@@ -1,0 +1,16 @@
+# Oniva Terraform Configuration
+# Copy this file to terraform.tfvars and fill in your values
+# NEVER commit terraform.tfvars to version control
+
+# AWS Configuration
+aws_region  = "us-east-1"
+environment = "production"
+
+# Required Secrets (generate with: openssl rand -base64 32)
+db_password = "REPLACE_WITH_SECURE_PASSWORD_MIN_16_CHARS"
+secret_key  = "REPLACE_WITH_SECURE_KEY_MIN_32_CHARS"
+
+# Optional: LLM API Keys (can also be configured in-app)
+# openai_api_key     = "sk-..."
+# anthropic_api_key  = "sk-ant-..."
+# openrouter_api_key = "sk-or-..."

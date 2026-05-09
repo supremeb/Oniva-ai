@@ -1,0 +1,231 @@
+---
+title: Common Issues
+description: Solutions to frequently encountered problems in Oniva.
+---
+
+Solutions to frequently encountered problems in Oniva.
+
+## Connection Issues
+
+<Accordions>
+  <Accordion title="Cannot Connect to Backend">
+    **Symptoms**: Chat not loading, workflows failing, "Connection refused" errors
+
+    **Solutions**:
+    1. Verify the backend is running (`localhost:8000/health` should respond)
+    2. Check that your browser isn't blocking the connection
+    3. Clear browser cache and reload
+    4. Restart the backend server
+  </Accordion>
+  <Accordion title="API Key Not Working">
+    **Symptoms**: "Invalid API key", "Unauthorized" errors
+
+    **Solutions**:
+    1. Verify the key is copied correctly without extra spaces
+    2. Check that the key hasn't expired with your provider
+    3. Ensure you selected the correct provider (OpenAI vs Anthropic)
+    4. Regenerate the key if needed
+  </Accordion>
+</Accordions>
+
+---
+
+## Agent Issues
+
+<Accordions>
+  <Accordion title="Agent Not Responding">
+    **Symptoms**: Chat shows loading indefinitely, no response appears
+
+    **Solutions**:
+    1. Check if your LLM provider is experiencing issues (check their status page)
+    2. Try switching to a different model
+    3. Verify your API key has sufficient credits
+    4. Check the browser console for error messages
+  </Accordion>
+  <Accordion title="Agent Gives Incorrect Responses">
+    **Symptoms**: Responses are off-topic, hallucinated, or wrong
+
+    **Solutions**:
+    1. Rephrase your question with more context
+    2. Be more specific about what you need
+    3. Try a more capable model (GPT-4o instead of Mini)
+    4. Check if the agent has the right skills enabled
+  </Accordion>
+  <Accordion title="Memory Not Working">
+    **Symptoms**: Agent forgets previous conversation, doesn't maintain context
+
+    **Solutions**:
+    1. Sessions expire after 24 hours - start a new chat
+    2. Context window may be exceeded - start fresh for long conversations
+    3. Switching agents resets the conversation
+  </Accordion>
+</Accordions>
+
+---
+
+## Workflow Issues
+
+<Accordions>
+  <Accordion title="Workflow Won't Save">
+    **Symptoms**: Save button doesn't work, changes are lost
+
+    **Solutions**:
+    1. Check that all nodes are properly connected
+    2. Verify there's exactly one Start node
+    3. Ensure all required fields are filled
+    4. Check browser console for validation errors
+  </Accordion>
+  <Accordion title="Workflow Execution Fails">
+    **Symptoms**: Workflow stops mid-execution, shows error status
+
+    **Solutions**:
+    1. Click on the failed node to see the error message
+    2. Verify input data matches expected format
+    3. Check that external APIs are accessible
+    4. Review node configuration for typos
+  </Accordion>
+  <Accordion title="Slow Workflow Execution">
+    **Symptoms**: Workflows take much longer than expected
+
+    **Solutions**:
+    1. Reduce the number of AI nodes (use simpler alternatives)
+    2. Use faster models where appropriate
+    3. Optimize data processing (smaller batches)
+    4. Check if external APIs are slow
+  </Accordion>
+  <Accordion title="Loop Not Terminating">
+    **Symptoms**: Iterator node runs indefinitely
+
+    **Solutions**:
+    1. Verify the input array has finite length
+    2. Check for circular references in data
+    3. Add a maximum iteration limit
+    4. Add exit conditions
+  </Accordion>
+</Accordions>
+
+---
+
+## Connector Issues
+
+<Accordions>
+  <Accordion title="Connector Not Found">
+    **Symptoms**: Connector doesn't appear in node configuration
+
+    **Solutions**:
+    1. Go to Settings → Connectors and verify it's configured
+    2. Test the connection to ensure credentials are valid
+    3. Refresh the workflow editor page
+  </Accordion>
+  <Accordion title="Connector Action Fails">
+    **Symptoms**: Connector node shows error during execution
+
+    **Solutions**:
+    1. Verify the connector credentials are still valid
+    2. Check if the external service is available
+    3. Review the action parameters for errors
+    4. Check rate limits on the external service
+  </Accordion>
+</Accordions>
+
+---
+
+## UI Issues
+
+<Accordions>
+  <Accordion title="Page Not Loading">
+    **Symptoms**: Blank page, infinite loading spinner
+
+    **Solutions**:
+    1. Hard refresh the page (Ctrl/Cmd + Shift + R)
+    2. Clear browser cache
+    3. Try a different browser
+    4. Check if JavaScript is enabled
+  </Accordion>
+  <Accordion title="Dark/Light Mode Issues">
+    **Symptoms**: UI elements not visible, wrong colors
+
+    **Solutions**:
+    1. Toggle the theme switch in the sidebar
+    2. Clear browser cache
+    3. Check system preferences for forced theme
+  </Accordion>
+  <Accordion title="Sidebar Navigation Broken">
+    **Symptoms**: Links don't work, pages not found
+
+    **Solutions**:
+    1. Refresh the page
+    2. Navigate to the home page and try again
+    3. Check browser console for errors
+  </Accordion>
+</Accordions>
+
+---
+
+## Data Issues
+
+<Accordions>
+  <Accordion title="Data Not Displaying">
+    **Symptoms**: Tables empty, charts not rendering
+
+    **Solutions**:
+    1. Check that data was successfully fetched (look at workflow logs)
+    2. Verify data format matches expected structure
+    3. Check for null/undefined values
+  </Accordion>
+  <Accordion title="Export Not Working">
+    **Symptoms**: Download button does nothing
+
+    **Solutions**:
+    1. Check if popup blockers are preventing download
+    2. Try a different export format
+    3. Check browser console for errors
+  </Accordion>
+</Accordions>
+
+---
+
+## Performance Issues
+
+<Accordions>
+  <Accordion title="High Memory Usage">
+    **Symptoms**: Browser becomes slow, page crashes
+
+    **Solutions**:
+    1. Close unused workflows
+    2. Limit data displayed in tables
+    3. Use pagination for large datasets
+    4. Refresh the page periodically
+  </Accordion>
+  <Accordion title="Slow Response Times">
+    **Symptoms**: Everything feels sluggish
+
+    **Solutions**:
+    1. Check your internet connection
+    2. Use faster AI models
+    3. Reduce workflow complexity
+    4. Check if backend is under heavy load
+  </Accordion>
+</Accordions>
+
+---
+
+## Getting Help
+
+If none of these solutions work:
+
+<Steps>
+  <Step>
+    Check the [FAQ](/docs/troubleshooting/faq)
+  </Step>
+  <Step>
+    Review [Error Messages](/docs/troubleshooting/error-messages)
+  </Step>
+  <Step>
+    Report the issue on GitHub with:
+    - Steps to reproduce
+    - Browser and OS version
+    - Any error messages
+    - Screenshots if applicable
+  </Step>
+</Steps>

@@ -1,0 +1,4 @@
+{
+  "_comment": "MCP servers used for local development. Add your own; none ship enabled by default.",
+  "mcpServers": {}
+}

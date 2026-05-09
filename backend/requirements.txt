@@ -1,0 +1,101 @@
+# FastAPI
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.18
+sse-starlette>=2.0.0
+
+# Pydantic AI & DBOS
+pydantic-ai==1.77.0
+pydantic==2.12.5
+pydantic-settings==2.13.1
+dbos>=1.0.0
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+psycopg2-binary==2.9.10
+pgvector==0.3.6
+
+# Redis
+redis[hiredis]==5.2.1
+
+# LLM Providers
+openai==2.30.0
+anthropic==0.89.0
+litellm==1.83.2
+
+# MCP (Model Context Protocol)
+mcp==1.27.0
+
+# Auth & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt>=4.0.0,<5.0.0  # Pin to 4.x for passlib compatibility
+python-dotenv==1.0.1
+cryptography==44.0.0
+
+# HTTP Client
+httpx==0.28.1
+aiohttp==3.11.10
+
+# Monitoring
+logfire==4.25.0
+prometheus-client==0.21.0
+python-json-logger==2.0.7
+
+# Phase 1: Observability ()
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+opentelemetry-instrumentation-fastapi>=0.41b0
+opentelemetry-exporter-otlp>=1.20.0
+langsmith>=0.1.0
+
+# Phase 2: Braintrust Observability (P2.4)
+braintrust[otel]>=0.4.0
+
+# Async File I/O (Simplified Memory Architecture)
+aiofiles>=24.0.0
+
+# Safe Expression Evaluation (replaces eval() in webhook filters)
+simpleeval==1.0.0
+
+# E2B Code Execution Sandbox (Phase 2 - Deep Work)
+e2b-code-interpreter>=1.0.0
+
+# Caching
+cachetools>=5.3.0
+
+# Utilities
+tenacity==9.0.0
+python-dateutil>=2.9.0
+beautifulsoup4==4.12.3
+matplotlib==3.9.2
+griffe==1.3.2
+
+# Document Processing (Phase 1 - Workflow Nodes Expansion)
+pymupdf>=1.24.0
+pymupdf4llm>=0.0.10
+
+# Semantic Chunking (RAG Upgrade - Stream B)
+chonkie[semantic]==1.5.5
+python-docx>=1.1.0
+openpyxl>=3.1.0
+pandas>=2.2.0
+
+# Scheduling (Phase 2 - Workflow Nodes Expansion)
+apscheduler>=3.11.0
+croniter>=2.0.0
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+pytest-mock==3.14.0
+pytest-timeout==2.3.1
+faker==33.1.0
+freezegun==1.4.0
+aiosqlite==0.20.0
+
+# SAML (Enterprise SSO - Phase 2)
+python3-saml==1.16.0

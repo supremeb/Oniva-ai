@@ -1,0 +1,249 @@
+/**
+ * Deep Work types for autonomous agent execution with plan-first UX.
+ */
+
+// ── Session status ──────────────────────────────────────────
+export type DeepWorkStatus =
+  | 'idle'
+  | 'clarifying'
+  | 'planning'
+  | 'awaiting_approval'
+  | 'executing'
+  | 'paused'
+  | 'awaiting_input'
+  | 'completed'
+  | 'error'
+  | 'stopped';
+
+// ── Todo item ───────────────────────────────────────────────
+export interface DeepWorkTodo {
+  text: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
+// ── Plan ────────────────────────────────────────────────────
+export interface DeepWorkPlan {
+  title: string;
+  steps: string[];
+}
+
+// ── Step event from SSE ─────────────────────────────────────
+export interface DeepWorkStep {
+  step_number: number;
+  total_steps: number;
+  iteration?: number;  // Tool call iteration count (separate from plan step)
+  tool_name: string | null;
+  status: 'success' | 'error';
+  result: Record<string, unknown> | null;
+  agent_message: string | null;
+  duration_ms: number;
+}
+
+// ── Artifact file ───────────────────────────────────────────
+export interface DeepWorkArtifact {
+  type: 'file';
+  filename: string;
+  size?: number;
+  fileType?: string;
+  downloadUrl?: string;
+  title?: string;
+  description?: string;
+  artifactType?: string;   // pdf_report | presentation | spreadsheet | dashboard | chart | document | data_export
+  artifactUri?: string;
+  tags?: string[];
+  pageCount?: number | null;
+}
+
+// ── SSE events ──────────────────────────────────────────────
+export interface DeepWorkStartEvent {
+  session_id: string;
+  plan: string;
+  todos: DeepWorkTodo[];
+  agent_id: string;
+}
+
+export interface StepCompleteEvent {
+  step_number: number;
+  total_steps: number;
+  tool_name: string | null;
+  status: 'success' | 'error';
+  result: Record<string, unknown> | null;
+  agent_message: string | null;
+  duration_ms: number;
+}
+
+export interface TodoUpdateEvent {
+  todos: DeepWorkTodo[];
+}
+
+export interface HumanInputRequiredEvent {
+  question: string;
+  session_id: string;
+}
+
+export interface DeepWorkCompleteEvent {
+  summary: string;
+  key_findings: string[];
+  artifacts: string[];
+  total_time: number;
+  total_steps: number;
+}
+
+export interface DeepWorkErrorEvent {
+  error: string;
+  last_step: number;
+  can_retry: boolean;
+}
+
+export interface DeepWorkPausedEvent {
+  reason: 'user_requested' | 'budget_exceeded' | 'time_limit_exceeded';
+  resumable: boolean;
+}
+
+export interface WorkspaceUpdateEvent {
+  action: 'create' | 'update' | 'delete';
+  path: string;
+  size?: number;
+}
+
+// ── Workspace file in store ────────────────────────────────
+export interface WorkspaceFile {
+  path: string;
+  action: 'create' | 'update' | 'delete';
+  size?: number;
+}
+
+// ── API request/response ────────────────────────────────────
+export interface ExecuteDeepWorkRequest {
+  agent_id: string;
+  plan: DeepWorkPlan;
+  message: string;
+  conversation_id?: string;
+}
+
+export interface ExecuteDeepWorkResponse {
+  session_id: string;
+  job_id: string;
+}
+
+export interface HumanInputRequest {
+  input: string;
+}
+
+// ── Source / connector tracking ──────────────────────────────
+export interface DeepWorkSource {
+  type: 'search' | 'url' | 'knowledge_base';
+  title?: string;
+  url?: string;
+  domain?: string;
+  query?: string;
+}
+
+export interface DeepWorkConnector {
+  name: string;
+  type: string;
+}
+
+// ── Source update SSE event ──────────────────────────────────
+export interface SourceUpdateEvent {
+  sources: DeepWorkSource[];
+  connectors: DeepWorkConnector[];
+}
+
+export interface SessionStatusResponse {
+  session_id: string;
+  status: string;
+  current_step: number;
+  total_steps: number;
+  elapsed_seconds: number;
+  // Full state for refresh recovery
+  original_message?: string;
+  plan?: { title: string; steps: string[] };
+  todos: DeepWorkTodo[];
+  sources: DeepWorkSource[];
+  connectors: DeepWorkConnector[];
+  summary?: string;
+  key_findings: string[];
+}
+
+// ── Deep Work Engine (orchestrator-worker) types ────────────
+// Separate from existing AutonomousExecutor types above.
+
+export type EnginePhase = 'researching' | 'reflecting' | 'synthesizing' | 'generating_output';
+
+export type DeepWorkEngineEvent =
+  | { type: 'deep_work_engine_planned'; sub_queries: string[] }
+  | { type: 'deep_work_engine_gap_tasks'; sub_queries: Array<{ worker_id: string; sub_query: string }>; round: number }
+  | { type: 'deep_work_engine_worker_started'; worker_id: string; sub_query: string }
+  | { type: 'deep_work_engine_worker_activity'; worker_id: string; activity_type: string; description: string; recent_actions?: string[] }
+  | { type: 'deep_work_engine_worker_complete'; worker_id: string; learning_count: number; source_count?: number; top_findings?: string[]; duration_seconds?: number; tool_call_count?: number; error?: string | null }
+  | { type: 'deep_work_engine_reflection'; score: number; gaps: string[]; round: number; continuing: boolean }
+  | { type: 'deep_work_engine_phase'; phase: EnginePhase }
+  | { type: 'deep_work_engine_synthesis_chunk'; content: string }
+  | { type: 'deep_work_engine_complete'; report_length: number }
+  | { type: 'deep_work_engine_error'; message: string };
+
+export type EngineWorkerStatus = 'idle' | 'researching' | 'complete' | 'error';
+
+export interface WorkerCompletionSummary {
+  findings: string[];
+  sourceCount: number;
+  duration: number;
+  toolCallCount: number;
+}
+
+export interface WorkerScreenshot {
+  url: string;
+  pageUrl: string;
+  timestamp: number;
+}
+
+export interface EngineWorkerState {
+  worker_id: string;
+  sub_query: string;
+  status: EngineWorkerStatus;
+  learning_count: number;
+  activity?: string;
+  recentActions?: string[];
+  error?: string | null;
+  completionSummary?: WorkerCompletionSummary;
+  lastScreenshot?: WorkerScreenshot;
+}
+
+export interface EngineReflection {
+  score: number;
+  gaps: string[];
+  round: number;
+  continuing: boolean;
+}
+
+export interface StartEngineRequest {
+  query: string;
+  session_id?: string;
+  conversation_id?: string;
+  plan?: Record<string, unknown>;
+}
+
+export interface StartEngineResponse {
+  session_id: string;
+  status: string;
+}
+
+export interface EnginePlanResponse {
+  title: string;
+  steps: string[];
+  raw_plan: Record<string, unknown>;
+}
+
+// ── Intake clarification ────────────────────────────────────
+
+export interface IntakeQuestion {
+  text: string;
+  options: string[] | null;
+}
+
+export interface IntakeResult {
+  action: 'ask' | 'proceed';
+  questions: IntakeQuestion[] | null;
+  enriched_query: string | null;
+}

@@ -1,0 +1,114 @@
+{
+    "name": "Code Generation with Review",
+    "description": "Generate code and review it with a second LLM call",
+    "nodes": [
+        {
+            "id": "start-1",
+            "type": "start",
+            "data": {
+                "label": "Start",
+                "variables": [
+                    {
+                        "name": "task",
+                        "type": "string"
+                    },
+                    {
+                        "name": "language",
+                        "type": "string"
+                    }
+                ]
+            },
+            "position": {
+                "x": 100,
+                "y": 200
+            }
+        },
+        {
+            "id": "llm-gen",
+            "type": "llm",
+            "data": {
+                "label": "Generate Code",
+                "model": "gpt-4o-mini",
+                "systemPrompt": "You are an expert programmer. Generate clean, well-documented code.",
+                "userPrompt": "Write {{language}} code for: {{sys.query}}\n\nProvide only the code, no explanations.",
+                "temperature": 0.3,
+                "maxTokens": 2000
+            },
+            "position": {
+                "x": 350,
+                "y": 150
+            }
+        },
+        {
+            "id": "llm-review",
+            "type": "llm",
+            "data": {
+                "label": "Code Review",
+                "model": "gpt-4o-mini",
+                "systemPrompt": "You are a code reviewer. Analyze code for bugs, improvements, and best practices.",
+                "userPrompt": "Review this code:\n\n{{llm-gen.text}}\n\nProvide:\n1. Issues found\n2. Suggestions\n3. Overall rating (1-10)",
+                "temperature": 0.5,
+                "maxTokens": 1000
+            },
+            "position": {
+                "x": 600,
+                "y": 150
+            }
+        },
+        {
+            "id": "agg-1",
+            "type": "aggregator",
+            "data": {
+                "label": "Combine Results",
+                "variables": [
+                    "llm-gen.text",
+                    "llm-review.text"
+                ],
+                "outputName": "result"
+            },
+            "position": {
+                "x": 850,
+                "y": 200
+            }
+        },
+        {
+            "id": "output-1",
+            "type": "output",
+            "data": {
+                "label": "Output",
+                "outputName": "code_with_review"
+            },
+            "position": {
+                "x": 1100,
+                "y": 200
+            }
+        }
+    ],
+    "edges": [
+        {
+            "id": "e1",
+            "source": "start-1",
+            "target": "llm-gen"
+        },
+        {
+            "id": "e2",
+            "source": "llm-gen",
+            "target": "llm-review"
+        },
+        {
+            "id": "e3",
+            "source": "llm-review",
+            "target": "agg-1"
+        },
+        {
+            "id": "e4",
+            "source": "llm-gen",
+            "target": "agg-1"
+        },
+        {
+            "id": "e5",
+            "source": "agg-1",
+            "target": "output-1"
+        }
+    ]
+}

@@ -1,0 +1,294 @@
+---
+title: Skills API
+description: API endpoints for managing and using skills in Oniva.
+---
+
+API endpoints for managing and using skills in Oniva.
+
+## Overview
+
+The Skills API allows you to:
+- List available skills
+- Get skill details and parameters
+- Execute skills directly
+- Create custom skills
+
+**Base URL:** `/api/v1/skills`
+
+---
+
+## List Skills
+
+Get all available skills.
+
+```bash
+GET /api/v1/skills
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `category` | string | Filter by category |
+| `search` | string | Search skills by name |
+
+**Response:**
+
+```json
+{
+  "skills": [
+    {
+      "id": "web_search",
+      "name": "Web Search",
+      "category": "web",
+      "description": "Search the internet for information",
+      "version": "1.2.0"
+    },
+    {
+      "id": "execute_python",
+      "name": "Execute Python",
+      "category": "code",
+      "description": "Run Python code in a sandbox",
+      "version": "2.0.0"
+    }
+  ],
+  "total": 34
+}
+```
+
+---
+
+## Get Skill Details
+
+Get detailed information about a skill including parameters.
+
+```bash
+GET /api/v1/skills/{skill_id}
+```
+
+**Response:**
+
+```json
+{
+  "id": "web_search",
+  "name": "Web Search",
+  "category": "web",
+  "description": "Search the internet for information using search engines",
+  "version": "1.2.0",
+  "inputs": {
+    "query": {
+      "type": "string",
+      "required": true,
+      "description": "What to search for"
+    },
+    "num_results": {
+      "type": "number",
+      "required": false,
+      "default": 5,
+      "description": "Number of results to return"
+    }
+  },
+  "outputs": {
+    "results": {
+      "type": "array",
+      "description": "Search results"
+    }
+  }
+}
+```
+
+---
+
+## Skill Categories
+
+<Tabs items={['Web', 'Code', 'File', 'Document', 'Memory', 'Financial']}>
+  <Tab value="Web">
+    | Skill ID | Name | Description |
+    |----------|------|-------------|
+    | `web_search` | Web Search | Search the internet |
+    | `browse_url` | Browse URL | Fetch webpage content |
+    | `extract_structured_data` | Extract Data | Parse tables and lists |
+  </Tab>
+  <Tab value="Code">
+    | Skill ID | Name | Description |
+    |----------|------|-------------|
+    | `execute_python` | Execute Python | Run Python code |
+    | `analyze_code` | Analyze Code | Review code quality |
+    | `generate_chart` | Generate Chart | Create visualizations |
+  </Tab>
+  <Tab value="File">
+    | Skill ID | Name | Description |
+    |----------|------|-------------|
+    | `read_file` | Read File | Read file contents |
+    | `write_file` | Write File | Create or update files |
+  </Tab>
+  <Tab value="Document">
+    | Skill ID | Name | Description |
+    |----------|------|-------------|
+    | `parse_pdf` | Parse PDF | Extract text from PDFs |
+    | `summarize_document` | Summarize | Generate summaries |
+    | `extract_entities` | Extract Entities | Find names, dates, amounts |
+  </Tab>
+  <Tab value="Memory">
+    | Skill ID | Name | Description |
+    |----------|------|-------------|
+    | `search_knowledge` | Search Knowledge | Semantic document search |
+    | `save_to_memory` | Save Memory | Store information |
+    | `recall_memory` | Recall Memory | Retrieve stored data |
+  </Tab>
+  <Tab value="Financial">
+    | Skill ID | Name | Description |
+    |----------|------|-------------|
+    | `fetch_market_data` | Market Data | Get stock prices |
+    | `get_financial_statements` | Financials | Company statements |
+    | `analyze_risk_metrics` | Risk Metrics | Calculate VaR, Sharpe |
+  </Tab>
+</Tabs>
+
+---
+
+## Execute Skill
+
+Execute a skill directly (outside of a workflow).
+
+```bash
+POST /api/v1/skills/{skill_id}/execute
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "inputs": {
+    "query": "Latest AI regulations 2024",
+    "num_results": 3
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "execution_id": "skill_exec_123",
+  "status": "completed",
+  "outputs": {
+    "results": [
+      {
+        "title": "EU AI Act 2024",
+        "url": "https://example.com/eu-ai-act",
+        "snippet": "The European Union AI Act..."
+      }
+    ]
+  },
+  "duration_ms": 1234
+}
+```
+
+---
+
+## Custom Skills
+
+### Create Custom Skill
+
+```bash
+POST /api/v1/skills/custom
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "name": "internal_credit_score",
+  "description": "Retrieves credit score from internal system",
+  "category": "compliance",
+  "version": "1.0.0",
+  "inputs": {
+    "customer_id": {
+      "type": "string",
+      "required": true,
+      "description": "Internal customer ID"
+    }
+  },
+  "outputs": {
+    "score": {
+      "type": "number",
+      "description": "Credit score (300-850)"
+    },
+    "factors": {
+      "type": "array",
+      "description": "Key factors affecting score"
+    }
+  },
+  "implementation": {
+    "type": "http",
+    "endpoint": "https://internal-api.example.com/credit-score",
+    "method": "GET",
+    "headers": {
+      "Authorization": "Bearer {{env.INTERNAL_API_KEY}}"
+    }
+  }
+}
+```
+
+### Update Custom Skill
+
+```bash
+PATCH /api/v1/skills/custom/{skill_id}
+```
+
+### Delete Custom Skill
+
+```bash
+DELETE /api/v1/skills/custom/{skill_id}
+```
+
+---
+
+## Skill Permissions
+
+### List Skill Permissions
+
+```bash
+GET /api/v1/skills/{skill_id}/permissions
+```
+
+**Response:**
+
+```json
+{
+  "skill_id": "execute_python",
+  "permissions": {
+    "network_access": false,
+    "file_system": "temp_only",
+    "max_execution_time": 30,
+    "max_memory_mb": 256
+  }
+}
+```
+
+---
+
+## Error Responses
+
+| Code | Error | Description |
+|------|-------|-------------|
+| `skill_not_found` | Skill doesn't exist | Check skill ID |
+| `invalid_inputs` | Input validation failed | Check parameter types |
+| `execution_timeout` | Skill took too long | Reduce data size |
+| `sandbox_error` | Sandbox execution failed | Check code syntax |
+
+---
+
+## Next Steps
+
+<Cards>
+  <Card title="Connectors API" href="/docs/api-reference/connectors">
+    Configure external integrations
+  </Card>
+  <Card title="Skills Library" href="/docs/features/skills-library">
+    Browse all available skills
+  </Card>
+</Cards>

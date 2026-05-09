@@ -1,0 +1,359 @@
+---
+title: Core Concepts
+description: Understanding the fundamental building blocks of Oniva - agents, skills, and workflows.
+---
+
+Understanding the fundamental building blocks of Oniva will help you build powerful automated workflows for your business.
+
+## The Three Pillars
+
+Oniva is built on three core concepts that work together:
+
+```
++-------------+
+|   Agents    |  <-- AI-powered specialists that execute tasks
++------+------+
+       | use
+       v
++-------------+
+|   Skills    |  <-- Reusable capabilities (search, analyze, calculate)
++------+------+
+       | orchestrated by
+       v
++-------------+
+|  Workflows  |  <-- Visual automation that chains agents together
++-------------+
+```
+
+## Agents
+
+### What is an Agent?
+
+An agent is an AI-powered specialist designed to perform specific tasks. Think of agents as intelligent assistants with:
+
+- **Specialized Knowledge**: Pre-configured with domain expertise
+- **Tool Access**: Can use skills to perform actions (search, calculate, retrieve data)
+- **Memory**: Remembers conversation context and user preferences
+- **Reasoning**: Can explain decisions and show its thinking
+
+### Agent Types
+
+<Tabs items={['Built-in Agents', 'Custom Agents']}>
+  <Tab value="Built-in Agents">
+    **Analysis Agent**
+    - **Purpose**: Data analysis, calculations, and insights
+    - **Best For**: Reports, metrics, data transformations
+    - **Default Skills**: Python execution, chart generation, code analysis
+    - **Example**: "Calculate the average response time from this dataset"
+
+    **Research Agent**
+    - **Purpose**: Document analysis and knowledge retrieval
+    - **Best For**: Policy research, document search, Q&A
+    - **Default Skills**: Knowledge search, document parsing, summarization
+    - **Example**: "Summarize the key points from this policy document"
+
+    **Data Retrieval Agent**
+    - **Purpose**: Fetch data from external systems
+    - **Best For**: API integration, database queries, data collection
+    - **Default Skills**: Web search, URL browsing, structured data extraction
+    - **Example**: "Get the latest data from our CRM for account #12345"
+  </Tab>
+  <Tab value="Custom Agents">
+    Create specialized assistants for your unique workflows:
+
+    - **Support Agent**: Answer customer inquiries
+    - **Report Generator**: Create formatted reports
+    - **Approval Agent**: Route decisions for review
+    - **Notification Agent**: Send alerts based on conditions
+
+    See [Custom Agents Guide](/docs/features/custom-agents) for details.
+  </Tab>
+</Tabs>
+
+### Agent Configuration
+
+Each agent can be configured with:
+
+**System Prompt**: Instructions that define agent behavior
+```text
+You are a helpful assistant specializing in data analysis.
+Always explain your methodology. Present results clearly.
+Flag any anomalies for human review.
+```
+
+**Skills**: Which capabilities the agent can use
+```python
+enabled_skills = [
+    "execute_python",
+    "web_search",
+    "generate_chart",
+    "search_knowledge"
+]
+```
+
+**Model Selection**: Which LLM to use
+- **GPT-4o**: Best for complex reasoning
+- **Claude 3.5 Sonnet**: Balanced performance
+- **Gemini 2.0 Flash**: Fast responses
+
+## Skills
+
+### What is a Skill?
+
+A skill is a reusable capability that agents can use to perform specific actions. Skills are the "hands" that let agents interact with the world.
+
+### Skill Categories
+
+<Accordions>
+  <Accordion title="Web Skills">
+    **web_search**
+    - Search the web for current information
+    - Example: "Search for recent industry trends"
+
+    **browse_url**
+    - Fetch and read content from a specific URL
+    - Example: "Read the content from this documentation page"
+
+    **extract_structured_data**
+    - Extract tables, lists, and structured content from HTML
+    - Example: "Extract the pricing table from this website"
+  </Accordion>
+  <Accordion title="Code Skills">
+    **execute_python**
+    - Run Python code in a sandboxed environment
+    - Example: Calculate formulas, data transformations
+
+    **analyze_code**
+    - Analyze Python code for quality and issues
+    - Example: Review code for bugs
+
+    **generate_chart**
+    - Create visualizations from data
+    - Example: Generate a bar chart from this data
+  </Accordion>
+  <Accordion title="Document Skills">
+    **parse_pdf**
+    - Extract text and metadata from PDF files
+    - Handles: Forms, reports, documents
+
+    **extract_entities**
+    - Named entity recognition for documents
+    - Extracts: Dates, amounts, organizations, people
+
+    **summarize_document**
+    - Generate concise document summaries
+    - Preserves: Key facts, decisions, dates
+  </Accordion>
+  <Accordion title="Memory Skills">
+    **store_memory**
+    - Store information in session memory
+    - Duration: 24 hours
+
+    **recall_memory**
+    - Retrieve stored information
+    - Fast: &lt;5ms access time
+
+    **search_knowledge**
+    - Semantic search across knowledge base
+    - Uses vector similarity for relevance
+  </Accordion>
+  <Accordion title="File Skills">
+    **read_file**
+    - Read content from files
+    - Formats: Text, CSV, JSON
+
+    **write_file**
+    - Write content to file
+    - Auto-cleanup after 24 hours
+  </Accordion>
+</Accordions>
+
+### Skill Execution
+
+Skills run in a controlled environment:
+
+- **Sandboxed Execution**: Code skills run in isolated containers
+- **Timeout Protection**: 30-second max execution time
+- **Error Handling**: Graceful failures with detailed error messages
+
+## Workflows
+
+### What is a Workflow?
+
+A workflow is a visual automation that chains multiple agents, skills, and logic together to complete complex, multi-step processes.
+
+Think of workflows as automated procedures where:
+- Each step is a **node** (agent, skill, or logic)
+- Steps are connected by **edges** (data flows from one to next)
+- Execution is **orchestrated** (handled by the workflow engine)
+- Results are **logged** (complete execution history)
+
+### When to Use Workflows
+
+Use workflows when you need to:
+
+| Use Case | Example |
+|----------|---------|
+| **Chain Multiple Agents** | Data retrieval -> Analysis -> Notification |
+| **Add Conditional Logic** | If score > threshold -> Auto-approve, else -> Human review |
+| **Repeat Operations** | Process each item in a list through the same steps |
+| **Orchestrate Complex Processes** | Multi-step approval process with 10 decision points |
+
+### Workflow Node Types
+
+<Cards>
+  <Card title="Start Node">
+    Entry point for workflow. Defines input parameters. Every workflow has exactly one.
+  </Card>
+  <Card title="Agent Node">
+    Executes an AI agent. Configuration: Which agent, instructions, context.
+  </Card>
+  <Card title="LLM Node">
+    Direct language model call. More flexible than Agent node.
+  </Card>
+  <Card title="Skill Node">
+    Execute a single skill. Faster than agent for simple tasks.
+  </Card>
+  <Card title="Connector Node">
+    Call external systems via MCP. Examples: Slack, Jira, ServiceNow.
+  </Card>
+  <Card title="HTTP Node">
+    Make HTTP requests to external APIs. Supports: GET, POST, PUT, DELETE.
+  </Card>
+  <Card title="Code Node">
+    Execute custom Python code. Access to previous node outputs.
+  </Card>
+  <Card title="IF/ELSE Node">
+    Branch based on conditions. Example: `if value > 100: route_a else: route_b`
+  </Card>
+  <Card title="Iterator Node">
+    Loop through arrays. Example: Process each item in a list.
+  </Card>
+  <Card title="Template Node">
+    Format output using templates. Generate reports, emails, documents.
+  </Card>
+  <Card title="End Node">
+    Final result formatting. Multiple end nodes for different paths.
+  </Card>
+</Cards>
+
+### Workflow Example: Document Processing
+
+```
++------------------+
+|  Start: Upload   |
++--------+---------+
+         |
+         v
++------------------+
+| Parse Document   |
++--------+---------+
+         |
+         v
++------------------+
+| Extract Entities |
++--------+---------+
+         |
+         v
++------------------+
+| Analyze Content  |
++--------+---------+
+         |
+         v
+    +----+----+
+    | IF/ELSE |
+    +----+----+
+    |         |
+    v         v
++-------+ +-----------+
+| Store | | Flag for  |
+|       | | Review    |
++---+---+ +-----+-----+
+    |           |
+    v           v
++------------------+
+|   End: Result    |
++------------------+
+```
+
+**Workflow Steps**:
+
+1. **Start**: Document uploaded
+2. **Parse**: Extract text from PDF
+3. **Extract**: Find key entities (dates, names, amounts)
+4. **Analyze**: Run AI analysis on content
+5. **Condition**: If confidence > 90% -> Store, else -> Flag for review
+6. **Output**: Return result
+
+## Understanding Relationships
+
+### Agents vs. Workflows
+
+| Aspect | Agent | Workflow |
+|--------|-------|----------|
+| **Purpose** | Single-task specialist | Multi-step orchestration |
+| **Interaction** | Chat-based, conversational | Automated, programmatic |
+| **Flexibility** | Adapts to conversation | Fixed logic path |
+| **Best For** | Ad-hoc queries, exploration | Repeatable processes |
+
+### Skills vs. Agents
+
+| Aspect | Skill | Agent |
+|--------|-------|-------|
+| **Autonomy** | No reasoning, just execution | Autonomous decision-making |
+| **Scope** | Single specific action | Multiple related tasks |
+| **Composability** | Building block | Composed of skills |
+
+## Memory & Context
+
+Understanding how Oniva remembers information:
+
+### Session Memory
+
+<Callout type="info">
+**What**: Conversation history for active sessions
+**Storage**: Redis (in-memory, fast)
+**Duration**: 24 hours
+**Access Time**: &lt;5ms
+</Callout>
+
+**Contains**:
+- Last 10 conversation turns
+- Active entities mentioned
+- Session metadata
+
+### Long-Term Memory
+
+<Callout type="info">
+**What**: Persistent facts and preferences
+**Storage**: PostgreSQL
+**Duration**: Permanent
+**Access Time**: &lt;50ms
+</Callout>
+
+**Contains**:
+- User preferences
+- Learned patterns
+- Historical context
+
+## Next Steps
+
+Now that you understand the core concepts:
+
+<Cards>
+  <Card title="Build Your First Workflow" href="/docs/getting-started/first-workflow">
+    Step-by-step guide to creating a loan approval workflow
+  </Card>
+  <Card title="AI Agents" href="/docs/features/ai-agents">
+    Deep dive into agent capabilities and configuration
+  </Card>
+  <Card title="Workflows" href="/docs/features/workflows">
+    Explore all workflow node types and patterns
+  </Card>
+  <Card title="Skills Library" href="/docs/features/skills-library">
+    Browse all available skills
+  </Card>
+  <Card title="Connectors" href="/docs/features/connectors">
+    Connect to external systems
+  </Card>
+</Cards>

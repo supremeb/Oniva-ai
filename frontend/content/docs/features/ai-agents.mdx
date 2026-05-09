@@ -1,0 +1,451 @@
+---
+title: AI Agents
+description: Learn about the intelligent specialists at the heart of Oniva, including pre-built and custom agents.
+---
+
+AI agents are the intelligent specialists at the heart of Oniva. Each agent is pre-configured with domain expertise, tools (skills), and reasoning capabilities tailored for specific tasks.
+
+![Agents Overview](/docs/images/agents/agents-overview.png)
+
+## Overview
+
+Oniva provides **8 production-ready agents** plus the ability to create unlimited **custom agents** for your specific needs.
+
+### What Makes Oniva Agents Different?
+
+| Feature | Description |
+|---------|-------------|
+| **Compliance-First Design** | Extended thinking capture for decision transparency, immutable audit trails (7-year retention), regulatory citations in responses, HITL integration for high-risk decisions |
+| **Financial Services Expertise** | Pre-trained on financial terminology, understanding of regulatory frameworks (FCA, SOX, BSA/AML), optimized prompts for compliance accuracy |
+| **Tool-Augmented** | Access to 34+ skills, can invoke external systems via MCP connectors, combine multiple data sources intelligently |
+| **Memory-Enabled** | Session memory (last 10 turns, under 5ms recall), long-term user preferences, entity relationship tracking |
+
+---
+
+## Built-in Agents
+
+### General Assistant
+
+Conversational AI helper that handles greetings, general questions, and guides users to specialized agents when needed.
+
+**Default Model**: GPT-4o Mini
+
+**Purpose**: Entry point for users, general conversation, routing to specialized agents
+
+**Typical Use Cases**:
+- Initial user interactions
+- General questions about the platform
+- Routing to appropriate specialized agent
+- Basic information retrieval
+
+---
+
+### Data Retrieval Agent
+
+Fetches financial data from external APIs and data sources.
+
+**Default Model**: GPT-4o Mini
+
+**Default Skills**:
+- `web_search`: Search internet for current information
+- `browse_url`: Fetch content from specific URLs
+- `extract_structured_data`: Parse tables and lists from web pages
+- `fetch_market_data`: Real-time market data
+- `get_financial_statements`: Public company financials
+- MCP connector skills: `dna_api_*`, `ofac_*`, `credit_bureau_*`
+
+**Typical Use Cases**:
+- Core banking data retrieval
+- Market data fetching
+- Credit report retrieval
+- Regulatory filing access
+- Web research and fact-finding
+- External API integration
+
+**Security Considerations**:
+- All API calls logged to audit trail
+- PII masked in logs
+- Credentials stored encrypted
+- Rate limiting enforced
+
+---
+
+### Analysis Agent
+
+Performs financial analysis, calculations, and data transformations.
+
+**Default Model**: GPT-4o
+
+**Default Skills**:
+- `execute_python`: Run calculations and data transformations
+- `generate_chart`: Create visualizations
+- `analyze_code`: Review financial models
+- `fetch_market_data`: Get real-time market data
+- `analyze_risk_metrics`: Calculate VaR, Sharpe, Beta
+
+**Typical Use Cases**:
+- Portfolio performance analysis
+- Risk metric calculations (VaR, Sharpe ratio, Beta)
+- Financial modeling and projections
+- Investment research and recommendations
+- Market trend analysis
+
+**Best Practices**:
+- Provide account numbers or tickers explicitly
+- Specify time periods for analysis
+- Request specific metrics if you have preferences
+- Ask for visualizations when helpful
+
+---
+
+### Compliance Agent
+
+Checks regulatory compliance and assesses risk.
+
+**Default Model**: Claude 3.5 Sonnet (temp=0 for determinism)
+
+**Default Skills**:
+- `kyc_verification`: Identity verification against watchlists
+- `aml_screening`: Transaction pattern analysis
+- `sanctions_check`: OFAC/EU sanctions screening
+- `regulatory_filing`: Parse SEC/FINRA filings
+- `risk_assessment`: Calculate composite risk scores
+- `parse_pdf`: Extract data from compliance documents
+- `search_knowledge`: Retrieve regulatory guidance
+
+**Typical Use Cases**:
+- Regulatory compliance verification
+- Risk assessment and scoring
+- Policy compliance checking
+- Audit preparation support
+
+**Compliance Features**:
+- All decisions logged to immutable audit trail
+- Regulatory citations automatically included
+- Risk scores calculated using standard frameworks
+- Extended thinking captured for examination
+
+---
+
+### KYC/AML Agent
+
+Validates Know Your Customer and Anti-Money Laundering requirements.
+
+**Default Model**: Claude 3.5 Sonnet
+
+**Purpose**: Specialized compliance agent for customer verification and transaction monitoring
+
+**Typical Use Cases**:
+- Customer identity verification
+- Watchlist and sanctions screening
+- Transaction pattern analysis
+- Suspicious activity detection
+- Enhanced due diligence
+
+**Key Capabilities**:
+- OFAC/EU/UN sanctions list checking
+- PEP (Politically Exposed Person) screening
+- Adverse media monitoring
+- Transaction velocity analysis
+- Geographic risk assessment
+
+---
+
+### Market Abuse Agent
+
+Detects potential insider trading or market manipulation.
+
+**Default Model**: Claude 3.5 Sonnet
+
+**Purpose**: Monitor trading activities for signs of market abuse
+
+**Typical Use Cases**:
+- Insider trading detection
+- Front-running identification
+- Market manipulation monitoring
+- Unusual trading pattern analysis
+- Pre-announcement trading alerts
+
+**Key Capabilities**:
+- Trading pattern analysis
+- News correlation checking
+- Position concentration monitoring
+- Cross-reference with material non-public information
+- Alert generation for suspicious activities
+
+---
+
+### Regulatory Report Generator
+
+Synthesizes analysis into formal regulatory reports.
+
+**Default Model**: Claude 3.5 Sonnet
+
+**Purpose**: Generate compliant, well-formatted regulatory reports
+
+**Typical Use Cases**:
+- SAR (Suspicious Activity Report) drafting
+- CTR (Currency Transaction Report) preparation
+- Regulatory examination responses
+- Compliance audit reports
+- Risk assessment documentation
+
+**Key Capabilities**:
+- Structured report generation
+- Regulatory citation inclusion
+- Evidence compilation
+- Formatting per regulatory standards
+- Version control and audit trails
+
+---
+
+### Research Agent
+
+Answers questions using document search (RAG - Retrieval-Augmented Generation).
+
+**Default Model**: GPT-4o
+
+**Default Skills**:
+- `search_knowledge`: Semantic search via pgvector RAG
+- `parse_pdf`: Extract text from PDF documents
+- `summarize_document`: Generate concise summaries
+- `extract_entities`: Extract dates, amounts, organizations
+- `web_search`: Search internet for recent information
+- `browse_url`: Read web content
+
+**Typical Use Cases**:
+- Policy and procedure research
+- Regulatory guidance interpretation
+- Historical case analysis
+- Document summarization
+- Competitive intelligence
+- Market research
+
+**RAG Knowledge Base**:
+- Your organization's policies and procedures
+- Regulatory documents and guidance
+- Historical case files
+- Training materials
+- Best practices documentation
+
+---
+
+## Agent Studio
+
+The Agent Studio is where you configure, test, and deploy agents.
+
+![Agent Studio](/docs/images/agents/agent-studio.png)
+
+### Accessing Agent Studio
+
+1. Navigate to **Agents** from the sidebar
+2. Click on any agent to open the Agent Studio
+3. Or click **Create Agent** to build a new one
+
+### Configuration Options
+
+| Setting | Description |
+|---------|-------------|
+| **Name** | Agent display name |
+| **Model** | AI model to use (GPT-4o, Claude 3.5 Sonnet, etc.) |
+| **Description** | Brief description of the agent's purpose |
+| **Temperature** | Controls response creativity (0 = deterministic, 1 = creative) |
+| **Max Tokens** | Maximum response length |
+| **System Prompt** | Instructions that define agent behavior |
+| **Skills** | Capabilities the agent can use |
+| **Connectors** | External systems the agent can access |
+
+### Tabs
+
+| Tab | Purpose |
+|-----|---------|
+| **Overview** | Configure agent settings and system prompt |
+| **Tests** | Manage test cases and run evaluations |
+| **Versions** | View version history and rollback changes |
+
+### Actions
+
+| Button | Action |
+|--------|--------|
+| **Evaluate** | Run test suite against the agent |
+| **Save Draft** | Save changes without deploying |
+| **Deploy** | Make changes live |
+
+---
+
+## Creating Custom Agents
+
+### Step-by-Step Guide
+
+<Steps>
+  <Step>
+    Click **Create Agent** from the Agents page
+  </Step>
+  <Step>
+    Enter a name and description
+  </Step>
+  <Step>
+    Select a base model (GPT-4o recommended for complex tasks)
+  </Step>
+  <Step>
+    Write a system prompt defining the agent's behavior
+  </Step>
+  <Step>
+    Select skills the agent needs
+  </Step>
+  <Step>
+    Configure connectors for external system access
+  </Step>
+  <Step>
+    Test using the chat interface
+  </Step>
+  <Step>
+    Deploy when ready
+  </Step>
+</Steps>
+
+### System Prompt Best Practices
+
+<Callout type="info">
+System prompts define agent behavior and decision-making criteria. A well-crafted system prompt is critical for agent performance.
+</Callout>
+
+**Structure your system prompt with:**
+
+1. **Role definition** - Who is the agent?
+2. **Goals** - What should it accomplish?
+3. **Decision criteria** - How should it decide?
+4. **Constraints** - What should it ALWAYS/NEVER do?
+5. **Tone and style** - How should it communicate?
+
+**Example:**
+```text
+You are a compliance officer specializing in AML transaction monitoring.
+
+Your role is to identify suspicious patterns and flag for SAR filing when needed.
+
+Flag transactions if:
+- Single transaction > $10,000
+- Structured deposits (multiple <$10K to avoid reporting)
+- High-risk jurisdictions (per FATF list)
+
+ALWAYS:
+- Cite regulatory sources (BSA, PATRIOT Act)
+- Generate audit trail entries
+- Escalate to human review when uncertain
+
+NEVER:
+- Make final SAR filing decision (requires human review)
+- Ignore partial matches on watchlists
+```
+
+---
+
+## Model Selection
+
+| Model | Best For | Cost | Speed | Quality |
+|-------|----------|------|-------|---------|
+| **Claude 3.7 Sonnet** | High-stakes compliance | High | Slow | Excellent |
+| **Claude 3.5 Sonnet** | Compliance tasks (default) | Medium | Medium | Excellent |
+| **GPT-4o** | Complex reasoning | High | Medium | Excellent |
+| **GPT-4o Mini** | High-volume tasks | Low | Fast | Very Good |
+| **DeepSeek-V3** | Cost-sensitive queries | Very Low | Fast | Good |
+
+---
+
+## Extended Thinking
+
+<Callout type="warn">
+For high-stakes decisions, extended thinking captures the agent's complete reasoning process for transparency and compliance.
+</Callout>
+
+**When to Use Extended Thinking:**
+- Loan approvals/denials
+- SAR (Suspicious Activity Report) decisions
+- Large transaction approvals
+- Customer risk classifications
+- Trading decisions (market abuse detection)
+
+**What Gets Captured:**
+- Observation: What data was considered
+- Analysis: How data was interpreted
+- Decision: What conclusion was reached
+- Factors: Which regulations were evaluated
+
+**Performance Impact**:
+- +10-20% tokens (higher cost)
+- +0.5-1.5 seconds latency
+- Worth it for high-stakes decisions
+
+---
+
+## Human-in-the-Loop Integration
+
+Route high-risk decisions to human reviewers.
+
+**Automatic HITL Triggers**:
+- Risk score above threshold (configurable, default: 7/10)
+- Dollar amount exceeds limit (e.g., >$250K)
+- Missing decision factors detected
+- Compliance flags present
+- Manual escalation requested
+
+**HITL Workflow**:
+<Steps>
+  <Step>
+    Agent makes decision with reasoning
+  </Step>
+  <Step>
+    Routing logic checks if HITL required
+  </Step>
+  <Step>
+    Queue for review with compliance officer
+  </Step>
+  <Step>
+    Human reviews full context, agent reasoning, all data
+  </Step>
+  <Step>
+    Human decision: Approve, Deny, or Override
+  </Step>
+  <Step>
+    Workflow resumes with human-approved decision
+  </Step>
+  <Step>
+    Complete audit trail including human review
+  </Step>
+</Steps>
+
+---
+
+## Best Practices
+
+<Accordions>
+  <Accordion title="For Compliance Officers">
+    1. **Always Enable Extended Thinking** for high-stakes decisions
+    2. **Review HITL Queue Daily** to prevent backlog
+    3. **Calibrate Risk Thresholds** based on your risk appetite
+    4. **Monitor False Positives** and adjust agent prompts
+    5. **Export Audit Trails Quarterly** for examination readiness
+  </Accordion>
+  <Accordion title="For Analysts">
+    1. **Be Specific with Requests** (tickers, time periods, metrics)
+    2. **Request Visualizations** when helpful for presentations
+    3. **Verify Agent Calculations** for high-stakes analysis
+    4. **Save Useful Prompts** as custom agents
+    5. **Provide Feedback** on accuracy to improve agents
+  </Accordion>
+  <Accordion title="For Developers">
+    1. **Start with Production Agents** before building custom
+    2. **Test Custom Agents Thoroughly** before deployment
+    3. **Use Minimal Skill Sets** to reduce cost
+    4. **Monitor Token Usage** and optimize prompts
+    5. **Version Control System Prompts** like code
+  </Accordion>
+  <Accordion title="For Administrators">
+    1. **Monitor Cost by Agent** to identify optimization opportunities
+    2. **Track Automation Rates** to measure ROI
+    3. **Review Audit Logs Regularly** for compliance
+    4. **Calibrate HITL Thresholds** based on queue depth
+    5. **Update Models Periodically** as providers improve
+  </Accordion>
+</Accordions>

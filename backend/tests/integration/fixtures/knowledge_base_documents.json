@@ -1,0 +1,20 @@
+[
+  {
+    "id": "doc-1",
+    "title": "AAPL Q4 Earnings Analysis",
+    "content": "Apple reported record Q4 revenue of $383B, driven by strong iPhone 16 sales and Services growth. Operating margin expanded to 30.7%, with EPS of $6.73 beating consensus by $0.12.",
+    "type": "earnings"
+  },
+  {
+    "id": "doc-2",
+    "title": "Fed Minutes Summary - December 2025",
+    "content": "The FOMC held rates steady at 5.25-5.50% for the fourth consecutive meeting. Committee members signaled potential rate cuts in Q1 2026 contingent on continued disinflation progress.",
+    "type": "research"
+  },
+  {
+    "id": "doc-3",
+    "title": "ESG Compliance Report - Tech Sector Q4 2025",
+    "content": "Environmental scoring methodology updated per SEC Climate Disclosure Rule. Tech sector average ESG score improved to 72/100. AAPL leads at 85, MSFT at 83, GOOGL at 78.",
+    "type": "esg"
+  }
+]

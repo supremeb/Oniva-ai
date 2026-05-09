@@ -1,0 +1,302 @@
+---
+title: Agents API
+description: API endpoints for managing and interacting with AI agents.
+---
+
+API endpoints for managing and interacting with AI agents.
+
+## Overview
+
+The Agents API allows you to:
+- List available agents
+- Get agent details
+- Create custom agents
+- Chat with agents programmatically
+
+**Base URL:** `/api/v1/agents`
+
+---
+
+## List Agents
+
+Get all available agents.
+
+```bash
+GET /api/v1/agents
+```
+
+**Response:**
+
+```json
+{
+  "agents": [
+    {
+      "id": "data-retrieval",
+      "name": "Data Retrieval Agent",
+      "description": "Fetches data from external sources",
+      "model": "gpt-4o-mini",
+      "skills": ["web_search", "browse_url", "fetch_market_data"]
+    },
+    {
+      "id": "analysis",
+      "name": "Analysis Agent",
+      "description": "Financial analysis and calculations",
+      "model": "claude-3-5-sonnet",
+      "skills": ["execute_python", "generate_chart", "analyze_risk_metrics"]
+    }
+  ]
+}
+```
+
+---
+
+## Get Agent Details
+
+Get detailed information about a specific agent.
+
+```bash
+GET /api/v1/agents/{agent_id}
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent_id` | string | Yes | The agent identifier |
+
+**Response:**
+
+```json
+{
+  "id": "compliance",
+  "name": "Compliance Agent",
+  "description": "Regulatory compliance checks",
+  "model": "claude-3-5-sonnet",
+  "temperature": 0,
+  "skills": [
+    "kyc_verification",
+    "aml_screening",
+    "sanctions_check"
+  ],
+  "system_prompt": "You are a compliance officer...",
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-20T14:45:00Z"
+}
+```
+
+---
+
+## Chat with Agent
+
+Send a message to an agent and receive a response.
+
+```bash
+POST /api/v1/chat
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "agent_id": "analysis",
+  "message": "Calculate the P/E ratio for AAPL",
+  "session_id": "sess_abc123",
+  "model": "gpt-4o"
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent_id` | string | Yes | Agent to use |
+| `message` | string | Yes | User message |
+| `session_id` | string | No | Session for context |
+| `model` | string | No | Override default model |
+
+**Response (Streaming):**
+
+```json
+{
+  "id": "msg_xyz789",
+  "role": "assistant",
+  "content": "Based on current market data...",
+  "agent_id": "analysis",
+  "session_id": "sess_abc123",
+  "tokens_used": 245
+}
+```
+
+<Callout type="info">
+Chat responses use Server-Sent Events (SSE) for real-time streaming.
+</Callout>
+
+---
+
+## Custom Agents
+
+### Create Custom Agent
+
+```bash
+POST /api/v1/custom-agents
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "name": "Loan Officer Agent",
+  "description": "Automates loan application review",
+  "model": "claude-3-5-sonnet",
+  "temperature": 0.3,
+  "skills": [
+    "kyc_verification",
+    "credit_check",
+    "risk_assessment"
+  ],
+  "system_prompt": "You are a loan officer assistant..."
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "custom_abc123",
+  "name": "Loan Officer Agent",
+  "status": "active",
+  "created_at": "2024-01-25T09:00:00Z"
+}
+```
+
+### Update Custom Agent
+
+```bash
+PATCH /api/v1/custom-agents/{agent_id}
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "temperature": 0.5,
+  "skills": ["kyc_verification", "credit_check"]
+}
+```
+
+### Delete Custom Agent
+
+```bash
+DELETE /api/v1/custom-agents/{agent_id}
+```
+
+---
+
+## Agent Skills
+
+### List Agent Skills
+
+```bash
+GET /api/v1/agents/{agent_id}/skills
+```
+
+**Response:**
+
+```json
+{
+  "skills": [
+    {
+      "id": "web_search",
+      "name": "Web Search",
+      "category": "web",
+      "description": "Search the internet"
+    },
+    {
+      "id": "execute_python",
+      "name": "Execute Python",
+      "category": "code",
+      "description": "Run Python code"
+    }
+  ]
+}
+```
+
+### Enable/Disable Skills
+
+```bash
+POST /api/v1/agents/{agent_id}/skills
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "enable": ["generate_chart"],
+  "disable": ["web_search"]
+}
+```
+
+---
+
+## Session Management
+
+### Get Session History
+
+```bash
+GET /api/v1/sessions/{session_id}
+```
+
+**Response:**
+
+```json
+{
+  "session_id": "sess_abc123",
+  "agent_id": "analysis",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What's the market cap of AAPL?"
+    },
+    {
+      "role": "assistant",
+      "content": "Apple's current market cap is..."
+    }
+  ],
+  "created_at": "2024-01-25T10:00:00Z",
+  "expires_at": "2024-01-26T10:00:00Z"
+}
+```
+
+### Clear Session
+
+```bash
+DELETE /api/v1/sessions/{session_id}
+```
+
+---
+
+## Error Codes
+
+| Code | Description |
+|------|-------------|
+| `agent_not_found` | Agent ID doesn't exist |
+| `skill_not_available` | Requested skill not enabled |
+| `session_expired` | Session has timed out |
+| `rate_limited` | Too many requests |
+
+---
+
+## Next Steps
+
+<Cards>
+  <Card title="Workflows API" href="/docs/api-reference/workflows">
+    Execute workflows programmatically
+  </Card>
+  <Card title="Skills API" href="/docs/api-reference/skills">
+    Explore available skills
+  </Card>
+</Cards>

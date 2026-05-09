@@ -1,0 +1,65 @@
+{
+    "name": "Simple Q&A",
+    "description": "Basic question-answering workflow with LLM",
+    "nodes": [
+        {
+            "id": "start-1",
+            "type": "start",
+            "data": {
+                "label": "Start",
+                "variables": [
+                    {
+                        "name": "query",
+                        "type": "string"
+                    }
+                ]
+            },
+            "position": {
+                "x": 100,
+                "y": 200
+            }
+        },
+        {
+            "id": "llm-1",
+            "type": "llm",
+            "data": {
+                "label": "Generate Answer",
+                "model": "gpt-4o-mini",
+                "systemPrompt": "You are a helpful AI assistant. Answer questions clearly and concisely.",
+                "userPrompt": "{{sys.query}}",
+                "temperature": 0.7,
+                "maxTokens": 1000
+            },
+            "position": {
+                "x": 350,
+                "y": 200
+            }
+        },
+        {
+            "id": "output-1",
+            "type": "output",
+            "data": {
+                "label": "Output",
+                "outputName": "answer",
+                "outputValue": "{{llm-1.text}}",
+                "streamOutput": true
+            },
+            "position": {
+                "x": 600,
+                "y": 200
+            }
+        }
+    ],
+    "edges": [
+        {
+            "id": "e1",
+            "source": "start-1",
+            "target": "llm-1"
+        },
+        {
+            "id": "e2",
+            "source": "llm-1",
+            "target": "output-1"
+        }
+    ]
+}

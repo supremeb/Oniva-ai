@@ -1,0 +1,649 @@
+# Data Retrieval Agent Test Cases
+# Part of Phase 1: Production Reliability
+#
+# These test cases evaluate the DataRetrievalAgent's ability to:
+# - Fetch stock prices and market data
+# - Retrieve company financial information
+# - Access economic indicators
+# - Handle API errors gracefully
+#
+# Total: 50 test cases
+
+---
+# ============================================
+# Stock Price Retrieval (15 test cases)
+# ============================================
+
+- id: "data-retrieval-001"
+  description: "Get current stock price - AAPL"
+  input: "Get the current stock price for Apple Inc (AAPL)"
+  expected:
+    symbol: "AAPL"
+    has_price: true
+    price:
+      check: "numeric_range"
+      min: 50
+      max: 500
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-002"
+  description: "Get current stock price - MSFT"
+  input: "What is Microsoft's current stock price?"
+  expected:
+    symbol: "MSFT"
+    has_price: true
+    price:
+      check: "numeric_range"
+      min: 100
+      max: 600
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-003"
+  description: "Get current stock price - GOOGL"
+  input: "Fetch Google/Alphabet stock price (GOOGL)"
+  expected:
+    symbol: "GOOGL"
+    has_price: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-004"
+  description: "Get stock price with volume"
+  input: "Get AMZN stock price and trading volume"
+  expected:
+    symbol: "AMZN"
+    has_price: true
+    has_volume: true
+    volume:
+      check: "numeric_range"
+      min: 1000000
+      max: 500000000
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-005"
+  description: "Get stock price with market cap"
+  input: "Get Tesla stock price and market capitalization"
+  expected:
+    symbol: "TSLA"
+    has_price: true
+    has_market_cap: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-006"
+  description: "Invalid ticker symbol"
+  input: "Get stock price for INVALIDTICKER123"
+  expected:
+    error: true
+    error_type_contains: ["not found", "invalid", "unknown"]
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-007"
+  description: "Get multiple stock prices"
+  input: "Get stock prices for AAPL, MSFT, and GOOGL"
+  expected:
+    stocks:
+      check: "length_range"
+      min: 3
+      max: 3
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-008"
+  description: "Get stock with 52-week range"
+  input: "Get JPMorgan Chase stock price with 52-week high and low"
+  expected:
+    symbol: "JPM"
+    has_price: true
+    has_52_week_high: true
+    has_52_week_low: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-009"
+  description: "Get penny stock price"
+  input: "Get stock price for SNDL"
+  expected:
+    symbol: "SNDL"
+    has_price: true
+    price:
+      check: "numeric_range"
+      min: 0.01
+      max: 50
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-010"
+  description: "Get high-value stock price"
+  input: "Get Berkshire Hathaway Class A stock price (BRK.A)"
+  expected:
+    symbol_contains: ["BRK.A", "BRK-A"]
+    has_price: true
+    price:
+      check: "numeric_range"
+      min: 100000
+      max: 1000000
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-011"
+  description: "Get ETF price"
+  input: "Get the current price of SPY ETF"
+  expected:
+    symbol: "SPY"
+    has_price: true
+    asset_type: "ETF"
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-012"
+  description: "Get stock with P/E ratio"
+  input: "Get NVDA stock price and P/E ratio"
+  expected:
+    symbol: "NVDA"
+    has_price: true
+    has_pe_ratio: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-013"
+  description: "Get stock with dividend yield"
+  input: "Get Coca-Cola stock price and dividend yield"
+  expected:
+    symbol: "KO"
+    has_price: true
+    has_dividend_yield: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-014"
+  description: "Get delisted stock - should error"
+  input: "Get stock price for Enron (ENE)"
+  expected:
+    error: true
+    error_type_contains: ["delisted", "not found", "unavailable"]
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+- id: "data-retrieval-015"
+  description: "Get pre-market stock price"
+  input: "Get AAPL pre-market price if available"
+  expected:
+    symbol: "AAPL"
+    response_contains: ["pre-market", "extended hours", "price"]
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "stock_price"
+
+# ============================================
+# Historical Data (10 test cases)
+# ============================================
+
+- id: "data-retrieval-016"
+  description: "Get 1-day historical data"
+  input: "Get AAPL stock data for the last trading day"
+  expected:
+    symbol: "AAPL"
+    has_historical_data: true
+    data_points:
+      check: "numeric_range"
+      min: 1
+      max: 500
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "historical_data"
+
+- id: "data-retrieval-017"
+  description: "Get 1-week historical data"
+  input: "Get Microsoft stock price history for the past week"
+  expected:
+    symbol: "MSFT"
+    has_historical_data: true
+    data_points:
+      check: "numeric_range"
+      min: 5
+      max: 10
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "historical_data"
+
+- id: "data-retrieval-018"
+  description: "Get 1-month historical data"
+  input: "Get Google stock history for the past month"
+  expected:
+    symbol: "GOOGL"
+    has_historical_data: true
+    data_points:
+      check: "numeric_range"
+      min: 15
+      max: 25
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "historical_data"
+
+- id: "data-retrieval-019"
+  description: "Get 1-year historical data"
+  input: "Get Amazon stock price data for the past year"
+  expected:
+    symbol: "AMZN"
+    has_historical_data: true
+    data_points:
+      check: "numeric_range"
+      min: 200
+      max: 300
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "historical_data"
+
+- id: "data-retrieval-020"
+  description: "Get historical data with OHLCV"
+  input: "Get Tesla daily OHLCV data for last month"
+  expected:
+    symbol: "TSLA"
+    has_open: true
+    has_high: true
+    has_low: true
+    has_close: true
+    has_volume: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "historical_data"
+
+- id: "data-retrieval-021"
+  description: "Get specific date range historical data"
+  input: "Get AAPL stock data from January 1, 2024 to January 31, 2024"
+  expected:
+    symbol: "AAPL"
+    has_historical_data: true
+    start_date_contains: "2024-01"
+    end_date_contains: "2024-01"
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "historical_data"
+
+- id: "data-retrieval-022"
+  description: "Get 5-year historical data"
+  input: "Get 5-year stock price history for JPMorgan"
+  expected:
+    symbol: "JPM"
+    has_historical_data: true
+    data_points:
+      check: "numeric_range"
+      min: 1000
+      max: 1500
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "historical_data"
+
+- id: "data-retrieval-023"
+  description: "Get intraday data"
+  input: "Get NVDA intraday 5-minute interval data"
+  expected:
+    symbol: "NVDA"
+    interval: "5min"
+    has_intraday_data: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "historical_data"
+
+- id: "data-retrieval-024"
+  description: "Get historical data with adjusted close"
+  input: "Get MSFT adjusted close prices for the past year"
+  expected:
+    symbol: "MSFT"
+    has_adjusted_close: true
+    has_historical_data: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "historical_data"
+
+- id: "data-retrieval-025"
+  description: "Get historical data before IPO - should error"
+  input: "Get Airbnb stock data for 2019"
+  expected:
+    error: true
+    error_type_contains: ["not available", "before IPO", "no data"]
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "historical_data"
+
+# ============================================
+# Company Financials (10 test cases)
+# ============================================
+
+- id: "data-retrieval-026"
+  description: "Get company income statement"
+  input: "Get Apple's latest income statement"
+  expected:
+    company: "Apple"
+    has_revenue: true
+    has_net_income: true
+    has_earnings_per_share: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "company_financials"
+
+- id: "data-retrieval-027"
+  description: "Get company balance sheet"
+  input: "Get Microsoft's balance sheet"
+  expected:
+    company: "Microsoft"
+    has_total_assets: true
+    has_total_liabilities: true
+    has_shareholders_equity: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "company_financials"
+
+- id: "data-retrieval-028"
+  description: "Get company cash flow statement"
+  input: "Get Amazon's cash flow statement"
+  expected:
+    company: "Amazon"
+    has_operating_cash_flow: true
+    has_investing_cash_flow: true
+    has_financing_cash_flow: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "company_financials"
+
+- id: "data-retrieval-029"
+  description: "Get quarterly earnings"
+  input: "Get NVIDIA's latest quarterly earnings"
+  expected:
+    company: "NVIDIA"
+    quarter:
+      check: "regex_match"
+      value: "Q[1-4].*20[2-3][0-9]"
+    has_revenue: true
+    has_eps: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "company_financials"
+
+- id: "data-retrieval-030"
+  description: "Get annual report summary"
+  input: "Get Tesla's annual revenue for the past 3 years"
+  expected:
+    company: "Tesla"
+    years:
+      check: "length_range"
+      min: 3
+      max: 3
+    has_revenue: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "company_financials"
+
+- id: "data-retrieval-031"
+  description: "Get company key ratios"
+  input: "Get key financial ratios for JPMorgan Chase"
+  expected:
+    company_contains: ["JPMorgan", "JPM"]
+    has_pe_ratio: true
+    has_price_to_book: true
+    has_debt_to_equity: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "company_financials"
+
+- id: "data-retrieval-032"
+  description: "Get earnings per share history"
+  input: "Get AAPL EPS history for the last 4 quarters"
+  expected:
+    symbol: "AAPL"
+    quarters:
+      check: "length_range"
+      min: 4
+      max: 4
+    has_eps: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "company_financials"
+
+- id: "data-retrieval-033"
+  description: "Get company profile"
+  input: "Get company profile and overview for Alphabet"
+  expected:
+    company_contains: ["Alphabet", "Google"]
+    has_sector: true
+    has_industry: true
+    has_description: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "company_financials"
+
+- id: "data-retrieval-034"
+  description: "Get private company financials - should error"
+  input: "Get SpaceX's income statement"
+  expected:
+    error: true
+    error_type_contains: ["private", "not available", "not public"]
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "company_financials"
+
+- id: "data-retrieval-035"
+  description: "Get financial data with currency conversion"
+  input: "Get Toyota's financials in USD"
+  expected:
+    company: "Toyota"
+    currency: "USD"
+    has_revenue: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "company_financials"
+
+# ============================================
+# Market Data & Indices (10 test cases)
+# ============================================
+
+- id: "data-retrieval-036"
+  description: "Get S&P 500 index value"
+  input: "Get current S&P 500 index value"
+  expected:
+    index: "S&P 500"
+    has_value: true
+    value:
+      check: "numeric_range"
+      min: 3000
+      max: 7000
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "market_indices"
+
+- id: "data-retrieval-037"
+  description: "Get Dow Jones index"
+  input: "What is the current Dow Jones Industrial Average?"
+  expected:
+    index_contains: ["Dow", "DJIA", "DJI"]
+    has_value: true
+    value:
+      check: "numeric_range"
+      min: 25000
+      max: 50000
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "market_indices"
+
+- id: "data-retrieval-038"
+  description: "Get NASDAQ composite"
+  input: "Get NASDAQ Composite current level"
+  expected:
+    index: "NASDAQ"
+    has_value: true
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "market_indices"
+
+- id: "data-retrieval-039"
+  description: "Get VIX volatility index"
+  input: "What is the current VIX level?"
+  expected:
+    index: "VIX"
+    has_value: true
+    value:
+      check: "numeric_range"
+      min: 5
+      max: 100
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "market_indices"
+
+- id: "data-retrieval-040"
+  description: "Get 10-year Treasury yield"
+  input: "Get current 10-year Treasury yield"
+  expected:
+    instrument: "10Y Treasury"
+    has_yield: true
+    yield:
+      check: "numeric_range"
+      min: 0.5
+      max: 10
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "market_indices"
+
+- id: "data-retrieval-041"
+  description: "Get Fed Funds Rate"
+  input: "What is the current Federal Funds Rate?"
+  expected:
+    indicator: "Fed Funds Rate"
+    has_rate: true
+    rate:
+      check: "numeric_range"
+      min: 0
+      max: 10
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "market_indices"
+
+- id: "data-retrieval-042"
+  description: "Get crude oil price"
+  input: "Get current WTI crude oil price"
+  expected:
+    commodity: "WTI Crude"
+    has_price: true
+    price:
+      check: "numeric_range"
+      min: 30
+      max: 200
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "market_indices"
+
+- id: "data-retrieval-043"
+  description: "Get gold price"
+  input: "What is the current gold price per ounce?"
+  expected:
+    commodity: "Gold"
+    has_price: true
+    unit: "oz"
+    price:
+      check: "numeric_range"
+      min: 1000
+      max: 3000
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "market_indices"
+
+- id: "data-retrieval-044"
+  description: "Get EUR/USD exchange rate"
+  input: "Get current EUR to USD exchange rate"
+  expected:
+    pair: "EUR/USD"
+    has_rate: true
+    rate:
+      check: "numeric_range"
+      min: 0.8
+      max: 1.5
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "market_indices"
+
+- id: "data-retrieval-045"
+  description: "Get Bitcoin price"
+  input: "What is the current Bitcoin price in USD?"
+  expected:
+    symbol_contains: ["BTC", "Bitcoin"]
+    currency: "USD"
+    has_price: true
+    price:
+      check: "numeric_range"
+      min: 10000
+      max: 200000
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "market_indices"
+
+# ============================================
+# Error Handling & Edge Cases (5 test cases)
+# ============================================
+
+- id: "data-retrieval-046"
+  description: "Handle API timeout gracefully"
+  input: "Get stock data with simulated timeout"
+  expected:
+    error: true
+    graceful_handling: true
+    error_type_contains: ["timeout", "unavailable", "retry"]
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "error_handling"
+
+- id: "data-retrieval-047"
+  description: "Handle rate limiting"
+  input: "Get data for 100 stocks simultaneously"
+  expected:
+    graceful_handling: true
+    response_contains: ["rate limit", "batch", "queued"]
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "error_handling"
+
+- id: "data-retrieval-048"
+  description: "Handle malformed input"
+  input: "Get stock price for $$$INVALID!!!"
+  expected:
+    error: true
+    error_type_contains: ["invalid", "malformed", "parse"]
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "error_handling"
+
+- id: "data-retrieval-049"
+  description: "Handle weekend/holiday request"
+  input: "Get AAPL price for Christmas Day 2023"
+  expected:
+    response_contains: ["holiday", "closed", "no trading"]
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "error_handling"
+
+- id: "data-retrieval-050"
+  description: "Handle empty response"
+  input: "Get stock data for newly listed company with no history"
+  expected:
+    has_data: false
+    response_contains: ["no data", "limited", "new listing"]
+  evaluation_method: "deterministic"
+  agent_type: "data_retrieval"
+  category: "error_handling"

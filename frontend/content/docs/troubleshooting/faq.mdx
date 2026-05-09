@@ -1,0 +1,203 @@
+---
+title: Frequently Asked Questions
+description: Common questions about using Oniva.
+---
+
+Common questions about using Oniva.
+
+## General
+
+<Accordions>
+  <Accordion title="What is Oniva?">
+    Oniva is an enterprise AI platform for building intelligent automation workflows. It lets you create AI-powered agents that can analyze data, process documents, and integrate with external systems - all without writing code.
+  </Accordion>
+  <Accordion title="What industries can use Oniva?">
+    Oniva is industry-agnostic. It can be used in:
+    - Finance and banking
+    - Healthcare
+    - Legal
+    - Retail and e-commerce
+    - Manufacturing
+    - Government
+    - Any industry with workflow automation needs
+  </Accordion>
+  <Accordion title="Do I need coding skills?">
+    No. The visual workflow builder lets you create complex automations by dragging and dropping nodes. However, developers can extend the platform with custom skills and agents if needed.
+  </Accordion>
+</Accordions>
+
+---
+
+## Agents
+
+<Accordions>
+  <Accordion title="What's the difference between an Agent and an LLM?">
+    An **Agent** is an AI assistant that can use tools (skills) to perform actions. It has memory, can make decisions, and execute multi-step tasks.
+
+    An **LLM** (Large Language Model) is the underlying AI that powers agents. It generates text but doesn't have tools or memory on its own.
+  </Accordion>
+  <Accordion title="Which AI model should I use?">
+    | Use Case | Recommended Model |
+    |----------|------------------|
+    | Quick questions | Gemini 2.0 Flash |
+    | Complex analysis | GPT-4o or Claude 3.5 |
+    | Cost-sensitive tasks | GPT-4o Mini |
+  </Accordion>
+  <Accordion title="Can I create custom agents?">
+    Yes. Navigate to Agents → Create Agent to build agents with custom system prompts, skills, and configurations.
+  </Accordion>
+</Accordions>
+
+---
+
+## Workflows
+
+<Accordions>
+  <Accordion title="How many nodes can a workflow have?">
+    There's no hard limit, but we recommend keeping workflows under 50 nodes for performance. For complex processes, consider splitting into multiple workflows.
+  </Accordion>
+  <Accordion title="Can workflows call other workflows?">
+    Yes. Use the **Subworkflow** node to call another workflow as a step in your current workflow.
+  </Accordion>
+  <Accordion title="How do I handle errors in workflows?">
+    Add **IF/ELSE** nodes to check for error conditions. You can also configure retry logic on individual nodes and add error notification branches.
+  </Accordion>
+  <Accordion title="Can workflows run on a schedule?">
+    Yes. Use the **Schedule Trigger** node to run workflows at specific times (hourly, daily, weekly, etc.).
+  </Accordion>
+</Accordions>
+
+---
+
+## Connectors
+
+<Accordions>
+  <Accordion title="How do I add a new connector?">
+    <Steps>
+      <Step>Go to Settings → Connectors</Step>
+      <Step>Click on the connector you want to add</Step>
+      <Step>Enter your API credentials</Step>
+      <Step>Test the connection</Step>
+      <Step>Save</Step>
+    </Steps>
+  </Accordion>
+  <Accordion title="Are my API keys secure?">
+    Yes. All API keys are encrypted using Fernet encryption with PBKDF2 key derivation before storage. Keys are never logged or exposed in responses.
+  </Accordion>
+  <Accordion title="What if my connector isn't listed?">
+    You can use the **HTTP Request** node to connect to any API. For native integration, contact us about adding new connectors.
+  </Accordion>
+</Accordions>
+
+---
+
+## Skills
+
+<Accordions>
+  <Accordion title="What skills are available?">
+    See [Skills Library](/docs/features/skills-library) for a complete list. Categories include:
+    - **Web**: search, browse, extract
+    - **Code**: Python execution, charts
+    - **Document**: PDF parsing, entity extraction
+    - **Memory**: store, recall
+    - **File**: read, write
+  </Accordion>
+  <Accordion title="Can I create custom skills?">
+    Yes, developers can create custom skills. See the [API Reference](/docs/api-reference) for details.
+  </Accordion>
+</Accordions>
+
+---
+
+## Performance
+
+<Accordions>
+  <Accordion title="Why is my workflow slow?">
+    Common causes:
+    1. **Complex AI reasoning**: Some models take longer. Try a faster model.
+    2. **Large data**: Process data in batches.
+    3. **External API calls**: APIs may have latency.
+    4. **Too many nodes**: Simplify the workflow.
+  </Accordion>
+  <Accordion title="What are the response time expectations?">
+    | Operation | Typical Time |
+    |-----------|--------------|
+    | Simple chat | 1-3 seconds |
+    | Workflow (5 nodes) | 5-15 seconds |
+    | Document processing | 10-30 seconds |
+    | Complex analysis | 30-60 seconds |
+  </Accordion>
+</Accordions>
+
+---
+
+## Billing & Costs
+
+<Accordions>
+  <Accordion title="How is usage calculated?">
+    Usage is based on tokens consumed by AI models. Tokens are units of text (roughly 4 characters = 1 token).
+  </Accordion>
+  <Accordion title="How can I reduce costs?">
+    1. Use faster/cheaper models for simple tasks
+    2. Keep prompts concise
+    3. Use caching for repeated queries
+    4. Process data efficiently
+  </Accordion>
+</Accordions>
+
+---
+
+## Troubleshooting Quick Reference
+
+<Tabs items={['Agent Issues', 'Workflow Issues', 'API Issues']}>
+  <Tab value="Agent Issues">
+    **"Agent not responding"**
+    1. Check your internet connection
+    2. Verify your API key is valid
+    3. Try a different model
+    4. Check the provider's status page
+  </Tab>
+  <Tab value="Workflow Issues">
+    **"Workflow failed"**
+    1. Check the execution log for the specific error
+    2. Verify all nodes are properly connected
+    3. Check that input data matches expected format
+    4. Review any external API dependencies
+  </Tab>
+  <Tab value="API Issues">
+    **"Invalid API key"**
+    1. Verify the key is copied correctly (no extra spaces)
+    2. Check that the key hasn't expired
+    3. Ensure you selected the correct provider
+  </Tab>
+</Tabs>
+
+---
+
+## Support
+
+<Accordions>
+  <Accordion title="How do I report a bug?">
+    Open an issue on our GitHub repository with:
+    - Steps to reproduce
+    - Expected behavior
+    - Actual behavior
+    - Screenshots if applicable
+  </Accordion>
+  <Accordion title="Where can I request features?">
+    Submit feature requests via GitHub Issues or contact your account manager.
+  </Accordion>
+</Accordions>
+
+---
+
+**Didn't find your answer?**
+
+<Cards>
+  <Card title="Common Issues" href="/docs/troubleshooting/common-issues">
+    Browse solutions to common problems
+  </Card>
+  <Card title="Error Messages" href="/docs/troubleshooting/error-messages">
+    Look up specific error codes
+  </Card>
+</Cards>

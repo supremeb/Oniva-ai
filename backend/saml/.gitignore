@@ -1,0 +1,13 @@
+# Ignore actual settings file (contains secrets)
+settings.json
+
+# Ignore certificates and private keys
+*.pem
+*.key
+*.crt
+*.cer
+
+# Keep example files
+!settings.example.json
+!settings.okta.example.json
+!settings.azure-ad.example.json

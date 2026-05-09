@@ -1,0 +1,324 @@
+---
+title: Quick Start Guide
+description: Get started with Oniva in 5 minutes. This guide walks you through your first agent interaction and workflow creation.
+---
+
+Get started with Oniva in 5 minutes. This guide will walk you through your first agent interaction and workflow creation.
+
+## Prerequisites
+
+Before you begin, ensure you have:
+
+- Access to Oniva platform (contact your administrator for credentials)
+- At least one LLM provider API key (OpenAI, Anthropic, Google, or OpenRouter)
+- Modern web browser (Chrome, Firefox, Safari, or Edge)
+
+## Step 1: Configure Your LLM Provider
+
+<Callout type="warn">
+Oniva requires an LLM provider to power AI agents. You'll need to add your API key before using any agent features.
+</Callout>
+
+### Add Your API Key
+
+<Steps>
+  <Step>
+    Navigate to **Settings** in the left sidebar (gear icon at the bottom)
+  </Step>
+  <Step>
+    Click **API Keys**
+  </Step>
+  <Step>
+    Click **Add New API Key**
+  </Step>
+  <Step>
+    Select your provider:
+    - **OpenAI**: For GPT-4 and GPT-4o models
+    - **Anthropic**: For Claude 3.x models
+    - **Google**: For Gemini models
+    - **OpenRouter**: For multi-model access to 100+ models
+  </Step>
+  <Step>
+    Enter your API key
+  </Step>
+  <Step>
+    Click **Save** (keys are encrypted before storage)
+  </Step>
+</Steps>
+
+<Callout type="info">
+**Security Note**: API keys are encrypted using Fernet encryption with PBKDF2 key derivation and never logged or exposed in responses.
+</Callout>
+
+### Verify Configuration
+
+The system will automatically test your API key. You should see a green checkmark indicating successful validation.
+
+## Step 2: Chat with Your First Agent
+
+Let's try the simplest interaction: chatting with an AI agent.
+
+### Start a Chat Session
+
+<Steps>
+  <Step>
+    Click **Chat** in the left sidebar (speech bubble icon)
+  </Step>
+  <Step>
+    You'll see available agents in the left panel:
+    - **Data Retrieval Agent** - Fetches financial data
+    - **Analysis Agent** - Performs financial analysis
+    - **Compliance Agent** - Handles regulatory checks
+  </Step>
+  <Step>
+    Click on an agent to select it
+  </Step>
+  <Step>
+    Type a question in the input box at the bottom:
+    ```
+    What are the key components of a KYC verification process?
+    ```
+  </Step>
+  <Step>
+    Press **Enter** or click the send button
+  </Step>
+</Steps>
+
+### What to Expect
+
+You'll see:
+- **Streaming Response**: The agent's answer appears in real-time, word by word
+- **Model Selector**: Choose between different AI models (e.g., Gemini 2.0 Flash)
+- **Session Memory**: The agent remembers context across the conversation
+
+### Try a Follow-up Question
+
+```
+How does OFAC screening fit into this process?
+```
+
+The agent will reference your previous question, demonstrating session memory.
+
+## Step 3: Explore Available Agents
+
+Oniva comes with pre-built agents designed for financial services.
+
+### Pre-Built Agent Templates
+
+| Agent | Purpose | Example Use Case |
+|-------|---------|------------------|
+| **Data Retrieval Agent** | Fetch financial data from external APIs | Get stock prices, market data |
+| **Analysis Agent** | Perform financial analysis | Calculate portfolio returns |
+| **Compliance Agent** | Check regulatory compliance | Verify KYC requirements |
+| **KYC/AML Agent** | Anti-money laundering checks | Customer verification |
+| **Market Abuse Agent** | Detect trading irregularities | Insider trading detection |
+| **Regulatory Report Generator** | Create compliance reports | Generate SAR filings |
+| **Research Agent** | Document research and analysis | Policy research |
+
+### Create a Custom Agent
+
+<Steps>
+  <Step>
+    Click **+ Create Agent** in the top right
+  </Step>
+  <Step>
+    Enter agent name and description
+  </Step>
+  <Step>
+    Configure:
+    - **System Prompt**: Instructions for how the agent should behave
+    - **Model**: Which AI model to use
+    - **Skills**: What capabilities the agent has access to
+  </Step>
+</Steps>
+
+## Step 4: Create Your First Workflow
+
+Workflows let you chain multiple agents and skills together for complex tasks.
+
+### Open Workflow Builder
+
+<Steps>
+  <Step>
+    Click **Workflows** in the left sidebar
+  </Step>
+  <Step>
+    Browse available templates or your saved workflows
+  </Step>
+  <Step>
+    Click **+ New Workflow** to start from scratch
+  </Step>
+</Steps>
+
+### Using Workflow Templates
+
+Oniva includes ready-to-use templates:
+
+- **Simple Q&A** - Basic question-answering with LLM
+- **Code Generation** - Generate and review code
+- **Conditional** - Route based on conditions
+- **Data Pipeline** - Fetch and process data
+- **KYC Review** - Customer due diligence
+- **Market Research** - Analyze competitors
+- **Financial Analysis** - Analyze metrics
+
+### Build from Scratch
+
+<Steps>
+  <Step>
+    Click **+ New Workflow**
+  </Step>
+  <Step>
+    Give it a name like "My First Workflow"
+  </Step>
+  <Step>
+    You'll see the workflow canvas with a **Start** node
+  </Step>
+</Steps>
+
+#### Add Nodes
+
+From the left sidebar, drag nodes onto the canvas:
+
+**1. Start Node** (automatically created)
+- This is where your workflow begins
+- Configure input variables users will provide
+
+**2. Add an LLM Node**
+- Drag **LLM** from the "Basic" category onto the canvas
+- Click on it to configure:
+  - **Model**: Select your AI model
+  - **System Prompt**: Instructions for the AI
+  - **User Prompt**: The question or task
+- Connect the Start node to this node by dragging from the black dot
+
+**3. Add an End Node**
+- Drag **End** from the "Basic" category
+- Connect the LLM output to this node
+
+#### Save and Execute
+
+<Steps>
+  <Step>
+    Click **Save** in the top right
+  </Step>
+  <Step>
+    Click **Execute** to run the workflow
+  </Step>
+  <Step>
+    Enter your input when prompted
+  </Step>
+  <Step>
+    Watch the execution in real-time
+  </Step>
+</Steps>
+
+## Step 5: Explore Skills
+
+Skills are reusable capabilities that agents can use.
+
+### Available Skill Categories
+
+| Category | Examples | Description |
+|----------|----------|-------------|
+| **Web** | web_search, browse_url | Search and fetch web content |
+| **Code** | execute_python, analyze_code | Run and analyze code |
+| **File** | read_file, write_file | Handle file operations |
+| **Financial** | Coming soon | Market data, calculations |
+| **Compliance** | Coming soon | KYC, AML, sanctions |
+
+### View Skill Details
+
+Click **View Details** on any skill card to see:
+- Input parameters
+- Output format
+- Usage examples
+- Version history
+
+## Understanding What Happened
+
+### Session Memory
+
+Your chat conversation is stored with:
+- Last 10 turns immediately accessible (&lt;5ms)
+- Full conversation history archived
+- 24-hour session expiration
+
+### Workflow Execution
+
+Your workflow ran through the DBOS orchestrator which:
+- Executed each node in sequence
+- Passed data between nodes
+- Logged execution to audit trail
+- Handled errors gracefully
+
+### Cost Tracking
+
+Each interaction is tracked:
+- Tokens used for the request
+- Cost based on the model used
+- View detailed analytics in Settings
+
+## Next Steps
+
+Now that you've completed your first interactions, here's where to go next:
+
+<Cards>
+  <Card title="Core Concepts" href="/docs/getting-started/core-concepts">
+    Understand agents, workflows, and skills in depth
+  </Card>
+  <Card title="First Workflow Tutorial" href="/docs/getting-started/first-workflow">
+    Build a complete compliance workflow step-by-step
+  </Card>
+  <Card title="Workflow Node Types" href="/docs/features/workflows">
+    Learn all 28 node types available
+  </Card>
+  <Card title="MCP Connectors Guide" href="/docs/features/connectors">
+    Integrate with your existing infrastructure
+  </Card>
+</Cards>
+
+## Troubleshooting
+
+<Accordions>
+  <Accordion title="Invalid API Key Error">
+    **Solution**:
+    1. Verify your API key is active with your provider
+    2. Check for extra spaces or characters
+    3. Ensure you selected the correct provider
+  </Accordion>
+  <Accordion title="Agent Not Responding">
+    **Solution**:
+    1. Check your internet connection
+    2. Verify LLM provider status (status.openai.com)
+    3. Try switching to a different model
+    4. Contact administrator if issue persists
+  </Accordion>
+  <Accordion title="Workflow Failed to Execute">
+    **Solution**:
+    1. Check workflow execution logs (click on failed node)
+    2. Verify all nodes are properly connected
+    3. Ensure required skills are enabled for agents
+    4. Review error message for specific guidance
+  </Accordion>
+</Accordions>
+
+## Getting Help
+
+If you're stuck:
+
+- **Documentation**: Search using the sidebar navigation
+- **FAQ**: [Common questions](/docs/troubleshooting/faq)
+- **Error Reference**: [Error messages explained](/docs/troubleshooting/error-messages)
+- **Support**: Contact your administrator
+
+---
+
+**You've successfully:**
+- Configured your first LLM provider
+- Chatted with an AI agent
+- Explored pre-built agents
+- Created and executed a workflow
+- Browsed the skills library
+
+**Next: [Core Concepts](/docs/getting-started/core-concepts)** - Learn about agents, workflows, and skills in depth

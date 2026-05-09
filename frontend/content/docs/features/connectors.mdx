@@ -1,0 +1,307 @@
+---
+title: Connectors
+description: Connect your AI agents to external tools and services like ServiceNow, Slack, Salesforce, and more.
+---
+
+Connectors let your AI agents communicate with external tools and services. Think of them as bridges that allow Oniva to talk to other software you already use in your organization.
+
+## What Are Connectors?
+
+In the real world, your financial operations likely involve multiple tools:
+- **ServiceNow** for incident management
+- **Slack** for team communication
+- **Salesforce** for customer relationships
+- **Jira** for project tracking
+- **GitHub** for code repositories
+
+Without connectors, your AI agents would be isolated - they could think and analyze, but couldn't take action in these systems. Connectors give your agents the ability to:
+
+- **Read data** from external systems (get customer records, fetch tickets)
+- **Create items** in external systems (open tickets, send messages)
+- **Update records** (modify CRM entries, close incidents)
+- **Automate workflows** across multiple tools
+
+## Available Connectors
+
+<Tabs items={['ServiceNow', 'Slack', 'Salesforce', 'Jira', 'GitHub']}>
+  <Tab value="ServiceNow">
+    **What it does**: Integrates with ServiceNow for IT service management.
+
+    **Think of it like**: A direct line to your IT help desk that your AI agents can use.
+
+    **Capabilities**:
+    - Create incidents automatically when issues are detected
+    - Query existing tickets and their status
+    - Update ticket information and add comments
+    - Close resolved incidents
+    - Search the knowledge base
+
+    **Use cases**:
+    - Automatically create an incident when a compliance check fails
+    - Query ticket status to include in reports
+    - Escalate issues based on AI analysis
+
+    **Configuration**:
+    | Field | Description |
+    |-------|-------------|
+    | Instance URL | Your ServiceNow instance (e.g., `company.service-now.com`) |
+    | Username | ServiceNow API username |
+    | Password | ServiceNow API password |
+    | Client ID | OAuth client ID (optional) |
+    | Client Secret | OAuth client secret (optional) |
+  </Tab>
+  <Tab value="Slack">
+    **What it does**: Sends messages and notifications to Slack channels.
+
+    **Think of it like**: Giving your AI agents the ability to post updates in your team chat.
+
+    **Capabilities**:
+    - Send messages to channels
+    - Send direct messages to users
+    - Post formatted messages with attachments
+    - Create threaded conversations
+    - React to messages
+
+    **Use cases**:
+    - Alert the compliance team when a suspicious transaction is detected
+    - Send daily summary reports to a channel
+    - Notify stakeholders when a workflow completes
+    - Request human approval via Slack
+
+    **Getting Your Bot Token**:
+    <Steps>
+      <Step>
+        Go to [api.slack.com/apps](https://api.slack.com/apps)
+      </Step>
+      <Step>
+        Create a new app or select existing
+      </Step>
+      <Step>
+        Navigate to "OAuth & Permissions"
+      </Step>
+      <Step>
+        Copy the "Bot User OAuth Token"
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab value="Salesforce">
+    **What it does**: Connects to Salesforce CRM for customer data management.
+
+    **Think of it like**: Giving your AI agents access to your customer database.
+
+    **Capabilities**:
+    - Query customer records
+    - Create new leads and opportunities
+    - Update account information
+    - Search across objects
+    - Run SOQL queries
+
+    **Use cases**:
+    - Pull customer information for KYC verification
+    - Update customer risk scores based on analysis
+    - Create follow-up tasks after compliance reviews
+    - Generate reports from CRM data
+
+    <Callout type="warn">
+    **Enterprise Badge**: This connector is marked as "Enterprise" because it requires additional licensing and configuration.
+    </Callout>
+  </Tab>
+  <Tab value="Jira">
+    **What it does**: Integrates with Jira for issue tracking and project management.
+
+    **Think of it like**: A project manager assistant that can create and manage tasks.
+
+    **Capabilities**:
+    - Create issues and subtasks
+    - Query and search issues with JQL
+    - Update issue status and fields
+    - Add comments and attachments
+    - Transition issues through workflows
+
+    **Use cases**:
+    - Create tickets for compliance findings
+    - Track remediation tasks from audits
+    - Link related issues together
+    - Generate sprint reports
+
+    **Getting Your API Token**:
+    <Steps>
+      <Step>
+        Go to [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
+      </Step>
+      <Step>
+        Click "Create API token"
+      </Step>
+      <Step>
+        Give it a label and copy the token
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab value="GitHub">
+    **What it does**: Connects to GitHub for code repository access.
+
+    **Think of it like**: Giving your AI agents the ability to read code and manage repositories.
+
+    **Capabilities**:
+    - Read repository contents
+    - Search code across repositories
+    - Create and manage issues
+    - Create pull requests
+    - Review code changes
+
+    **Use cases**:
+    - Analyze code for compliance requirements
+    - Create issues for security findings
+    - Generate documentation from code
+    - Track code changes for audit
+
+    **Required Scopes**:
+    - `repo` - Full repository access
+    - `read:org` - Read organization data
+    - `read:user` - Read user profile
+  </Tab>
+</Tabs>
+
+---
+
+## Setting Up a Connector
+
+<Steps>
+  <Step>
+    **Navigate to Connectors**
+
+    Click **Settings** in the left sidebar (gear icon), then click **Connectors**. You'll see all available connectors.
+  </Step>
+  <Step>
+    **Click Connect**
+
+    Find the connector you want to set up and click the **Connect** button on the card. A configuration dialog will appear.
+  </Step>
+  <Step>
+    **Enter Credentials**
+
+    Fill in the required fields for your connector. Use API keys or OAuth credentials from your external service. Test the connection if available.
+  </Step>
+  <Step>
+    **Save Configuration**
+
+    Click **Save** to store your configuration. Credentials are encrypted before storage. The connector status will change to "Connected".
+  </Step>
+</Steps>
+
+---
+
+## Using Connectors in Workflows
+
+Once configured, connectors become available in your workflows through the **Connector** node.
+
+### Adding a Connector Node
+
+1. Open the workflow editor
+2. Drag a **Connector** node from the sidebar
+3. Click on the node to configure it
+4. Select which connector to use
+5. Choose the action to perform
+6. Map input data to the action parameters
+
+### Example: Creating a Slack Alert
+
+```
+Start Node
+    |
+    v
+LLM Node (Analyze data)
+    |
+    v
+IF Node (Check if alert needed)
+    | (Yes)
+    v
+Connector Node (Slack: Send Message)
+    |
+    v
+End Node
+```
+
+---
+
+## Security Best Practices
+
+<Accordions>
+  <Accordion title="Credential Management">
+    - **Never share** connector credentials
+    - **Rotate tokens** regularly (every 90 days recommended)
+    - **Use service accounts** instead of personal accounts
+    - **Limit permissions** to only what's needed
+  </Accordion>
+  <Accordion title="Access Control">
+    - Only administrators should configure connectors
+    - Review connector usage in audit logs
+    - Disable unused connectors
+    - Monitor for unusual activity
+  </Accordion>
+  <Accordion title="Data Protection">
+    - Connectors encrypt credentials at rest
+    - Connections use HTTPS/TLS
+    - Sensitive data is masked in logs
+    - API responses are not stored permanently
+  </Accordion>
+</Accordions>
+
+---
+
+## Troubleshooting
+
+<Accordions>
+  <Accordion title="Connection Failed Error">
+    **Possible causes**:
+    1. Invalid credentials
+    2. Expired API token
+    3. Network connectivity issues
+    4. Service is down
+
+    **Solutions**:
+    1. Verify credentials are correct
+    2. Generate new API token
+    3. Check firewall settings
+    4. Check external service status page
+  </Accordion>
+  <Accordion title="Unauthorized Error">
+    **Possible causes**:
+    1. Insufficient permissions
+    2. Token doesn't have required scopes
+    3. Account is disabled
+
+    **Solutions**:
+    1. Check account permissions in external service
+    2. Regenerate token with proper scopes
+    3. Contact your administrator
+  </Accordion>
+  <Accordion title="Rate Limited Error">
+    **Possible causes**:
+    1. Too many requests in short time
+    2. API quota exceeded
+
+    **Solutions**:
+    1. Reduce workflow execution frequency
+    2. Add delays between connector calls
+    3. Upgrade API tier if needed
+  </Accordion>
+</Accordions>
+
+---
+
+## Coming Soon
+
+We're working on additional connectors:
+
+| Connector | Status | Description |
+|-----------|--------|-------------|
+| Microsoft Teams | Coming Soon | Team collaboration and messaging |
+| AWS S3 | Coming Soon | Cloud storage integration |
+| Google Drive | Coming Soon | Document storage and sharing |
+| PostgreSQL | Coming Soon | Direct database queries |
+| REST API | Coming Soon | Generic HTTP API connector |
+| Bloomberg | Planned | Financial market data |
+| Reuters | Planned | News and financial data |
+| SWIFT | Planned | Financial messaging network |
+

@@ -1,0 +1,587 @@
+# Analysis Agent Test Cases
+# Part of Phase 1: Production Reliability
+#
+# These test cases evaluate the AnalysisAgent's ability to:
+# - Calculate financial metrics and ratios
+# - Perform technical analysis
+# - Generate investment recommendations
+# - Analyze portfolio performance
+#
+# Total: 50 test cases
+
+---
+# ============================================
+# Ratio Calculations (15 test cases)
+# ============================================
+
+- id: "analysis-001"
+  description: "Calculate P/E ratio"
+  input: "Calculate P/E ratio for a stock priced at $150 with EPS of $5"
+  expected:
+    ratio_name: "P/E"
+    value: 30
+    value_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-002"
+  description: "Calculate PEG ratio"
+  input: "Calculate PEG ratio with P/E of 25 and earnings growth rate of 20%"
+  expected:
+    ratio_name: "PEG"
+    value: 1.25
+    value_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-003"
+  description: "Calculate debt-to-equity ratio"
+  input: "Calculate debt-to-equity ratio with total debt $500M and shareholders equity $250M"
+  expected:
+    ratio_name: "Debt-to-Equity"
+    value: 2.0
+    value_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-004"
+  description: "Calculate current ratio"
+  input: "Calculate current ratio with current assets $100M and current liabilities $50M"
+  expected:
+    ratio_name: "Current Ratio"
+    value: 2.0
+    value_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-005"
+  description: "Calculate quick ratio"
+  input: "Calculate quick ratio with current assets $100M, inventory $30M, current liabilities $50M"
+  expected:
+    ratio_name: "Quick Ratio"
+    value: 1.4
+    value_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-006"
+  description: "Calculate ROE"
+  input: "Calculate ROE with net income $50M and shareholders equity $250M"
+  expected:
+    ratio_name: "ROE"
+    value: 20
+    unit: "percent"
+    value_tolerance: 0.1
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-007"
+  description: "Calculate ROA"
+  input: "Calculate ROA with net income $50M and total assets $500M"
+  expected:
+    ratio_name: "ROA"
+    value: 10
+    unit: "percent"
+    value_tolerance: 0.1
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-008"
+  description: "Calculate gross profit margin"
+  input: "Calculate gross margin with revenue $200M and COGS $120M"
+  expected:
+    ratio_name: "Gross Margin"
+    value: 40
+    unit: "percent"
+    value_tolerance: 0.1
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-009"
+  description: "Calculate net profit margin"
+  input: "Calculate net profit margin with net income $30M and revenue $200M"
+  expected:
+    ratio_name: "Net Profit Margin"
+    value: 15
+    unit: "percent"
+    value_tolerance: 0.1
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-010"
+  description: "Calculate EV/EBITDA"
+  input: "Calculate EV/EBITDA with enterprise value $10B and EBITDA $2B"
+  expected:
+    ratio_name: "EV/EBITDA"
+    value: 5.0
+    value_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-011"
+  description: "Calculate dividend yield"
+  input: "Calculate dividend yield with annual dividend $4 and stock price $100"
+  expected:
+    ratio_name: "Dividend Yield"
+    value: 4
+    unit: "percent"
+    value_tolerance: 0.1
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-012"
+  description: "Calculate price-to-book ratio"
+  input: "Calculate P/B ratio with market cap $50B and book value $25B"
+  expected:
+    ratio_name: "P/B"
+    value: 2.0
+    value_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-013"
+  description: "Calculate interest coverage ratio"
+  input: "Calculate interest coverage with EBIT $100M and interest expense $25M"
+  expected:
+    ratio_name: "Interest Coverage"
+    value: 4.0
+    value_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-014"
+  description: "Calculate inventory turnover"
+  input: "Calculate inventory turnover with COGS $500M and average inventory $100M"
+  expected:
+    ratio_name: "Inventory Turnover"
+    value: 5.0
+    value_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+- id: "analysis-015"
+  description: "Division by zero handling"
+  input: "Calculate P/E ratio for a company with EPS of $0"
+  expected:
+    error: true
+    error_type_contains: ["undefined", "division by zero", "N/A"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "ratio_calculation"
+
+# ============================================
+# Technical Analysis (12 test cases)
+# ============================================
+
+- id: "analysis-016"
+  description: "Calculate 50-day moving average"
+  input: "Calculate 50-day simple moving average for AAPL"
+  expected:
+    indicator: "SMA"
+    period: 50
+    has_value: true
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-017"
+  description: "Calculate 200-day moving average"
+  input: "Calculate 200-day moving average for Microsoft"
+  expected:
+    indicator: "SMA"
+    period: 200
+    has_value: true
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-018"
+  description: "Calculate RSI"
+  input: "Calculate 14-day RSI for Tesla stock"
+  expected:
+    indicator: "RSI"
+    period: 14
+    value:
+      check: "numeric_range"
+      min: 0
+      max: 100
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-019"
+  description: "Identify overbought condition"
+  input: "Is NVDA overbought? RSI is 78"
+  expected:
+    condition: "overbought"
+    reasoning_contains: ["RSI", "above 70", "overbought"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-020"
+  description: "Identify oversold condition"
+  input: "Is the stock oversold? RSI is 25"
+  expected:
+    condition: "oversold"
+    reasoning_contains: ["RSI", "below 30", "oversold"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-021"
+  description: "Calculate MACD"
+  input: "Calculate MACD for GOOGL stock"
+  expected:
+    indicator: "MACD"
+    has_macd_line: true
+    has_signal_line: true
+    has_histogram: true
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-022"
+  description: "Identify golden cross"
+  input: "Has AMZN formed a golden cross recently?"
+  expected:
+    pattern: "golden cross"
+    response_contains: ["50-day", "200-day", "bullish"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-023"
+  description: "Identify death cross"
+  input: "Check for death cross pattern in META stock"
+  expected:
+    pattern: "death cross"
+    response_contains: ["50-day", "200-day", "bearish"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-024"
+  description: "Calculate Bollinger Bands"
+  input: "Calculate Bollinger Bands for SPY"
+  expected:
+    indicator: "Bollinger Bands"
+    has_upper_band: true
+    has_middle_band: true
+    has_lower_band: true
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-025"
+  description: "Calculate ATR (volatility)"
+  input: "Calculate 14-day Average True Range for VIX"
+  expected:
+    indicator: "ATR"
+    period: 14
+    has_value: true
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-026"
+  description: "Identify support level"
+  input: "What is the key support level for AAPL?"
+  expected:
+    analysis_type: "support"
+    has_price_level: true
+    reasoning_contains: ["support", "level"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+- id: "analysis-027"
+  description: "Identify resistance level"
+  input: "What is the resistance level for TSLA?"
+  expected:
+    analysis_type: "resistance"
+    has_price_level: true
+    reasoning_contains: ["resistance", "level"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "technical_analysis"
+
+# ============================================
+# Investment Analysis (12 test cases)
+# ============================================
+
+- id: "analysis-028"
+  description: "Generate buy recommendation"
+  input: "Analyze MSFT: P/E 25 (industry avg 30), revenue growth 15%, strong balance sheet"
+  expected:
+    recommendation_contains: ["buy", "positive", "favorable"]
+    reasoning_quality:
+      check: "llm_judge"
+      category: "reasoning"
+      threshold: 0.7
+  evaluation_method: "llm_judge"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-029"
+  description: "Generate sell recommendation"
+  input: "Analyze stock: P/E 80 (industry avg 20), declining revenue, high debt"
+  expected:
+    recommendation_contains: ["sell", "negative", "caution"]
+    reasoning_quality:
+      check: "llm_judge"
+      category: "reasoning"
+      threshold: 0.7
+  evaluation_method: "llm_judge"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-030"
+  description: "Generate hold recommendation"
+  input: "Analyze stock: P/E 22 (industry avg 22), stable revenue, moderate debt"
+  expected:
+    recommendation_contains: ["hold", "neutral", "wait"]
+    reasoning_quality:
+      check: "llm_judge"
+      category: "reasoning"
+      threshold: 0.7
+  evaluation_method: "llm_judge"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-031"
+  description: "Compare two stocks"
+  input: "Compare AAPL vs MSFT for investment"
+  expected:
+    has_aapl_analysis: true
+    has_msft_analysis: true
+    has_comparison: true
+    comparison_factors_contains: ["P/E", "growth", "valuation"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-032"
+  description: "Sector analysis"
+  input: "Analyze the technology sector outlook"
+  expected:
+    sector: "technology"
+    has_outlook: true
+    factors_discussed_contains: ["growth", "valuation", "risk"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-033"
+  description: "Value stock identification"
+  input: "Is Berkshire Hathaway a value stock?"
+  expected:
+    analysis_type: "value"
+    response_contains: ["P/B", "intrinsic value", "margin of safety"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-034"
+  description: "Growth stock identification"
+  input: "Is NVDA a growth stock?"
+  expected:
+    analysis_type: "growth"
+    response_contains: ["revenue growth", "earnings growth", "expansion"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-035"
+  description: "Dividend stock analysis"
+  input: "Analyze Coca-Cola as a dividend investment"
+  expected:
+    analysis_type: "dividend"
+    has_dividend_yield: true
+    has_payout_ratio: true
+    response_contains: ["dividend", "yield", "income"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-036"
+  description: "Risk assessment"
+  input: "Assess investment risk for a biotech startup"
+  expected:
+    risk_level_contains: ["high", "elevated", "significant"]
+    risk_factors_contains: ["volatility", "regulatory", "clinical"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-037"
+  description: "DCF valuation"
+  input: "Perform DCF valuation with FCF $5B, growth 10%, discount rate 8%"
+  expected:
+    valuation_method: "DCF"
+    has_intrinsic_value: true
+    has_assumptions: true
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-038"
+  description: "Comparable company analysis"
+  input: "Value UBER using comparable companies method"
+  expected:
+    valuation_method: "Comparables"
+    has_peer_comparison: true
+    multiples_used_contains: ["P/E", "EV/Revenue", "P/S"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+- id: "analysis-039"
+  description: "Earnings estimate"
+  input: "Estimate next quarter EPS for AAPL"
+  expected:
+    has_eps_estimate: true
+    has_methodology: true
+    confidence_level:
+      check: "not_empty"
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "investment_analysis"
+
+# ============================================
+# Portfolio Analysis (11 test cases)
+# ============================================
+
+- id: "analysis-040"
+  description: "Calculate portfolio return"
+  input: "Calculate return for portfolio: AAPL (40%, +15%), MSFT (30%, +10%), GOOGL (30%, +5%)"
+  expected:
+    return_percent: 10.5
+    return_tolerance: 0.1
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"
+
+- id: "analysis-041"
+  description: "Calculate portfolio beta"
+  input: "Calculate portfolio beta: AAPL (50%, beta 1.2), MSFT (50%, beta 0.9)"
+  expected:
+    beta: 1.05
+    beta_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"
+
+- id: "analysis-042"
+  description: "Calculate Sharpe ratio"
+  input: "Calculate Sharpe ratio with portfolio return 12%, risk-free rate 4%, std dev 15%"
+  expected:
+    sharpe_ratio: 0.533
+    sharpe_tolerance: 0.01
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"
+
+- id: "analysis-043"
+  description: "Analyze portfolio diversification"
+  input: "Analyze diversification of portfolio: 80% tech stocks, 20% bonds"
+  expected:
+    diversification_level_contains: ["low", "concentrated", "sector-heavy"]
+    recommendation_contains: ["diversify", "reduce exposure"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"
+
+- id: "analysis-044"
+  description: "Calculate portfolio volatility"
+  input: "Calculate volatility for a 60/40 stock/bond portfolio"
+  expected:
+    has_volatility: true
+    volatility_type: "standard deviation"
+    has_historical_range: true
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"
+
+- id: "analysis-045"
+  description: "Rebalancing recommendation"
+  input: "Portfolio drifted from 60/40 to 70/30 stocks/bonds. Should I rebalance?"
+  expected:
+    recommendation: "rebalance"
+    reasoning_contains: ["drift", "risk", "target allocation"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"
+
+- id: "analysis-046"
+  description: "Tax-loss harvesting opportunity"
+  input: "Identify tax-loss harvesting opportunities in portfolio with -20% TSLA position"
+  expected:
+    has_opportunity: true
+    response_contains: ["loss", "harvest", "wash sale"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"
+
+- id: "analysis-047"
+  description: "Asset allocation recommendation"
+  input: "Recommend asset allocation for moderate risk investor, 20 years to retirement"
+  expected:
+    has_stocks_allocation: true
+    has_bonds_allocation: true
+    risk_profile: "moderate"
+    stocks_range:
+      check: "numeric_range"
+      min: 50
+      max: 80
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"
+
+- id: "analysis-048"
+  description: "Calculate maximum drawdown"
+  input: "Calculate maximum drawdown for portfolio that went from $100K to $75K to $90K"
+  expected:
+    max_drawdown: 25
+    max_drawdown_tolerance: 0.1
+    unit: "percent"
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"
+
+- id: "analysis-049"
+  description: "Correlation analysis"
+  input: "Analyze correlation between AAPL and SPY in portfolio"
+  expected:
+    has_correlation: true
+    correlation:
+      check: "numeric_range"
+      min: -1
+      max: 1
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"
+
+- id: "analysis-050"
+  description: "Risk-adjusted return comparison"
+  input: "Compare risk-adjusted returns of two portfolios: A (12% return, 20% vol) vs B (10% return, 12% vol)"
+  expected:
+    better_portfolio: "B"
+    reasoning_contains: ["Sharpe", "risk-adjusted", "volatility"]
+  evaluation_method: "deterministic"
+  agent_type: "analysis"
+  category: "portfolio_analysis"

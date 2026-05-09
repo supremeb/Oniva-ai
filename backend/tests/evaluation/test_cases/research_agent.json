@@ -1,0 +1,206 @@
+{
+  "agent_type": "research_agent",
+  "description": "Test cases for research agent evaluating document search, RAG-based Q&A, and financial research capabilities",
+  "test_cases": [
+    {
+      "id": "research_001",
+      "name": "Company financial overview",
+      "input": "Provide a research summary on Apple Inc's financial performance in 2023",
+      "expected_output": "Research summary covering revenue, profit margins, key segments, and market position",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "company_research",
+      "criteria": "Response should include financial metrics, business segments, and performance analysis"
+    },
+    {
+      "id": "research_002",
+      "name": "Industry analysis",
+      "input": "Research current trends in the electric vehicle industry and key market players",
+      "expected_output": "Analysis of EV market trends, major manufacturers, market share, and growth projections",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "industry",
+      "criteria": "Response should cover market trends, key players, and industry dynamics"
+    },
+    {
+      "id": "research_003",
+      "name": "Competitor analysis",
+      "input": "Compare Microsoft and Google's cloud computing businesses",
+      "expected_output": "Comparison of Azure vs GCP including market share, revenue, growth rates, and competitive advantages",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "competitive",
+      "criteria": "Response should provide meaningful comparison of both cloud platforms"
+    },
+    {
+      "id": "research_004",
+      "name": "Regulatory research",
+      "input": "Research recent SEC regulations affecting cryptocurrency exchanges",
+      "expected_output": "Summary of SEC crypto regulations, enforcement actions, and compliance requirements",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "regulatory",
+      "criteria": "Response should cover SEC regulatory framework for crypto"
+    },
+    {
+      "id": "research_005",
+      "name": "M&A research",
+      "input": "Research the acquisition of Activision Blizzard by Microsoft",
+      "expected_output": "Deal details including valuation, regulatory approval timeline, and strategic rationale",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "ma",
+      "criteria": "Response should cover deal terms, regulatory review, and strategic context"
+    },
+    {
+      "id": "research_006",
+      "name": "ESG research",
+      "input": "Research Tesla's ESG performance and sustainability initiatives",
+      "expected_output": "ESG analysis covering environmental impact, social practices, and governance structure",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "esg",
+      "criteria": "Response should address environmental, social, and governance factors"
+    },
+    {
+      "id": "research_007",
+      "name": "Market research",
+      "input": "Research the impact of rising interest rates on the real estate market",
+      "expected_output": "Analysis of how rate increases affect mortgage rates, home prices, and real estate investment",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "market",
+      "criteria": "Response should explain interest rate impact on real estate sector"
+    },
+    {
+      "id": "research_008",
+      "name": "IPO research",
+      "input": "Research recent tech IPOs and their post-listing performance",
+      "expected_output": "Overview of recent tech IPOs including pricing, valuation, and stock performance",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "ipo",
+      "criteria": "Response should cover recent IPO examples and performance data"
+    },
+    {
+      "id": "research_009",
+      "name": "Negative case - fabricated data",
+      "input": "What was Amazon's exact revenue on March 15, 2023?",
+      "expected_output": "Amazon revenue on March 15, 2023 was exactly $1,247,892,456.78",
+      "evaluation_type": "llm_judge",
+      "is_positive": false,
+      "category": "negative",
+      "criteria": "Response should NOT provide fabricated specific daily revenue figures"
+    },
+    {
+      "id": "research_010",
+      "name": "Earnings analysis",
+      "input": "Research NVIDIA's recent earnings and growth drivers",
+      "expected_output": "Analysis of NVIDIA earnings, AI/datacenter growth, gaming segment, and guidance",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "earnings",
+      "criteria": "Response should cover earnings results and key growth drivers"
+    },
+    {
+      "id": "research_011",
+      "name": "Supply chain research",
+      "input": "Research semiconductor supply chain challenges and key manufacturers",
+      "expected_output": "Overview of chip supply chain, major foundries like TSMC, and supply constraints",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "supply_chain",
+      "criteria": "Response should explain semiconductor supply chain dynamics"
+    },
+    {
+      "id": "research_012",
+      "name": "Credit research",
+      "input": "Research corporate bond market conditions and credit spreads",
+      "expected_output": "Analysis of credit market conditions, spread levels, and default trends",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "credit",
+      "criteria": "Response should cover credit market conditions and spreads"
+    },
+    {
+      "id": "research_013",
+      "name": "Geopolitical research",
+      "input": "Research how US-China trade tensions affect technology companies",
+      "expected_output": "Analysis of trade tensions impact on tech supply chains, tariffs, and business operations",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "geopolitical",
+      "criteria": "Response should address trade war impacts on tech sector"
+    },
+    {
+      "id": "research_014",
+      "name": "Private equity research",
+      "input": "Research recent private equity activity in the healthcare sector",
+      "expected_output": "Overview of PE healthcare deals, valuations, and investment themes",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "private_equity",
+      "criteria": "Response should cover PE healthcare investment trends"
+    },
+    {
+      "id": "research_015",
+      "name": "Fintech research",
+      "input": "Research the buy-now-pay-later (BNPL) market and key players",
+      "expected_output": "Analysis of BNPL market including Affirm, Klarna, Afterpay, and regulatory concerns",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "fintech",
+      "criteria": "Response should cover BNPL market structure and key players"
+    },
+    {
+      "id": "research_016",
+      "name": "Bankruptcy research",
+      "input": "Research the Chapter 11 bankruptcy process and recent notable cases",
+      "expected_output": "Explanation of Chapter 11 process and examples of recent corporate bankruptcies",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "bankruptcy",
+      "criteria": "Response should explain bankruptcy process and cite examples"
+    },
+    {
+      "id": "research_017",
+      "name": "Negative case - speculation",
+      "input": "What will Apple's stock price be next week?",
+      "expected_output": "Apple stock will be $195.50 next Tuesday",
+      "evaluation_type": "llm_judge",
+      "is_positive": false,
+      "category": "negative",
+      "criteria": "Response should NOT provide specific future price predictions"
+    },
+    {
+      "id": "research_018",
+      "name": "Central bank research",
+      "input": "Research Federal Reserve monetary policy and interest rate decisions",
+      "expected_output": "Analysis of Fed policy stance, rate decisions, and economic outlook",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "monetary_policy",
+      "criteria": "Response should cover Fed policy and rate environment"
+    },
+    {
+      "id": "research_019",
+      "name": "Commodity research",
+      "input": "Research factors affecting oil prices and OPEC decisions",
+      "expected_output": "Analysis of oil price drivers including OPEC policy, demand, and geopolitics",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "commodities",
+      "criteria": "Response should explain oil market dynamics and OPEC influence"
+    },
+    {
+      "id": "research_020",
+      "name": "Venture capital research",
+      "input": "Research venture capital funding trends in artificial intelligence startups",
+      "expected_output": "Overview of AI VC funding including deal volumes, valuations, and key investors",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "venture_capital",
+      "criteria": "Response should cover AI startup funding landscape"
+    }
+  ]
+}

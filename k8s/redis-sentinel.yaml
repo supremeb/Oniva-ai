@@ -1,0 +1,499 @@
+# Redis Sentinel StatefulSet - Phase 2 (P2.2)
+#
+# This configuration deploys a 3-node Redis Sentinel cluster for high availability.
+# Features:
+# - 3 Redis replicas (1 master, 2 replicas)
+# - 3 Sentinel processes for quorum-based failover
+# - Automatic failover in <30 seconds
+# - Persistent storage for each replica
+#
+# Usage:
+#   kubectl apply -f redis-sentinel.yaml
+#
+# Connection:
+#   REDIS_SENTINEL_ENABLED=true
+#   REDIS_SENTINEL_HOSTS=redis-sentinel-0.redis-sentinel:26379,redis-sentinel-1.redis-sentinel:26379,redis-sentinel-2.redis-sentinel:26379
+#   REDIS_SENTINEL_MASTER_NAME=mymaster
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: oniva
+  labels:
+    app: redis
+    component: config
+data:
+  redis.conf: |
+    # Redis configuration for Sentinel-managed nodes
+    bind 0.0.0.0
+    port 6379
+
+    # Persistence
+    appendonly yes
+    appendfsync everysec
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+
+    # Memory management
+    maxmemory 512mb
+    maxmemory-policy allkeys-lru
+
+    # Replication
+    min-replicas-to-write 1
+    min-replicas-max-lag 10
+
+    # Security (password configured via secret)
+    # requirepass and masterauth set via sentinel
+
+    # Performance
+    tcp-keepalive 300
+    timeout 0
+    tcp-backlog 511
+
+  sentinel.conf: |
+    # Sentinel configuration
+    port 26379
+    bind 0.0.0.0
+
+    # Monitor master - initial configuration
+    # Will be updated by sentinel when failover occurs
+    sentinel monitor mymaster redis-0.redis 6379 2
+
+    # Failover settings
+    sentinel down-after-milliseconds mymaster 5000
+    sentinel parallel-syncs mymaster 1
+    sentinel failover-timeout mymaster 30000
+
+    # Notification
+    sentinel deny-scripts-reconfig yes
+
+  init-sentinel.sh: |
+    #!/bin/sh
+    set -e
+
+    HOSTNAME=$(hostname)
+    REDIS_MASTER="redis-0.redis.oniva.svc.cluster.local"
+
+    # Copy sentinel config
+    cp /redis-config/sentinel.conf /data/sentinel.conf
+
+    # Wait for Redis master to be ready
+    echo "Waiting for Redis master at $REDIS_MASTER..."
+    until redis-cli -h $REDIS_MASTER ping; do
+      echo "Redis master not ready, waiting..."
+      sleep 2
+    done
+    echo "Redis master is ready"
+
+    # Update sentinel config with resolved master address
+    sed -i "s/redis-0.redis/$REDIS_MASTER/g" /data/sentinel.conf
+
+    # Set password if configured
+    if [ -n "$REDIS_PASSWORD" ]; then
+      echo "sentinel auth-pass mymaster $REDIS_PASSWORD" >> /data/sentinel.conf
+    fi
+
+    echo "Starting Redis Sentinel..."
+    exec redis-sentinel /data/sentinel.conf
+
+  init-redis.sh: |
+    #!/bin/sh
+    set -e
+
+    HOSTNAME=$(hostname)
+    INDEX="${HOSTNAME##*-}"
+    REDIS_MASTER="redis-0.redis.oniva.svc.cluster.local"
+
+    # Copy redis config
+    cp /redis-config/redis.conf /data/redis.conf
+
+    # Set password if configured
+    if [ -n "$REDIS_PASSWORD" ]; then
+      echo "requirepass $REDIS_PASSWORD" >> /data/redis.conf
+      echo "masterauth $REDIS_PASSWORD" >> /data/redis.conf
+    fi
+
+    # Configure as replica if not master
+    if [ "$INDEX" != "0" ]; then
+      echo "Configuring as replica of $REDIS_MASTER"
+      echo "replicaof $REDIS_MASTER 6379" >> /data/redis.conf
+    else
+      echo "Configuring as master"
+    fi
+
+    echo "Starting Redis server..."
+    exec redis-server /data/redis.conf
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-password
+  namespace: oniva
+  labels:
+    app: redis
+type: Opaque
+data:
+  # Base64 encoded password - CHANGE THIS IN PRODUCTION!
+  # echo -n "your-secure-password" | base64
+  password: Y2hhbmdlLW1lLWluLXByb2R1Y3Rpb24=
+
+---
+# Headless service for Redis StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: oniva
+  labels:
+    app: redis
+spec:
+  clusterIP: None
+  ports:
+    - port: 6379
+      name: redis
+  selector:
+    app: redis
+    component: server
+
+---
+# Service for Redis master (used by app)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-master
+  namespace: oniva
+  labels:
+    app: redis
+    component: master
+spec:
+  ports:
+    - port: 6379
+      name: redis
+  selector:
+    app: redis
+    component: server
+    role: master
+
+---
+# Headless service for Sentinel StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-sentinel
+  namespace: oniva
+  labels:
+    app: redis
+    component: sentinel
+spec:
+  clusterIP: None
+  ports:
+    - port: 26379
+      name: sentinel
+  selector:
+    app: redis
+    component: sentinel
+
+---
+# Redis Server StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: oniva
+  labels:
+    app: redis
+    component: server
+spec:
+  serviceName: redis
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis
+      component: server
+  template:
+    metadata:
+      labels:
+        app: redis
+        component: server
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+
+      initContainers:
+        - name: init-config
+          image: redis:7-alpine
+          command: ["/bin/sh", "/redis-config/init-redis.sh"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-password
+                  key: password
+          volumeMounts:
+            - name: config
+              mountPath: /redis-config
+            - name: data
+              mountPath: /data
+
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "/data/redis.conf"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+        # Redis exporter sidecar for Prometheus metrics
+        - name: exporter
+          image: oliver006/redis_exporter:v1.55.0
+          ports:
+            - containerPort: 9121
+              name: metrics
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-password
+                  key: password
+            - name: REDIS_ADDR
+              value: "redis://localhost:6379"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config
+            defaultMode: 0755
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 5Gi
+
+---
+# Redis Sentinel StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-sentinel
+  namespace: oniva
+  labels:
+    app: redis
+    component: sentinel
+spec:
+  serviceName: redis-sentinel
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis
+      component: sentinel
+  template:
+    metadata:
+      labels:
+        app: redis
+        component: sentinel
+    spec:
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+
+      containers:
+        - name: sentinel
+          image: redis:7-alpine
+          command: ["/bin/sh", "/redis-config/init-sentinel.sh"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-password
+                  key: password
+          ports:
+            - containerPort: 26379
+              name: sentinel
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /redis-config
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "-p", "26379", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "-p", "26379", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config
+            defaultMode: 0755
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 1Gi
+
+---
+# PodDisruptionBudget for Redis servers
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: oniva
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: redis
+      component: server
+
+---
+# PodDisruptionBudget for Sentinels
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-sentinel-pdb
+  namespace: oniva
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: redis
+      component: sentinel
+
+---
+# PrometheusRule for Redis alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: redis-alerts
+  namespace: oniva
+  labels:
+    app: redis
+    prometheus: kube-prometheus
+spec:
+  groups:
+    - name: redis.rules
+      rules:
+        - alert: RedisDown
+          expr: redis_up == 0
+          for: 30s
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis instance is down"
+            description: "Redis instance {{ $labels.instance }} has been down for more than 30 seconds."
+
+        - alert: RedisMemoryHigh
+          expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis memory usage is high"
+            description: "Redis instance {{ $labels.instance }} memory usage is above 85%."
+
+        - alert: RedisTooManyConnections
+          expr: redis_connected_clients > 100
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis has too many connections"
+            description: "Redis instance {{ $labels.instance }} has {{ $value }} connections."
+
+        - alert: RedisReplicationBroken
+          expr: redis_connected_slaves < 2
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis replication is broken"
+            description: "Redis master has only {{ $value }} connected slaves, expected 2."
+
+        - alert: SentinelDown
+          expr: up{job="redis-sentinel"} == 0
+          for: 30s
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis Sentinel is down"
+            description: "Sentinel instance {{ $labels.instance }} has been down for more than 30 seconds."
+
+---
+# ServiceMonitor for Prometheus scraping
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis
+  namespace: oniva
+  labels:
+    app: redis
+spec:
+  selector:
+    matchLabels:
+      app: redis
+      component: server
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics

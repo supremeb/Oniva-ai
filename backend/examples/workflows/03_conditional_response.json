@@ -1,0 +1,151 @@
+{
+    "name": "Conditional Response",
+    "description": "Route queries based on sentiment classification",
+    "nodes": [
+        {
+            "id": "start-1",
+            "type": "start",
+            "data": {
+                "label": "Start",
+                "variables": [
+                    {
+                        "name": "message",
+                        "type": "string"
+                    }
+                ]
+            },
+            "position": {
+                "x": 100,
+                "y": 200
+            }
+        },
+        {
+            "id": "classifier-1",
+            "type": "classifier",
+            "data": {
+                "label": "Classify Intent",
+                "model": "gpt-4o-mini",
+                "inputText": "{{sys.query}}",
+                "classes": [
+                    {
+                        "id": "question",
+                        "name": "Question",
+                        "description": "User is asking a question"
+                    },
+                    {
+                        "id": "complaint",
+                        "name": "Complaint",
+                        "description": "User is complaining about something"
+                    },
+                    {
+                        "id": "request",
+                        "name": "Request",
+                        "description": "User is requesting help or action"
+                    }
+                ],
+                "instructions": "Classify the user's intent based on their message."
+            },
+            "position": {
+                "x": 350,
+                "y": 200
+            }
+        },
+        {
+            "id": "ifelse-1",
+            "type": "ifelse",
+            "data": {
+                "label": "Check Complaint",
+                "conditions": [
+                    {
+                        "id": "c1",
+                        "variable": "classifier-1.class_id",
+                        "operator": "equals",
+                        "value": "complaint"
+                    }
+                ],
+                "logicalOperator": "and"
+            },
+            "position": {
+                "x": 600,
+                "y": 200
+            }
+        },
+        {
+            "id": "llm-empathy",
+            "type": "llm",
+            "data": {
+                "label": "Empathetic Response",
+                "model": "gpt-4o-mini",
+                "systemPrompt": "You are a customer support agent. Be empathetic and apologetic when addressing complaints.",
+                "userPrompt": "Respond to this complaint with empathy:\n\n{{sys.query}}",
+                "temperature": 0.7,
+                "maxTokens": 500
+            },
+            "position": {
+                "x": 850,
+                "y": 100
+            }
+        },
+        {
+            "id": "llm-helpful",
+            "type": "llm",
+            "data": {
+                "label": "Helpful Response",
+                "model": "gpt-4o-mini",
+                "systemPrompt": "You are a helpful assistant. Provide clear and actionable responses.",
+                "userPrompt": "Help with this {{classifier-1.class_name}}:\n\n{{sys.query}}",
+                "temperature": 0.7,
+                "maxTokens": 500
+            },
+            "position": {
+                "x": 850,
+                "y": 300
+            }
+        },
+        {
+            "id": "output-1",
+            "type": "output",
+            "data": {
+                "label": "Output"
+            },
+            "position": {
+                "x": 1100,
+                "y": 200
+            }
+        }
+    ],
+    "edges": [
+        {
+            "id": "e1",
+            "source": "start-1",
+            "target": "classifier-1"
+        },
+        {
+            "id": "e2",
+            "source": "classifier-1",
+            "target": "ifelse-1"
+        },
+        {
+            "id": "e3",
+            "source": "ifelse-1",
+            "target": "llm-empathy",
+            "sourceHandle": "true"
+        },
+        {
+            "id": "e4",
+            "source": "ifelse-1",
+            "target": "llm-helpful",
+            "sourceHandle": "false"
+        },
+        {
+            "id": "e5",
+            "source": "llm-empathy",
+            "target": "output-1"
+        },
+        {
+            "id": "e6",
+            "source": "llm-helpful",
+            "target": "output-1"
+        }
+    ]
+}

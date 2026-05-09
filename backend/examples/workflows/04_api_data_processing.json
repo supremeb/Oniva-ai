@@ -1,0 +1,119 @@
+{
+    "name": "API Data Processing",
+    "description": "Fetch data from API, process with code, analyze with LLM",
+    "nodes": [
+        {
+            "id": "start-1",
+            "type": "start",
+            "data": {
+                "label": "Start",
+                "variables": [
+                    {
+                        "name": "stock_symbol",
+                        "type": "string"
+                    }
+                ]
+            },
+            "position": {
+                "x": 100,
+                "y": 200
+            }
+        },
+        {
+            "id": "http-1",
+            "type": "http",
+            "data": {
+                "label": "Fetch Stock Data",
+                "method": "GET",
+                "url": "https://api.example.com/stocks/{{sys.query}}",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "timeout": 30
+            },
+            "position": {
+                "x": 350,
+                "y": 200
+            }
+        },
+        {
+            "id": "code-1",
+            "type": "code",
+            "data": {
+                "label": "Process Data",
+                "language": "python3",
+                "code": "import json\n\n# Get API response\napi_data = http_1.get('body', {})\n\n# Calculate metrics\nprices = api_data.get('prices', [100, 102, 98, 105, 110])\navg_price = sum(prices) / len(prices) if prices else 0\nmax_price = max(prices) if prices else 0\nmin_price = min(prices) if prices else 0\nvolatility = max_price - min_price\n\nresult = {\n    'average': round(avg_price, 2),\n    'high': max_price,\n    'low': min_price,\n    'volatility': round(volatility, 2),\n    'data_points': len(prices)\n}"
+            },
+            "position": {
+                "x": 600,
+                "y": 200
+            }
+        },
+        {
+            "id": "template-1",
+            "type": "template",
+            "data": {
+                "label": "Format Report",
+                "template": "## Stock Analysis\n\n**Symbol:** {{sys.query}}\n\n**Metrics:**\n- Average Price: ${{code-1.result.average}}\n- High: ${{code-1.result.high}}\n- Low: ${{code-1.result.low}}\n- Volatility: ${{code-1.result.volatility}}"
+            },
+            "position": {
+                "x": 850,
+                "y": 200
+            }
+        },
+        {
+            "id": "llm-1",
+            "type": "llm",
+            "data": {
+                "label": "Generate Insights",
+                "model": "gpt-4o-mini",
+                "systemPrompt": "You are a financial analyst. Provide brief insights based on stock data.",
+                "userPrompt": "Analyze this data and provide 3 key insights:\n\n{{template-1.text}}",
+                "temperature": 0.7,
+                "maxTokens": 500
+            },
+            "position": {
+                "x": 1100,
+                "y": 200
+            }
+        },
+        {
+            "id": "output-1",
+            "type": "output",
+            "data": {
+                "label": "Final Report"
+            },
+            "position": {
+                "x": 1350,
+                "y": 200
+            }
+        }
+    ],
+    "edges": [
+        {
+            "id": "e1",
+            "source": "start-1",
+            "target": "http-1"
+        },
+        {
+            "id": "e2",
+            "source": "http-1",
+            "target": "code-1"
+        },
+        {
+            "id": "e3",
+            "source": "code-1",
+            "target": "template-1"
+        },
+        {
+            "id": "e4",
+            "source": "template-1",
+            "target": "llm-1"
+        },
+        {
+            "id": "e5",
+            "source": "llm-1",
+            "target": "output-1"
+        }
+    ]
+}

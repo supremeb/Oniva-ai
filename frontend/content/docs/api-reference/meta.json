@@ -1,0 +1,4 @@
+{
+  "title": "API Reference",
+  "pages": ["authentication", "agents", "workflows", "skills", "connectors"]
+}

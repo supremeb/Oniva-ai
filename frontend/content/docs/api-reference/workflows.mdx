@@ -1,0 +1,381 @@
+---
+title: Workflows API
+description: API endpoints for managing and executing workflows.
+---
+
+API endpoints for managing and executing workflows.
+
+## Overview
+
+The Workflows API allows you to:
+- Create and manage workflows
+- Execute workflows programmatically
+- Monitor execution status
+- Retrieve execution history
+
+**Base URL:** `/api/v1/workflows`
+
+---
+
+## List Workflows
+
+Get all workflows in your account.
+
+```bash
+GET /api/v1/workflows
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `page` | number | Page number (default: 1) |
+| `limit` | number | Results per page (default: 20) |
+| `status` | string | Filter by status: active, draft, archived |
+
+**Response:**
+
+```json
+{
+  "workflows": [
+    {
+      "id": "wf_abc123",
+      "name": "KYC Verification",
+      "description": "Automated customer verification",
+      "status": "active",
+      "node_count": 8,
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-20T14:45:00Z"
+    }
+  ],
+  "total": 15,
+  "page": 1,
+  "pages": 1
+}
+```
+
+---
+
+## Get Workflow
+
+Get details of a specific workflow.
+
+```bash
+GET /api/v1/workflows/{workflow_id}
+```
+
+**Response:**
+
+```json
+{
+  "id": "wf_abc123",
+  "name": "KYC Verification",
+  "description": "Automated customer verification",
+  "status": "active",
+  "nodes": [
+    {
+      "id": "start_1",
+      "type": "start",
+      "position": { "x": 100, "y": 100 },
+      "data": {
+        "inputs": [
+          { "name": "customer_id", "type": "string" }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_1",
+      "source": "start_1",
+      "target": "agent_1"
+    }
+  ],
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+---
+
+## Create Workflow
+
+Create a new workflow.
+
+```bash
+POST /api/v1/workflows
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "name": "Data Analysis Pipeline",
+  "description": "Fetches and analyzes market data",
+  "nodes": [
+    {
+      "id": "start_1",
+      "type": "start",
+      "position": { "x": 100, "y": 100 },
+      "data": {
+        "inputs": [
+          { "name": "ticker", "type": "string" }
+        ]
+      }
+    },
+    {
+      "id": "agent_1",
+      "type": "agent",
+      "position": { "x": 100, "y": 250 },
+      "data": {
+        "agent_id": "analysis",
+        "instructions": "Analyze {{input.ticker}}"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_1",
+      "source": "start_1",
+      "target": "agent_1"
+    }
+  ]
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "wf_xyz789",
+  "name": "Data Analysis Pipeline",
+  "status": "draft",
+  "created_at": "2024-01-25T09:00:00Z"
+}
+```
+
+---
+
+## Execute Workflow
+
+Execute a workflow with input data.
+
+```bash
+POST /api/v1/workflows/{workflow_id}/execute
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "inputs": {
+    "ticker": "AAPL",
+    "analysis_type": "comprehensive"
+  },
+  "async": false
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `inputs` | object | Input values for the workflow |
+| `async` | boolean | Run asynchronously (default: false) |
+
+**Response (Synchronous):**
+
+```json
+{
+  "execution_id": "exec_abc123",
+  "status": "completed",
+  "result": {
+    "analysis": "Based on the financial data...",
+    "metrics": {
+      "pe_ratio": 28.5,
+      "market_cap": "2.8T"
+    }
+  },
+  "duration_ms": 4523,
+  "tokens_used": 1245
+}
+```
+
+**Response (Asynchronous):**
+
+```json
+{
+  "execution_id": "exec_abc123",
+  "status": "running",
+  "message": "Workflow execution started"
+}
+```
+
+---
+
+## Durable Execution
+
+Execute with DBOS checkpointing for crash recovery.
+
+```bash
+POST /api/v1/workflows/{workflow_id}/execute-durable
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "inputs": {
+    "customer_id": "cust_123"
+  }
+}
+```
+
+<Callout type="info">
+Durable execution automatically checkpoints after each node, enabling recovery from any failure.
+</Callout>
+
+---
+
+## Get Execution Status
+
+Check the status of a workflow execution.
+
+```bash
+GET /api/v1/workflows/executions/{execution_id}
+```
+
+**Response:**
+
+```json
+{
+  "execution_id": "exec_abc123",
+  "workflow_id": "wf_abc123",
+  "status": "completed",
+  "current_node": null,
+  "node_results": {
+    "start_1": { "status": "completed" },
+    "agent_1": { "status": "completed", "output": "..." }
+  },
+  "started_at": "2024-01-25T10:00:00Z",
+  "completed_at": "2024-01-25T10:00:45Z"
+}
+```
+
+**Status Values:**
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Queued for execution |
+| `running` | Currently executing |
+| `completed` | Successfully finished |
+| `failed` | Execution failed |
+| `cancelled` | Manually cancelled |
+| `awaiting_approval` | Waiting for human review |
+
+---
+
+## Recover Workflow
+
+Resume a failed durable workflow from its last checkpoint.
+
+```bash
+POST /api/v1/workflows/{workflow_id}/recover
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "execution_id": "exec_abc123"
+}
+```
+
+---
+
+## List Checkpoints
+
+Get checkpoints for a workflow execution.
+
+```bash
+GET /api/v1/workflows/{workflow_id}/checkpoints?execution_id=exec_abc123
+```
+
+**Response:**
+
+```json
+{
+  "checkpoints": [
+    {
+      "id": "cp_1",
+      "node_id": "start_1",
+      "state": { "inputs": { "ticker": "AAPL" } },
+      "created_at": "2024-01-25T10:00:00Z"
+    },
+    {
+      "id": "cp_2",
+      "node_id": "agent_1",
+      "state": { "output": "..." },
+      "created_at": "2024-01-25T10:00:30Z"
+    }
+  ]
+}
+```
+
+---
+
+## Replay Execution
+
+Replay a workflow execution for audit purposes.
+
+```bash
+GET /api/v1/workflows/{workflow_id}/replay?execution_id=exec_abc123
+```
+
+**Response:**
+
+```json
+{
+  "execution_id": "exec_abc123",
+  "steps": [
+    {
+      "node_id": "start_1",
+      "action": "process_input",
+      "input": { "ticker": "AAPL" },
+      "output": { "ticker": "AAPL" },
+      "timestamp": "2024-01-25T10:00:00Z"
+    },
+    {
+      "node_id": "agent_1",
+      "action": "agent_response",
+      "input": { "message": "Analyze AAPL" },
+      "output": { "analysis": "..." },
+      "timestamp": "2024-01-25T10:00:30Z"
+    }
+  ]
+}
+```
+
+---
+
+## Delete Workflow
+
+```bash
+DELETE /api/v1/workflows/{workflow_id}
+```
+
+---
+
+## Next Steps
+
+<Cards>
+  <Card title="Skills API" href="/docs/api-reference/skills">
+    Explore available skills
+  </Card>
+  <Card title="Connectors API" href="/docs/api-reference/connectors">
+    Configure external integrations
+  </Card>
+</Cards>

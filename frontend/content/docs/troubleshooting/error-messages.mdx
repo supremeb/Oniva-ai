@@ -1,0 +1,245 @@
+---
+title: Error Messages
+description: Reference guide for error messages in Oniva and how to resolve them.
+---
+
+Reference guide for error messages in Oniva and how to resolve them.
+
+## Authentication Errors
+
+<Accordions>
+  <Accordion title="Invalid API key">
+    **Cause**: The API key is incorrect or expired.
+
+    **Solution**:
+    1. Go to Settings → API Keys
+    2. Verify the key is copied correctly
+    3. Check with your provider that the key is active
+    4. Generate a new key if needed
+  </Accordion>
+  <Accordion title="Unauthorized">
+    **Cause**: Missing or invalid authentication.
+
+    **Solution**:
+    1. Refresh the page and log in again
+    2. Check if your session has expired
+    3. Verify API key configuration
+  </Accordion>
+  <Accordion title="Rate limit exceeded">
+    **Cause**: Too many requests to the LLM provider.
+
+    **Solution**:
+    1. Wait a few minutes and try again
+    2. Reduce the frequency of requests
+    3. Consider upgrading your API plan
+  </Accordion>
+</Accordions>
+
+---
+
+## Workflow Errors
+
+<Accordions>
+  <Accordion title="Workflow validation failed">
+    **Cause**: Workflow has structural issues.
+
+    **Solution**:
+    1. Ensure there's exactly one Start node
+    2. Verify all nodes are connected
+    3. Check that required fields are filled
+    4. Look for circular connections
+  </Accordion>
+  <Accordion title="Node execution failed">
+    **Cause**: A specific node encountered an error.
+
+    **Solution**:
+    1. Click on the failed node to see details
+    2. Check input data format
+    3. Verify external service availability
+    4. Review node configuration
+  </Accordion>
+  <Accordion title="Input type mismatch">
+    **Cause**: Data passed to a node doesn't match expected type.
+
+    **Solution**:
+    1. Check the output type of the previous node
+    2. Add a Code node to transform data
+    3. Verify variable names are correct
+  </Accordion>
+  <Accordion title="Maximum iterations exceeded">
+    **Cause**: Loop ran too many times.
+
+    **Solution**:
+    1. Check your data for infinite loops
+    2. Add exit conditions
+    3. Limit the array size
+    4. Increase the max iterations setting if appropriate
+  </Accordion>
+</Accordions>
+
+---
+
+## Connector Errors
+
+<Accordions>
+  <Accordion title="Connection failed">
+    **Cause**: Cannot connect to external service.
+
+    **Solution**:
+    1. Verify the service is online
+    2. Check your credentials
+    3. Verify network/firewall settings
+    4. Test the connection in Settings
+  </Accordion>
+  <Accordion title="Action not permitted">
+    **Cause**: Your credentials don't have required permissions.
+
+    **Solution**:
+    1. Check the permission scopes for your API key/token
+    2. Request additional permissions from your admin
+    3. Use a different account with more access
+  </Accordion>
+  <Accordion title="Resource not found">
+    **Cause**: The requested item doesn't exist in the external system.
+
+    **Solution**:
+    1. Verify the ID/name is correct
+    2. Check if the resource was deleted
+    3. Verify you have access to the resource
+  </Accordion>
+</Accordions>
+
+---
+
+## Agent Errors
+
+<Accordions>
+  <Accordion title="Context length exceeded">
+    **Cause**: Conversation is too long for the model's context window.
+
+    **Solution**:
+    1. Start a new conversation
+    2. Be more concise in your messages
+    3. Use a model with a larger context window
+  </Accordion>
+  <Accordion title="Model not available">
+    **Cause**: The selected model is unavailable.
+
+    **Solution**:
+    1. Check if the model is enabled for your API key
+    2. Select a different model
+    3. Verify your provider subscription
+  </Accordion>
+  <Accordion title="Tool execution failed">
+    **Cause**: A skill failed to execute.
+
+    **Solution**:
+    1. Check the skill's input parameters
+    2. Verify external dependencies are available
+    3. Check the execution logs for details
+  </Accordion>
+</Accordions>
+
+---
+
+## Data Errors
+
+<Accordions>
+  <Accordion title="Invalid JSON">
+    **Cause**: Data is not valid JSON format.
+
+    **Solution**:
+    1. Validate your JSON using a JSON validator
+    2. Check for missing quotes, commas, or brackets
+    3. Ensure strings are properly escaped
+  </Accordion>
+  <Accordion title="Required field missing">
+    **Cause**: A mandatory field is not provided.
+
+    **Solution**:
+    1. Check the node configuration for required fields
+    2. Verify data mapping from previous nodes
+    3. Add default values where appropriate
+  </Accordion>
+  <Accordion title="Type conversion failed">
+    **Cause**: Cannot convert data to required type.
+
+    **Solution**:
+    1. Check the source data type
+    2. Add explicit type conversion in a Code node
+    3. Verify number formats (decimals, thousands separators)
+  </Accordion>
+</Accordions>
+
+---
+
+## System Errors
+
+<Accordions>
+  <Accordion title="Internal server error">
+    **Cause**: Unexpected error on the backend.
+
+    **Solution**:
+    1. Wait a moment and retry
+    2. Refresh the page
+    3. Check if the backend is running
+    4. Report the issue if it persists
+  </Accordion>
+  <Accordion title="Service unavailable">
+    **Cause**: Backend service is down or overloaded.
+
+    **Solution**:
+    1. Check service status
+    2. Wait and retry
+    3. Contact your administrator
+  </Accordion>
+  <Accordion title="Timeout">
+    **Cause**: Operation took too long.
+
+    **Solution**:
+    1. Simplify the operation
+    2. Break into smaller steps
+    3. Use faster models
+    4. Check external service response times
+  </Accordion>
+</Accordions>
+
+---
+
+## Error Codes Reference
+
+| Code | Meaning | Description |
+|------|---------|-------------|
+| 400 | Bad Request | Invalid input data |
+| 401 | Unauthorized | Invalid credentials |
+| 403 | Forbidden | Insufficient permissions |
+| 404 | Not Found | Resource doesn't exist |
+| 429 | Too Many Requests | Rate limited |
+| 500 | Internal Error | Server problem |
+| 502 | Bad Gateway | Upstream service error |
+| 503 | Service Unavailable | System overloaded |
+| 504 | Timeout | Operation took too long |
+
+---
+
+## Getting Help
+
+If you can't resolve an error:
+
+<Steps>
+  <Step>
+    Copy the full error message
+  </Step>
+  <Step>
+    Note what you were doing when it occurred
+  </Step>
+  <Step>
+    Check [Common Issues](/docs/troubleshooting/common-issues)
+  </Step>
+  <Step>
+    Search the [FAQ](/docs/troubleshooting/faq)
+  </Step>
+  <Step>
+    Report on GitHub with reproduction steps
+  </Step>
+</Steps>

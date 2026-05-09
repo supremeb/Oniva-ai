@@ -1,0 +1,341 @@
+---
+title: Skills Library
+description: Explore the building blocks of agent capabilities - focused, reusable tools that agents can use to accomplish specific tasks.
+---
+
+Skills are the building blocks of agent capabilities. Think of them as individual tools that agents can use to accomplish specific tasks - like web searching, running code, or reading files.
+
+## What is a Skill?
+
+A **skill** is a focused, reusable capability that an agent or workflow can invoke. Each skill:
+
+- Does **one thing well** (single responsibility)
+- Has defined **inputs and outputs**
+- Can be **used by any agent** or in any workflow
+- Has **version control** for stability
+
+<Callout type="info">
+**Think of it like**: If agents are employees, skills are the tools on their desk - a calculator, a phone, a web browser. Each tool does a specific job.
+</Callout>
+
+## Available Skills
+
+<Tabs items={['Web Skills', 'Code Skills', 'File Skills', 'Document Skills', 'Memory Skills']}>
+  <Tab value="Web Skills">
+    ### web_search
+
+    **What it does**: Searches the internet for information using search engines.
+
+    **When to use it**:
+    - Finding current information (news, prices, regulations)
+    - Researching topics not in your knowledge base
+    - Fact-checking or verification
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | query | text | Yes | What to search for |
+    | num_results | number | No | How many results (default: 5) |
+
+    ---
+
+    ### browse_url
+
+    **What it does**: Fetches and reads the content of a specific webpage.
+
+    **When to use it**:
+    - Reading articles or documentation
+    - Extracting data from known websites
+    - Following up on search results
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | url | text | Yes | The webpage URL to read |
+
+    ---
+
+    ### extract_structured_data
+
+    **What it does**: Extracts tables, lists, and structured data from HTML content.
+
+    **When to use it**:
+    - Getting data from websites with tables
+    - Extracting lists or product information
+    - Scraping structured content
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | url | text | Yes | The webpage to extract from |
+    | data_type | text | No | Type: "table", "list", "all" |
+  </Tab>
+  <Tab value="Code Skills">
+    ### execute_python
+
+    **What it does**: Runs Python code in a secure, sandboxed environment.
+
+    **When to use it**:
+    - Complex calculations
+    - Data transformations
+    - Custom logic that can't be done with other skills
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | code | text | Yes | Python code to execute |
+    | timeout | number | No | Maximum seconds to run (default: 30) |
+
+    <Callout type="warn">
+    **Security**: Code runs in an isolated sandbox with no network access, no file system access outside temp directory, limited CPU/memory, and 30-second timeout.
+    </Callout>
+
+    ---
+
+    ### analyze_code
+
+    **What it does**: Reviews code for quality, complexity, and potential issues.
+
+    **When to use it**:
+    - Code review automation
+    - Finding bugs or security issues
+    - Understanding existing code
+
+    ---
+
+    ### generate_chart
+
+    **What it does**: Creates visualizations (charts, graphs) from data.
+
+    **When to use it**:
+    - Creating visual reports
+    - Plotting financial data
+    - Presenting analysis results
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | data | JSON | Yes | Data to visualize |
+    | chart_type | text | Yes | "line", "bar", "pie", "scatter" |
+    | title | text | No | Chart title |
+  </Tab>
+  <Tab value="File Skills">
+    ### read_file
+
+    **What it does**: Reads the contents of a file.
+
+    **When to use it**:
+    - Reading uploaded documents
+    - Processing data files
+    - Loading configuration
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | file_path | text | Yes | Path to the file |
+    | encoding | text | No | File encoding (default: UTF-8) |
+
+    **Supported formats**: .txt, .csv, .json, .md, .xml
+
+    ---
+
+    ### write_file
+
+    **What it does**: Creates or updates a file with content.
+
+    **When to use it**:
+    - Saving analysis results
+    - Generating reports
+    - Creating data exports
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | file_path | text | Yes | Where to save the file |
+    | content | text | Yes | What to write |
+    | mode | text | No | "overwrite" or "append" |
+  </Tab>
+  <Tab value="Document Skills">
+    ### parse_pdf
+
+    **What it does**: Extracts text from PDF documents.
+
+    **When to use it**:
+    - Reading loan applications
+    - Processing compliance documents
+    - Extracting data from reports
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | file_path | text | Yes | Path to PDF file |
+    | pages | text | No | Which pages: "all", "1-5", "1,3,5" |
+
+    ---
+
+    ### summarize_document
+
+    **What it does**: Creates a summary of a long document.
+
+    **When to use it**:
+    - Quickly understanding long reports
+    - Creating executive summaries
+    - Processing multiple documents
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | content | text | Yes | Document text to summarize |
+    | length | text | No | "short" (1 para), "medium" (3), "long" (5+) |
+
+    ---
+
+    ### extract_entities
+
+    **What it does**: Identifies and extracts named entities (people, organizations, dates, amounts).
+
+    **Example**:
+    ```
+    Text: "John Smith transferred $50,000 to Acme Corp on January 15, 2025"
+
+    Extracts:
+    - Person: "John Smith"
+    - Organization: "Acme Corp"
+    - Money: "$50,000"
+    - Date: "January 15, 2025"
+    ```
+  </Tab>
+  <Tab value="Memory Skills">
+    ### search_knowledge
+
+    **What it does**: Searches your organization's uploaded documents using semantic (meaning-based) search.
+
+    **When to use it**:
+    - Finding information in policy documents
+    - Researching historical cases
+    - Answering questions from your knowledge base
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | query | text | Yes | What to search for |
+    | collection | text | No | Which knowledge base |
+    | num_results | number | No | How many results (default: 5) |
+
+    <Callout type="info">
+    **How it works**: Uses vector similarity search (pgvector) to find semantically similar content, not just keyword matches.
+    </Callout>
+
+    ---
+
+    ### save_to_memory
+
+    **What it does**: Stores information for later retrieval in the session.
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | key | text | Yes | Name for this memory |
+    | value | any | Yes | What to store |
+    | ttl | number | No | How long to keep (seconds) |
+
+    ---
+
+    ### recall_memory
+
+    **What it does**: Retrieves previously stored information from memory.
+
+    | Parameter | Type | Required | Description |
+    |-----------|------|----------|-------------|
+    | key | text | Yes | Name of the memory to retrieve |
+  </Tab>
+</Tabs>
+
+---
+
+## Creating Custom Skills
+
+You can create custom skills for your organization's specific needs.
+
+### When to Create a Custom Skill
+
+- You have a unique internal API to integrate
+- You need specialized calculations
+- You have domain-specific logic to encapsulate
+- You want to standardize a common operation
+
+### Custom Skill Structure
+
+```python
+# Example: Custom skill for internal credit score lookup
+{
+    "name": "lookup_internal_credit_score",
+    "description": "Retrieves credit score from internal scoring system",
+    "version": "1.0.0",
+    "category": "compliance",
+    "inputs": {
+        "customer_id": {
+            "type": "string",
+            "required": True,
+            "description": "Internal customer ID"
+        }
+    },
+    "outputs": {
+        "score": {
+            "type": "number",
+            "description": "Credit score (300-850)"
+        },
+        "factors": {
+            "type": "array",
+            "description": "Key factors affecting score"
+        }
+    }
+}
+```
+
+### Skill Best Practices
+
+<Steps>
+  <Step>
+    **Single Responsibility**: Each skill should do one thing well
+  </Step>
+  <Step>
+    **Clear Naming**: Name skills clearly (verb_noun format)
+  </Step>
+  <Step>
+    **Good Descriptions**: Write descriptions that help the AI use the skill correctly
+  </Step>
+  <Step>
+    **Input Validation**: Define required inputs and types
+  </Step>
+  <Step>
+    **Version Control**: Use semantic versioning (1.0.0)
+  </Step>
+  <Step>
+    **Error Handling**: Return clear error messages
+  </Step>
+  <Step>
+    **Documentation**: Include examples and edge cases
+  </Step>
+</Steps>
+
+---
+
+## Skills in Workflows
+
+You can use skills directly in workflows without involving an agent.
+
+### Skill Node
+
+Add a **Skill Node** to your workflow to run a specific skill:
+
+1. Drag "Skill" from the node palette
+2. Select which skill to run
+3. Connect inputs from previous nodes
+4. Connect output to next node
+
+This is faster and cheaper than using a full agent when you just need a specific capability.
+
+---
+
+## Skill Permissions
+
+Control who can use which skills:
+
+| Permission Level | Description |
+|-----------------|-------------|
+| **System** | Built-in skills, available to all agents |
+| **Organization** | Custom skills your team created |
+| **User** | Skills you created personally |
+
+Administrators can restrict access to sensitive skills (like those that access external systems).
+

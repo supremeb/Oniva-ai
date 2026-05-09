@@ -1,0 +1,68 @@
+{
+    "_comment": "SAML Configuration for Okta Identity Provider",
+    "_instructions": [
+        "1. Create a SAML 2.0 application in Okta Admin Console",
+        "2. Set Single Sign-On URL to: https://your-app.example.com/api/v1/auth/saml/acs",
+        "3. Set Audience URI (SP Entity ID) to: https://your-app.example.com/api/v1/auth/saml/metadata",
+        "4. Configure attribute statements (email, firstName, lastName, groups)",
+        "5. Copy the IdP metadata to fill in the 'idp' section below",
+        "6. Save as 'settings.json' in this directory"
+    ],
+
+    "strict": true,
+    "debug": false,
+
+    "sp": {
+        "entityId": "https://your-app.example.com/api/v1/auth/saml/metadata",
+        "assertionConsumerService": {
+            "url": "https://your-app.example.com/api/v1/auth/saml/acs",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+        },
+        "singleLogoutService": {
+            "url": "https://your-app.example.com/api/v1/auth/saml/sls",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "x509cert": "",
+        "privateKey": ""
+    },
+
+    "idp": {
+        "_comment": "Get these values from Okta Admin > Applications > Your App > Sign On > View Setup Instructions",
+        "entityId": "http://www.okta.com/exk12345abcdef",
+        "singleSignOnService": {
+            "url": "https://your-company.okta.com/app/your-app/exk12345abcdef/sso/saml",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "singleLogoutService": {
+            "url": "",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "x509cert": "MIIDpDCCAoygAwIBAgIGA... (copy from Okta)"
+    },
+
+    "security": {
+        "nameIdEncrypted": false,
+        "authnRequestsSigned": false,
+        "logoutRequestSigned": false,
+        "logoutResponseSigned": false,
+        "signMetadata": false,
+        "wantMessagesSigned": true,
+        "wantAssertionsSigned": true,
+        "wantAssertionsEncrypted": false,
+        "wantNameIdEncrypted": false,
+        "requestedAuthnContext": false,
+        "wantNameId": true,
+        "signatureAlgorithm": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+        "digestAlgorithm": "http://www.w3.org/2001/04/xmlenc#sha256"
+    },
+
+    "_attribute_mapping": {
+        "_comment": "Configure these attributes in Okta",
+        "email": "user.email",
+        "firstName": "user.firstName",
+        "lastName": "user.lastName",
+        "displayName": "user.displayName",
+        "groups": "user.getGroupNames()"
+    }
+}

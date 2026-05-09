@@ -1,0 +1,206 @@
+{
+  "agent_type": "data_retrieval_agent",
+  "description": "Test cases for data retrieval agent evaluating API data fetching, stock prices, financial data extraction",
+  "test_cases": [
+    {
+      "id": "data_001",
+      "name": "Stock price retrieval",
+      "input": "Get the current stock price for AAPL",
+      "expected_output": "Response should include current Apple stock price with timestamp",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "stock_data",
+      "criteria": "Response should include a stock price value and indicate it's for Apple/AAPL"
+    },
+    {
+      "id": "data_002",
+      "name": "Historical price data",
+      "input": "Retrieve MSFT stock price history for the last 30 days",
+      "expected_output": "Historical price data series for Microsoft over 30 days",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "historical",
+      "criteria": "Response should include historical price data points for MSFT"
+    },
+    {
+      "id": "data_003",
+      "name": "Company financials",
+      "input": "Get the latest quarterly financials for Tesla (TSLA)",
+      "expected_output": "Quarterly financial data including revenue, net income, and key metrics",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "financials",
+      "criteria": "Response should include financial metrics like revenue, earnings, or margins"
+    },
+    {
+      "id": "data_004",
+      "name": "Market index data",
+      "input": "Retrieve the current S&P 500 index value and daily change",
+      "expected_output": "S&P 500 index value with daily change percentage",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "index",
+      "criteria": "Response should include S&P 500 index value and change information"
+    },
+    {
+      "id": "data_005",
+      "name": "Currency exchange rate",
+      "input": "Get the current EUR/USD exchange rate",
+      "expected_output": "EUR/USD exchange rate around 1.05-1.15 range",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "forex",
+      "criteria": "Response should include a reasonable EUR/USD exchange rate"
+    },
+    {
+      "id": "data_006",
+      "name": "Commodity price",
+      "input": "Retrieve the current gold price per ounce",
+      "expected_output": "Gold spot price in USD per ounce",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "commodities",
+      "criteria": "Response should include gold price with appropriate units (per ounce)"
+    },
+    {
+      "id": "data_007",
+      "name": "Bond yield data",
+      "input": "Get the current 10-year US Treasury yield",
+      "expected_output": "10-year Treasury yield percentage",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "bonds",
+      "criteria": "Response should include Treasury yield as a percentage"
+    },
+    {
+      "id": "data_008",
+      "name": "Market cap retrieval",
+      "input": "Get the market capitalization for Amazon (AMZN)",
+      "expected_output": "Amazon market cap in billions/trillions USD",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "fundamentals",
+      "criteria": "Response should include market cap value for Amazon"
+    },
+    {
+      "id": "data_009",
+      "name": "Negative case - invalid ticker",
+      "input": "Get stock price for INVALIDTICKER123",
+      "expected_output": "Stock price is $156.78",
+      "evaluation_type": "llm_judge",
+      "is_positive": false,
+      "category": "negative",
+      "criteria": "Response should NOT return a fabricated price for invalid ticker"
+    },
+    {
+      "id": "data_010",
+      "name": "Earnings date",
+      "input": "When is the next earnings report for GOOGL?",
+      "expected_output": "Upcoming earnings date for Google/Alphabet",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "calendar",
+      "criteria": "Response should provide information about Google's earnings schedule"
+    },
+    {
+      "id": "data_011",
+      "name": "Dividend information",
+      "input": "Get dividend yield and payout for JPM",
+      "expected_output": "JPMorgan dividend yield and annual dividend amount",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "dividends",
+      "criteria": "Response should include dividend information for JPMorgan"
+    },
+    {
+      "id": "data_012",
+      "name": "Crypto price data",
+      "input": "Retrieve the current Bitcoin (BTC) price",
+      "expected_output": "Bitcoin price in USD",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "crypto",
+      "criteria": "Response should include Bitcoin price value"
+    },
+    {
+      "id": "data_013",
+      "name": "Options data",
+      "input": "Get options chain for NVDA with nearest expiration",
+      "expected_output": "Options data including calls/puts with strikes and premiums",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "options",
+      "criteria": "Response should include options contract information"
+    },
+    {
+      "id": "data_014",
+      "name": "Economic indicator",
+      "input": "Retrieve the latest US unemployment rate",
+      "expected_output": "US unemployment rate as percentage",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "economic",
+      "criteria": "Response should include unemployment rate statistic"
+    },
+    {
+      "id": "data_015",
+      "name": "Sector performance",
+      "input": "Get performance data for the technology sector today",
+      "expected_output": "Tech sector performance with percentage change",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "sector",
+      "criteria": "Response should include technology sector performance data"
+    },
+    {
+      "id": "data_016",
+      "name": "Volume data",
+      "input": "Get trading volume for META today",
+      "expected_output": "Meta/Facebook trading volume in shares",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "trading",
+      "criteria": "Response should include trading volume for Meta"
+    },
+    {
+      "id": "data_017",
+      "name": "Negative case - future data",
+      "input": "Get the stock price of AAPL on December 31, 2030",
+      "expected_output": "AAPL will be trading at $425.50 on December 31, 2030",
+      "evaluation_type": "llm_judge",
+      "is_positive": false,
+      "category": "negative",
+      "criteria": "Response should NOT provide future stock prices"
+    },
+    {
+      "id": "data_018",
+      "name": "ETF data",
+      "input": "Retrieve holdings and performance for SPY ETF",
+      "expected_output": "SPY ETF information including top holdings and performance",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "etf",
+      "criteria": "Response should include SPY ETF data"
+    },
+    {
+      "id": "data_019",
+      "name": "52-week range",
+      "input": "Get the 52-week high and low for NFLX",
+      "expected_output": "Netflix 52-week high and low prices",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "technical",
+      "criteria": "Response should include 52-week price range for Netflix"
+    },
+    {
+      "id": "data_020",
+      "name": "Analyst ratings",
+      "input": "Get analyst ratings and price targets for DIS",
+      "expected_output": "Disney analyst ratings (buy/hold/sell) and target prices",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "analyst",
+      "criteria": "Response should include analyst rating information for Disney"
+    }
+  ]
+}

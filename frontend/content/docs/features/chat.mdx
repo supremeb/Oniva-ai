@@ -1,0 +1,336 @@
+---
+title: Chat Interface
+description: Have natural conversations with AI agents - like texting with an intelligent financial expert.
+---
+
+The Chat Interface lets you have conversations with AI agents directly. Think of it like texting with a highly intelligent financial expert who can answer questions, perform analysis, and remember what you talked about earlier.
+
+## What is the Chat Interface?
+
+The Chat Interface is the simplest way to interact with Oniva. Instead of building workflows or configuring settings, you just:
+
+<Steps>
+  <Step>
+    Select an agent
+  </Step>
+  <Step>
+    Type your question
+  </Step>
+  <Step>
+    Get an instant, intelligent response
+  </Step>
+</Steps>
+
+It's designed to feel natural - like chatting with a colleague who happens to have expertise in financial analysis, compliance, and data retrieval.
+
+## Interface Overview
+
+### Left Panel: Agent Selection
+
+The left side shows all available agents you can chat with:
+
+| Agent | Specialty | Best For |
+|-------|-----------|----------|
+| **Data Retrieval Agent** | Fetching financial data | Stock prices, market data, historical trends |
+| **Analysis Agent** | Financial calculations | Portfolio analysis, risk metrics, returns |
+| **Compliance Agent** | Regulatory knowledge | KYC requirements, AML rules, regulations |
+| **Research Agent** | Document analysis | Policy research, report summaries |
+
+**To switch agents**: Simply click on a different agent card in the left panel. Your conversation will reset with the new agent.
+
+### Center Panel: Conversation
+
+The main area shows your conversation history:
+
+- **Your messages** appear on the right with a distinct style
+- **Agent responses** appear on the left
+- **Timestamps** show when each message was sent
+- **Streaming responses** appear word-by-word as the AI generates them
+
+### Top Bar: Model Selection
+
+The model selector dropdown lets you choose which AI model powers your conversation:
+
+| Model | Provider | Best For |
+|-------|----------|----------|
+| Gemini 2.0 Flash | Google | Fast responses, good for quick questions |
+| GPT-4o | OpenAI | Complex reasoning, nuanced analysis |
+| Claude 3.5 Sonnet | Anthropic | Detailed explanations, compliance tasks |
+| GPT-4o Mini | OpenAI | Cost-effective, simple queries |
+
+<Callout type="info">
+**Tip**: Start with Gemini 2.0 Flash for speed, switch to GPT-4o or Claude for complex analysis.
+</Callout>
+
+### Bottom: Input Area
+
+The input area includes:
+
+- **Text box**: Type your message here
+- **Send button**: Click or press Enter to send
+- **Clear button**: Start a fresh conversation
+
+---
+
+## How to Use Chat
+
+### Starting a Conversation
+
+<Steps>
+  <Step>
+    Click **Chat** in the left sidebar (speech bubble icon)
+  </Step>
+  <Step>
+    Select an agent from the left panel
+  </Step>
+  <Step>
+    Type your question in the input box
+  </Step>
+  <Step>
+    Press **Enter** or click the send button
+  </Step>
+</Steps>
+
+### Example Conversations
+
+<Tabs items={['Compliance Agent', 'Analysis Agent', 'Data Retrieval Agent']}>
+  <Tab value="Compliance Agent">
+    **You**: What are the key steps in a KYC verification process?
+
+    **Agent**: KYC (Know Your Customer) verification typically involves these key steps:
+
+    1. **Customer Identification**
+       - Collect full legal name, date of birth, address
+       - Government-issued ID (passport, driver's license)
+       - Proof of address (utility bill, bank statement)
+
+    2. **Customer Due Diligence (CDD)**
+       - Verify identity against official documents
+       - Screen against sanctions lists (OFAC, UN, EU)
+       - Assess risk level based on country, business type
+
+    3. **Enhanced Due Diligence (EDD)** - for high-risk customers
+       - Source of wealth verification
+       - Ongoing transaction monitoring
+       - Senior management approval
+
+    4. **Record Keeping**
+       - Maintain all documentation for 5-7 years
+       - Audit trail of verification steps
+       - Regular periodic reviews
+
+    Would you like me to elaborate on any of these steps?
+  </Tab>
+  <Tab value="Analysis Agent">
+    **You**: How do I calculate portfolio volatility?
+
+    **Agent**: Portfolio volatility measures how much your portfolio's returns fluctuate. Here's how to calculate it:
+
+    **Standard Deviation Method**:
+
+    1. Calculate daily/monthly returns for each asset
+    2. Calculate the portfolio return (weighted average)
+    3. Find the standard deviation of portfolio returns
+    4. Annualize if needed (multiply by sqrt(252) for daily data)
+
+    **Example**: If your portfolio has:
+    - 60% stocks (sigma = 20%)
+    - 40% bonds (sigma = 5%)
+    - Correlation = 0.2
+
+    Portfolio volatility = ~12.6%
+
+    Would you like me to walk through a specific calculation with your data?
+  </Tab>
+  <Tab value="Data Retrieval Agent">
+    **You**: What's the current price of Apple stock?
+
+    **Agent**: I'll fetch the current market data for Apple Inc. (AAPL):
+
+    **Apple Inc. (AAPL)**
+    - Current Price: $178.52
+    - Change: +$2.34 (+1.33%)
+    - Volume: 48.2M shares
+    - Market Cap: $2.78T
+    - 52-Week Range: $124.17 - $198.23
+
+    *Data as of market close. Real-time prices require a market data subscription.*
+
+    Would you like historical data or comparison with other tech stocks?
+  </Tab>
+</Tabs>
+
+---
+
+## Session Memory
+
+The Chat Interface remembers your conversation context - but only for the current session.
+
+### How Memory Works
+
+| Feature | Behavior |
+|---------|----------|
+| **Within session** | Agent remembers everything you discussed |
+| **Context window** | Last ~10 turns are immediately accessible |
+| **Session duration** | 24 hours of inactivity before expiration |
+| **New session** | Clicking "Clear" or selecting new agent resets |
+
+### Using Memory Effectively
+
+**Good**: Building on previous questions
+```
+You: What's the risk-free rate used in CAPM?
+Agent: [Explains risk-free rate]
+You: How does that affect the expected return calculation?
+Agent: [Builds on previous answer, references CAPM context]
+```
+
+**Not ideal**: Unrelated questions that waste context
+```
+You: What's Apple's stock price?
+You: Who won the Super Bowl?
+You: Calculate my portfolio volatility
+```
+
+### Conversation Limits
+
+- **Turns**: Approximately 50-100 back-and-forth exchanges
+- **Token limit**: Varies by model (8k-128k tokens)
+- **When reached**: Start a new conversation
+
+---
+
+## Streaming Responses
+
+Responses appear in real-time, word by word, as the AI generates them. This means:
+
+- You see the response building immediately
+- No waiting for the full answer to generate
+- You can start reading while the AI continues
+
+<Callout type="info">
+**Technical detail**: Oniva uses Server-Sent Events (SSE) for real-time streaming, powered by the Vercel AI SDK.
+</Callout>
+
+---
+
+## Tips for Better Conversations
+
+<Accordions>
+  <Accordion title="Be Specific">
+    **Less effective**: "Tell me about compliance"
+
+    **More effective**: "What are the OFAC screening requirements for wire transfers over $10,000?"
+  </Accordion>
+  <Accordion title="Provide Context">
+    **Less effective**: "Is this risky?"
+
+    **More effective**: "I have a client who is a PEP from a high-risk jurisdiction wanting to open a corporate account. What additional due diligence should I perform?"
+  </Accordion>
+  <Accordion title="Ask Follow-ups">
+    The agent remembers context, so build on previous answers:
+
+    1. Start with a broad question
+    2. Drill down based on the response
+    3. Ask for examples or clarifications
+    4. Request specific calculations or data
+  </Accordion>
+  <Accordion title="Use the Right Agent">
+    Each agent has different strengths:
+
+    | Task | Best Agent |
+    |------|------------|
+    | Getting stock prices | Data Retrieval Agent |
+    | Calculating metrics | Analysis Agent |
+    | Regulatory questions | Compliance Agent |
+    | Researching policies | Research Agent |
+  </Accordion>
+</Accordions>
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Enter` | Send message |
+| `Shift + Enter` | New line in message |
+| `Esc` | Clear input |
+| `↑` | Edit last message (if empty input) |
+
+---
+
+## Troubleshooting
+
+<Accordions>
+  <Accordion title="Agent not responding">
+    **Causes**:
+    - Network connectivity issues
+    - LLM provider is experiencing problems
+    - API key is invalid or expired
+
+    **Solutions**:
+    1. Check your internet connection
+    2. Try a different model from the dropdown
+    3. Verify API keys in Settings
+  </Accordion>
+  <Accordion title="Response is slow">
+    **Causes**:
+    - Using a more powerful (slower) model
+    - Complex question requiring more computation
+    - High traffic on LLM provider
+
+    **Solutions**:
+    1. Switch to a faster model (Gemini 2.0 Flash)
+    2. Break complex questions into smaller parts
+    3. Wait a moment and try again
+  </Accordion>
+  <Accordion title="Response seems wrong">
+    **Causes**:
+    - Ambiguous question
+    - Model hallucination
+    - Outdated information in model training
+
+    **Solutions**:
+    1. Rephrase with more specificity
+    2. Ask the agent to explain its reasoning
+    3. Verify important information independently
+    4. Try a different model
+  </Accordion>
+  <Accordion title="Context seems lost">
+    **Causes**:
+    - Conversation exceeded context window
+    - Session timed out
+    - Agent was switched
+
+    **Solutions**:
+    1. Summarize key points and restart
+    2. Keep conversations focused on one topic
+    3. Use workflows for complex multi-step tasks
+  </Accordion>
+</Accordions>
+
+---
+
+## Chat vs. Workflows
+
+| Feature | Chat | Workflows |
+|---------|------|-----------|
+| **Best for** | Quick questions, exploration | Repeatable multi-step processes |
+| **Interaction** | Conversational | Automated |
+| **Memory** | Session-based | Persisted |
+| **Complexity** | Simple to moderate | Any complexity |
+| **Reproducibility** | Low | High |
+
+**Use Chat when**:
+- You have a quick question
+- You're exploring a topic
+- You need interactive back-and-forth
+- The task is one-time
+
+**Use Workflows when**:
+- You need to repeat the process
+- Multiple steps are involved
+- Different agents need to collaborate
+- You need audit trails
+

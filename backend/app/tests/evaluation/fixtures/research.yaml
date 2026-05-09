@@ -1,0 +1,634 @@
+# Research Agent Test Cases
+# Part of Phase 1: Production Reliability
+#
+# These test cases evaluate the ResearchAgent's ability to:
+# - Perform RAG-based document search
+# - Answer financial research questions
+# - Synthesize information from multiple sources
+# - Generate research summaries
+#
+# Total: 50 test cases
+
+---
+# ============================================
+# Document Retrieval (12 test cases)
+# ============================================
+
+- id: "research-001"
+  description: "Find relevant SEC filings"
+  input: "Find Apple's latest 10-K filing"
+  expected:
+    document_type: "10-K"
+    company: "Apple"
+    has_filing_date: true
+    has_content_summary: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-002"
+  description: "Find quarterly earnings report"
+  input: "Find Microsoft's Q4 2023 earnings report"
+  expected:
+    document_type_contains: ["10-Q", "8-K", "earnings"]
+    company: "Microsoft"
+    quarter: "Q4"
+    year: 2023
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-003"
+  description: "Find proxy statement"
+  input: "Find Tesla's latest DEF 14A proxy statement"
+  expected:
+    document_type: "DEF 14A"
+    company: "Tesla"
+    has_filing_date: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-004"
+  description: "Find IPO prospectus"
+  input: "Find Rivian's S-1 prospectus from their IPO"
+  expected:
+    document_type: "S-1"
+    company: "Rivian"
+    context_contains: ["IPO", "prospectus", "offering"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-005"
+  description: "Find merger announcement"
+  input: "Find the 8-K filing for Microsoft's Activision acquisition"
+  expected:
+    document_type: "8-K"
+    companies_mentioned_contains: ["Microsoft", "Activision"]
+    context_contains: ["acquisition", "merger"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-006"
+  description: "Find analyst report"
+  input: "Find recent analyst reports on NVIDIA"
+  expected:
+    company: "NVIDIA"
+    has_analyst_ratings: true
+    has_price_targets: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-007"
+  description: "Find industry report"
+  input: "Find industry reports on the semiconductor sector"
+  expected:
+    sector: "semiconductor"
+    has_industry_analysis: true
+    has_market_trends: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-008"
+  description: "Find earnings call transcript"
+  input: "Find Amazon's latest earnings call transcript"
+  expected:
+    company: "Amazon"
+    document_type: "earnings call"
+    has_transcript: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-009"
+  description: "Find company press release"
+  input: "Find Google's press releases about AI announcements"
+  expected:
+    company_contains: ["Google", "Alphabet"]
+    document_type: "press release"
+    topic_contains: ["AI", "artificial intelligence"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-010"
+  description: "Find regulatory filing with specific content"
+  input: "Find SEC filings where companies mention climate risk"
+  expected:
+    has_results: true
+    content_contains: ["climate", "risk", "environmental"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-011"
+  description: "Handle non-existent document"
+  input: "Find XYZ123 Corp's 10-K filing"
+  expected:
+    error: true
+    error_type_contains: ["not found", "no results", "unknown company"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+- id: "research-012"
+  description: "Find multiple related documents"
+  input: "Find all SEC filings from Meta in 2023"
+  expected:
+    company: "Meta"
+    year: 2023
+    result_count:
+      check: "numeric_range"
+      min: 4
+      max: 50
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "document_retrieval"
+
+# ============================================
+# Question Answering (14 test cases)
+# ============================================
+
+- id: "research-013"
+  description: "Answer factual question from 10-K"
+  input: "What was Apple's total revenue in fiscal year 2023?"
+  expected:
+    has_answer: true
+    source_type: "10-K"
+    answer_contains: ["revenue", "billion"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-014"
+  description: "Answer question about risk factors"
+  input: "What are the main risk factors mentioned in Tesla's 10-K?"
+  expected:
+    has_answer: true
+    risk_factors:
+      check: "length_range"
+      min: 3
+      max: 20
+    source_type: "10-K"
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-015"
+  description: "Answer question about executive compensation"
+  input: "What was the CEO compensation at Microsoft last year?"
+  expected:
+    has_answer: true
+    source_type_contains: ["DEF 14A", "proxy"]
+    answer_contains: ["compensation", "salary", "stock"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-016"
+  description: "Answer question about business segments"
+  input: "What are Amazon's main business segments and their revenue breakdown?"
+  expected:
+    has_answer: true
+    segments:
+      check: "length_range"
+      min: 3
+      max: 10
+    has_revenue_breakdown: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-017"
+  description: "Answer question about guidance"
+  input: "What guidance did NVIDIA provide for next quarter?"
+  expected:
+    has_answer: true
+    guidance_type_contains: ["revenue", "EPS", "margin"]
+    has_outlook: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-018"
+  description: "Answer question about competitive position"
+  input: "How does Apple describe its competitive advantages?"
+  expected:
+    has_answer: true
+    competitive_factors_contains: ["ecosystem", "brand", "innovation"]
+    source_cited: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-019"
+  description: "Answer question about litigation"
+  input: "What major legal proceedings is Google facing?"
+  expected:
+    has_answer: true
+    legal_matters:
+      check: "length_range"
+      min: 1
+      max: 20
+    source_type_contains: ["10-K", "10-Q", "8-K"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-020"
+  description: "Answer question about R&D spending"
+  input: "How much does Microsoft spend on R&D annually?"
+  expected:
+    has_answer: true
+    has_dollar_amount: true
+    context_contains: ["research", "development", "R&D"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-021"
+  description: "Answer question about debt structure"
+  input: "What is Amazon's long-term debt and when does it mature?"
+  expected:
+    has_answer: true
+    has_debt_amount: true
+    has_maturity_schedule: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-022"
+  description: "Answer question about insider ownership"
+  input: "What percentage of Tesla shares do insiders own?"
+  expected:
+    has_answer: true
+    ownership_percentage:
+      check: "numeric_range"
+      min: 0
+      max: 100
+    source_type_contains: ["DEF 14A", "proxy"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-023"
+  description: "Answer complex question requiring reasoning"
+  input: "How has Apple's gross margin trended over the past 3 years and why?"
+  expected:
+    has_trend_analysis: true
+    has_explanation: true
+    reasoning_quality:
+      check: "llm_judge"
+      category: "reasoning"
+      threshold: 0.7
+  evaluation_method: "llm_judge"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-024"
+  description: "Answer question with conflicting sources"
+  input: "What is the consensus view on Netflix's subscriber growth?"
+  expected:
+    has_answer: true
+    acknowledges_different_views: true
+    has_synthesis: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-025"
+  description: "Handle unanswerable question"
+  input: "What is Apple's secret unreleased product roadmap?"
+  expected:
+    answer_contains: ["not available", "confidential", "not disclosed", "cannot answer"]
+    acknowledges_limitation: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+- id: "research-026"
+  description: "Answer question about ESG"
+  input: "What are Microsoft's environmental sustainability initiatives?"
+  expected:
+    has_answer: true
+    esg_topics_contains: ["carbon", "renewable", "sustainability"]
+    has_specific_initiatives: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "question_answering"
+
+# ============================================
+# Research Synthesis (12 test cases)
+# ============================================
+
+- id: "research-027"
+  description: "Synthesize company overview"
+  input: "Provide a comprehensive overview of NVIDIA's business"
+  expected:
+    has_business_description: true
+    has_products_services: true
+    has_market_position: true
+    has_financials_summary: true
+    completeness:
+      check: "llm_judge"
+      category: "completeness"
+      threshold: 0.7
+  evaluation_method: "llm_judge"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-028"
+  description: "Synthesize competitive landscape"
+  input: "Analyze the competitive landscape in cloud computing"
+  expected:
+    competitors_mentioned:
+      check: "length_range"
+      min: 3
+      max: 10
+    has_market_share_info: true
+    has_competitive_dynamics: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-029"
+  description: "Synthesize industry trends"
+  input: "What are the key trends in the electric vehicle industry?"
+  expected:
+    trends:
+      check: "length_range"
+      min: 3
+      max: 10
+    has_supporting_data: true
+    has_outlook: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-030"
+  description: "Synthesize earnings analysis"
+  input: "Analyze Apple's latest earnings report and market reaction"
+  expected:
+    has_earnings_summary: true
+    has_beats_misses: true
+    has_market_reaction: true
+    has_management_commentary: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-031"
+  description: "Synthesize M&A analysis"
+  input: "Analyze the strategic rationale for Microsoft's Activision acquisition"
+  expected:
+    has_deal_summary: true
+    has_strategic_rationale: true
+    has_synergies: true
+    has_risks: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-032"
+  description: "Synthesize sector report"
+  input: "Create a sector analysis for US banking stocks"
+  expected:
+    sector: "banking"
+    companies_analyzed:
+      check: "length_range"
+      min: 3
+      max: 15
+    has_sector_outlook: true
+    has_key_metrics: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-033"
+  description: "Synthesize bull vs bear case"
+  input: "Present the bull and bear case for Tesla stock"
+  expected:
+    has_bull_case: true
+    has_bear_case: true
+    has_supporting_evidence: true
+    balanced_analysis:
+      check: "llm_judge"
+      category: "completeness"
+      threshold: 0.7
+  evaluation_method: "llm_judge"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-034"
+  description: "Synthesize management discussion"
+  input: "Summarize key points from Amazon's latest earnings call"
+  expected:
+    has_key_points: true
+    topics_covered:
+      check: "length_range"
+      min: 3
+      max: 10
+    has_quotes: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-035"
+  description: "Synthesize regulatory analysis"
+  input: "What regulatory challenges does big tech face?"
+  expected:
+    regulatory_issues:
+      check: "length_range"
+      min: 2
+      max: 10
+    jurisdictions_mentioned_contains: ["US", "EU", "China"]
+    has_potential_impact: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-036"
+  description: "Synthesize IPO analysis"
+  input: "Analyze ARM's IPO and valuation"
+  expected:
+    company: "ARM"
+    has_ipo_details: true
+    has_valuation_analysis: true
+    has_peer_comparison: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-037"
+  description: "Synthesize macro impact analysis"
+  input: "How would rising interest rates affect growth stocks?"
+  expected:
+    has_mechanism_explanation: true
+    has_historical_context: true
+    stocks_sectors_mentioned:
+      check: "length_range"
+      min: 2
+      max: 10
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_synthesis"
+
+- id: "research-038"
+  description: "Synthesize multi-source research"
+  input: "What do analysts say about Google's AI strategy?"
+  expected:
+    sources_cited:
+      check: "length_range"
+      min: 2
+      max: 20
+    has_consensus_view: true
+    has_differing_opinions: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_synthesis"
+
+# ============================================
+# Research Quality & Edge Cases (12 test cases)
+# ============================================
+
+- id: "research-039"
+  description: "Cite sources properly"
+  input: "What is Apple's cash position? Cite your sources."
+  expected:
+    has_answer: true
+    has_citations: true
+    citations_include_contains: ["10-K", "10-Q", "filing date"]
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-040"
+  description: "Acknowledge data recency"
+  input: "What is Tesla's current production capacity?"
+  expected:
+    has_answer: true
+    acknowledges_data_date: true
+    has_recency_caveat: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-041"
+  description: "Handle outdated information request"
+  input: "What was Enron's stock price in 2000?"
+  expected:
+    has_answer: true
+    has_historical_context: true
+    acknowledges_company_status: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-042"
+  description: "Distinguish fact from opinion"
+  input: "Is Tesla overvalued?"
+  expected:
+    distinguishes_fact_opinion: true
+    presents_multiple_perspectives: true
+    does_not_make_definitive_claim: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-043"
+  description: "Handle speculative question appropriately"
+  input: "Will Amazon stock go up tomorrow?"
+  expected:
+    does_not_predict: true
+    response_contains: ["cannot predict", "uncertain", "depends on"]
+    may_provide_context: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-044"
+  description: "Research small-cap company"
+  input: "Research Palantir Technologies business model"
+  expected:
+    company: "Palantir"
+    has_business_description: true
+    acknowledges_limited_coverage: false
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-045"
+  description: "Research foreign company"
+  input: "Research Samsung Electronics financials"
+  expected:
+    company: "Samsung"
+    acknowledges_reporting_differences: true
+    currency_mentioned: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-046"
+  description: "Research private company"
+  input: "Research SpaceX's business and financials"
+  expected:
+    company: "SpaceX"
+    acknowledges_private_status: true
+    uses_available_public_info: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-047"
+  description: "Research recent event"
+  input: "Research the impact of the latest Fed rate decision"
+  expected:
+    has_event_summary: true
+    has_market_reaction: true
+    acknowledges_recency: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-048"
+  description: "Handle ambiguous company name"
+  input: "Research Apple's competitors"
+  expected:
+    clarifies_company: true
+    company: "Apple Inc"
+    does_not_confuse_with_other_apple: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-049"
+  description: "Research with conflicting data"
+  input: "What is the market share of iPhone globally?"
+  expected:
+    has_answer: true
+    acknowledges_data_variance: true
+    provides_range_or_multiple_sources: true
+  evaluation_method: "deterministic"
+  agent_type: "research"
+  category: "research_quality"
+
+- id: "research-050"
+  description: "Comprehensive research with quality check"
+  input: "Provide a thorough due diligence report on Stripe"
+  expected:
+    has_company_overview: true
+    has_financials_if_available: true
+    has_competitive_analysis: true
+    has_risk_factors: true
+    has_growth_drivers: true
+    research_quality:
+      check: "llm_judge"
+      category: "completeness"
+      threshold: 0.8
+  evaluation_method: "llm_judge"
+  agent_type: "research"
+  category: "research_quality"

@@ -1,0 +1,568 @@
+# Compliance Agent Test Cases
+# Part of Phase 1: Production Reliability
+#
+# These test cases evaluate the ComplianceAgent's ability to:
+# - Screen entities against OFAC SDN lists
+# - Evaluate transaction risk
+# - Perform KYC/AML checks
+# - Generate compliance recommendations
+#
+# Total: 50 test cases
+
+---
+# ============================================
+# OFAC SDN Screening (15 test cases)
+# ============================================
+
+- id: "compliance-001"
+  description: "Clean entity - no OFAC match"
+  input: "Screen John Smith at 123 Main St, Springfield IL for OFAC SDN"
+  expected:
+    result: "PASS"
+    risk_level: "LOW"
+    rationale_contains: ["No match found", "OFAC SDN"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-002"
+  description: "Transaction to sanctioned country - Iran"
+  input: "Screen transaction of $15,000 to recipient in Tehran, Iran"
+  expected:
+    result: "FAIL"
+    risk_level: "CRITICAL"
+    rationale_contains: ["sanctioned", "Iran"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-003"
+  description: "Transaction to sanctioned country - North Korea"
+  input: "Evaluate wire transfer to DPRK-based entity"
+  expected:
+    result: "FAIL"
+    risk_level: "CRITICAL"
+    rationale_contains: ["North Korea", "DPRK", "prohibited"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-004"
+  description: "Transaction to sanctioned country - Russia defense sector"
+  input: "Screen payment to Russian defense contractor Almaz-Antey"
+  expected:
+    result: "FAIL"
+    risk_level: "CRITICAL"
+    rationale_contains: ["Russia", "defense", "sanctions"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-005"
+  description: "Partial name match - requires review"
+  input: "Screen Mohammed Al-Hassan for OFAC compliance"
+  expected:
+    result: "REVIEW"
+    risk_level:
+      check: "contains_any"
+      value: ["MEDIUM", "HIGH"]
+    rationale_contains: ["partial match", "review"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-006"
+  description: "Clean corporate entity"
+  input: "OFAC screening for Microsoft Corporation, Redmond WA"
+  expected:
+    result: "PASS"
+    risk_level: "LOW"
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-007"
+  description: "SDN list entity - exact match"
+  input: "Screen Islamic Revolutionary Guard Corps for sanctions"
+  expected:
+    result: "FAIL"
+    risk_level: "CRITICAL"
+    rationale_contains: ["IRGC", "designated", "SDN"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-008"
+  description: "Venezuelan state oil company"
+  input: "Compliance check for PDVSA (Petroleos de Venezuela)"
+  expected:
+    result: "FAIL"
+    risk_level:
+      check: "contains_any"
+      value: ["HIGH", "CRITICAL"]
+    rationale_contains: ["Venezuela", "PDVSA", "sanctions"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-009"
+  description: "Cuban entity screening"
+  input: "Screen Banco Nacional de Cuba for OFAC"
+  expected:
+    result: "FAIL"
+    risk_level: "CRITICAL"
+    rationale_contains: ["Cuba", "prohibited"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-010"
+  description: "Syrian entity screening"
+  input: "OFAC check for Central Bank of Syria"
+  expected:
+    result: "FAIL"
+    risk_level: "CRITICAL"
+    rationale_contains: ["Syria", "sanctioned"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-011"
+  description: "Clean UK entity"
+  input: "Screen Barclays Bank PLC, London UK"
+  expected:
+    result: "PASS"
+    risk_level: "LOW"
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-012"
+  description: "Clean Japanese entity"
+  input: "OFAC screening for Toyota Motor Corporation, Japan"
+  expected:
+    result: "PASS"
+    risk_level: "LOW"
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-013"
+  description: "Belarus defense entity"
+  input: "Screen Belaruskali for OFAC compliance"
+  expected:
+    result: "FAIL"
+    risk_level:
+      check: "contains_any"
+      value: ["HIGH", "CRITICAL"]
+    rationale_contains: ["Belarus", "sanctions"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-014"
+  description: "Crimea-based entity"
+  input: "Compliance check for entity registered in Sevastopol, Crimea"
+  expected:
+    result: "FAIL"
+    risk_level: "CRITICAL"
+    rationale_contains: ["Crimea", "prohibited region"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+- id: "compliance-015"
+  description: "Multiple jurisdiction check"
+  input: "Screen ABC Trading Ltd with offices in Dubai, Singapore, and Cayman Islands"
+  expected:
+    result: "REVIEW"
+    risk_level: "MEDIUM"
+    rationale_contains: ["multiple jurisdictions", "enhanced due diligence"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "ofac_screening"
+
+# ============================================
+# Transaction Risk Assessment (15 test cases)
+# ============================================
+
+- id: "compliance-016"
+  description: "Standard domestic wire - low risk"
+  input: "Assess risk for $5,000 wire from Chase to Wells Fargo, domestic payroll"
+  expected:
+    result: "PASS"
+    risk_level: "LOW"
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-017"
+  description: "Large cash transaction - CTR threshold"
+  input: "Evaluate cash deposit of $12,000"
+  expected:
+    result: "REVIEW"
+    risk_level: "MEDIUM"
+    rationale_contains: ["CTR", "cash", "threshold"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-018"
+  description: "Structuring pattern detected"
+  input: "Review 3 cash deposits of $9,500 each within 24 hours"
+  expected:
+    result: "FAIL"
+    risk_level: "HIGH"
+    rationale_contains: ["structuring", "suspicious"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-019"
+  description: "High-value international wire"
+  input: "Risk assessment for $500,000 wire to Switzerland"
+  expected:
+    result: "REVIEW"
+    risk_level:
+      check: "contains_any"
+      value: ["MEDIUM", "HIGH"]
+    rationale_contains: ["international", "high value", "enhanced review"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-020"
+  description: "Cryptocurrency conversion"
+  input: "Evaluate $50,000 conversion from Bitcoin to USD"
+  expected:
+    result: "REVIEW"
+    risk_level: "HIGH"
+    rationale_contains: ["cryptocurrency", "source of funds"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-021"
+  description: "Shell company transaction"
+  input: "Assess wire from BVI-registered company with no visible operations"
+  expected:
+    result: "FAIL"
+    risk_level: "HIGH"
+    rationale_contains: ["shell company", "beneficial ownership"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-022"
+  description: "PEP transaction"
+  input: "Review $100,000 transfer from account of former government minister"
+  expected:
+    result: "REVIEW"
+    risk_level: "HIGH"
+    rationale_contains: ["PEP", "politically exposed", "enhanced due diligence"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-023"
+  description: "Dormant account activity"
+  input: "Assess $25,000 withdrawal from account dormant for 3 years"
+  expected:
+    result: "REVIEW"
+    risk_level: "MEDIUM"
+    rationale_contains: ["dormant", "unusual activity"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-024"
+  description: "Round-trip transaction"
+  input: "Evaluate pattern: $100K sent abroad, returned within 48 hours"
+  expected:
+    result: "FAIL"
+    risk_level: "HIGH"
+    rationale_contains: ["round trip", "layering", "suspicious"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-025"
+  description: "Trade-based laundering indicators"
+  input: "Review import payment: $2M for goods valued at $500K market price"
+  expected:
+    result: "FAIL"
+    risk_level: "HIGH"
+    rationale_contains: ["over-invoicing", "trade-based", "money laundering"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-026"
+  description: "Normal business wire"
+  input: "Assess monthly vendor payment of $15,000 to established supplier"
+  expected:
+    result: "PASS"
+    risk_level: "LOW"
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-027"
+  description: "Real estate transaction"
+  input: "Review $2M real estate purchase with all-cash payment"
+  expected:
+    result: "REVIEW"
+    risk_level: "HIGH"
+    rationale_contains: ["real estate", "cash", "source of funds"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-028"
+  description: "Rapid account activity"
+  input: "Assess new account with 50 transactions in first week totaling $200K"
+  expected:
+    result: "REVIEW"
+    risk_level: "HIGH"
+    rationale_contains: ["new account", "unusual volume"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-029"
+  description: "Charity donation anomaly"
+  input: "Evaluate $500K donation to unregistered charity in high-risk region"
+  expected:
+    result: "FAIL"
+    risk_level: "HIGH"
+    rationale_contains: ["charity", "terrorism financing"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+- id: "compliance-030"
+  description: "Normal payroll processing"
+  input: "Risk check for monthly payroll run of $150,000 to 50 employees"
+  expected:
+    result: "PASS"
+    risk_level: "LOW"
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "transaction_risk"
+
+# ============================================
+# KYC/AML Checks (10 test cases)
+# ============================================
+
+- id: "compliance-031"
+  description: "Complete KYC documentation"
+  input: "KYC check: passport, utility bill, employment verification provided"
+  expected:
+    result: "PASS"
+    risk_level: "LOW"
+    rationale_contains: ["documents verified", "KYC complete"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "kyc_aml"
+
+- id: "compliance-032"
+  description: "Missing beneficial ownership"
+  input: "KYC review: corporate account without beneficial ownership declaration"
+  expected:
+    result: "FAIL"
+    risk_level: "HIGH"
+    rationale_contains: ["beneficial ownership", "missing", "required"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "kyc_aml"
+
+- id: "compliance-033"
+  description: "Address verification failed"
+  input: "KYC check: provided address does not match any public records"
+  expected:
+    result: "REVIEW"
+    risk_level: "MEDIUM"
+    rationale_contains: ["address verification", "mismatch"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "kyc_aml"
+
+- id: "compliance-034"
+  description: "Expired identification"
+  input: "KYC review: passport expired 6 months ago"
+  expected:
+    result: "FAIL"
+    risk_level: "MEDIUM"
+    rationale_contains: ["expired", "ID document"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "kyc_aml"
+
+- id: "compliance-035"
+  description: "High-risk business type"
+  input: "KYC for money service business (MSB) license applicant"
+  expected:
+    result: "REVIEW"
+    risk_level: "HIGH"
+    rationale_contains: ["MSB", "high-risk category", "enhanced due diligence"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "kyc_aml"
+
+- id: "compliance-036"
+  description: "Third-party verification passed"
+  input: "KYC: automated ID verification returned 95% match score"
+  expected:
+    result: "PASS"
+    risk_level: "LOW"
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "kyc_aml"
+
+- id: "compliance-037"
+  description: "Adverse media hit"
+  input: "KYC check found news articles linking applicant to fraud investigation"
+  expected:
+    result: "FAIL"
+    risk_level: "HIGH"
+    rationale_contains: ["adverse media", "fraud", "negative news"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "kyc_aml"
+
+- id: "compliance-038"
+  description: "Corporate structure complexity"
+  input: "KYC for company with 5 layers of holding companies across 4 jurisdictions"
+  expected:
+    result: "REVIEW"
+    risk_level: "HIGH"
+    rationale_contains: ["complex structure", "multiple jurisdictions"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "kyc_aml"
+
+- id: "compliance-039"
+  description: "Source of wealth verified"
+  input: "KYC: source of $5M wealth documented from business sale, verified by attorney"
+  expected:
+    result: "PASS"
+    risk_level: "LOW"
+    rationale_contains: ["source of wealth", "verified"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "kyc_aml"
+
+- id: "compliance-040"
+  description: "Identity theft indicators"
+  input: "KYC: same ID documents used by different applicant last month"
+  expected:
+    result: "FAIL"
+    risk_level: "CRITICAL"
+    rationale_contains: ["identity theft", "fraud", "duplicate"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "kyc_aml"
+
+# ============================================
+# Compliance Recommendations (10 test cases)
+# ============================================
+
+- id: "compliance-041"
+  description: "File SAR recommendation"
+  input: "Recommend action for confirmed structuring pattern"
+  expected:
+    recommendation: "FILE_SAR"
+    rationale_contains: ["SAR", "suspicious activity report"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "recommendations"
+
+- id: "compliance-042"
+  description: "Enhanced monitoring recommendation"
+  input: "Recommend action for PEP with unusual transaction pattern"
+  expected:
+    recommendation: "ENHANCED_MONITORING"
+    rationale_contains: ["monitoring", "PEP", "ongoing"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "recommendations"
+
+- id: "compliance-043"
+  description: "Account closure recommendation"
+  input: "Recommend action for customer refusing to provide KYC documents"
+  expected:
+    recommendation: "CLOSE_ACCOUNT"
+    rationale_contains: ["close", "non-compliance", "KYC"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "recommendations"
+
+- id: "compliance-044"
+  description: "Escalate to compliance officer"
+  input: "Recommend action for complex cross-border transaction with partial OFAC match"
+  expected:
+    recommendation: "ESCALATE"
+    rationale_contains: ["escalate", "compliance officer", "review"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "recommendations"
+
+- id: "compliance-045"
+  description: "Request additional documentation"
+  input: "Recommend action for high-value transaction with incomplete SOW"
+  expected:
+    recommendation: "REQUEST_DOCUMENTS"
+    rationale_contains: ["additional documentation", "source of wealth"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "recommendations"
+
+- id: "compliance-046"
+  description: "Approve with conditions"
+  input: "Recommend action for medium-risk customer meeting all requirements"
+  expected:
+    recommendation: "APPROVE_WITH_CONDITIONS"
+    rationale_contains: ["approve", "periodic review"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "recommendations"
+
+- id: "compliance-047"
+  description: "Decline relationship"
+  input: "Recommend action for entity in comprehensively sanctioned country"
+  expected:
+    recommendation: "DECLINE"
+    rationale_contains: ["decline", "sanctions", "prohibited"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "recommendations"
+
+- id: "compliance-048"
+  description: "Standard approval"
+  input: "Recommend action for low-risk retail customer with complete KYC"
+  expected:
+    recommendation: "APPROVE"
+    risk_level: "LOW"
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "recommendations"
+
+- id: "compliance-049"
+  description: "Freeze account recommendation"
+  input: "Recommend action for account receiving funds from known fraud scheme"
+  expected:
+    recommendation: "FREEZE_ACCOUNT"
+    rationale_contains: ["freeze", "fraud", "investigation"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "recommendations"
+
+- id: "compliance-050"
+  description: "Report to law enforcement"
+  input: "Recommend action for suspected terrorist financing activity"
+  expected:
+    recommendation: "REPORT_LAW_ENFORCEMENT"
+    rationale_contains: ["law enforcement", "terrorism", "urgent"]
+  evaluation_method: "deterministic"
+  agent_type: "compliance"
+  category: "recommendations"

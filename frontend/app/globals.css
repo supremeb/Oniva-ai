@@ -1,0 +1,805 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============ Sonner Toast Styles ============ */
+:root {
+  --sonner-background: hsl(var(--background));
+  --sonner-border: hsl(var(--border));
+  --sonner-text: hsl(var(--foreground));
+  --sonner-success: hsl(142.3 71.8% 29.2%);
+  --sonner-error: hsl(0 84.2% 60.2%);
+  --sonner-info: hsl(217.2 91.2% 59.8%);
+  --sonner-warning: hsl(38.6 92.1% 50.1%);
+}
+
+.dark {
+  --sonner-background: hsl(var(--background));
+  --sonner-border: hsl(var(--border));
+  --sonner-text: hsl(var(--foreground));
+}
+
+.toaster {
+  @apply font-sans;
+}
+
+/* ============ Design System Tokens - Linear Inspired ============ */
+@layer base {
+  :root {
+    /* Linear-inspired Warm Neutral Theme - Light Mode */
+    --background: 40 20% 98%;
+    --foreground: 20 14% 10%;
+    --card: 40 25% 99%;
+    --card-foreground: 20 14% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 14% 10%;
+
+    /* Primary - Black */
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary - Warm light gray */
+    --secondary: 40 10% 95%;
+    --secondary-foreground: 20 14% 10%;
+
+    /* Muted - Warm neutral tones */
+    --muted: 40 10% 94%;
+    --muted-foreground: 20 10% 50%;
+
+    /* Accent - Light gray */
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 9%;
+
+    /* Status Colors */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 60% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    /* UI Elements - Very subtle borders */
+    --border: 40 10% 90%;
+    --input: 40 10% 90%;
+    --ring: 0 0% 9%;
+
+    /* Border Radius - Smaller, cleaner */
+    --radius: 0.5rem;
+
+    /* Shadows - Very subtle */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.03);
+    --shadow-md: 0 2px 4px -1px rgb(0 0 0 / 0.05);
+    --shadow-lg: 0 4px 8px -2px rgb(0 0 0 / 0.06);
+
+    /* Charts */
+    --chart-1: 0 0% 9%;
+    --chart-2: 152 60% 40%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 280 60% 55%;
+    --chart-5: 0 72% 51%;
+  }
+
+  .dark {
+    /* Dark Mode - Clean dark with warm undertones */
+    --background: 20 14% 6%;
+    --foreground: 40 10% 90%;
+    --card: 20 14% 8%;
+    --card-foreground: 40 10% 90%;
+    --popover: 20 14% 8%;
+    --popover-foreground: 40 10% 90%;
+
+    /* Primary - White for dark mode */
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+
+    /* Secondary */
+    --secondary: 20 14% 14%;
+    --secondary-foreground: 40 10% 90%;
+
+    /* Muted */
+    --muted: 20 14% 14%;
+    --muted-foreground: 40 10% 55%;
+
+    /* Accent */
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 90%;
+
+    /* Status Colors */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 60% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    /* UI Elements */
+    --border: 20 14% 15%;
+    --input: 20 14% 15%;
+    --ring: 0 0% 98%;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.2);
+    --shadow-md: 0 2px 4px -1px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 4px 8px -2px rgb(0 0 0 / 0.4);
+
+    /* Charts */
+    --chart-1: 0 0% 70%;
+    --chart-2: 152 60% 45%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 280 60% 60%;
+    --chart-5: 0 72% 51%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  h1 { letter-spacing: -0.03em; }
+  h2 { letter-spacing: -0.025em; }
+  h3 { letter-spacing: -0.02em; }
+  h4 { letter-spacing: -0.015em; }
+
+  /* Improved focus styles */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Selection styling */
+  ::selection {
+    @apply bg-primary/20 text-foreground;
+  }
+}
+
+/* ============ React Flow Custom Styles ============ */
+
+/* Reset ALL node types - override React Flow's built-in styles for default/input/output/group */
+.react-flow__node,
+.react-flow__node-input,
+.react-flow__node-default,
+.react-flow__node-output,
+.react-flow__node-group,
+.react-flow__node-start,
+.react-flow__node-llm,
+.react-flow__node-skill,
+.react-flow__node-connector,
+.react-flow__node-agent,
+.react-flow__node-data,
+.react-flow__node-analysis,
+.react-flow__node-compliance,
+.react-flow__node-research,
+.react-flow__node-knowledge,
+.react-flow__node-code,
+.react-flow__node-http,
+.react-flow__node-ifelse,
+.react-flow__node-iteration,
+.react-flow__node-template,
+.react-flow__node-aggregator,
+.react-flow__node-classifier {
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  width: auto !important;
+  font-size: inherit !important;
+  color: inherit !important;
+  text-align: inherit !important;
+}
+
+/* Completely remove React Flow's default selection outline/border */
+.react-flow__node.selected,
+.react-flow__node-output.selected,
+.react-flow__node-output.selectable.selected,
+.react-flow__node-output.selectable:focus,
+.react-flow__node-output.selectable:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+/* Ensure nodes don't show focus outlines */
+.react-flow__node:focus,
+.react-flow__node:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Selection styling is handled by our BaseNode component */
+.react-flow__node.selected > div {
+  /* Selection ring is applied via Tailwind in BaseNode */
+}
+
+/* Remove any dragging/resizing indicators */
+.react-flow__node.dragging {
+  cursor: grabbing;
+}
+
+/* Ensure node wrappers don't constrain content */
+.react-flow__node > div {
+  /* Allow content to define size */
+}
+
+/* Override hover styles for built-in node types */
+.react-flow__node-input.selectable:hover,
+.react-flow__node-default.selectable:hover,
+.react-flow__node-output.selectable:hover,
+.react-flow__node-group.selectable:hover {
+  box-shadow: none !important;
+}
+
+/* Larger handles for easier connection - visible dot */
+.react-flow__handle {
+  width: 14px !important;
+  height: 14px !important;
+  background: hsl(var(--primary)) !important;
+  border: 2px solid hsl(var(--background)) !important;
+  transition: background 0.15s ease !important;
+}
+
+/* Even larger hit area for easier connecting */
+.react-flow__handle::after {
+  content: '';
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  /* Invisible but clickable */
+}
+
+.react-flow__handle:hover {
+  background: hsl(var(--primary) / 0.7) !important;
+  /* No transform scale - it was causing issues */
+}
+
+/* Connecting state - make handle glow */
+.react-flow__handle.connecting {
+  background: hsl(var(--accent)) !important;
+  box-shadow: 0 0 8px hsl(var(--accent));
+}
+
+.react-flow__edge-path {
+  stroke: hsl(var(--primary));
+  stroke-width: 2;
+  /* No transition to avoid jank */
+}
+
+/* Subtle hover on edges - no zoom effect */
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 3;
+  stroke: hsl(var(--primary) / 0.8);
+}
+
+.react-flow__controls {
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+
+.react-flow__controls button {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+  transition: all 0.15s ease;
+}
+
+.react-flow__controls button:hover {
+  background: hsl(var(--muted));
+}
+
+.react-flow__minimap {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+}
+
+/* Override Tailwind Typography backticks on inline code */
+.prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *))::before,
+.prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *))::after {
+  content: none !important;
+}
+
+/* Suppress ProseMirror/Tiptap contenteditable inner border */
+.instructions-editor .ProseMirror {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.instructions-editor .ProseMirror:focus {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* ============ Typography Utilities ============ */
+@layer utilities {
+  /* --- Headings --- */
+  .text-display {
+    @apply text-4xl font-bold;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+  }
+
+  .text-heading-1 {
+    @apply text-2xl font-semibold;
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+  }
+
+  .text-heading-2 {
+    @apply text-xl font-semibold;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+  }
+
+  .text-heading-3 {
+    @apply text-lg font-semibold;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+  }
+
+  .text-heading-4 {
+    @apply text-base font-medium;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+  }
+
+  /* --- Body --- */
+  .text-body-lg {
+    @apply text-base leading-relaxed;
+  }
+
+  .text-body {
+    @apply text-sm leading-relaxed;
+  }
+
+  .text-body-sm {
+    @apply text-xs leading-relaxed;
+  }
+
+  /* --- Semantic: Dashboard Patterns --- */
+
+  .text-page-title {
+    @apply text-2xl font-semibold text-foreground;
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+  }
+
+  .text-page-description {
+    @apply text-sm text-muted-foreground;
+    line-height: 1.5;
+  }
+
+  .text-overline {
+    @apply text-xs font-medium text-muted-foreground uppercase tracking-wider;
+  }
+
+  .text-stat {
+    @apply text-2xl font-bold text-foreground;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .text-stat-label {
+    @apply text-xs text-muted-foreground uppercase tracking-wider;
+  }
+
+  .text-table-head {
+    @apply text-xs font-medium text-muted-foreground uppercase tracking-wider;
+  }
+
+  .text-card-title {
+    @apply text-sm font-medium text-foreground;
+    line-height: 1.4;
+  }
+
+  .text-label {
+    @apply text-sm font-medium text-foreground;
+    line-height: 1;
+  }
+
+  .text-caption {
+    @apply text-[11px] text-muted-foreground;
+    line-height: 1.4;
+  }
+
+  .text-detail {
+    @apply text-xs text-muted-foreground;
+  }
+
+  .text-body-muted {
+    @apply text-sm text-muted-foreground leading-relaxed;
+  }
+
+  .text-mono {
+    @apply text-xs font-mono text-muted-foreground;
+  }
+
+  .text-mono-sm {
+    @apply text-[11px] font-mono text-muted-foreground;
+  }
+
+  /* Text Balance for headings */
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* ============ Animation Utilities ============ */
+  /* NOTE: .animate-in is provided by tailwindcss-animate plugin - do not override */
+
+  /* Fade in from bottom - use .fade-up instead of .animate-in to avoid conflict */
+  .fade-up {
+    animation: fadeUp 0.25s ease-out;
+  }
+
+  @keyframes fadeUp {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Fade in from left */
+  .fade-left {
+    animation: fadeLeft 0.25s ease-out;
+  }
+
+  @keyframes fadeLeft {
+    from {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  /* Fade in with scale - centered */
+  .scale-in {
+    animation: scaleIn 0.2s ease-out;
+  }
+
+  @keyframes scaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  /* Subtle pulse for attention */
+  .animate-subtle-pulse {
+    animation: subtlePulse 2s ease-in-out infinite;
+  }
+
+  @keyframes subtlePulse {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+
+  /* Shimmer loading effect */
+  .animate-shimmer {
+    animation: shimmer 2s linear infinite;
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 0%,
+      hsl(var(--muted-foreground) / 0.1) 50%,
+      hsl(var(--muted)) 100%
+    );
+    background-size: 200% 100%;
+  }
+
+  /* Thinking shimmer - purple-tinted for thinking accordion */
+  .thinking-shimmer {
+    animation: shimmer 2s ease-in-out infinite;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(168, 85, 247, 0.15) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+  }
+
+  /* Text shimmer - purple sweep on text using currentColor inheritance */
+  .text-shimmer {
+    background: linear-gradient(
+      90deg,
+      currentColor 0%, currentColor 40%,
+      rgba(168, 85, 247, 0.6) 50%,
+      currentColor 60%, currentColor 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 2s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  /* ============ Visual Effects ============ */
+
+  /* Glass Morphism Effect - Simplified */
+  .glass {
+    @apply bg-background/95 backdrop-blur-sm border border-border;
+  }
+
+  .glass-subtle {
+    @apply bg-background/90;
+  }
+
+  /* Card Hover Effects - Linear style: subtle border change only */
+  .card-hover {
+    @apply transition-colors duration-150 hover:border-foreground/20;
+  }
+
+  .card-hover-subtle {
+    @apply transition-colors duration-150 hover:bg-muted/30;
+  }
+
+  /* Interactive element */
+  .interactive {
+    @apply transition-colors duration-100;
+  }
+
+  /* ============ Status Badges ============ */
+  .badge-success {
+    @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400;
+  }
+
+  .badge-warning {
+    @apply bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400;
+  }
+
+  .badge-error {
+    @apply bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400;
+  }
+
+  .badge-info {
+    @apply bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400;
+  }
+
+  .badge-neutral {
+    @apply bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300;
+  }
+
+  /* ============ Gradient Utilities ============ */
+
+  /* Gradient text - simplified */
+  .gradient-text {
+    @apply text-foreground;
+  }
+
+  /* Gradient backgrounds - simplified to solid */
+  .gradient-primary {
+    @apply bg-primary;
+  }
+
+  .gradient-accent {
+    @apply bg-accent;
+  }
+
+  /* Gradient borders - simplified */
+  .gradient-border {
+    @apply border border-border;
+  }
+
+  /* Mesh gradient background - removed for clean look */
+  .mesh-gradient {
+    /* Intentionally empty - clean, minimal background */
+  }
+
+  /* ============ Scrollbar Styling ============ */
+  .smooth-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.2) transparent;
+    scroll-behavior: smooth;
+  }
+
+  .smooth-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .smooth-scroll::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 3px;
+  }
+
+  .smooth-scroll::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.2);
+    border-radius: 3px;
+    transition: background-color 0.2s ease;
+  }
+
+  .smooth-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.35);
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ============ Layout Utilities ============ */
+
+  /* Content container */
+  .container-narrow {
+    @apply max-w-4xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .container-wide {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  /* Sticky header */
+  .sticky-header {
+    @apply sticky top-0 z-30 bg-background/80 backdrop-blur-lg border-b border-border/50;
+  }
+
+  /* ============ Form Utilities ============ */
+
+  /* Input focus glow */
+  .input-glow:focus-within {
+    @apply ring-2 ring-primary/20 border-primary;
+  }
+
+  /* ============ Loading States ============ */
+
+  /* Skeleton loading */
+  .skeleton {
+    @apply bg-muted animate-pulse rounded;
+  }
+
+  /* Spinner */
+  .spinner {
+    @apply inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin;
+  }
+
+  .spinner-lg {
+    @apply inline-block w-8 h-8 border-3 border-current border-t-transparent rounded-full animate-spin;
+  }
+}
+
+/* ============ Component Specific ============ */
+
+/* Command menu styling */
+[cmdk-dialog] {
+  @apply fixed inset-0 z-50;
+}
+
+[cmdk-overlay] {
+  @apply fixed inset-0 bg-background/80 backdrop-blur-sm;
+}
+
+[cmdk-list] {
+  @apply overflow-y-auto smooth-scroll max-h-[300px];
+}
+
+/* Command input - remove default focus ring */
+[cmdk-input]:focus,
+[cmdk-input]:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  ring: 0 !important;
+}
+
+[cmdk-input-wrapper] {
+  @apply transition-colors duration-150;
+}
+
+[cmdk-input-wrapper]:focus-within {
+  @apply bg-muted/40;
+}
+
+/* Tooltip styling override */
+[data-radix-tooltip-content] {
+  @apply scale-in;
+}
+
+/* Dialog styling override - smooth center scale animation */
+[data-radix-dialog-content] {
+  @apply scale-in;
+}
+
+/* ============ Reduced Motion Support (emilkowal standard) ============ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Motion-safe utility class for animations that should respect reduced motion */
+@media (prefers-reduced-motion: no-preference) {
+  .motion-safe\:animate-fade-in {
+    animation: fade-in 200ms ease-out;
+  }
+  .motion-safe\:animate-fade-slide-up {
+    animation: fade-slide-up 150ms ease-out;
+  }
+  .motion-safe\:animate-scale-in {
+    animation: scale-in 200ms ease-out;
+  }
+}
+
+/* Stagger delay utilities for animations */
+.stagger-1 { animation-delay: 30ms; }
+.stagger-2 { animation-delay: 60ms; }
+.stagger-3 { animation-delay: 90ms; }
+.stagger-4 { animation-delay: 120ms; }
+.stagger-5 { animation-delay: 150ms; }
+.stagger-6 { animation-delay: 180ms; }
+.stagger-7 { animation-delay: 210ms; }
+.stagger-8 { animation-delay: 240ms; }
+.stagger-9 { animation-delay: 270ms; }
+.stagger-10 { animation-delay: 300ms; }
+
+/* Animation fill mode utilities */
+.animate-fill-forwards {
+  animation-fill-mode: forwards;
+}
+.animate-fill-backwards {
+  animation-fill-mode: backwards;
+}
+.animate-fill-both {
+  animation-fill-mode: both;
+}
+
+/* ============ Print Styles ============ */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    @apply bg-white text-black;
+  }
+}

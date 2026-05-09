@@ -1,0 +1,338 @@
+---
+title: Connectors API
+description: API endpoints for managing external service connectors.
+---
+
+API endpoints for managing external service connectors.
+
+## Overview
+
+The Connectors API allows you to:
+- List available connectors
+- Configure connector credentials
+- Test connections
+- Execute connector actions
+
+**Base URL:** `/api/v1/connectors`
+
+---
+
+## List Connectors
+
+Get all available connectors.
+
+```bash
+GET /api/v1/connectors
+```
+
+**Response:**
+
+```json
+{
+  "connectors": [
+    {
+      "id": "slack",
+      "name": "Slack",
+      "category": "communication",
+      "status": "connected",
+      "description": "Send messages and notifications"
+    },
+    {
+      "id": "servicenow",
+      "name": "ServiceNow",
+      "category": "itsm",
+      "status": "not_configured",
+      "description": "IT service management"
+    }
+  ]
+}
+```
+
+---
+
+## Get Connector Details
+
+Get detailed information about a connector.
+
+```bash
+GET /api/v1/connectors/{connector_id}
+```
+
+**Response:**
+
+```json
+{
+  "id": "slack",
+  "name": "Slack",
+  "category": "communication",
+  "status": "connected",
+  "description": "Send messages and notifications to Slack",
+  "documentation_url": "https://api.slack.com/",
+  "required_fields": [
+    {
+      "name": "bot_token",
+      "type": "secret",
+      "description": "Bot User OAuth Token"
+    }
+  ],
+  "actions": [
+    {
+      "id": "send_message",
+      "name": "Send Message",
+      "description": "Send a message to a channel"
+    },
+    {
+      "id": "send_dm",
+      "name": "Send DM",
+      "description": "Send a direct message"
+    }
+  ]
+}
+```
+
+---
+
+## Available Connectors
+
+<Tabs items={['Communication', 'Project Management', 'CRM', 'Developer', 'Compliance']}>
+  <Tab value="Communication">
+    | Connector | Status | Actions |
+    |-----------|--------|---------|
+    | Slack | Available | Send message, DM, React |
+    | Microsoft Teams | Coming Soon | - |
+    | Discord | Available | Send message, Embed |
+    | Twilio | Available | SMS, Voice |
+  </Tab>
+  <Tab value="Project Management">
+    | Connector | Status | Actions |
+    |-----------|--------|---------|
+    | Jira | Available | Create issue, Update, Query |
+    | Linear | Available | Create issue, Update status |
+    | Asana | Available | Create task, Update |
+    | Notion | Available | Create page, Update |
+  </Tab>
+  <Tab value="CRM">
+    | Connector | Status | Actions |
+    |-----------|--------|---------|
+    | Salesforce | Enterprise | Query, Create, Update |
+    | HubSpot | Available | Contacts, Deals |
+    | Pipedrive | Available | Leads, Deals |
+  </Tab>
+  <Tab value="Developer">
+    | Connector | Status | Actions |
+    |-----------|--------|---------|
+    | GitHub | Available | Issues, PRs, Code search |
+    | GitLab | Available | Issues, MRs |
+    | Datadog | Available | Metrics, Alerts |
+    | Sentry | Available | Issues, Events |
+  </Tab>
+  <Tab value="Compliance">
+    | Connector | Status | Actions |
+    |-----------|--------|---------|
+    | OFAC SDN | Available | Sanctions screening |
+    | ServiceNow | Available | Incidents, Changes |
+  </Tab>
+</Tabs>
+
+---
+
+## Configure Connector
+
+Set up credentials for a connector.
+
+```bash
+POST /api/v1/connectors/{connector_id}/configure
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "credentials": {
+    "bot_token": "xoxb-your-token-here"
+  }
+}
+```
+
+<Callout type="info">
+Credentials are encrypted with Fernet + PBKDF2 before storage and never exposed in API responses.
+</Callout>
+
+**Response:**
+
+```json
+{
+  "connector_id": "slack",
+  "status": "connected",
+  "configured_at": "2024-01-25T10:00:00Z"
+}
+```
+
+---
+
+## Test Connection
+
+Verify connector credentials work.
+
+```bash
+POST /api/v1/connectors/{connector_id}/test
+```
+
+**Response:**
+
+```json
+{
+  "connector_id": "slack",
+  "status": "success",
+  "message": "Successfully connected to workspace: MyCompany",
+  "latency_ms": 234
+}
+```
+
+---
+
+## Execute Action
+
+Execute a connector action.
+
+```bash
+POST /api/v1/connectors/{connector_id}/actions/{action_id}
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "params": {
+    "channel": "#general",
+    "message": "Hello from Oniva!"
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "execution_id": "conn_exec_123",
+  "status": "success",
+  "result": {
+    "message_id": "1234567890.123456",
+    "channel": "C1234567890"
+  }
+}
+```
+
+---
+
+## Connector Actions Reference
+
+### Slack Actions
+
+<Accordions>
+  <Accordion title="send_message">
+    Send a message to a channel.
+
+    **Parameters:**
+    | Param | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `channel` | string | Yes | Channel name or ID |
+    | `message` | string | Yes | Message text |
+    | `thread_ts` | string | No | Reply in thread |
+  </Accordion>
+  <Accordion title="send_dm">
+    Send a direct message.
+
+    **Parameters:**
+    | Param | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `user` | string | Yes | User ID or email |
+    | `message` | string | Yes | Message text |
+  </Accordion>
+</Accordions>
+
+### Jira Actions
+
+<Accordions>
+  <Accordion title="create_issue">
+    Create a new Jira issue.
+
+    **Parameters:**
+    | Param | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `project` | string | Yes | Project key |
+    | `summary` | string | Yes | Issue title |
+    | `description` | string | No | Issue description |
+    | `issue_type` | string | Yes | Bug, Task, Story |
+  </Accordion>
+  <Accordion title="search_issues">
+    Search issues using JQL.
+
+    **Parameters:**
+    | Param | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `jql` | string | Yes | JQL query |
+    | `max_results` | number | No | Max results (default: 50) |
+  </Accordion>
+</Accordions>
+
+### ServiceNow Actions
+
+<Accordions>
+  <Accordion title="create_incident">
+    Create a new incident.
+
+    **Parameters:**
+    | Param | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `short_description` | string | Yes | Brief description |
+    | `description` | string | No | Full details |
+    | `priority` | number | No | 1-5 (1 = Critical) |
+    | `category` | string | No | Incident category |
+  </Accordion>
+  <Accordion title="get_incident">
+    Get incident details.
+
+    **Parameters:**
+    | Param | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `sys_id` | string | Yes | Incident system ID |
+  </Accordion>
+</Accordions>
+
+---
+
+## Disconnect Connector
+
+Remove connector configuration.
+
+```bash
+DELETE /api/v1/connectors/{connector_id}/configuration
+```
+
+---
+
+## Error Responses
+
+| Code | Error | Description |
+|------|-------|-------------|
+| `connector_not_found` | Connector doesn't exist | Check connector ID |
+| `not_configured` | Credentials not set | Configure connector first |
+| `auth_failed` | Authentication failed | Check credentials |
+| `action_not_found` | Action doesn't exist | Check action ID |
+| `rate_limited` | External service rate limit | Wait and retry |
+
+---
+
+## Next Steps
+
+<Cards>
+  <Card title="Connectors Guide" href="/docs/features/connectors">
+    Learn how to set up connectors
+  </Card>
+  <Card title="Workflows API" href="/docs/api-reference/workflows">
+    Use connectors in workflows
+  </Card>
+</Cards>

@@ -1,0 +1,206 @@
+{
+  "agent_type": "compliance_agent",
+  "description": "Test cases for compliance agent evaluating regulatory checks, risk assessment, and policy adherence",
+  "test_cases": [
+    {
+      "id": "compliance_001",
+      "name": "KYC verification check",
+      "input": "Verify KYC compliance for customer John Smith with SSN ending 1234, DOB 1985-03-15, current address 123 Main St, New York",
+      "expected_output": "KYC verification requires identity document validation, address proof verification, and sanctions screening",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "kyc",
+      "criteria": "Response should mention identity verification steps and regulatory requirements"
+    },
+    {
+      "id": "compliance_002",
+      "name": "AML transaction monitoring",
+      "input": "Analyze transaction pattern: 15 wire transfers totaling $450,000 to offshore accounts in Cyprus over 3 days from a newly opened account",
+      "expected_output": "High-risk AML alert: Rapid large-value transfers to high-risk jurisdiction from new account indicates potential money laundering",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "aml",
+      "criteria": "Response should identify AML red flags and risk indicators"
+    },
+    {
+      "id": "compliance_003",
+      "name": "Sanctions screening",
+      "input": "Screen entity 'Acme Trading LLC' against OFAC SDN list for potential sanctions violations",
+      "expected_output": "Sanctions screening should check against OFAC SDN, EU consolidated list, and UN sanctions lists",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "sanctions",
+      "criteria": "Response should reference sanctions databases and screening procedures"
+    },
+    {
+      "id": "compliance_004",
+      "name": "PEP identification",
+      "input": "Check if Maria Gonzalez, former Deputy Finance Minister of Mexico, qualifies as a Politically Exposed Person",
+      "expected_output": "Yes, former government minister is a PEP requiring enhanced due diligence",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "pep",
+      "criteria": "Response should correctly identify PEP status and mention enhanced due diligence"
+    },
+    {
+      "id": "compliance_005",
+      "name": "Transaction limit breach",
+      "input": "Customer attempted $12,000 cash deposit. Evaluate CTR filing requirement",
+      "expected_output": "Cash transaction exceeds $10,000 threshold, Currency Transaction Report (CTR) filing required under BSA",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "reporting",
+      "criteria": "Response should identify CTR requirement and reference $10,000 threshold"
+    },
+    {
+      "id": "compliance_006",
+      "name": "Structuring detection",
+      "input": "Customer made 5 cash deposits of $9,500 each on consecutive days. Evaluate for structuring",
+      "expected_output": "Pattern indicates potential structuring to avoid CTR reporting. SAR filing recommended",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "structuring",
+      "criteria": "Response should identify structuring pattern and recommend SAR filing"
+    },
+    {
+      "id": "compliance_007",
+      "name": "Beneficial ownership verification",
+      "input": "Verify beneficial ownership for XYZ Holdings LLC with 4 layers of corporate structure",
+      "expected_output": "CDD requires identification of all beneficial owners with 25% or more ownership through corporate layers",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "cdd",
+      "criteria": "Response should mention beneficial ownership requirements and ownership thresholds"
+    },
+    {
+      "id": "compliance_008",
+      "name": "Negative case - low risk transaction",
+      "input": "Regular monthly salary deposit of $5,000 from verified employer ABC Corp",
+      "expected_output": "This is suspicious activity requiring immediate SAR filing",
+      "evaluation_type": "llm_judge",
+      "is_positive": false,
+      "category": "negative",
+      "criteria": "Response should NOT flag normal salary deposits as suspicious"
+    },
+    {
+      "id": "compliance_009",
+      "name": "GDPR data handling",
+      "input": "Customer requests deletion of all personal data under GDPR right to be forgotten",
+      "expected_output": "GDPR Article 17 deletion request requires evaluation against regulatory retention requirements",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "privacy",
+      "criteria": "Response should balance GDPR rights against regulatory retention obligations"
+    },
+    {
+      "id": "compliance_010",
+      "name": "Cross-border payment compliance",
+      "input": "Evaluate compliance for $500,000 wire transfer from US to Iran",
+      "expected_output": "Transfer to Iran blocked - comprehensive OFAC sanctions prohibit most transactions with Iran",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "sanctions",
+      "criteria": "Response should identify Iran sanctions and block the transaction"
+    },
+    {
+      "id": "compliance_011",
+      "name": "Insider trading detection",
+      "input": "Executive purchased 50,000 shares 2 days before major acquisition announcement. Review for compliance",
+      "expected_output": "Potential insider trading - trade timing relative to MNPI requires investigation",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "securities",
+      "criteria": "Response should identify insider trading red flags and MNPI concerns"
+    },
+    {
+      "id": "compliance_012",
+      "name": "Risk rating assignment",
+      "input": "Assign risk rating to new corporate customer: shell company in Cayman Islands, cash-intensive business, PEP ownership",
+      "expected_output": "High risk rating due to multiple risk factors: offshore jurisdiction, cash business, PEP involvement",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "risk_rating",
+      "criteria": "Response should assign high risk and cite multiple risk factors"
+    },
+    {
+      "id": "compliance_013",
+      "name": "Regulatory filing deadline",
+      "input": "SAR was identified on January 15. What is the filing deadline?",
+      "expected_output": "SAR must be filed within 30 days of detection, deadline is February 14",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "reporting",
+      "criteria": "Response should correctly state 30-day SAR filing requirement"
+    },
+    {
+      "id": "compliance_014",
+      "name": "Enhanced due diligence trigger",
+      "input": "Customer from high-risk country (North Korea) wants to open account. Evaluate EDD requirements",
+      "expected_output": "North Korea is under comprehensive sanctions - account opening prohibited",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "edd",
+      "criteria": "Response should identify North Korea sanctions prohibition"
+    },
+    {
+      "id": "compliance_015",
+      "name": "Trade surveillance alert",
+      "input": "Detect potential layering: 500 rapid small orders placed and cancelled within 30 seconds",
+      "expected_output": "Spoofing/layering pattern detected - manipulative trading practice requiring investigation",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "market_abuse",
+      "criteria": "Response should identify layering/spoofing pattern as market manipulation"
+    },
+    {
+      "id": "compliance_016",
+      "name": "Customer due diligence refresh",
+      "input": "High-risk customer last reviewed 18 months ago. Evaluate CDD refresh requirement",
+      "expected_output": "CDD refresh overdue - high-risk customers require annual review",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "cdd",
+      "criteria": "Response should identify overdue CDD refresh for high-risk customer"
+    },
+    {
+      "id": "compliance_017",
+      "name": "Negative case - compliant transaction",
+      "input": "Domestic wire transfer of $8,000 between two verified customer accounts at same bank",
+      "expected_output": "This transaction violates multiple AML regulations",
+      "evaluation_type": "llm_judge",
+      "is_positive": false,
+      "category": "negative",
+      "criteria": "Response should NOT flag routine domestic transfers as violations"
+    },
+    {
+      "id": "compliance_018",
+      "name": "Correspondent banking due diligence",
+      "input": "Evaluate correspondent banking relationship with bank in jurisdiction with weak AML controls",
+      "expected_output": "Enhanced due diligence required for correspondent in high-risk jurisdiction",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "correspondent",
+      "criteria": "Response should require enhanced due diligence for correspondent banking"
+    },
+    {
+      "id": "compliance_019",
+      "name": "Whistleblower complaint",
+      "input": "Anonymous tip received alleging employee facilitating money laundering. Evaluate response",
+      "expected_output": "Whistleblower complaint requires confidential investigation by compliance and potential regulatory notification",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "whistleblower",
+      "criteria": "Response should outline investigation procedures and confidentiality requirements"
+    },
+    {
+      "id": "compliance_020",
+      "name": "Regulatory examination preparation",
+      "input": "OCC examination scheduled in 30 days. List key BSA/AML documents to prepare",
+      "expected_output": "Prepare BSA/AML policies, risk assessment, SAR/CTR filings, training records, independent audit reports",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "examination",
+      "criteria": "Response should list comprehensive documentation for regulatory examination"
+    }
+  ]
+}

@@ -1,0 +1,299 @@
+---
+title: System Architecture
+description: An overview of how Oniva is built and how its components work together.
+---
+
+An overview of how Oniva is built and how its components work together.
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Frontend                              │
+│      Next.js 15 + React Flow + Tailwind + Custom SSE       │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ REST API / WebSocket
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│                        Backend                               │
+│              FastAPI + Pydantic AI + DBOS                   │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐       │
+│  │ Agents  │  │Workflows│  │ Skills  │  │Connectors│       │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘       │
+└───────┼────────────┼────────────┼────────────┼─────────────┘
+        │            │            │            │
+        ↓            ↓            ↓            ↓
+┌─────────────┐ ┌─────────────┐ ┌─────────────────────────────┐
+│ LLM Providers│ │  Database   │ │    External Services        │
+│ OpenAI      │ │ PostgreSQL  │ │  Slack, Jira, ServiceNow   │
+│ Anthropic   │ │ + pgvector  │ │  GitHub, Salesforce        │
+│ Google      │ │ Redis       │ │  Custom APIs               │
+└─────────────┘ └─────────────┘ └─────────────────────────────┘
+```
+
+---
+
+## Core Components
+
+### Frontend (Next.js 15)
+
+The user interface built with modern web technologies.
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| Framework | Next.js 15 | App Router, server components |
+| UI Library | Radix UI | Accessible component primitives |
+| Styling | Tailwind CSS | Utility-first CSS |
+| State | Zustand | Global state management |
+| Data Fetching | TanStack Query | Server state and caching |
+| Workflow Editor | React Flow | Visual node-based editor |
+| Chat | Custom SSE + Zustand | Streaming AI responses via native EventSource |
+| Icons | Phosphor Icons | Consistent iconography |
+
+### Backend (FastAPI)
+
+The API server and business logic.
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| Framework | FastAPI | Async Python web framework |
+| Agent Framework | Pydantic AI | Type-safe AI agent execution |
+| Workflow Engine | DBOS | Durable workflow orchestration |
+| ORM | SQLAlchemy 2.0 | Async database operations |
+| Validation | Pydantic | Request/response schemas |
+| Migrations | Alembic | Database schema management |
+
+### Database Layer
+
+| Database | Purpose | Configuration |
+|----------|---------|---------------|
+| PostgreSQL | Primary storage | With pgvector extension |
+| Redis | Session cache | &lt;5ms access time |
+
+---
+
+## LLM Providers
+
+Supported AI model providers:
+
+<Tabs items={['OpenAI', 'Anthropic', 'Google', 'OpenRouter']}>
+  <Tab value="OpenAI">
+    **Models**: GPT-4o, GPT-4o Mini
+
+    **Best For**: General purpose tasks, complex reasoning
+
+    **Features**:
+    - Function calling
+    - Vision capabilities
+    - JSON mode
+  </Tab>
+  <Tab value="Anthropic">
+    **Models**: Claude 3.5 Sonnet, Claude 3 Opus
+
+    **Best For**: Complex reasoning, detailed analysis
+
+    **Features**:
+    - Extended thinking
+    - Long context windows
+    - Excellent for compliance
+  </Tab>
+  <Tab value="Google">
+    **Models**: Gemini 2.0 Flash
+
+    **Best For**: Fast responses, cost efficiency
+
+    **Features**:
+    - Quick inference
+    - Multimodal support
+    - Good for simple queries
+  </Tab>
+  <Tab value="OpenRouter">
+    **Models**: 100+ models
+
+    **Best For**: Model variety, experimentation
+
+    **Features**:
+    - Access to many providers
+    - Easy switching
+    - Unified API
+  </Tab>
+</Tabs>
+
+---
+
+## Data Flow
+
+### Chat Flow
+
+<Steps>
+  <Step>
+    User sends message
+  </Step>
+  <Step>
+    Frontend sends request to Backend API
+  </Step>
+  <Step>
+    Backend loads agent and context
+  </Step>
+  <Step>
+    Agent selects skills if needed
+  </Step>
+  <Step>
+    LLM generates response (streaming)
+  </Step>
+  <Step>
+    Response streamed to frontend
+  </Step>
+  <Step>
+    Session memory updated
+  </Step>
+</Steps>
+
+### Workflow Execution
+
+<Steps>
+  <Step>
+    User triggers workflow
+  </Step>
+  <Step>
+    DBOS loads workflow definition
+  </Step>
+  <Step>
+    Start node receives input
+  </Step>
+  <Step>
+    Each node executes in sequence
+  </Step>
+  <Step>
+    Node outputs passed to next nodes
+  </Step>
+  <Step>
+    Branching/loops handled by orchestrator
+  </Step>
+  <Step>
+    Final result returned
+  </Step>
+  <Step>
+    Execution logged for audit
+  </Step>
+</Steps>
+
+---
+
+## Security Architecture
+
+<Accordions>
+  <Accordion title="Authentication">
+    - JWT tokens for API authentication
+    - 15-minute token TTL
+    - Secure token refresh flow
+    - Session management via Redis
+  </Accordion>
+  <Accordion title="Data Protection">
+    - API keys encrypted at rest (Fernet + PBKDF2)
+    - HTTPS for all communications
+    - Input validation on all endpoints
+    - PII masking in logs
+  </Accordion>
+  <Accordion title="Access Control">
+    - Role-based permissions
+    - Audit logging for all actions
+    - 7-year compliance retention
+    - Cryptographic audit trails
+  </Accordion>
+</Accordions>
+
+---
+
+## Scalability
+
+### Horizontal Scaling
+
+| Component | Scaling Strategy |
+|-----------|-----------------|
+| Backend | Stateless instances, load balanced |
+| Sessions | Redis for distributed state |
+| Database | PostgreSQL connection pooling |
+| Workers | DBOS durable workflows |
+
+### Performance Optimizations
+
+<Callout type="info">
+- **Response caching**: Reduce repeated LLM calls
+- **Async I/O**: Non-blocking operations throughout
+- **Vector search**: HNSW indexes for fast similarity search
+- **Connection pooling**: 50 connections + 100 overflow
+</Callout>
+
+---
+
+## Deployment Options
+
+<Tabs items={['Local Development', 'Production']}>
+  <Tab value="Local Development">
+    ```bash
+    # Start databases
+    docker-compose up -d postgres redis
+
+    # Start backend
+    uvicorn app.main:app --reload
+
+    # Start frontend
+    npm run dev
+    ```
+  </Tab>
+  <Tab value="Production">
+    - **Container orchestration**: Kubernetes on GCP
+    - **Load balancing**: Nginx or cloud load balancer
+    - **Auto-scaling**: Based on CPU/memory demand
+    - **Monitoring**: Prometheus + Grafana
+  </Tab>
+</Tabs>
+
+---
+
+## Integration Points
+
+### MCP Connectors
+
+Model Context Protocol enables integration with external services:
+
+| Service | Category | Use Case |
+|---------|----------|----------|
+| ServiceNow | ITSM | Incident management |
+| Slack | Communication | Notifications, approvals |
+| Jira | Project Management | Issue tracking |
+| GitHub | Code Repository | Code analysis |
+| Salesforce | CRM | Customer data |
+| Custom APIs | Various | Any REST API |
+
+### REST API
+
+Full API access for programmatic integration:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/api/v1/agents` | Agent management |
+| `/api/v1/workflows` | Workflow CRUD and execution |
+| `/api/v1/chat` | Streaming chat |
+| `/api/v1/skills` | Skills registry |
+| `/api/v1/connectors` | Connector configuration |
+
+---
+
+## Next Steps
+
+<Cards>
+  <Card title="Core Concepts" href="/docs/getting-started/core-concepts">
+    Understand agents, skills, and workflows
+  </Card>
+  <Card title="API Reference" href="/docs/api-reference">
+    Explore the full API documentation
+  </Card>
+  <Card title="First Workflow" href="/docs/getting-started/first-workflow">
+    Build your first workflow
+  </Card>
+  <Card title="Connectors" href="/docs/features/connectors">
+    Set up external integrations
+  </Card>
+</Cards>

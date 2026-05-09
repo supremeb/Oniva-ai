@@ -1,0 +1,125 @@
+---
+title: Introduction to Oniva
+description: Welcome to Oniva, an enterprise AI platform for building intelligent automation workflows without code.
+---
+
+Welcome to Oniva, an enterprise AI platform for building intelligent automation workflows without code.
+
+## What is Oniva?
+
+Oniva is a platform that lets you create AI-powered agents and workflows to automate complex business processes. Whether you're in finance, healthcare, legal, retail, or any other industry, Oniva helps you:
+
+- **Automate Repetitive Tasks**: Let AI agents handle routine work like data processing, document analysis, and report generation
+- **Build Custom Workflows**: Create multi-step processes that chain together agents, APIs, and business logic
+- **Integrate External Systems**: Connect to your existing tools through MCP connectors (Slack, Jira, Salesforce, etc.)
+- **Maintain Oversight**: Keep humans in the loop for important decisions with approval workflows
+
+## Key Capabilities
+
+### Pre-Built AI Agents
+
+Oniva includes specialized agents ready to use:
+
+| Agent | Purpose | Use Cases |
+|-------|---------|-----------|
+| **Analysis Agent** | Data analysis and calculations | Reports, metrics, data transformations |
+| **Research Agent** | Document search and Q&A | Policy research, knowledge retrieval |
+| **Data Retrieval Agent** | Fetch data from external systems | API integration, database queries |
+| **Custom Agents** | Your specialized workflows | Any industry-specific automation |
+
+### Visual Workflow Builder
+
+Create complex automations without code using our drag-and-drop interface:
+
+- **Agent Nodes**: Execute AI agents with specific instructions
+- **LLM Nodes**: Direct language model calls for flexibility
+- **Logic Nodes**: Conditional branching, loops, classification
+- **Connector Nodes**: Integrate with external systems
+- **Data Nodes**: Transform, aggregate, validate data
+- **Output Nodes**: Format and deliver results
+
+### Skills Library
+
+Skills are reusable capabilities that agents can use:
+
+- **Web Skills**: Search, browse URLs, extract data from websites
+- **Code Skills**: Execute Python, analyze code, generate charts
+- **Document Skills**: Parse PDFs, extract entities, summarize content
+- **Memory Skills**: Store and retrieve information across sessions
+- **File Skills**: Read/write files, parse documents
+
+### MCP Connectors
+
+Connect to external tools and services:
+
+- **ServiceNow**: Incident management and IT workflows
+- **Slack**: Team notifications and approvals
+- **Salesforce**: CRM data access
+- **Jira**: Issue tracking and project management
+- **GitHub**: Code repository integration
+
+## Who Should Use Oniva?
+
+<Tabs items={['Business Analysts', 'Operations Teams', 'Developers', 'IT Administrators']}>
+  <Tab value="Business Analysts">
+    Automate data gathering, analysis, and reporting:
+    - Build data pipelines that run automatically
+    - Generate insights from multiple data sources
+    - Create recurring reports without manual work
+  </Tab>
+  <Tab value="Operations Teams">
+    Streamline processes and reduce manual work:
+    - Automate approval workflows
+    - Set up notification pipelines
+    - Create document processing automations
+  </Tab>
+  <Tab value="Developers">
+    Build custom agents and integrate with existing systems:
+    - Create specialized agents for your workflows
+    - Connect to APIs and databases
+    - Extend platform capabilities with custom skills
+  </Tab>
+  <Tab value="IT Administrators">
+    Manage the platform and ensure smooth operations:
+    - Configure connectors and integrations
+    - Monitor system performance
+    - Manage API keys and access
+  </Tab>
+</Tabs>
+
+## Architecture Highlights
+
+<Callout type="info">
+Oniva is built on a modern, scalable architecture designed for enterprise workloads.
+</Callout>
+
+- **Backend**: FastAPI (Python) with async support for high performance
+- **Database**: PostgreSQL with vector search for semantic queries
+- **Caching**: Redis for fast session memory (&lt;5ms response times)
+- **Agent Framework**: Pydantic AI for type-safe agent execution
+- **Workflow Engine**: DBOS for durable, fault-tolerant orchestration
+- **Frontend**: Next.js 15 with real-time streaming chat
+- **LLM Providers**: Multi-provider support (OpenAI, Anthropic, Google, OpenRouter)
+
+## Getting Started
+
+Ready to dive in? Here's your path forward:
+
+<Steps>
+  <Step>
+    **[Quick Start Guide](/docs/getting-started/quick-start)**: Get up and running in 5 minutes
+  </Step>
+  <Step>
+    **[Core Concepts](/docs/getting-started/core-concepts)**: Understand agents, workflows, and skills
+  </Step>
+  <Step>
+    **[First Workflow](/docs/getting-started/first-workflow)**: Create your first automated workflow
+  </Step>
+</Steps>
+
+## Support & Resources
+
+- **Documentation**: Navigate using the sidebar
+- **API Reference**: [/docs/api-reference](/docs/api-reference)
+- **GitHub Issues**: Report bugs and request features
+

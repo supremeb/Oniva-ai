@@ -1,0 +1,818 @@
+---
+title: "Your First Workflow: Loan Approval Automation"
+description: Build a production-ready loan approval workflow with compliance checks, risk assessment, and human review routing.
+---
+
+This tutorial will guide you through creating a complete loan approval workflow from scratch. You'll learn how to use the visual workflow designer, configure nodes, test execution, and monitor results.
+
+**What You'll Build**:
+A production-ready loan approval workflow that:
+- Retrieves applicant credit data
+- Performs KYC/AML compliance checks
+- Calculates financial ratios
+- Makes approval decisions based on risk
+- Routes high-risk applications to human review
+
+<Callout type="info">
+**Time to Complete**: 30-45 minutes
+
+**Prerequisites**:
+- Oniva account with Workflow Designer access
+- Basic understanding of [Core Concepts](/docs/getting-started/core-concepts)
+- API keys configured (if using external connectors)
+</Callout>
+
+---
+
+## Step 1: Access the Workflow Designer
+
+<Steps>
+  <Step>
+    Log in to Oniva
+  </Step>
+  <Step>
+    Navigate to **Workflows** in the left sidebar
+  </Step>
+  <Step>
+    Click **Create New Workflow**
+  </Step>
+  <Step>
+    Enter workflow name: `Loan Approval - Tutorial`
+  </Step>
+  <Step>
+    Add description: `Automated loan application review with compliance checks`
+  </Step>
+  <Step>
+    Click **Create**
+  </Step>
+</Steps>
+
+You'll see the visual workflow canvas with a **Start** node already placed.
+
+---
+
+## Step 2: Configure the Start Node
+
+The Start node defines inputs your workflow will receive.
+
+<Steps>
+  <Step>
+    Click the **Start** node to open properties panel
+  </Step>
+  <Step>
+    Define input schema:
+    ```json
+    {
+      "applicant_id": "string",
+      "requested_amount": "number",
+      "loan_purpose": "string",
+      "applicant_ssn": "string",
+      "applicant_name": "string",
+      "annual_income": "number"
+    }
+    ```
+  </Step>
+  <Step>
+    Add input validation rules:
+    - `requested_amount`: Minimum $1,000, Maximum $500,000
+    - `annual_income`: Minimum $20,000
+    - `applicant_ssn`: Format XXX-XX-XXXX
+  </Step>
+  <Step>
+    Click **Save**
+  </Step>
+</Steps>
+
+<Callout type="warn">
+**Best Practice**: Always validate inputs at the start to catch errors early.
+</Callout>
+
+---
+
+## Step 3: Add Credit Bureau Data Retrieval
+
+Now we'll fetch the applicant's credit report.
+
+### Add Data Retrieval Agent Node
+
+<Steps>
+  <Step>
+    Click **Add Node** button or press `N`
+  </Step>
+  <Step>
+    Select **Agent** from node types
+  </Step>
+  <Step>
+    Choose **Data Retrieval Agent**
+  </Step>
+  <Step>
+    Name the node: `Fetch Credit Report`
+  </Step>
+</Steps>
+
+### Configure the Node
+
+```yaml
+Agent: Data Retrieval Agent
+Instructions: |
+  Retrieve the credit report for applicant SSN: {{start.applicant_ssn}}
+
+  Extract and return:
+  - Credit score
+  - Total debt
+  - Monthly debt payments
+  - Delinquencies in last 24 months
+  - Credit history length (years)
+
+Skills Enabled:
+  - credit_bureau_credit_report (requires Phase 3)
+  - Or use mock data for testing
+
+Output Variables:
+  credit_score: number
+  total_debt: number
+  monthly_debt: number
+  delinquencies: number
+  credit_history_years: number
+```
+
+### Connect to Start Node
+
+1. Drag from Start node's output port
+2. Drop on Credit Report node's input port
+3. Green line indicates connection
+
+<Callout type="info">
+**Testing Tip**: Use the **Test with Mock Data** feature to simulate credit bureau responses during development.
+</Callout>
+
+---
+
+## Step 4: Add KYC/AML Compliance Check
+
+Verify the applicant meets regulatory requirements.
+
+### Add Compliance Agent Node
+
+<Steps>
+  <Step>
+    Add new **Agent** node
+  </Step>
+  <Step>
+    Select **Compliance Agent**
+  </Step>
+  <Step>
+    Name: `KYC/AML Screening`
+  </Step>
+  <Step>
+    Connect from `Fetch Credit Report` node
+  </Step>
+</Steps>
+
+### Configure Compliance Check
+
+```yaml
+Agent: Compliance Agent
+Instructions: |
+  Perform comprehensive KYC/AML screening for:
+  - Name: {{start.applicant_name}}
+  - SSN: {{start.applicant_ssn}}
+  - Loan Amount: ${{start.requested_amount}}
+
+  Check:
+  1. Identity verification
+  2. OFAC sanctions screening
+  3. PEP (Politically Exposed Person) status
+  4. Transaction risk assessment
+
+  Return structured results with pass/fail status and risk score.
+
+Skills Enabled:
+  - kyc_verification
+  - aml_screening
+  - sanctions_check
+  - risk_assessment
+
+Extended Thinking: Enabled
+  (Captures reasoning for regulatory audit)
+
+Output Variables:
+  kyc_status: "passed" | "failed" | "review_required"
+  aml_flags: array
+  risk_score: number (0-10)
+  compliance_notes: string
+```
+
+<Callout type="warn">
+**Important**: Extended thinking creates an audit trail required for regulatory examination.
+</Callout>
+
+---
+
+## Step 5: Calculate Financial Metrics
+
+Use the Analysis Agent to calculate debt-to-income ratio.
+
+### Add Analysis Agent Node
+
+<Steps>
+  <Step>
+    Add **Agent** node
+  </Step>
+  <Step>
+    Select **Analysis Agent**
+  </Step>
+  <Step>
+    Name: `Calculate DTI Ratio`
+  </Step>
+  <Step>
+    Connect from `KYC/AML Screening`
+  </Step>
+</Steps>
+
+### Configure Financial Calculation
+
+```yaml
+Agent: Analysis Agent
+Instructions: |
+  Calculate the debt-to-income (DTI) ratio:
+
+  Monthly gross income: ${{start.annual_income / 12}}
+  Existing monthly debt: ${{fetch_credit_report.monthly_debt}}
+  Proposed loan payment (estimate): Calculate for ${{start.requested_amount}} at 7% APR, 30-year term
+
+  Return:
+  - DTI ratio (existing debt only)
+  - Projected DTI ratio (including new loan)
+  - Assessment (acceptable if < 43%, high_risk if >= 43%)
+
+Skills Enabled:
+  - execute_python
+
+Output Variables:
+  current_dti: number
+  projected_dti: number
+  monthly_payment: number
+  dti_assessment: string
+```
+
+<Callout type="info">
+**Pro Tip**: The Analysis Agent can execute Python code in a sandboxed environment for complex calculations.
+</Callout>
+
+---
+
+## Step 6: Add Risk Assessment Logic
+
+Create a conditional node to route based on risk.
+
+### Add Condition Node
+
+<Steps>
+  <Step>
+    Add **Condition** node
+  </Step>
+  <Step>
+    Name: `Risk Evaluation`
+  </Step>
+  <Step>
+    Connect from `Calculate DTI Ratio`
+  </Step>
+</Steps>
+
+### Configure Decision Logic
+
+```yaml
+Node Type: Condition
+Name: Risk Evaluation
+
+Conditions:
+  1. Auto-Approve Path:
+     Expression: |
+       credit_score >= 700 AND
+       projected_dti < 43 AND
+       kyc_status == "passed" AND
+       risk_score < 5 AND
+       requested_amount <= 250000 AND
+       delinquencies == 0
+
+     Label: "Low Risk - Auto Approve"
+
+  2. Human Review Path:
+     Expression: |
+       credit_score >= 640 AND
+       projected_dti < 50 AND
+       kyc_status != "failed" AND
+       risk_score < 8
+
+     Label: "Medium Risk - HITL Review"
+
+  3. Auto-Deny Path:
+     Expression: true (default/catch-all)
+     Label: "High Risk - Auto Deny"
+```
+
+**Understanding Conditions**:
+- Conditions evaluated in order (top to bottom)
+- First matching condition determines route
+- Use `true` as final catch-all condition
+
+---
+
+## Step 7: Handle Auto-Approve Path
+
+Create the success output for approved applications.
+
+### Add Template Node
+
+<Steps>
+  <Step>
+    Add **Template** node
+  </Step>
+  <Step>
+    Name: `Generate Approval Letter`
+  </Step>
+  <Step>
+    Connect from `Risk Evaluation` -> "Low Risk" output
+  </Step>
+</Steps>
+
+### Configure Approval Template
+
+The template generates a professional approval notice with:
+- Loan details (amount, rate, term)
+- Financial assessment summary
+- Next steps for the applicant
+- Compliance reference IDs
+
+---
+
+## Step 8: Handle HITL Review Path
+
+Route medium-risk applications to human reviewers.
+
+### Add HITL Node
+
+<Steps>
+  <Step>
+    Add **Human-in-the-Loop** node
+  </Step>
+  <Step>
+    Name: `Loan Officer Review`
+  </Step>
+  <Step>
+    Connect from `Risk Evaluation` -> "Medium Risk" output
+  </Step>
+</Steps>
+
+### Configure HITL Review
+
+```yaml
+Node Type: HITL Review
+Reviewer Role: loan_officer
+
+Review Context:
+  Applicant: {{start.applicant_name}}
+  Amount: ${{start.requested_amount}}
+  Credit Score: {{fetch_credit_report.credit_score}}
+  DTI Ratio: {{calculate_dti.projected_dti}}%
+  AML Risk: {{kyc_aml.risk_score}}/10
+
+Approval Options:
+  - Approve
+  - Deny
+  - Request Additional Information
+
+Required Fields:
+  - Decision (required)
+  - Underwriter Notes (required, min 50 characters)
+  - Conditions (optional, if approved with stipulations)
+
+Timeout: 48 hours (escalate to manager if no response)
+```
+
+<Callout type="info">
+**HITL Best Practices**:
+- Provide complete context to reviewers
+- Set reasonable timeouts
+- Require detailed notes for audit trail
+- Escalate stale reviews automatically
+</Callout>
+
+---
+
+## Step 9: Handle Auto-Deny Path
+
+Create denial notification for high-risk applications.
+
+### Add Template Node
+
+<Steps>
+  <Step>
+    Add **Template** node
+  </Step>
+  <Step>
+    Name: `Generate Denial Letter`
+  </Step>
+  <Step>
+    Connect from `Risk Evaluation` -> "High Risk" output
+  </Step>
+</Steps>
+
+The denial template includes:
+- Specific reasons for denial (ECOA compliance)
+- Applicant rights under ECOA
+- Steps to improve and reapply
+- Compliance reference IDs
+
+<Callout type="warn">
+**Legal Compliance**: ECOA (Equal Credit Opportunity Act) requires specific reasons for denial. This template ensures compliance.
+</Callout>
+
+---
+
+## Step 10: Add Final Output Node
+
+Consolidate all paths into a single output.
+
+### Add Aggregator Node
+
+<Steps>
+  <Step>
+    Add **Aggregator** node
+  </Step>
+  <Step>
+    Name: `Consolidate Results`
+  </Step>
+  <Step>
+    Connect ALL three paths (Approve, HITL, Deny) to this node
+  </Step>
+</Steps>
+
+### Add Output Node
+
+<Steps>
+  <Step>
+    Add **Output** node
+  </Step>
+  <Step>
+    Name: `Workflow Complete`
+  </Step>
+  <Step>
+    Connect from `Consolidate Results`
+  </Step>
+</Steps>
+
+---
+
+## Step 11: Test Your Workflow
+
+Before production deployment, thoroughly test your workflow.
+
+### Test Cases
+
+<Tabs items={['Low-Risk (Auto-Approve)', 'Medium-Risk (HITL)', 'High-Risk (Auto-Deny)']}>
+  <Tab value="Low-Risk (Auto-Approve)">
+    ```json
+    {
+      "applicant_id": "TEST-001",
+      "applicant_name": "Jane Doe",
+      "applicant_ssn": "123-45-6789",
+      "requested_amount": 200000,
+      "loan_purpose": "Home Purchase",
+      "annual_income": 95000
+    }
+    ```
+    **Expected**: Credit score 750, DTI 28%, Auto-Approved
+  </Tab>
+  <Tab value="Medium-Risk (HITL)">
+    ```json
+    {
+      "applicant_id": "TEST-002",
+      "applicant_name": "John Smith",
+      "applicant_ssn": "987-65-4321",
+      "requested_amount": 180000,
+      "loan_purpose": "Home Purchase",
+      "annual_income": 62000
+    }
+    ```
+    **Expected**: Credit score 680, DTI 41%, Sent to HITL Review
+  </Tab>
+  <Tab value="High-Risk (Auto-Deny)">
+    ```json
+    {
+      "applicant_id": "TEST-003",
+      "applicant_name": "Bob Johnson",
+      "applicant_ssn": "555-12-3456",
+      "requested_amount": 150000,
+      "loan_purpose": "Home Purchase",
+      "annual_income": 45000
+    }
+    ```
+    **Expected**: Credit score 590, DTI 52%, Auto-Denied
+  </Tab>
+</Tabs>
+
+### Review Test Results
+
+1. Click on each node to see outputs
+2. Verify data flows correctly between nodes
+3. Check conditional routing worked
+4. Review final output format
+
+---
+
+## Step 12: Monitor Execution
+
+Watch your workflow execute in real-time.
+
+### Execution View Features
+
+**Visual Progress**:
+- Green checkmark: Node completed successfully
+- Blue pulse: Node currently executing
+- Red X: Node failed
+- Yellow warning: Node needs attention
+
+**Performance Metrics**:
+- Total execution time: ~8 seconds
+- Nodes executed: 7 of 9 (conditional paths)
+- Tokens used: ~3,450
+- Estimated cost: ~$0.07
+
+---
+
+## Step 13: Configure Error Handling
+
+Make your workflow resilient to failures.
+
+### Error Handler Configuration
+
+```yaml
+Error Handling:
+  Retry Policy:
+    Max Attempts: 3
+    Backoff: Exponential (1s, 2s, 4s)
+    Retry On:
+      - Network timeout
+      - Rate limit exceeded
+      - Temporary service unavailability
+
+  Fallback Behavior:
+    On Permanent Failure:
+      - Log error to audit trail
+      - Send to manual review queue
+      - Notify: loan_ops_team@example.com
+
+    Timeout: 30 seconds per attempt
+
+  Circuit Breaker:
+    Enabled: true
+    Failure Threshold: 5 failures in 1 minute
+    Reset After: 5 minutes
+```
+
+---
+
+## Step 14: Deploy to Production
+
+Make your workflow live.
+
+### Pre-Deployment Checklist
+
+- [ ] Test all execution paths (approve, deny, HITL)
+- [ ] Verify error handling works
+- [ ] Review audit trail entries
+- [ ] Confirm HITL routing to correct reviewers
+- [ ] Validate output format matches API contract
+- [ ] Check compliance requirements met
+- [ ] Load test with expected volume (if applicable)
+- [ ] Document workflow for operations team
+
+### Deployment Process
+
+<Steps>
+  <Step>
+    Click **Deploy** button
+  </Step>
+  <Step>
+    Select environment: **Production**
+  </Step>
+  <Step>
+    Add deployment notes with version, changes, and approver
+  </Step>
+  <Step>
+    Set deployment schedule (Immediate, Scheduled, or Gradual Rollout)
+  </Step>
+  <Step>
+    Click **Deploy**
+  </Step>
+</Steps>
+
+---
+
+## Step 15: Integrate via API
+
+Call your workflow programmatically.
+
+### REST API Integration
+
+**Endpoint**: `POST /api/v1/workflows/{workflow_id}/execute`
+
+**Example: cURL**
+```bash
+curl -X POST https://api.oniva.ai/api/v1/workflows/wf_loan_approval_123/execute \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "applicant_id": "APP-2026-00145",
+    "applicant_name": "Jane Doe",
+    "applicant_ssn": "123-45-6789",
+    "requested_amount": 250000,
+    "loan_purpose": "Home Purchase",
+    "annual_income": 95000
+  }'
+```
+
+**Example: Python**
+```python
+import requests
+
+url = "https://api.oniva.ai/api/v1/workflows/wf_loan_approval_123/execute"
+headers = {
+    "Authorization": "Bearer YOUR_API_KEY",
+    "Content-Type": "application/json"
+}
+payload = {
+    "applicant_id": "APP-2026-00145",
+    "applicant_name": "Jane Doe",
+    "applicant_ssn": "123-45-6789",
+    "requested_amount": 250000,
+    "loan_purpose": "Home Purchase",
+    "annual_income": 95000
+}
+
+response = requests.post(url, json=payload, headers=headers)
+result = response.json()
+
+print(f"Decision: {result['decision']}")
+print(f"Execution ID: {result['workflow_id']}")
+```
+
+**Example: TypeScript**
+```typescript
+const executeWorkflow = async (applicantData: ApplicantInput) => {
+  const response = await fetch(
+    'https://api.oniva.ai/api/v1/workflows/wf_loan_approval_123/execute',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.ONIVA_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(applicantData)
+    }
+  );
+
+  return response.json();
+};
+```
+
+---
+
+## Common Patterns & Best Practices
+
+<Accordions>
+  <Accordion title="Pattern 1: Conditional Routing Based on Business Rules">
+    ```yaml
+    Condition Node: Risk Assessment
+      Rule 1: VIP Customer Fast Track
+        Expression: customer.vip_status == true AND requested_amount < 100000
+        Route: Auto-Approve (VIP)
+
+      Rule 2: Standard Low Risk
+        Expression: credit_score >= 700 AND dti < 43
+        Route: Auto-Approve (Standard)
+
+      Rule 3: Medium Risk Manual Review
+        Expression: credit_score >= 640 AND dti < 50
+        Route: HITL Review
+
+      Rule 4: Catch-all Deny
+        Expression: true
+        Route: Auto-Deny
+    ```
+  </Accordion>
+  <Accordion title="Pattern 2: Parallel Processing for Speed">
+    Execute independent checks in parallel:
+
+    - Branch 1: Credit Bureau Check (2-3 seconds)
+    - Branch 2: KYC/AML Screening (3-4 seconds)
+    - Branch 3: Employment Verification (2-3 seconds)
+
+    Then: Aggregator Node waits for all 3 to complete
+
+    **Result**: 4 seconds total vs 9 seconds sequential
+  </Accordion>
+  <Accordion title="Pattern 3: Iterative Processing">
+    Process multiple items (batch screening):
+    ```yaml
+    Iterator Node: Screen Transaction Batch
+      Input: Array of transactions from previous node
+      Loop Variable: transaction
+
+      Loop Body:
+        1. AML Screening (transaction)
+        2. Risk Assessment (transaction)
+        3. Store Result
+
+      Aggregation: Collect all results into array
+    ```
+  </Accordion>
+  <Accordion title="Pattern 4: Graceful Degradation">
+    Handle service outages gracefully:
+    ```yaml
+    Credit Bureau Node:
+      Primary: Credit Bureau API
+
+      Error Handler:
+        On Service Unavailable:
+          - Log error
+          - Switch to: Alternative Credit Scorer
+          - If also fails: Use historical credit data
+          - Last resort: Route to manual review
+    ```
+  </Accordion>
+</Accordions>
+
+---
+
+## Troubleshooting
+
+<Accordions>
+  <Accordion title="Workflow Times Out">
+    **Symptom**: Execution exceeds 2-minute timeout
+
+    **Cause**: External API (credit bureau) slow to respond
+
+    **Solution**:
+    1. Add timeout to API call node (30 seconds)
+    2. Implement retry with exponential backoff
+    3. Add fallback to cached data if available
+    4. Consider async pattern with webhooks for slow APIs
+  </Accordion>
+  <Accordion title="HITL Queue Overflows">
+    **Symptom**: 100+ applications in review queue
+
+    **Cause**: Risk thresholds too strict, routing too many to HITL
+
+    **Solution**:
+    1. Analyze HITL approval rate (if >90% approved, loosen threshold)
+    2. Adjust risk score threshold: 7 -> 8 (fewer HITL routes)
+    3. Train additional reviewers
+    4. Implement auto-escalation for stale reviews (>48 hours)
+  </Accordion>
+  <Accordion title="Inconsistent Decisions">
+    **Symptom**: Similar applications get different decisions
+
+    **Cause**: Agent not deterministic, using conversation history inconsistently
+
+    **Solution**:
+    1. Ensure all decision factors explicitly in prompt
+    2. Disable session memory for workflows (use only workflow variables)
+    3. Set model temperature to 0 (deterministic)
+    4. Add extensive logging to compare decision paths
+  </Accordion>
+  <Accordion title="High Cost">
+    **Symptom**: $500/month for 1,000 executions
+
+    **Cause**: Using GPT-4 for all steps, large context windows
+
+    **Solution**:
+    1. Switch to Claude 3.5 Sonnet (40% cheaper)
+    2. Enable prompt caching (80% savings)
+    3. Use model routing (cheaper models for low-risk)
+    4. Reduce context size (only essential data in prompts)
+  </Accordion>
+</Accordions>
+
+---
+
+## Next Steps
+
+Congratulations! You've built a complete loan approval workflow.
+
+<Cards>
+  <Card title="Workflow Orchestration" href="/docs/architecture">
+    Deep dive into DBOS engine and execution patterns
+  </Card>
+  <Card title="Custom Agents" href="/docs/features/ai-agents">
+    Build specialized loan officer agents
+  </Card>
+  <Card title="API Integration" href="/docs/api-reference">
+    Programmatic workflow control
+  </Card>
+  <Card title="Troubleshooting" href="/docs/troubleshooting/common-issues">
+    Solve common problems
+  </Card>
+</Cards>

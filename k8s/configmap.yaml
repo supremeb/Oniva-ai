@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oniva-config
+  namespace: oniva
+data:
+  DEBUG: "false"
+  ENVIRONMENT: "production"
+  DEFAULT_LLM_PROVIDER: "openrouter"
+  DEFAULT_LLM_MODEL: "openai/gpt-4o-mini"
+  RATE_LIMIT_ENABLED: "true"
+  DEFAULT_RATE_LIMIT: "100"

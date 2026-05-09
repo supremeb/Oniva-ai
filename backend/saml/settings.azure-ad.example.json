@@ -1,0 +1,76 @@
+{
+    "_comment": "SAML Configuration for Azure Active Directory (Microsoft Entra ID)",
+    "_instructions": [
+        "1. In Azure Portal, go to Enterprise Applications > New Application > Create your own",
+        "2. Choose 'Integrate any other application you don't find in the gallery (Non-gallery)'",
+        "3. Go to Single Sign-On > SAML",
+        "4. Set Identifier (Entity ID): https://your-app.example.com/api/v1/auth/saml/metadata",
+        "5. Set Reply URL (ACS URL): https://your-app.example.com/api/v1/auth/saml/acs",
+        "6. Set Sign on URL: https://your-app.example.com/api/v1/auth/saml/login",
+        "7. Configure User Attributes & Claims (email, name, groups)",
+        "8. Download Federation Metadata XML and extract values for 'idp' section",
+        "9. Save as 'settings.json' in this directory"
+    ],
+
+    "strict": true,
+    "debug": false,
+
+    "sp": {
+        "entityId": "https://your-app.example.com/api/v1/auth/saml/metadata",
+        "assertionConsumerService": {
+            "url": "https://your-app.example.com/api/v1/auth/saml/acs",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+        },
+        "singleLogoutService": {
+            "url": "https://your-app.example.com/api/v1/auth/saml/sls",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        "x509cert": "",
+        "privateKey": ""
+    },
+
+    "idp": {
+        "_comment": "Get these values from Azure Portal > Enterprise Applications > Your App > Single Sign-On > SAML Signing Certificate section",
+        "entityId": "https://sts.windows.net/your-tenant-id/",
+        "singleSignOnService": {
+            "url": "https://login.microsoftonline.com/your-tenant-id/saml2",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "singleLogoutService": {
+            "url": "https://login.microsoftonline.com/your-tenant-id/saml2",
+            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+        },
+        "x509cert": "MIIC8DCCAdi... (download from Azure - Base64 Certificate)"
+    },
+
+    "security": {
+        "nameIdEncrypted": false,
+        "authnRequestsSigned": false,
+        "logoutRequestSigned": false,
+        "logoutResponseSigned": false,
+        "signMetadata": false,
+        "wantMessagesSigned": true,
+        "wantAssertionsSigned": true,
+        "wantAssertionsEncrypted": false,
+        "wantNameIdEncrypted": false,
+        "requestedAuthnContext": false,
+        "wantNameId": true,
+        "signatureAlgorithm": "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+        "digestAlgorithm": "http://www.w3.org/2001/04/xmlenc#sha256"
+    },
+
+    "_attribute_mapping": {
+        "_comment": "Azure AD default SAML claims - configure in User Attributes & Claims",
+        "email": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+        "name": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
+        "firstName": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+        "lastName": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+        "groups": "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+    },
+
+    "_group_mapping_example": {
+        "_comment": "Use SAML_GROUP_MAPPING env var to map Azure AD group IDs to roles",
+        "_example": "SAML_GROUP_MAPPING={\"abc-123-def\": \"admin\", \"xyz-789-uvw\": \"analyst\"}"
+    }
+}

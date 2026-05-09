@@ -1,0 +1,564 @@
+---
+title: Visual Workflow Builder
+description: Create automated AI workflows by connecting nodes together on a visual canvas.
+---
+
+Build powerful automation by connecting nodes on a visual canvas. Right-click anywhere to add nodes, drag connections between them, and create sophisticated AI workflows without writing code.
+
+![Workflow Editor](/docs/images/workflows/workflow-example-support-ticket.png)
+
+## Getting Started
+
+### Opening the Workflow Editor
+
+1. Navigate to **Workflows** from the sidebar
+2. Click **New Workflow** or select an existing workflow
+3. The visual canvas opens with a Start node
+
+### Adding Nodes
+
+**Right-click** anywhere on the canvas to open the node menu. You can:
+- Search for nodes by name
+- Browse by category
+- Click a node to add it at that position
+
+![Node Context Menu](/docs/images/workflows/node-context-menu.png)
+
+### Connecting Nodes
+
+1. Hover over a node's output handle (right side)
+2. Click and drag to another node's input handle (left side)
+3. Release to create the connection
+
+Connections show how data flows through your workflow. Each node processes the data and passes results to the next node.
+
+### Configuring Nodes
+
+Click any node to open its configuration panel on the right side. Each node type has different settings - see the node reference below for details.
+
+![Node Configuration](/docs/images/workflows/node-llm-config.png)
+
+---
+
+## Node Categories
+
+Oniva provides **29 node types** organized into 7 categories:
+
+| Category | Nodes | Purpose |
+|----------|-------|---------|
+| **Agents & Integrations** | Agent, Skill, Connector | AI agents, skills, and external integrations |
+| **Financial Agents** | Data Retrieval, Analysis, Compliance, Research | Specialized financial AI capabilities |
+| **Basic** | Start, LLM, Knowledge Retrieval, End | Core workflow building blocks |
+| **Logic** | IF/ELSE, Iteration, Classifier, Wait, Sub-Workflow, Human Approval | Flow control and decision making |
+| **Transform** | Code, Template, Aggregator, Assigner, List Operator, Parameter Extractor | Data transformation |
+| **Data Processing** | Document Extractor, OCR, Spreadsheet | File and document processing |
+| **Utilities** | HTTP Request, Notification, Webhook Trigger, Schedule Trigger, Notes | External communication and triggers |
+
+---
+
+## Agents & Integrations
+
+### Agent Node
+
+Executes a pre-built or custom AI agent with specific capabilities.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Agent | Select from available agents (Data Retrieval, Analysis, Compliance, Research, or custom) |
+| Prompt | Instructions for what the agent should do |
+| Skills | Optional skills to enable for this agent |
+| Connectors | Optional external connectors to enable |
+
+**Use when:** You need AI reasoning with specialized capabilities.
+
+### Skill Node
+
+Runs a single capability without the full agent reasoning.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Skill | Select from available skills (web search, code execution, etc.) |
+| Category | Filter skills by category |
+| Inputs | Parameters required by the selected skill |
+
+**Use when:** You need a specific capability with predictable, fast results.
+
+### Connector Node
+
+Connects to external systems like Salesforce, Jira, Slack, or custom APIs.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Connector | Select from configured connectors |
+| Action | The operation to perform (query, create, update, etc.) |
+| Inputs | Parameters for the action |
+
+**Use when:** You need to read from or write to external systems.
+
+---
+
+## Financial Agents
+
+### Data Retrieval Node
+
+Fetches financial data from external sources.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Source | Data source to query |
+| Query | What data to retrieve |
+| Format | Output format preference |
+
+**Use when:** You need to fetch market data, company information, or financial records.
+
+### Analysis Node
+
+Performs financial calculations and analysis.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Analysis Type | Type of analysis (fundamental, technical, risk, etc.) |
+| Data Input | Data to analyze |
+| Metrics | Specific metrics to calculate |
+
+**Use when:** You need to calculate financial metrics, ratios, or perform valuation analysis.
+
+### Compliance Node
+
+Checks data against compliance rules and regulations.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Check Type | Type of compliance check (KYC, AML, sanctions, etc.) |
+| Entity Data | Data to check |
+| Regulations | Applicable regulatory frameworks |
+
+**Use when:** You need to verify compliance with regulations or screen against watchlists.
+
+### Research Node
+
+Searches through documents and knowledge bases using RAG (Retrieval-Augmented Generation).
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Knowledge Base | Which document collection to search |
+| Query | Research question or topic |
+| Result Count | Number of relevant documents to retrieve |
+
+**Use when:** You need to find information in your uploaded documents.
+
+---
+
+## Basic Nodes
+
+### Start Node
+
+The entry point for every workflow. Defines input variables that the workflow accepts.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Variables | Define inputs (name, type, required, default value) |
+
+**Variable Types:**
+- `text` / `string` - Text input
+- `number` - Numeric input
+- `file` - File upload
+
+Every workflow must have exactly one Start node.
+
+### LLM Node
+
+Sends a prompt to an AI language model and receives a response.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Model | AI model to use (GPT-4o, Claude, etc.) |
+| System Prompt | Instructions defining the AI's behavior |
+| User Prompt | The specific task or question |
+| Context | Optional knowledge retrieval nodes to include |
+| Skills | Optional skills to enable for function calling |
+
+**Tip:** Use `{{variable_name}}` syntax to insert values from previous nodes.
+
+### Knowledge Retrieval Node
+
+Searches your uploaded documents using semantic search.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Knowledge Base | Which document collection to search |
+| Query | Search query (can use variables) |
+| Top K | Number of relevant chunks to retrieve |
+
+**Use when:** You want to ground AI responses in your own documents.
+
+### End Node (Output)
+
+Marks the end of your workflow and defines what to return.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Output Variables | Which values to include in the final output |
+
+---
+
+## Logic Nodes
+
+### IF/ELSE Node
+
+Routes the workflow based on conditions. Has two outputs: "if true" and "if false".
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Conditions | One or more conditions to evaluate |
+| Logical Operator | AND (all must be true) or OR (any must be true) |
+
+**Operators:**
+- `equals` / `not_equals` - Exact match
+- `contains` - Text contains substring
+- `greater_than` / `less_than` - Numeric comparison
+- `is_empty` / `is_not_empty` - Check for value
+
+### Iteration Node
+
+Loops over a list, executing connected nodes for each item.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Input Array | The list to iterate over |
+| Item Variable | Name of the variable holding current item |
+
+**Use when:** You need to process multiple items (e.g., check each customer in a list).
+
+### Question Classifier Node
+
+Uses AI to classify text into predefined categories and routes accordingly.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Input Text | Text to classify |
+| Model | AI model for classification |
+| Classes | Categories to classify into (each becomes an output) |
+
+**Use when:** You need intelligent routing based on intent or content.
+
+### Wait/Delay Node
+
+Pauses workflow execution for a specified duration.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Wait Type | Duration or until specific time |
+| Duration | How long to wait |
+| Unit | Seconds, minutes, hours, or days |
+
+### Sub-Workflow Node
+
+Executes another workflow as a step within this workflow.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Workflow | Select the sub-workflow to execute |
+| Input Mapping | Map current variables to sub-workflow inputs |
+
+**Use when:** You want to reuse workflow logic or organize complex workflows.
+
+### Human Approval Node
+
+Pauses and waits for human review before continuing.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Title | Task description shown to the approver |
+| Approver Type | Specific users, by role, by group, or dynamic |
+| Options | Approval choices (e.g., Approve, Reject, Escalate) |
+| SLA | Time limit for response |
+| Escalation | Who to notify if SLA is exceeded |
+| Require Comment | Whether approver must provide explanation |
+
+Each option becomes a separate output path, allowing different handling based on the decision.
+
+---
+
+## Transform Nodes
+
+### Code Node
+
+Executes custom Python or JavaScript code for data transformation.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Language | Python or JavaScript |
+| Code | Your custom code |
+| Input Variables | Variables to make available in code |
+| Output Variables | Variables to return from code |
+
+**Python example:**
+```python
+# Access inputs via 'inputs' dict
+name = inputs.get('customer_name', 'Unknown')
+# Return outputs via 'outputs' dict
+outputs['greeting'] = f"Hello, {name}!"
+```
+
+### Template Node
+
+Combines variables into formatted text using mustache-style templates.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Template | Text with `{{variable}}` placeholders |
+
+**Example:** `Dear {{customer_name}}, Your account {{account_id}} has been updated.`
+
+### Variable Aggregator Node
+
+Combines multiple values into a single variable.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Input Variables | Variables to combine |
+| Aggregation Type | How to combine (concat, merge, array) |
+| Output Variable | Name for the combined result |
+
+### Variable Assigner Node
+
+Stores or transforms a value into a new variable.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Assignments | Variable name and value pairs |
+| Output Mode | Merge with existing or replace |
+
+### List Operator Node
+
+Performs operations on arrays/lists.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Input Array | The list to operate on |
+| Operation | first, last, filter, map, sort, slice, etc. |
+| Parameters | Operation-specific settings |
+
+### Parameter Extractor Node
+
+Uses AI to extract structured data from unstructured text.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Input Text | Text to extract from |
+| Parameters | Fields to extract (name, type, description) |
+| Strict Mode | Fail if required parameters not found |
+
+**Use when:** You need to pull specific data points from documents or responses.
+
+---
+
+## Data Processing Nodes
+
+### Document Extractor Node
+
+Extracts text and data from uploaded documents.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Input Document | File to process |
+| Extraction Type | Full text, tables only, or structured |
+| Output Format | Text, JSON, or markdown |
+
+**Supported formats:** PDF, DOCX, XLSX, CSV, TXT, images
+
+### OCR Node
+
+Reads text from images using Optical Character Recognition.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Input Image | Image file to process |
+| Language | Expected language(s) |
+| Output | Plain text or with bounding boxes |
+
+### Spreadsheet Node
+
+Reads and manipulates spreadsheet data.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| File | Spreadsheet file (Excel or CSV) |
+| Operation | Read, filter, transform, write |
+| Sheet | Which sheet to process (for Excel) |
+
+---
+
+## Utilities
+
+### HTTP Request Node
+
+Makes calls to external APIs or web services.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Method | GET, POST, PUT, PATCH, DELETE |
+| URL | Endpoint URL (supports variables) |
+| Headers | Request headers |
+| Body | Request body (for POST/PUT/PATCH) |
+| Authentication | None, API Key, Bearer Token, Basic |
+
+### Notification Node
+
+Sends notifications via various channels.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Channel | Email, Slack, SMS, or webhook |
+| Recipient | Who to notify |
+| Subject | Notification title |
+| Message | Notification content |
+| Priority | Normal, high, or urgent |
+
+### Webhook Trigger Node
+
+Creates a URL that starts the workflow when called.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Path | Custom URL path |
+| Method | HTTP methods to accept |
+| Authentication | Required headers or tokens |
+
+Use the generated webhook URL to trigger workflows from external systems.
+
+### Schedule Trigger Node
+
+Starts the workflow automatically at scheduled times.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Schedule Type | Interval, daily, weekly, or cron expression |
+| Timezone | Timezone for scheduling |
+| Parameters | Default input values for scheduled runs |
+
+### Notes Node
+
+Adds documentation to your canvas without affecting execution.
+
+**Configuration:**
+| Setting | Description |
+|---------|-------------|
+| Content | Your note text |
+| Color | Background color (yellow, blue, green, etc.) |
+
+Use notes to document complex logic, leave reminders, or explain sections of your workflow.
+
+---
+
+## Workflow Controls
+
+### Top Bar Actions
+
+| Button | Action |
+|--------|--------|
+| **Reset** | Discard unsaved changes |
+| **Save Draft** | Save without publishing |
+| **Execute** | Run the workflow with test inputs |
+| **Publish** | Make the workflow active |
+
+### View Tabs
+
+| Tab | Purpose |
+|-----|---------|
+| **Canvas** | Visual workflow editor |
+| **Steps** | Simplified list view |
+| **Chat** | Test with conversational interface |
+| **Versions** | View and manage workflow versions |
+
+### Bottom Panel
+
+| Tab | Shows |
+|-----|-------|
+| **Logs** | Execution history and results |
+| **Monitoring** | Performance metrics |
+| **API** | API endpoint details for this workflow |
+
+---
+
+## Best Practices
+
+<Callout type="info">
+**Start simple** - Begin with basic workflows and add complexity gradually.
+
+**Use descriptive names** - Name your nodes clearly so the workflow is self-documenting.
+
+**Add notes** - Use Notes nodes to explain complex logic.
+
+**Test incrementally** - Test each section before building more.
+
+**Handle errors** - Add IF/ELSE nodes to handle potential failures gracefully.
+
+**Reuse with sub-workflows** - Extract common patterns into reusable sub-workflows.
+</Callout>
+
+## Common Patterns
+
+<Accordions>
+  <Accordion title="Sequential Processing">
+    ```
+    Start → Get Data → Analyze → Format → End
+    ```
+    Data flows linearly through each step. Good for simple, predictable processes.
+  </Accordion>
+  <Accordion title="Conditional Branching">
+    ```
+    Start → Check Condition → IF/ELSE → [Different paths] → End
+    ```
+    Different handling based on rules. Use for risk-based processing or tiered workflows.
+  </Accordion>
+  <Accordion title="Loop Processing">
+    ```
+    Start → Get List → Iteration [Process Each] → Aggregate → End
+    ```
+    Process multiple items in a batch. Good for bulk operations.
+  </Accordion>
+  <Accordion title="Human-in-the-Loop">
+    ```
+    Start → AI Analysis → Human Approval → Final Action → End
+    ```
+    AI does the work, humans verify. Required for regulated processes.
+  </Accordion>
+  <Accordion title="Intelligent Routing">
+    ```
+    Start → Question Classifier → [Category-specific handlers] → End
+    ```
+    AI routes to the right handler. Good for support tickets, document processing.
+  </Accordion>
+</Accordions>

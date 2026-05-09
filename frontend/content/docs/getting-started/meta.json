@@ -1,0 +1,10 @@
+{
+  "title": "Getting Started",
+  "pages": [
+    "introduction",
+    "quick-start",
+    "core-concepts",
+    "first-workflow",
+    "key-terminology"
+  ]
+}

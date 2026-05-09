@@ -1,0 +1,224 @@
+{
+  "agent_type": "analysis_agent",
+  "description": "Test cases for analysis agent evaluating financial calculations, ratio analysis, and quantitative assessments",
+  "test_cases": [
+    {
+      "id": "analysis_001",
+      "name": "PE ratio calculation",
+      "input": "Calculate the P/E ratio for a company with stock price $150 and EPS of $6.25",
+      "expected_output": "P/E ratio = 150 / 6.25 = 24x",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "valuation",
+      "expected_value": 24,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_002",
+      "name": "ROE calculation",
+      "input": "Calculate ROE given net income of $500M and shareholders equity of $2.5B",
+      "expected_output": "ROE = 500M / 2.5B = 20%",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "profitability",
+      "expected_value": 20,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_003",
+      "name": "Debt-to-equity ratio",
+      "input": "Calculate debt-to-equity ratio with total debt $800M and equity $1.2B",
+      "expected_output": "D/E ratio = 800M / 1.2B = 0.67",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "leverage",
+      "expected_value": 0.67,
+      "tolerance": 0.02
+    },
+    {
+      "id": "analysis_004",
+      "name": "DCF analysis",
+      "input": "Perform a simple DCF: FCF Year 1 = $100M, growth 5%, discount rate 10%, terminal growth 2%",
+      "expected_output": "Present value calculation using DCF methodology",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "valuation",
+      "criteria": "Response should apply DCF formula correctly with proper discounting"
+    },
+    {
+      "id": "analysis_005",
+      "name": "Current ratio",
+      "input": "Calculate current ratio with current assets $2.4B and current liabilities $1.2B",
+      "expected_output": "Current ratio = 2.4B / 1.2B = 2.0",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "liquidity",
+      "expected_value": 2.0,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_006",
+      "name": "WACC calculation",
+      "input": "Calculate WACC: cost of equity 12%, cost of debt 6%, tax rate 25%, 60% equity and 40% debt",
+      "expected_output": "WACC = (0.60 × 12%) + (0.40 × 6% × (1-0.25)) = 7.2% + 1.8% = 9%",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "cost_of_capital",
+      "expected_value": 9.0,
+      "tolerance": 0.2
+    },
+    {
+      "id": "analysis_007",
+      "name": "Gross margin analysis",
+      "input": "Calculate gross margin: revenue $10B, COGS $6B",
+      "expected_output": "Gross margin = (10B - 6B) / 10B = 40%",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "profitability",
+      "expected_value": 40,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_008",
+      "name": "EV/EBITDA multiple",
+      "input": "Calculate EV/EBITDA with market cap $50B, debt $10B, cash $5B, EBITDA $8B",
+      "expected_output": "EV = 50B + 10B - 5B = 55B. EV/EBITDA = 55B / 8B = 6.875x",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "valuation",
+      "expected_value": 6.875,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_009",
+      "name": "Negative case - wrong formula",
+      "input": "Calculate P/E ratio for stock at $100 with EPS of $5",
+      "expected_output": "P/E ratio = 5 / 100 = 0.05",
+      "evaluation_type": "deterministic",
+      "is_positive": false,
+      "category": "negative",
+      "expected_value": 20,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_010",
+      "name": "Beta calculation interpretation",
+      "input": "A stock has beta of 1.5. Analyze its risk relative to market",
+      "expected_output": "Beta of 1.5 indicates 50% more volatile than market - higher systematic risk",
+      "evaluation_type": "llm_judge",
+      "is_positive": true,
+      "category": "risk",
+      "criteria": "Response should correctly interpret beta as measure of systematic risk"
+    },
+    {
+      "id": "analysis_011",
+      "name": "Interest coverage ratio",
+      "input": "Calculate interest coverage with EBIT $400M and interest expense $80M",
+      "expected_output": "Interest coverage = 400M / 80M = 5x",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "leverage",
+      "expected_value": 5.0,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_012",
+      "name": "DuPont analysis",
+      "input": "Perform DuPont analysis: profit margin 10%, asset turnover 1.5, equity multiplier 2.0",
+      "expected_output": "ROE = 10% × 1.5 × 2.0 = 30%",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "profitability",
+      "expected_value": 30,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_013",
+      "name": "Quick ratio",
+      "input": "Calculate quick ratio: current assets $500M, inventory $150M, current liabilities $200M",
+      "expected_output": "Quick ratio = (500M - 150M) / 200M = 1.75",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "liquidity",
+      "expected_value": 1.75,
+      "tolerance": 0.05
+    },
+    {
+      "id": "analysis_014",
+      "name": "Revenue growth rate",
+      "input": "Calculate YoY revenue growth: current year $12B, prior year $10B",
+      "expected_output": "Growth rate = (12B - 10B) / 10B = 20%",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "growth",
+      "expected_value": 20,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_015",
+      "name": "CAGR calculation",
+      "input": "Calculate 5-year CAGR: starting value $100M, ending value $161M",
+      "expected_output": "CAGR = (161/100)^(1/5) - 1 = 10%",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "growth",
+      "expected_value": 10,
+      "tolerance": 0.5
+    },
+    {
+      "id": "analysis_016",
+      "name": "Operating margin",
+      "input": "Calculate operating margin: revenue $8B, operating income $1.6B",
+      "expected_output": "Operating margin = 1.6B / 8B = 20%",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "profitability",
+      "expected_value": 20,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_017",
+      "name": "Negative case - unit error",
+      "input": "Calculate ROA with net income $200M and total assets $4B",
+      "expected_output": "ROA = 200M / 4B = 50%",
+      "evaluation_type": "deterministic",
+      "is_positive": false,
+      "category": "negative",
+      "expected_value": 5,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_018",
+      "name": "Price-to-book ratio",
+      "input": "Calculate P/B ratio: market cap $30B, book value of equity $15B",
+      "expected_output": "P/B ratio = 30B / 15B = 2.0x",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "valuation",
+      "expected_value": 2.0,
+      "tolerance": 0.1
+    },
+    {
+      "id": "analysis_019",
+      "name": "Free cash flow",
+      "input": "Calculate FCF: operating cash flow $3B, capex $800M",
+      "expected_output": "FCF = 3B - 800M = $2.2B",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "cash_flow",
+      "expected_value": 2.2,
+      "tolerance": 0.05
+    },
+    {
+      "id": "analysis_020",
+      "name": "Dividend yield",
+      "input": "Calculate dividend yield: annual dividend $4 per share, stock price $80",
+      "expected_output": "Dividend yield = 4 / 80 = 5%",
+      "evaluation_type": "deterministic",
+      "is_positive": true,
+      "category": "dividends",
+      "expected_value": 5,
+      "tolerance": 0.1
+    }
+  ]
+}

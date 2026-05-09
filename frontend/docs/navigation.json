@@ -1,0 +1,225 @@
+{
+  "documentation": [
+    {
+      "title": "Getting Started",
+      "path": "/docs/getting-started",
+      "icon": "RocketIcon",
+      "items": [
+        {
+          "title": "Introduction",
+          "path": "/docs/getting-started/introduction"
+        },
+        {
+          "title": "Quick Start (5 Minutes)",
+          "path": "/docs/getting-started/quick-start"
+        },
+        {
+          "title": "Core Concepts",
+          "path": "/docs/getting-started/core-concepts"
+        },
+        {
+          "title": "First Workflow",
+          "path": "/docs/getting-started/first-workflow"
+        }
+      ]
+    },
+    {
+      "title": "User Guides",
+      "path": "/docs/user-guides",
+      "icon": "PersonIcon",
+      "items": [
+        {
+          "title": "For Compliance Teams",
+          "path": "/docs/user-guides/compliance-teams"
+        },
+        {
+          "title": "For Financial Analysts",
+          "path": "/docs/user-guides/analysts"
+        },
+        {
+          "title": "For Developers",
+          "path": "/docs/user-guides/developers"
+        },
+        {
+          "title": "For Administrators",
+          "path": "/docs/user-guides/administrators"
+        }
+      ]
+    },
+    {
+      "title": "Features",
+      "path": "/docs/features",
+      "icon": "ComponentBooleanIcon",
+      "items": [
+        {
+          "title": "AI Agents",
+          "path": "/docs/features/ai-agents"
+        },
+        {
+          "title": "Workflows",
+          "path": "/docs/features/workflows"
+        },
+        {
+          "title": "Custom Agents",
+          "path": "/docs/features/custom-agents"
+        },
+        {
+          "title": "MCP Connectors",
+          "path": "/docs/features/connectors"
+        },
+        {
+          "title": "Skills Library",
+          "path": "/docs/features/skills-library"
+        },
+        {
+          "title": "Compliance Dashboard",
+          "path": "/docs/features/compliance-dashboard",
+          "badge": "Phase 1"
+        }
+      ]
+    },
+    {
+      "title": "How-To Guides",
+      "path": "/docs/how-to",
+      "icon": "BookmarkIcon",
+      "items": [
+        {
+          "title": "Analyze a Stock Portfolio",
+          "path": "/docs/how-to/analyze-portfolio"
+        },
+        {
+          "title": "Run KYC/AML Checks",
+          "path": "/docs/how-to/kyc-aml-checks"
+        },
+        {
+          "title": "Create Loan Approval Workflow",
+          "path": "/docs/how-to/loan-approval"
+        },
+        {
+          "title": "Set Up OFAC Screening",
+          "path": "/docs/how-to/ofac-screening"
+        },
+        {
+          "title": "Build Custom Compliance Agent",
+          "path": "/docs/how-to/custom-compliance-agent"
+        },
+        {
+          "title": "Integrate External Data Sources",
+          "path": "/docs/how-to/external-data"
+        }
+      ]
+    },
+    {
+      "title": "API Reference",
+      "path": "/docs/api-reference",
+      "icon": "CodeIcon",
+      "items": [
+        {
+          "title": "Authentication",
+          "path": "/docs/api-reference/authentication"
+        },
+        {
+          "title": "Chat Endpoints",
+          "path": "/docs/api-reference/chat"
+        },
+        {
+          "title": "Workflow Endpoints",
+          "path": "/docs/api-reference/workflows"
+        },
+        {
+          "title": "Agent Endpoints",
+          "path": "/docs/api-reference/agents"
+        },
+        {
+          "title": "Connector Endpoints",
+          "path": "/docs/api-reference/connectors"
+        },
+        {
+          "title": "Skills Endpoints",
+          "path": "/docs/api-reference/skills"
+        },
+        {
+          "title": "Response Formats",
+          "path": "/docs/api-reference/response-formats"
+        }
+      ]
+    },
+    {
+      "title": "Concepts & Architecture",
+      "path": "/docs/concepts",
+      "icon": "ArchiveIcon",
+      "items": [
+        {
+          "title": "System Architecture",
+          "path": "/docs/concepts/architecture"
+        },
+        {
+          "title": "Agent Execution Model",
+          "path": "/docs/concepts/agent-execution"
+        },
+        {
+          "title": "Workflow Orchestration",
+          "path": "/docs/concepts/workflow-orchestration"
+        },
+        {
+          "title": "Memory & Context",
+          "path": "/docs/concepts/memory-context"
+        },
+        {
+          "title": "Security & Compliance",
+          "path": "/docs/concepts/security-compliance"
+        },
+        {
+          "title": "Cost Optimization",
+          "path": "/docs/concepts/cost-optimization"
+        }
+      ]
+    },
+    {
+      "title": "Troubleshooting",
+      "path": "/docs/troubleshooting",
+      "icon": "QuestionMarkCircledIcon",
+      "items": [
+        {
+          "title": "Common Issues",
+          "path": "/docs/troubleshooting/common-issues"
+        },
+        {
+          "title": "Error Messages",
+          "path": "/docs/troubleshooting/error-messages"
+        },
+        {
+          "title": "Performance Tips",
+          "path": "/docs/troubleshooting/performance"
+        },
+        {
+          "title": "Best Practices",
+          "path": "/docs/troubleshooting/best-practices"
+        },
+        {
+          "title": "FAQ",
+          "path": "/docs/troubleshooting/faq"
+        }
+      ]
+    },
+    {
+      "title": "Release Notes",
+      "path": "/docs/release-notes",
+      "icon": "UpdateIcon",
+      "items": [
+        {
+          "title": "What's New",
+          "path": "/docs/release-notes/whats-new"
+        },
+        {
+          "title": "Upcoming Features",
+          "path": "/docs/release-notes/roadmap"
+        },
+        {
+          "title": "Known Limitations",
+          "path": "/docs/release-notes/limitations"
+        }
+      ]
+    }
+  ]
+}

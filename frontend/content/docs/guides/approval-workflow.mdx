@@ -1,0 +1,185 @@
+---
+title: Build an Approval Workflow
+description: Learn how to create a workflow that routes decisions for human approval based on configurable rules.
+---
+
+Learn how to create a workflow that routes decisions for human approval based on configurable rules.
+
+## What You'll Build
+
+A workflow that:
+1. Receives a request (e.g., purchase order, time-off request)
+2. Evaluates the request against rules
+3. Auto-approves simple requests
+4. Routes complex requests for human review
+5. Sends notifications about the decision
+
+## Prerequisites
+
+<Callout type="info">
+Before starting, ensure you have:
+- Oniva account with API key configured
+- Slack connector configured (for notifications)
+</Callout>
+
+## Step 1: Create the Workflow
+
+<Steps>
+  <Step>
+    Navigate to **Workflows** in the sidebar
+  </Step>
+  <Step>
+    Click **+ New Workflow**
+  </Step>
+  <Step>
+    Name it "Approval Workflow"
+  </Step>
+  <Step>
+    Click **Create**
+  </Step>
+</Steps>
+
+## Step 2: Define Start Node Inputs
+
+Configure input variables:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `request_type` | string | Type of request |
+| `requester` | string | Person making the request |
+| `amount` | number | Dollar amount (if applicable) |
+| `description` | string | Request details |
+
+## Step 3: Add Classification Node
+
+<Steps>
+  <Step>
+    Drag a **Classifier** node onto the canvas
+  </Step>
+  <Step>
+    Connect it to the Start node
+  </Step>
+  <Step>
+    Configure categories:
+    - **low_value**: Amount &lt; $500
+    - **medium_value**: Amount $500-$5000
+    - **high_value**: Amount &gt; $5000
+  </Step>
+</Steps>
+
+## Step 4: Add Conditional Branches
+
+<Tabs items={['Auto-Approve Branch', 'Human Review Branch']}>
+  <Tab value="Auto-Approve Branch">
+    **For Low Value Requests**
+
+    <Steps>
+      <Step>
+        Add an **Agent** node for the low_value path
+      </Step>
+      <Step>
+        Configure:
+        - **Agent**: Analysis Agent
+        - **Instructions**: "Generate an approval confirmation for: \{\{input.description\}\}"
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab value="Human Review Branch">
+    **For High Value Requests**
+
+    <Steps>
+      <Step>
+        Add a **Human Approval** node for the high_value path
+      </Step>
+      <Step>
+        Configure:
+        - **Title**: "Approval Required: \{\{input.request_type\}\}"
+        - **Description**: Include requester, amount, and description
+        - **Options**: Approve, Reject, Request More Info
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Step 5: Add Notification Nodes
+
+<Steps>
+  <Step>
+    Add **Connector** nodes (Slack) after each branch
+  </Step>
+  <Step>
+    Configure messages for auto-approved requests:
+    ```
+    Your {{input.request_type}} has been automatically approved.
+    Amount: ${{input.amount}}
+    ```
+  </Step>
+  <Step>
+    Configure messages for human decisions:
+    ```
+    Your {{input.request_type}} has been {{nodes.human_approval.decision}}.
+    Reviewer notes: {{nodes.human_approval.notes}}
+    ```
+  </Step>
+</Steps>
+
+## Step 6: Add End Node
+
+Connect all paths to an **End** node that outputs the final decision.
+
+## Complete Workflow Diagram
+
+```
+         Start
+           ↓
+       Classifier
+      /    |    \
+     ↓     ↓     ↓
+  (low) (med) (high)
+     ↓     ↓     ↓
+  Auto   Agent  Human
+  Approve       Approval
+     \     |     /
+      \    |    /
+       Notify (Slack)
+           ↓
+          End
+```
+
+## Configuration Options
+
+<Accordions>
+  <Accordion title="Approval Thresholds">
+    Customize thresholds in the Classifier node:
+    - **Budget requests**: $1,000 auto-approve limit
+    - **Time-off**: 3 days auto-approve limit
+    - **Purchases**: $500 auto-approve limit
+  </Accordion>
+  <Accordion title="Escalation Rules">
+    Add additional conditions:
+    - Escalate if requester is on probation
+    - Escalate if department budget exceeded
+    - Escalate if rush request
+  </Accordion>
+</Accordions>
+
+## Tips
+
+<Callout type="info">
+- **Audit Trail**: All decisions are logged automatically
+- **Timeouts**: Set timeout on Human Approval nodes (e.g., 48 hours)
+- **Reminders**: Use Schedule Trigger to send reminder notifications
+</Callout>
+
+---
+
+## Next Steps
+
+<Cards>
+  <Card title="Workflows Guide" href="/docs/features/workflows">
+    Learn more about workflow features
+  </Card>
+  <Card title="Connectors" href="/docs/features/connectors">
+    Set up notification connectors
+  </Card>
+</Cards>

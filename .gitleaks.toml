@@ -1,0 +1,38 @@
+# Oniva gitleaks configuration
+#
+# Extends the default ruleset, then allowlists known false-positive paths and
+# patterns: test fixtures for the secret-redactor itself, intentional
+# placeholder examples in documentation, and the explicitly placeholder
+# Kubernetes Redis Sentinel password.
+#
+# Run with: gitleaks dir --config .gitleaks.toml
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Oniva intentional placeholders and test fixtures"
+
+paths = [
+  # Tests for the secret-redaction logic — must contain example secrets to
+  # exercise the matcher. They use AWS-published canonical examples and
+  # clearly-fake values like "abc123".
+  '''backend/app/tests/skills/test_security\.py''',
+  '''backend/tests/test_harness\.py''',
+
+  # User-facing API docs that show example bearer tokens / API keys
+  # (placeholders ending with "...").
+  '''frontend/content/docs/api-reference/authentication\.mdx''',
+  '''frontend/content/docs/getting-started/first-workflow\.mdx''',
+  '''frontend/docs/getting-started/first-workflow\.md''',
+
+  # Kubernetes Redis Sentinel manifest ships with the literal placeholder
+  # base64("change-me-in-production"). The accompanying comment instructs
+  # operators to replace it.
+  '''k8s/redis-sentinel\.yaml''',
+]
+
+regexes = [
+  # Bearer YOUR_API_KEY appears in curl examples in docs.
+  '''Bearer\s+YOUR_API_KEY''',
+]

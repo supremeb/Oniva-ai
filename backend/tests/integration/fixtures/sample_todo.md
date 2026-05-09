@@ -1,0 +1,5 @@
+- [ ] Fetch AAPL price and financials
+- [ ] Fetch GOOGL price and financials
+- [ ] Fetch MSFT price and financials
+- [ ] Calculate comparative ratios
+- [ ] Generate final report

@@ -1,0 +1,109 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+# lib/ - removed, was incorrectly ignoring frontend/lib source code
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+.venv/
+.pytest_cache/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.next/
+out/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.sqlite
+postgres_data/
+redis_data/
+
+# Logs
+*.log
+logs/
+
+# Docker
+.dockerignore
+
+# Playwright
+.playwright-mcp/
+playwright-report/
+test-results/
+frontend/playwright-report/
+frontend/test-results/
+
+backend/sessions/
+
+# Oh My Claude Code
+.omc/
+
+# Conductor session state (local-only)
+conductor/setup_state.json
+
+# Build artifacts
+*.tsbuildinfo
+
+# Redis dumps
+dump.rdb
+*.rdb
+
+# Recordings / large media at repo root (track via Docs/ if needed)
+/recording.*
+/*.webm
+/*.mp4
+/*.mov
+
+# CleanShot screenshots accidentally captured at repo root
+/CleanShot*.png
+
+# Stray flag-named files from misused CLI commands
+/--*
+/-o
+/-i
+
+# Local tmp / reports directories
+/tmp/
+/reports/
+
+# Backend artifact directories that store runtime files
+backend/artifacts/
+backend/uploads/
+
+# Fumadocs generated source map (regenerated at build time)
+frontend/.source/
