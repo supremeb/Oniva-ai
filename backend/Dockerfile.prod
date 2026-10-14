@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
+# requirements.txt is generated from uv.lock (full transitive set, resolved)
+RUN pip wheel --no-cache-dir --wheel-dir /app/wheels -r requirements.txt
 
 # Production image
 FROM python:3.12-slim
@@ -27,7 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy wheels from builder
 COPY --from=builder /app/wheels /wheels
-RUN pip install --no-cache /wheels/*
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --no-index --find-links=/wheels -r /tmp/requirements.txt \
+    && rm -rf /wheels
 
 # Copy application code
 COPY --chown=appuser:appuser . .

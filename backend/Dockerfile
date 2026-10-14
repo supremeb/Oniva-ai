@@ -8,7 +8,8 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install Python dependencies (requirements.txt is generated from uv.lock;
+# regenerate with: uv export --frozen --no-dev --no-hashes --no-emit-project -o requirements.txt)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
