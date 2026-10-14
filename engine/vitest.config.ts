@@ -15,6 +15,9 @@ export default defineConfig({
           name: "scenario",
           include: ["test/scenario/**/*.test.ts"],
           testTimeout: 120_000,
+          hookTimeout: 120_000,
+          // Worker processes and the load measurement need the machine to themselves.
+          fileParallelism: false,
         },
       },
     ],

@@ -21,7 +21,9 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "vitest run --project unit",
-    "test:scenario": "vitest run --project scenario --passWithNoTests"
+    "test:scenario": "vitest run --project scenario --passWithNoTests",
+    "worker": "node --import tsx scripts/worker.ts",
+    "worker:test": "node --import tsx scripts/worker-test-harness.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

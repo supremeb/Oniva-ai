@@ -49,3 +49,5 @@ export * from "./tools/registry.js";
 export * from "./watch/patch.js";
 export * from "./watch/stream.js";
 export * from "./watch/view.js";
+export * from "./worker/config.js";
+export * from "./worker/worker.js";
