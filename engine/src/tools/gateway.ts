@@ -52,7 +52,7 @@
  */
 import { z } from "zod";
 import { type Clock, realClock } from "../core/clock.js";
-import { LeaseLost } from "../core/errors.js";
+import { errorText, LeaseLost } from "../core/errors.js";
 import type { JsonObject, JsonValue } from "../core/json.js";
 import type { TextContent } from "../models/types.js";
 import type { Fence } from "../storage/types.js";
@@ -644,14 +644,6 @@ function messageOf(body: JsonValue | null): string {
     if (typeof body.error === "string") return body.error;
   }
   return "";
-}
-
-function errorText(err: unknown): string {
-  if (err instanceof Error) {
-    const cause = (err as { cause?: unknown }).cause;
-    return cause instanceof Error ? `${err.message}: ${cause.message}` : err.message;
-  }
-  return String(err);
 }
 
 /** A gateway outcome as a tool result, or null when it is malformed. */

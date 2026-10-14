@@ -37,7 +37,7 @@ import type { AgentHooks } from "../agent/hooks.js";
 import type { HostPolicy } from "../agent/policy.js";
 import { createSubagentTool } from "../agent/subagents.js";
 import { type Clock, realClock } from "../core/clock.js";
-import { NotOwner } from "../core/errors.js";
+import { errorText, NotOwner } from "../core/errors.js";
 import type { ModelRegistry } from "../models/stream.js";
 import { bearerMatches, headerValue } from "../server/auth.js";
 import { createEngineServer, type EngineServer } from "../server/http.js";
@@ -264,7 +264,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       }
       await notServing(req, res);
     })().catch((err: unknown) => {
-      log("http_error", { error: errorText(err) });
+      log("http_error", { error: logErrorText(err) });
       sendJson(res, 500, { error: "internal" });
     });
   });
@@ -284,7 +284,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
     if (!work) return;
     const result = await within(work, ms);
     if (result === TIMED_OUT) log("close_timeout", { step: what, timeoutMs: closeTimeoutMs });
-    else if (!result.ok) log("close_error", { step: what, error: errorText(result.error) });
+    else if (!result.ok) log("close_error", { step: what, error: logErrorText(result.error) });
   }
 
   /**
@@ -319,13 +319,13 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
   function onLost(error: unknown): void {
     if (state === "stopping" || state === "stopped" || state === "lost") return;
     state = "lost";
-    log("lease_lost", { error: errorText(error) });
+    log("lease_lost", { error: logErrorText(error) });
     void shutdown({ reason: "lease_lost", error });
   }
 
   function onFailed(error: unknown): void {
     if (state === "stopping" || state === "stopped" || state === "lost") return;
-    log("failed", { error: errorText(error) });
+    log("failed", { error: logErrorText(error) });
     state = "stopping";
     void shutdown({ reason: "failed", error });
   }
@@ -382,7 +382,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       ...(options.settings ? { settings: options.settings } : {}),
       ...(options.redact ? { redact: options.redact } : {}),
       ...(options.hooks ? { hooks: options.hooks } : {}),
-      onError: (err, info) => log("engine_error", { ...info, error: errorText(err) }),
+      onError: (err, info) => log("engine_error", { ...info, error: logErrorText(err) }),
     });
     harness = h;
     void h.runtime.closed.then((reason) => onEngineStopped(k, reason));
@@ -393,7 +393,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       serviceToken,
       isOwner: () => k.state === "held",
       currentOwner,
-      onError: (err) => log("http_error", { error: errorText(err) }),
+      onError: (err) => log("http_error", { error: logErrorText(err) }),
     });
   }
 
@@ -424,7 +424,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
           onLost,
         });
       } catch (err) {
-        if (!(err instanceof NotOwner)) log("lease_error", { error: errorText(err) });
+        if (!(err instanceof NotOwner)) log("lease_error", { error: logErrorText(err) });
         else log("standby", { ownerId: err.ownerId ?? null });
         await standbyPause();
         continue;
@@ -443,7 +443,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
         if (state !== "standby") return; // stopped or fenced while loading
         // A gateway outage: give the lease back and retry from standby rather
         // than exiting into a crash loop.
-        log("gateway_unavailable", { error: errorText(err), retryMs });
+        log("gateway_unavailable", { error: logErrorText(err), retryMs });
         keeper = null;
         await k.release().catch(() => {});
         if (state !== "standby") return;
@@ -486,6 +486,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
   };
 }
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+/** Log form of a thrown value: the error's name, then {@link errorText}. */
+function logErrorText(err: unknown): string {
+  return err instanceof Error ? `${err.name}: ${errorText(err)}` : String(err);
 }

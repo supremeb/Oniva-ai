@@ -17,12 +17,11 @@
  *   boundary) starts the next run in the same commit.
  */
 import { z } from "zod";
-import type { JsonValue } from "../core/json.js";
 import { type DocDraft, defineDoc } from "../session/documents.js";
 import type { Transaction } from "../session/transaction.js";
 import type { SubmissionRecord, TaskRecord } from "../storage/types.js";
 import type { TaskDefinition, TaskOps } from "../tasks/define.js";
-import { ENTRY_KINDS, type UserPayload } from "./context-builder.js";
+import { ENTRY_KINDS, toEntryPayload, type UserPayload } from "./context-builder.js";
 import type { GenerationCheckpoint, GenerationInput } from "./generation.js";
 import {
   type SubmissionAnswer,
@@ -85,7 +84,7 @@ export function appendUserEntry(
     conversationId,
     taskId: null,
     kind: ENTRY_KINDS.user,
-    payload: payload as unknown as JsonValue,
+    payload: toEntryPayload(ENTRY_KINDS.user, payload),
   }).id;
 }
 

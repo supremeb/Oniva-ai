@@ -21,6 +21,7 @@ import {
   type TaskLookup,
   WAKE_KEY,
   type Wake,
+  withSignal,
 } from "./define.js";
 
 /** The task with `payload` delivered under `key`, woken if it was waiting on it. */
@@ -83,6 +84,6 @@ export function wake(task: TaskRecord, reason: Wake): TaskRecord {
     ...task,
     status: "pending",
     waiting: null,
-    signals: { ...task.signals, [WAKE_KEY]: reason as unknown as JsonValue },
+    signals: withSignal(task.signals, WAKE_KEY, reason),
   };
 }

@@ -53,6 +53,9 @@ import {
   type SubmissionInputRecord,
   type SubmissionUnanswered,
   settleSubmission,
+  submissionResult,
+  toSubmissionInput,
+  toSubmissionResult,
 } from "./submission.js";
 import type { AgentDeps, ToolTaskCheckpoint, ToolTaskInput } from "./tool-task.js";
 
@@ -185,6 +188,7 @@ export async function subagentPhase(
         isError: true,
       });
     }
+    // The registry erases I/C (heterogeneous kinds); re-narrow to the generation kind.
     const generation = rt.runtime.registry.get(GENERATION_TASK_KIND) as unknown as
       | TaskDefinition<GenerationInput, GenerationCheckpoint>
       | undefined;
@@ -245,7 +249,7 @@ function spawnChild(
       id: submissionId,
       conversationId: child.id,
       requestId: `subagent:${task.id}`,
-      input: input as unknown as JsonValue,
+      input: toSubmissionInput(input),
       status: "active",
       result: null,
       taskId: runId,
@@ -303,7 +307,7 @@ function awaitChild(
         tx,
         task,
         link,
-        { ...sub, status: "unanswered", result: unanswered as unknown as JsonValue },
+        { ...sub, status: "unanswered", result: toSubmissionResult(unanswered) },
         writeResult,
       );
     }
@@ -336,7 +340,7 @@ async function answer(
 ) {
   const depth = (await tx.doc(agentConfigDoc, link.conversationId)).value.depth;
   if (sub.status === "done") {
-    const a = sub.result as unknown as SubmissionAnswer;
+    const a = submissionResult(sub) as SubmissionAnswer | null;
     const details: SubagentDetails = { ...link, depth, status: "done" };
     const text = typeof a?.text === "string" ? a.text : "";
     return writeResult(
@@ -350,7 +354,7 @@ async function answer(
       1,
     );
   }
-  const u = sub.result as unknown as SubmissionUnanswered;
+  const u = submissionResult(sub) as SubmissionUnanswered | null;
   const reason = typeof u?.reason === "string" ? u.reason : "unanswered";
   const details: SubagentDetails = { ...link, depth, status: "unanswered", reason };
   return writeResult(

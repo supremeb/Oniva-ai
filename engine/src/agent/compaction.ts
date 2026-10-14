@@ -48,13 +48,12 @@ import {
   type TaskState,
 } from "../tasks/define.js";
 import {
-  type AssistantPayload,
   assistantText,
   buildContext,
   type CompactionPayload,
   ENTRY_KINDS,
-  type ToolResultPayload,
-  type UserPayload,
+  payloadOf,
+  toEntryPayload,
 } from "./context-builder.js";
 import {
   type CompactionOverrides,
@@ -175,11 +174,11 @@ const CONTEXT_KINDS: ReadonlySet<string> = new Set([
 export function entryChars(e: EntryRecord): number {
   switch (e.kind) {
     case ENTRY_KINDS.user:
-      return contentChars((e.payload as unknown as UserPayload).content);
+      return contentChars(payloadOf(e, ENTRY_KINDS.user).content);
     case ENTRY_KINDS.assistant:
-      return messageChars((e.payload as unknown as AssistantPayload).message);
+      return messageChars(payloadOf(e, ENTRY_KINDS.assistant).message);
     case ENTRY_KINDS.toolResult:
-      return contentChars((e.payload as unknown as ToolResultPayload).content);
+      return contentChars(payloadOf(e, ENTRY_KINDS.toolResult).content);
     default:
       return 0;
   }
@@ -203,7 +202,7 @@ export function estimateContextTokens(entries: readonly EntryRecord[]): {
   const head = newestIndex(entries, ENTRY_KINDS.compaction);
   const last = newestIndex(entries, ENTRY_KINDS.assistant, head);
   if (last >= 0) {
-    const p = (entries[last] as EntryRecord).payload as unknown as AssistantPayload;
+    const p = payloadOf(entries[last] as EntryRecord, ENTRY_KINDS.assistant);
     let chars = 0;
     for (let i = last + 1; i < entries.length; i++) chars += entryChars(entries[i] as EntryRecord);
     return { tokens: contextTokens(p.usage) + toTokens(chars), model: p.message.model };
@@ -212,9 +211,7 @@ export function estimateContextTokens(entries: readonly EntryRecord[]): {
   const chars = built.messages.reduce((n, m) => n + messageChars(m), 0);
   const any = newestIndex(entries, ENTRY_KINDS.assistant);
   const model =
-    any >= 0
-      ? ((entries[any] as EntryRecord).payload as unknown as AssistantPayload).message.model
-      : null;
+    any >= 0 ? payloadOf(entries[any] as EntryRecord, ENTRY_KINDS.assistant).message.model : null;
   return { tokens: toTokens(chars), model };
 }
 
@@ -246,7 +243,7 @@ export function planCompaction(
   let start = 0;
   let previousSummary: string | null = null;
   if (head >= 0) {
-    const c = (entries[head] as EntryRecord).payload as unknown as CompactionPayload;
+    const c = payloadOf(entries[head] as EntryRecord, ENTRY_KINDS.compaction);
     previousSummary = c.summary;
     const keptAt =
       c.firstKeptEntryId === null ? -1 : entries.findIndex((e) => e.id === c.firstKeptEntryId);
@@ -257,7 +254,7 @@ export function planCompaction(
   for (let i = start; i < entries.length; i++) {
     const e = entries[i] as EntryRecord;
     if (e.kind !== ENTRY_KINDS.toolResult) continue;
-    const id = (e.payload as unknown as ToolResultPayload).toolCallId;
+    const id = payloadOf(e, ENTRY_KINDS.toolResult).toolCallId;
     if (!resultAt.has(id)) resultAt.set(id, i);
   }
   // valid[i]: a user/assistant entry with every earlier call's result before it.
@@ -268,7 +265,7 @@ export function planCompaction(
     const turn = e.kind === ENTRY_KINDS.user || e.kind === ENTRY_KINDS.assistant;
     valid[i] = turn && reach < i;
     if (e.kind === ENTRY_KINDS.assistant) {
-      for (const b of (e.payload as unknown as AssistantPayload).message.blocks) {
+      for (const b of payloadOf(e, ENTRY_KINDS.assistant).message.blocks) {
         if (b.type !== "tool_call") continue;
         const at = resultAt.get(b.id);
         if (at !== undefined && at > reach) reach = at;
@@ -317,9 +314,9 @@ export function renderTranscript(plan: CompactionPlan): string {
   const lines: string[] = [];
   for (const e of plan.summarized) {
     if (e.kind === ENTRY_KINDS.user) {
-      lines.push(`[user]\n${clip(plain((e.payload as unknown as UserPayload).content))}`);
+      lines.push(`[user]\n${clip(plain(payloadOf(e, ENTRY_KINDS.user).content))}`);
     } else if (e.kind === ENTRY_KINDS.assistant) {
-      const message = (e.payload as unknown as AssistantPayload).message;
+      const message = payloadOf(e, ENTRY_KINDS.assistant).message;
       const text = assistantText(message);
       if (text.length > 0) lines.push(`[assistant]\n${clip(text)}`);
       for (const b of message.blocks) {
@@ -328,7 +325,7 @@ export function renderTranscript(plan: CompactionPlan): string {
         }
       }
     } else {
-      const r = e.payload as unknown as ToolResultPayload;
+      const r = payloadOf(e, ENTRY_KINDS.toolResult);
       const flag = r.isError ? ` (${r.status})` : "";
       lines.push(`[result of ${r.toolName}${flag}]\n${clip(plain(r.content))}`);
     }
@@ -406,7 +403,7 @@ export async function placeReadyCompaction(
     conversationId,
     taskId: ready.taskId,
     kind: ENTRY_KINDS.compaction,
-    payload: payload as unknown as JsonValue,
+    payload: toEntryPayload(ENTRY_KINDS.compaction, payload),
   }).id;
 }
 

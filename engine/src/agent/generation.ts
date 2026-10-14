@@ -73,6 +73,7 @@ import {
   buildContext,
   ENTRY_KINDS,
   type RunErrorPayload,
+  toEntryPayload,
 } from "./context-builder.js";
 import { Inbox } from "./inbox.js";
 import { liveDoc, ProgressWriter, toolOutputDoc } from "./progress.js";
@@ -204,7 +205,7 @@ export function generationTaskDefinition(
             conversationId,
             taskId: task.id,
             kind: ENTRY_KINDS.system,
-            payload: system as unknown as JsonValue,
+            payload: toEntryPayload(ENTRY_KINDS.system, system),
           });
         }
         await placeReadyCompaction(tx, conversationId);
@@ -439,7 +440,7 @@ export function generationTaskDefinition(
         conversationId,
         taskId: task.id,
         kind: ENTRY_KINDS.runError,
-        payload: payload as unknown as JsonValue,
+        payload: toEntryPayload(ENTRY_KINDS.runError, payload),
       });
       if (spend) await recordSpend(tx, conversationId, spend);
       await clearLive(tx, conversationId, task.id);
@@ -556,6 +557,6 @@ function appendAssistant(
     conversationId: task.conversationId,
     taskId: task.id,
     kind: ENTRY_KINDS.assistant,
-    payload: payload as unknown as JsonValue,
+    payload: toEntryPayload(ENTRY_KINDS.assistant, payload),
   }).id;
 }

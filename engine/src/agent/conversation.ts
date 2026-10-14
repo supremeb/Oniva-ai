@@ -44,6 +44,8 @@ import {
   type SubmissionWritten,
   type SubmitInput,
   settleSubmission,
+  toSubmissionInput,
+  toSubmissionResult,
 } from "./submission.js";
 import { listAllEntries } from "./tool-task.js";
 import { type UsageTotals, usageDoc } from "./usage.js";
@@ -133,7 +135,7 @@ export class Conversation {
         id: submissionId,
         conversationId: this.id,
         requestId: requestId ?? submissionId,
-        input: record as unknown as JsonValue,
+        input: toSubmissionInput(record),
       };
       if (record.type === "write") {
         const payload: UserPayload = { submissionId, content: record.content };
@@ -147,7 +149,7 @@ export class Conversation {
         tx.createSubmission({
           ...base,
           status: "done",
-          result: written as unknown as JsonValue,
+          result: toSubmissionResult(written),
           taskId: null,
         });
         return submissionId;

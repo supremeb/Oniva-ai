@@ -119,3 +119,21 @@ export class InvalidJson extends EngineError {
     super(`invalid JSON at ${path}: ${reason}`, options);
   }
 }
+
+/**
+ * Human-readable text of a thrown value: an Error's message followed by the
+ * messages of its `cause` chain (`outer: inner: root`); anything else is
+ * stringified.
+ */
+export function errorText(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  let text = err.message;
+  const seen = new Set<Error>([err]);
+  let cause: unknown = err.cause;
+  while (cause instanceof Error && !seen.has(cause)) {
+    seen.add(cause);
+    text += `: ${cause.message}`;
+    cause = cause.cause;
+  }
+  return text;
+}

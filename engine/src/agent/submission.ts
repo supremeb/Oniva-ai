@@ -60,6 +60,24 @@ export type SubmissionUnanswered = {
   error: JsonValue;
 };
 
+/** What a settled submission stores as its `result`. */
+export type SubmissionResult = SubmissionAnswer | SubmissionWritten | SubmissionUnanswered;
+
+/** A submission result as stored JSON. */
+export function toSubmissionResult(result: SubmissionResult): JsonValue {
+  return result as unknown as JsonValue;
+}
+
+/** The result a submission was settled with (null while it is open). */
+export function submissionResult(sub: SubmissionRecord): SubmissionResult | null {
+  return sub.result as unknown as SubmissionResult | null;
+}
+
+/** A submission input as stored JSON. */
+export function toSubmissionInput(input: SubmissionInputRecord): JsonValue {
+  return input as unknown as JsonValue;
+}
+
 export interface SubmissionSettled {
   status: "done" | "unanswered";
   /** `SubmissionAnswer` / `SubmissionWritten` when done, `SubmissionUnanswered` otherwise. */
@@ -89,11 +107,11 @@ export function settleSubmission(
   tx: Transaction,
   sub: SubmissionRecord | null,
   status: "done" | "unanswered",
-  result: SubmissionAnswer | SubmissionWritten | SubmissionUnanswered,
+  result: SubmissionResult,
 ): boolean {
   if (!sub || (sub.status !== "pending" && sub.status !== "active")) return false;
   const { seq: _seq, ...rec } = sub as SubmissionRecord & { seq?: number };
-  tx.replaceSubmission({ ...rec, status, result: result as unknown as JsonValue });
+  tx.replaceSubmission({ ...rec, status, result: toSubmissionResult(result) });
   return true;
 }
 

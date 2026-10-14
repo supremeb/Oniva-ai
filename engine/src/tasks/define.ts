@@ -19,7 +19,7 @@
 import type { Context } from "../core/context.js";
 import type { JsonValue } from "../core/json.js";
 import type { NewConversation, Transaction } from "../session/transaction.js";
-import type { ConversationRecord, TaskRecord, WaitPolicy } from "../storage/types.js";
+import type { ConversationRecord, TaskOutcome, TaskRecord, WaitPolicy } from "../storage/types.js";
 
 // ---- reserved signal keys ---------------------------------------------------
 
@@ -34,6 +34,29 @@ export const RESERVED_PREFIX = "$";
 export const WAKE_KEY = "$wake";
 export const ABORT_KEY = "$abort";
 export const OUTCOME_KEY = "$outcome";
+
+/** Payload types of the reserved signal keys the runtime writes with {@link withSignal}. */
+export interface ReservedSignals {
+  [WAKE_KEY]: Wake;
+  [OUTCOME_KEY]: TaskOutcome;
+}
+
+/** A reserved signal's payload, or undefined when it was never written. */
+export function getSignal<K extends keyof ReservedSignals>(
+  signals: TaskRecord["signals"],
+  key: K,
+): ReservedSignals[K] | undefined {
+  return signals[key] as unknown as ReservedSignals[K] | undefined;
+}
+
+/** `signals` with a reserved signal's payload set. */
+export function withSignal<K extends keyof ReservedSignals>(
+  signals: TaskRecord["signals"],
+  key: K,
+  value: ReservedSignals[K],
+): TaskRecord["signals"] {
+  return { ...signals, [key]: value as unknown as JsonValue };
+}
 
 // ---- errors -----------------------------------------------------------------
 
@@ -213,7 +236,7 @@ export function taskState<I, C>(record: TaskRecord): TaskState<I, C> {
     input: rec.input as I,
     checkpoint: rec.checkpoint as C,
     signals,
-    wake: (rec.signals[WAKE_KEY] as Wake | undefined) ?? null,
+    wake: getSignal(rec.signals, WAKE_KEY) ?? null,
     abandonOnRestart: rec.abandonOnRestart,
     record: rec,
   };
@@ -363,6 +386,7 @@ export class TaskRegistry {
 
   /** Add a definition. Registering the same object twice is a no-op; another one for a taken kind throws. */
   register<I, C>(def: TaskDefinition<I, C>): this {
+    // Erase I/C: the registry is heterogeneous; handlers re-narrow by kind.
     const erased = def as unknown as TaskDefinition;
     const existing = this.#defs.get(def.kind);
     if (existing && existing !== erased) {

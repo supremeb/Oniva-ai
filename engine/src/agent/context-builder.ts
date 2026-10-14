@@ -93,6 +93,39 @@ export type CompactionPayload = {
   firstKeptEntryId: string | null;
 };
 
+export type EntryKind = (typeof ENTRY_KINDS)[keyof typeof ENTRY_KINDS];
+
+/** The payload type of each entry kind the agent loop writes. */
+export interface EntryPayloads {
+  system: SystemPayload;
+  user: UserPayload;
+  assistant: AssistantPayload;
+  tool_result: ToolResultPayload;
+  run_error: RunErrorPayload;
+  compaction: CompactionPayload;
+}
+
+/**
+ * The typed payload of an entry of `kind`. Entries are only written through
+ * {@link toEntryPayload}, so the kind fixes the payload shape; a kind mismatch
+ * is a caller bug and throws.
+ */
+export function payloadOf<K extends EntryKind>(
+  entry: Pick<EntryRecord, "kind" | "payload">,
+  kind: K,
+): EntryPayloads[K] {
+  if (entry.kind !== kind) throw new TypeError(`expected a ${kind} entry, got ${entry.kind}`);
+  return entry.payload as unknown as EntryPayloads[K];
+}
+
+/** A typed payload for an entry of `kind`, as stored JSON. */
+export function toEntryPayload<K extends EntryKind>(
+  _kind: K,
+  payload: EntryPayloads[K],
+): JsonValue {
+  return payload as unknown as JsonValue;
+}
+
 export interface BuiltContext {
   /** Newest system payload, or null when none was appended yet. */
   system: SystemPayload | null;
@@ -108,8 +141,7 @@ export function buildContext(entries: readonly EntryRecord[]): BuiltContext {
   let head = -1;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i] as EntryRecord;
-    if (system === null && e.kind === ENTRY_KINDS.system)
-      system = e.payload as unknown as SystemPayload;
+    if (system === null && e.kind === ENTRY_KINDS.system) system = payloadOf(e, ENTRY_KINDS.system);
     if (head < 0 && e.kind === ENTRY_KINDS.compaction) head = i;
     if (system !== null && head >= 0) break;
   }
@@ -122,7 +154,7 @@ export function buildContext(entries: readonly EntryRecord[]): BuiltContext {
   let body: readonly EntryRecord[] = entries;
   if (head >= 0) {
     const compaction = entries[head] as EntryRecord;
-    const c = compaction.payload as unknown as CompactionPayload;
+    const c = payloadOf(compaction, ENTRY_KINDS.compaction);
     messages.push({ role: "user", content: SUMMARY_PREFIX + c.summary });
     const keptAt =
       c.firstKeptEntryId === null ? -1 : entries.findIndex((e) => e.id === c.firstKeptEntryId);
@@ -138,18 +170,18 @@ export function buildContext(entries: readonly EntryRecord[]): BuiltContext {
     switch (e.kind) {
       case ENTRY_KINDS.user: {
         closeOpen();
-        messages.push({ role: "user", content: (e.payload as unknown as UserPayload).content });
+        messages.push({ role: "user", content: payloadOf(e, ENTRY_KINDS.user).content });
         break;
       }
       case ENTRY_KINDS.assistant: {
         closeOpen();
-        const message = (e.payload as unknown as AssistantPayload).message;
+        const message = payloadOf(e, ENTRY_KINDS.assistant).message;
         messages.push(message);
         for (const b of message.blocks) if (b.type === "tool_call") open.set(b.id, b.name);
         break;
       }
       case ENTRY_KINDS.toolResult: {
-        const p = e.payload as unknown as ToolResultPayload;
+        const p = payloadOf(e, ENTRY_KINDS.toolResult);
         if (!open.has(p.toolCallId)) break; // orphan (its call was compacted away)
         open.delete(p.toolCallId);
         messages.push(toolResultMessage(p));

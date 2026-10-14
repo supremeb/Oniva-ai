@@ -5,6 +5,7 @@
  * the provider registry with the policy-gated `resolveAndStream` entry point.
  */
 import type { Context } from "../core/context.js";
+import { errorText } from "../core/errors.js";
 import type { JsonObject } from "../core/json.js";
 import type {
   AssistantBlock,
@@ -50,10 +51,6 @@ export function modelError(
 
 export function isContextOverflow(event: StreamEvent): boolean {
   return event.type === "error" && event.error.kind === "context_overflow";
-}
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 // ---------------------------------------------------------------------------

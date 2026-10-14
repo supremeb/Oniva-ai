@@ -40,7 +40,8 @@
  */
 import type { Clock } from "../core/clock.js";
 import type { Context } from "../core/context.js";
-import { type JsonObject, type JsonValue, jsonByteLength } from "../core/json.js";
+import { errorText } from "../core/errors.js";
+import { type JsonObject, jsonByteLength } from "../core/json.js";
 import type { EngineLimits } from "../core/limits.js";
 import type { ModelRegistry } from "../models/stream.js";
 import type { Session } from "../session/session.js";
@@ -74,7 +75,12 @@ import {
   requestApproval,
   resultApproval,
 } from "./approvals.js";
-import { ENTRY_KINDS, type ToolResultPayload, type ToolResultStatus } from "./context-builder.js";
+import {
+  ENTRY_KINDS,
+  type ToolResultPayload,
+  type ToolResultStatus,
+  toEntryPayload,
+} from "./context-builder.js";
 import { type AgentErrorReporter, type HookRunner, isToolResult } from "./hooks.js";
 import { authorize, type HostPolicy } from "./policy.js";
 import {
@@ -196,7 +202,7 @@ export function appendToolResult(
     conversationId,
     taskId,
     kind: ENTRY_KINDS.toolResult,
-    payload: payload as unknown as JsonValue,
+    payload: toEntryPayload(ENTRY_KINDS.toolResult, payload),
   }).id;
 }
 
@@ -302,8 +308,6 @@ export function capToolResult(
   capped = { ...capped, content: marker(0).trimStart() };
   return capped;
 }
-
-const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 function issuesText(issues: ReadonlyArray<{ path: PropertyKey[]; message: string }>): string {
   return issues.map((i) => `${i.path.map(String).join(".") || "(root)"}: ${i.message}`).join("; ");

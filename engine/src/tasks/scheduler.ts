@@ -38,6 +38,7 @@ import {
   type Committed,
   committed,
   committedTransition,
+  getSignal,
   InvalidTransition,
   isTransition,
   OUTCOME_KEY,
@@ -54,6 +55,7 @@ import {
   type Transition,
   taskState,
   WaitRejected,
+  withSignal,
 } from "./define.js";
 import { checkWaitTargets, hasLiveOwned, type TaskIndex } from "./ownership.js";
 import { deliverSignal, dueWake, failFastVictims, wake } from "./signals.js";
@@ -222,7 +224,7 @@ export class TaskWrites implements TaskLookup {
       ...current,
       status: "completing",
       waiting: null,
-      signals: { ...current.signals, [OUTCOME_KEY]: outcome as unknown as JsonValue },
+      signals: withSignal(current.signals, OUTCOME_KEY, outcome),
     });
   }
 
@@ -459,7 +461,8 @@ export class Scheduler {
           const reason = dueWake(t, w, now);
           if (reason) w.put(wake(t, reason));
         } else if (t.status === "completing" && !hasLiveOwned(w, t.id)) {
-          const outcome = t.signals[OUTCOME_KEY] as unknown as TaskOutcome;
+          // `finish` sets $outcome before a task enters `completing`.
+          const outcome = getSignal(t.signals, OUTCOME_KEY) as TaskOutcome;
           w.put({ ...t, status: "terminal", outcome });
         }
       }
