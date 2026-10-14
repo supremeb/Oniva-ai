@@ -1,3 +1,13 @@
+export * from "./agent/context-builder.js";
+export * from "./agent/conversation.js";
+export * from "./agent/generation.js";
+export * from "./agent/harness.js";
+export * from "./agent/hooks.js";
+export * from "./agent/policy.js";
+export * from "./agent/progress.js";
+export * from "./agent/prompt.js";
+export * from "./agent/tool-task.js";
+export * from "./agent/usage.js";
 export * from "./core/clock.js";
 export * from "./core/context.js";
 export * from "./core/errors.js";
@@ -26,3 +36,4 @@ export * from "./storage/types.js";
 export * from "./tasks/define.js";
 export * from "./tasks/runtime.js";
 export { ABORT_REASONS, type TaskErrorContext, type TaskErrorReporter } from "./tasks/scheduler.js";
+export * from "./tools/registry.js";
