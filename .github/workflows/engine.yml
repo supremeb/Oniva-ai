@@ -1,0 +1,46 @@
+name: engine
+
+on:
+  push:
+    paths:
+      - "engine/**"
+      - ".github/workflows/engine.yml"
+  pull_request:
+    paths:
+      - "engine/**"
+      - ".github/workflows/engine.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: engine
+          POSTGRES_PASSWORD: engine
+          POSTGRES_DB: engine_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U engine -d engine_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENGINE_TEST_PG_URL: postgres://engine:engine@localhost:5432/engine_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:scenario
