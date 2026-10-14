@@ -5,7 +5,11 @@
  * engine HTTP API once it holds the session lease and answers `409` with the
  * owner id while another worker does. Exit codes: 0 after SIGTERM/SIGINT,
  * 2 for bad configuration, 3 when the lease was lost (restart the process),
- * 1 for any other failure.
+ * 1 for any other failure (including the engine failing while serving, and a
+ * shutdown that overran its deadline and was forced).
+ *
+ * Every stored payload passes through the default secret-masking redactor
+ * (`src/worker/redact.ts`).
  */
 import { AnthropicProvider } from "../src/models/anthropic.js";
 import { ModelRegistry } from "../src/models/stream.js";
@@ -15,6 +19,7 @@ import {
   WorkerConfigError,
   workerConfigFromEnv,
 } from "../src/worker/config.js";
+import { maskSecrets } from "../src/worker/redact.js";
 import { startWorker, type WorkerLog } from "../src/worker/worker.js";
 
 const log: WorkerLog = (event, fields = {}) => {
@@ -34,7 +39,7 @@ async function main(): Promise<number> {
     throw err;
   }
 
-  const pool = createWorkerPool(config);
+  const pool = createWorkerPool(config, log);
   const models = new ModelRegistry().register(new AnthropicProvider());
   const worker = await startWorker({
     pool,
@@ -59,20 +64,38 @@ async function main(): Promise<number> {
     approvalTtlMs: config.approvalTtlMs,
     subagentTool: config.subagentTool,
     settings: { progressIntervalMs: config.progressIntervalMs },
+    redact: maskSecrets,
+    closeTimeoutMs: config.shutdownTimeoutMs,
     log,
   });
 
+  // Fallback: if shutdown wedges past its own bounds, exit anyway. Unref'd so
+  // it never keeps an otherwise finished process alive.
+  const forceExitAfter = (ms: number, code: number) => {
+    setTimeout(() => {
+      log("force_exit", { code, afterMs: ms });
+      process.exit(code);
+    }, ms).unref();
+  };
+  // Closing the engine and releasing the lease are each bounded by the timeout.
+  const shutdownBudgetMs = config.shutdownTimeoutMs * 2 + 5_000;
+
   const stop = () => {
     log("signal", { action: "stop" });
+    forceExitAfter(shutdownBudgetMs, 1);
     void worker.stop();
   };
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
 
   const exit = await worker.exited;
-  await pool.end().catch(() => {});
-  if (exit.reason === "stopped") return 0;
-  return exit.reason === "lease_lost" ? 3 : 1;
+  const code = exit.reason === "stopped" ? 0 : exit.reason === "lease_lost" ? 3 : 1;
+  // `pool.end()` waits for checked-out clients; do not let a stuck one hold the exit.
+  forceExitAfter(config.shutdownTimeoutMs, code);
+  await pool.end().catch((err: unknown) => {
+    log("pool_end_error", { error: err instanceof Error ? err.message : String(err) });
+  });
+  return code;
 }
 
 main().then(

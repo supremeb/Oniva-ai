@@ -75,12 +75,14 @@ import {
   type RunErrorPayload,
 } from "./context-builder.js";
 import { Inbox } from "./inbox.js";
-import { liveDoc, ProgressWriter } from "./progress.js";
+import { liveDoc, ProgressWriter, toolOutputDoc } from "./progress.js";
 import { systemPayload } from "./prompt.js";
 import { settleSubmission } from "./submission.js";
 import {
   type AgentDeps,
   appendToolResult,
+  capToolResult,
+  interruptedResult,
   listAllEntries,
   loadConversation,
   resultPayload,
@@ -478,6 +480,19 @@ export function generationTaskDefinition(
       const inbox = await Inbox.load(tx, conversationId);
       for (const call of missing) {
         const t = call.taskId === null ? null : rt.task(call.taskId);
+        if (t?.outcome?.type === "faulted" && t.phase === "execute" && call.taskId !== null) {
+          // Faulted after the intent: the effect may have run even though its
+          // result never committed. Warn the model rather than call it a failure.
+          const stored = (await tx.doc(toolOutputDoc, call.taskId)).value;
+          const result = capToolResult(call, interruptedResult(stored), deps.limits.maxEntryBytes);
+          appendToolResult(
+            tx,
+            conversationId,
+            call.taskId,
+            resultPayload(runId, call, "interrupted", result, stored.attempt),
+          );
+          continue;
+        }
         const why =
           t?.outcome?.type === "aborted"
             ? `The tool call was aborted (${t.outcome.reason}).`

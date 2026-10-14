@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LeaseLost, StorageRequestError } from "../../src/core/errors.js";
 import { newId, uuidv7 } from "../../src/core/ids.js";
@@ -191,6 +192,42 @@ describe("postgres specifics", () => {
     assert.equal(await s.lastSeq(), 0);
     assert.equal(await s.getConversation(c.id), null);
     assert.deepEqual(await s.commit({ createConversations: [c] }, fence), { seq: 1 });
+  });
+
+  it("commits a document-only batch in five round trips", async () => {
+    const pool = env.newPool();
+    let statements = 0;
+    // Count every statement sent on a pooled client (commits run on one).
+    pool.on("connect", (client: pg.PoolClient) => {
+      const query = client.query.bind(client) as (...args: unknown[]) => unknown;
+      (client as unknown as { query: (...args: unknown[]) => unknown }).query = (
+        ...args: unknown[]
+      ) => {
+        statements++;
+        return query(...args);
+      };
+    });
+    const sid = `sess-${uuidv7()}`;
+    const fence = await leaseFence(sid);
+    const s = await new PostgresStorageProvider(pool).open(sid);
+    const c = conversation();
+    await s.commit({ createConversations: [c] }, fence);
+    statements = 0;
+    const doc = { kind: "live", scopeId: c.id, data: { n: 1 }, updatedAt: 5 };
+    assert.deepEqual(await s.commit({ putDocuments: [doc] }, fence), { seq: 2 });
+    // BEGIN, lease+counters lock, document upsert, counters+commit row, COMMIT.
+    assert.equal(statements, 5);
+    const { rows } = await pool.query(
+      "SELECT seq, fence_token, record_count FROM engine_commits WHERE session_id = $1 ORDER BY seq",
+      [sid],
+    );
+    assert.deepEqual(
+      rows.map((r) => [Number(r.seq), Number(r.fence_token), r.record_count]),
+      [
+        [1, Number(fence.token), 1],
+        [2, Number(fence.token), 1],
+      ],
+    );
   });
 
   it("runs migrations idempotently and records them", async () => {

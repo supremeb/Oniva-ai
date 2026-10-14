@@ -11,7 +11,8 @@
  *   those tools that is already on the wire: it logs `invoke_pending` (a
  *   marked point to SIGKILL or SIGSTOP the process at), and `ms` later the
  *   request is delivered whatever the worker did meanwhile (it is detached
- *   from the caller's abort signal, as bytes in flight would be);
+ *   from the caller's abort signal, and the process waits for it before
+ *   exiting, as bytes already handed to the kernel would still arrive);
  * - storage commits are timed for the load scenario.
  *
  * Test-only routes (bearer token required): `GET|POST /v1/test/clock`
@@ -62,22 +63,38 @@ function timedStorage(provider: StorageProvider, samples: CommitSample[]): Stora
   };
 }
 
+/** Delayed deliveries still on the wire; the process drains them before exiting. */
+const onTheWire = new Set<Promise<unknown>>();
+
 /** Deliver gateway invokes of the listed tools late, as if delayed on the wire. */
 function delayedFetch(pauses: Record<string, number>): typeof fetch {
-  return async (input, init) => {
+  return (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const tool = /\/internal\/tools\/([^/]+)\/invoke$/.exec(url)?.[1];
     const ms = tool === undefined ? undefined : pauses[decodeURIComponent(tool)];
-    if (ms === undefined) return fetch(input, init);
-    const fence = new Headers(init?.headers).get("x-engine-fence");
-    log("invoke_pending", { tool, fence });
-    await new Promise((resolve) => setTimeout(resolve, ms));
-    log("invoke_sending", { tool, fence });
-    const { signal: _detached, ...rest } = init ?? {};
-    const res = await fetch(input, rest);
-    log("invoke_answered", { tool, fence, status: res.status });
-    return res;
+    if (tool === undefined || ms === undefined) return fetch(input, init);
+    const delivery = deliverLate(tool, ms, input, init);
+    onTheWire.add(delivery);
+    const drop = () => onTheWire.delete(delivery);
+    delivery.then(drop, drop);
+    return delivery;
   };
+}
+
+async function deliverLate(
+  tool: string,
+  ms: number,
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1],
+): Promise<Response> {
+  const fence = new Headers(init?.headers).get("x-engine-fence");
+  log("invoke_pending", { tool, fence });
+  await new Promise((resolve) => setTimeout(resolve, ms));
+  log("invoke_sending", { tool, fence });
+  const { signal: _detached, ...rest } = init ?? {};
+  const res = await fetch(input, rest);
+  log("invoke_answered", { tool, fence, status: res.status });
+  return res;
 }
 
 function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -193,6 +210,10 @@ async function main(): Promise<number> {
   process.once("SIGINT", stop);
 
   const exit = await worker.exited;
+  await Promise.race([
+    Promise.allSettled([...onTheWire]),
+    new Promise((resolve) => setTimeout(resolve, 10_000).unref()),
+  ]);
   clock.close();
   await pool.end().catch(() => {});
   if (exit.reason === "stopped") return 0;

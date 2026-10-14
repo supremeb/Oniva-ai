@@ -34,12 +34,57 @@ function sleepWith(clock: Clock, delayMs: number, signal?: AbortSignal): Promise
   });
 }
 
+/** The longest delay `setTimeout` honours; Node fires longer ones after 1 ms. */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/** The timer primitives {@link setLongTimer} arms (injectable for tests). */
+export interface TimerHost<H = unknown> {
+  setTimeout(callback: () => void, delayMs: number): H;
+  clearTimeout(handle: H): void;
+}
+
+const nodeTimers: TimerHost<ReturnType<typeof setTimeout>> = {
+  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimeout: (handle) => clearTimeout(handle),
+};
+
+/**
+ * Run `callback` once `delayMs` has elapsed, for any delay: a delay beyond
+ * {@link MAX_TIMER_DELAY_MS} is armed in chunks of at most that size, so a
+ * long deadline (an approval expiring in 30 days) is not fired after 1 ms.
+ * A negative or NaN delay fires on the next turn; `Infinity` never fires.
+ */
+export function setLongTimer<H>(
+  delayMs: number,
+  callback: () => void,
+  host: TimerHost<H>,
+): CancelTimer {
+  let remaining = delayMs > 0 ? delayMs : 0;
+  let handle: H | undefined;
+  let cancelled = false;
+  const arm = (): void => {
+    const step = Math.min(remaining, MAX_TIMER_DELAY_MS);
+    handle = host.setTimeout(() => {
+      handle = undefined;
+      if (cancelled) return;
+      remaining -= step;
+      if (remaining > 0) arm();
+      else callback();
+    }, step);
+  };
+  arm();
+  return () => {
+    cancelled = true;
+    if (handle !== undefined) host.clearTimeout(handle);
+    handle = undefined;
+  };
+}
+
 export const realClock: Clock = {
   now: () => Date.now(),
   monotonic: () => performance.now(),
   setTimer(delayMs, callback) {
-    const handle = setTimeout(callback, Math.max(0, delayMs));
-    return () => clearTimeout(handle);
+    return setLongTimer(delayMs, callback, nodeTimers);
   },
   sleep(delayMs, signal) {
     return sleepWith(realClock, delayMs, signal);

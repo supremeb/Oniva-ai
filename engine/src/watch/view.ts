@@ -91,12 +91,14 @@ export async function loadViewState(session: Session, conversationId: string): P
   const toolOutput: ConversationView["toolOutput"] = {};
   for (let cursor: string | null = null; ; ) {
     const page = await reader.listTasks({ conversationId, limit: MAX_PAGE_LIMIT, cursor });
-    for (const task of page.items) {
-      if (task.kind !== TOOL_TASK_KIND) continue;
-      toolTasks.add(task.id);
-      const stored = await reader.getDocument(toolOutputDoc.kind, task.id);
-      if (stored) toolOutput[task.id] = parseDoc(toolOutputDoc, task.id, stored.data);
-    }
+    const ids = page.items.filter((t) => t.kind === TOOL_TASK_KIND).map((t) => t.id);
+    // One batched read per page of tasks (a page holds at most MAX_PAGE_LIMIT).
+    const docs = ids.length === 0 ? [] : await reader.getDocuments(toolOutputDoc.kind, ids);
+    ids.forEach((id, i) => {
+      toolTasks.add(id);
+      const stored = docs[i];
+      if (stored) toolOutput[id] = parseDoc(toolOutputDoc, id, stored.data);
+    });
     cursor = page.nextCursor;
     if (cursor === null) break;
   }

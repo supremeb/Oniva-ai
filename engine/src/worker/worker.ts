@@ -7,7 +7,9 @@
  *
  * - **standby** while another worker holds the lease: health answers
  *   `owner: false`, every authenticated route `409 { error: "not_owner",
- *   ownerId }`, and the lease is retried every `leaseRetryMs`;
+ *   ownerId }`, and the lease is retried every `leaseRetryMs`. A worker that
+ *   acquires the lease but cannot load the gateway manifest gives the lease
+ *   back and stays on standby, retrying, instead of exiting;
  * - **serving** once the lease is acquired: the gateway manifest is loaded
  *   with the lease fence, the harness opens over Postgres with the keeper's
  *   fence and signal, and requests go to {@link createEngineServer} with
@@ -16,14 +18,22 @@
  *   rejecting the fence token, which calls `fenceNow`): the runtime stops,
  *   the harness closes and {@link WorkerHandle.exited} resolves
  *   `lease_lost`; the process should exit and be restarted;
+ * - **failed** when the engine stops on its own while serving (its session
+ *   failed on a storage error): the lease is released so a successor takes
+ *   over at once, and {@link WorkerHandle.exited} resolves `failed`; the
+ *   process should exit non-zero and be restarted;
  * - **stopped** after {@link WorkerHandle.stop}: the front closes, the
  *   harness closes and the lease is released so a successor takes over at
  *   once.
+ *
+ * Every shutdown bounds closing the engine (and releasing the lease) by
+ * `closeTimeoutMs`, so a wedged handler or connection cannot hold the process.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Pool } from "pg";
 import { type AgentSettings, Harness } from "../agent/harness.js";
+import type { AgentHooks } from "../agent/hooks.js";
 import type { HostPolicy } from "../agent/policy.js";
 import { createSubagentTool } from "../agent/subagents.js";
 import { type Clock, realClock } from "../core/clock.js";
@@ -32,6 +42,7 @@ import type { ModelRegistry } from "../models/stream.js";
 import { bearerMatches, headerValue } from "../server/auth.js";
 import { createEngineServer, type EngineServer } from "../server/http.js";
 import { matchRoute } from "../server/routes.js";
+import type { Redact } from "../session/transaction.js";
 import { defaultOwnerId, LeaseKeeper, PostgresLeases } from "../storage/postgres/lease.js";
 import { migrate } from "../storage/postgres/migrate.js";
 import { PostgresStorageProvider } from "../storage/postgres/storage.js";
@@ -85,6 +96,11 @@ export interface WorkerOptions {
   /** Engine clock (approval expiry, deadlines, throttling). Leases use the database clock. */
   clock?: Clock;
   settings?: Partial<AgentSettings>;
+  /** Host redaction (R20) for every stored payload. */
+  redact?: Redact;
+  hooks?: AgentHooks | readonly AgentHooks[];
+  /** Bound on closing the front, engine and harness, and on releasing the lease. Default 10s. */
+  closeTimeoutMs?: number;
   /** Wrap the storage provider (instrumentation). */
   wrapStorage?: (provider: StorageProvider) => StorageProvider;
   /** Sees every request first; return true when it answered it. */
@@ -163,6 +179,33 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 
 const noLog: WorkerLog = () => {};
 
+export const DEFAULT_CLOSE_TIMEOUT_MS = 10_000;
+
+const TIMED_OUT = Symbol("timed out");
+
+/** Settle `work` or give up after `ms` (real time); never rejects. */
+async function within(
+  work: Promise<unknown>,
+  ms: number,
+): Promise<{ ok: true } | { ok: false; error: unknown } | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), Math.max(0, ms));
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([
+      work.then(
+        () => ({ ok: true }) as const,
+        (error: unknown) => ({ ok: false, error }) as const,
+      ),
+      deadline,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Start a worker; resolves once it listens (it may still be on standby). */
 export async function startWorker(options: WorkerOptions): Promise<WorkerHandle> {
   const log = options.log ?? noLog;
@@ -170,6 +213,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
   const ownerId = options.ownerId ?? defaultOwnerId();
   const { sessionId, serviceToken, pool } = options;
   const retryMs = options.leaseRetryMs ?? Math.max(1, Math.floor(options.leaseTtlMs / 3));
+  const closeTimeoutMs = options.closeTimeoutMs ?? DEFAULT_CLOSE_TIMEOUT_MS;
   if (options.migrate !== false) await migrate(pool);
   const leases = new PostgresLeases(pool);
 
@@ -235,18 +279,36 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
   const url = `http://${host}:${address.port}`;
   log("listening", { url, port: address.port, ownerId, sessionId });
 
-  /** Close the front, engine and harness once; release the lease when stopping. */
+  /** Run one shutdown step within `ms`, logging a failure or timeout. */
+  async function step(what: string, work: Promise<unknown> | undefined, ms: number): Promise<void> {
+    if (!work) return;
+    const result = await within(work, ms);
+    if (result === TIMED_OUT) log("close_timeout", { step: what, timeoutMs: closeTimeoutMs });
+    else if (!result.ok) log("close_error", { step: what, error: errorText(result.error) });
+  }
+
+  /**
+   * Close the front, engine and harness once (together bounded by
+   * `closeTimeoutMs`); then, unless the lease was lost, release it (bounded
+   * the same) so a successor takes over at once.
+   */
   function shutdown(exit: WorkerExit): Promise<void> {
     if (teardown) return teardown;
     teardown = (async () => {
       wake?.();
-      await new Promise<void>((resolve) => {
-        front.close(() => resolve());
-        front.closeAllConnections();
-      });
-      await engine?.close().catch(() => {});
-      await harness?.close().catch(() => {});
-      if (exit.reason === "stopped") await keeper?.release().catch(() => {});
+      const deadline = Date.now() + closeTimeoutMs;
+      const left = () => deadline - Date.now();
+      await step(
+        "front",
+        new Promise<void>((resolve) => {
+          front.close(() => resolve());
+          front.closeAllConnections();
+        }),
+        left(),
+      );
+      await step("engine", engine?.close(), left());
+      await step("harness", harness?.close(), left());
+      if (exit.reason !== "lease_lost") await step("lease", keeper?.release(), closeTimeoutMs);
       state = exit.reason === "lease_lost" ? "lost" : "stopped";
       log("exited", { reason: exit.reason });
       finish(exit);
@@ -261,22 +323,42 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
     void shutdown({ reason: "lease_lost", error });
   }
 
-  async function serve(k: LeaseKeeper): Promise<void> {
-    let gateway: GatewayToolset | null = null;
-    if (options.gateway) {
-      gateway = await createGatewayTools({
-        baseUrl: options.gateway.baseUrl,
-        serviceToken: options.gateway.serviceToken,
-        fence: k.fence,
-        sessionId,
-        signal: k.signal,
-        ...(options.gateway.fetch ? { fetch: options.gateway.fetch } : {}),
-        onFenceRejected: (rejection) => {
-          log("fence_rejected", { tool: rejection.tool, token: String(rejection.token) });
-          k.fenceNow("the tool gateway rejected this worker's fence token");
-        },
-      });
-    }
+  function onFailed(error: unknown): void {
+    if (state === "stopping" || state === "stopped" || state === "lost") return;
+    log("failed", { error: errorText(error) });
+    state = "stopping";
+    void shutdown({ reason: "failed", error });
+  }
+
+  /**
+   * The runtime stopped while this worker still wanted to serve: after a lost
+   * lease `onLost` has already run (the keeper calls it synchronously as it
+   * aborts its signal); otherwise the session failed on its own (a storage
+   * error) and the worker fails, releasing the lease.
+   */
+  function onEngineStopped(k: LeaseKeeper, reason: unknown): void {
+    if (state !== "serving" && state !== "standby") return;
+    if (k.state === "lost") onLost(reason);
+    else onFailed(reason);
+  }
+
+  async function loadGateway(k: LeaseKeeper): Promise<GatewayToolset | null> {
+    if (!options.gateway) return null;
+    return createGatewayTools({
+      baseUrl: options.gateway.baseUrl,
+      serviceToken: options.gateway.serviceToken,
+      fence: k.fence,
+      sessionId,
+      signal: k.signal,
+      ...(options.gateway.fetch ? { fetch: options.gateway.fetch } : {}),
+      onFenceRejected: (rejection) => {
+        log("fence_rejected", { tool: rejection.tool, token: String(rejection.token) });
+        k.fenceNow("the tool gateway rejected this worker's fence token");
+      },
+    });
+  }
+
+  async function serve(k: LeaseKeeper, gateway: GatewayToolset | null): Promise<void> {
     const tools = [
       ...(gateway?.tools ?? []),
       ...(options.tools ?? []),
@@ -298,9 +380,12 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       fence: k.fence,
       signal: k.signal,
       ...(options.settings ? { settings: options.settings } : {}),
+      ...(options.redact ? { redact: options.redact } : {}),
+      ...(options.hooks ? { hooks: options.hooks } : {}),
       onError: (err, info) => log("engine_error", { ...info, error: errorText(err) }),
     });
     harness = h;
+    void h.runtime.closed.then((reason) => onEngineStopped(k, reason));
     engine = createEngineServer({
       harness: h,
       sessionId,
@@ -310,6 +395,18 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       currentOwner,
       onError: (err) => log("http_error", { error: errorText(err) }),
     });
+  }
+
+  /** Wait `retryMs` on standby; `shutdown` cuts it short. */
+  async function standbyPause(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, retryMs);
+      wake = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+    wake = null;
   }
 
   async function run(): Promise<void> {
@@ -329,14 +426,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       } catch (err) {
         if (!(err instanceof NotOwner)) log("lease_error", { error: errorText(err) });
         else log("standby", { ownerId: err.ownerId ?? null });
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, retryMs);
-          wake = () => {
-            clearTimeout(timer);
-            resolve();
-          };
-        });
-        wake = null;
+        await standbyPause();
         continue;
       }
       keeper = k;
@@ -346,13 +436,27 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
         if (state === "stopping") await k.release().catch(() => {});
         return;
       }
-      await serve(k);
+      let gateway: GatewayToolset | null;
+      try {
+        gateway = await loadGateway(k);
+      } catch (err) {
+        if (state !== "standby") return; // stopped or fenced while loading
+        // A gateway outage: give the lease back and retry from standby rather
+        // than exiting into a crash loop.
+        log("gateway_unavailable", { error: errorText(err), retryMs });
+        keeper = null;
+        await k.release().catch(() => {});
+        if (state !== "standby") return;
+        await standbyPause();
+        continue;
+      }
+      await serve(k, gateway);
       if (state !== "standby") {
         // Stopped or fenced while opening: the teardown may have missed what serve opened.
         await teardown;
-        await engine?.close().catch(() => {});
-        await harness?.close().catch(() => {});
-        if (state !== "lost") await k.release().catch(() => {});
+        await step("engine", engine?.close(), closeTimeoutMs);
+        await step("harness", harness?.close(), closeTimeoutMs);
+        if (state !== "lost") await step("lease", k.release(), closeTimeoutMs);
         return;
       }
       state = "serving";
@@ -361,13 +465,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
     }
   }
 
-  run().catch((error: unknown) => {
-    if (state === "stopping" || state === "stopped" || state === "lost") return;
-    log("failed", { error: errorText(error) });
-    state = "stopping";
-    void keeper?.release().catch(() => {});
-    void shutdown({ reason: "failed", error });
-  });
+  run().catch(onFailed);
 
   return {
     url,

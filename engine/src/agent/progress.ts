@@ -15,8 +15,27 @@ import { jsonValue } from "./prompt.js";
 
 export const DEFAULT_PROGRESS_INTERVAL_MS = 100;
 
-/** Most characters of partial tool output kept (the tail is kept). */
-export const MAX_TOOL_OUTPUT_CHARS = 64 * 1024;
+/**
+ * Most characters of partial tool output kept in the live document (the tail
+ * is kept). The document is rewritten on every progress write, so this bounds
+ * the write cost; the tool's own result is not affected by it.
+ */
+export const MAX_TOOL_OUTPUT_CHARS = 16 * 1024;
+
+/** Snapshot size (characters) above which tool output is written less often. */
+export const LARGE_TOOL_OUTPUT_CHARS = 8 * 1024;
+
+/** Minimum interval between writes of a large tool output snapshot. */
+export const LARGE_TOOL_OUTPUT_INTERVAL_MS = 250;
+
+/**
+ * The progress interval for a tool output snapshot of `chars` characters. A
+ * base of 0 (throttling off, as tests configure it) is kept as is.
+ */
+export function toolOutputIntervalMs(baseMs: number, chars: number): number {
+  if (baseMs <= 0 || chars <= LARGE_TOOL_OUTPUT_CHARS) return baseMs;
+  return Math.max(baseMs, LARGE_TOOL_OUTPUT_INTERVAL_MS);
+}
 
 const liveSchema = z.object({
   runId: z.string().nullable(),
@@ -51,10 +70,13 @@ export const toolOutputDoc = defineDoc<ToolOutputState>({
   schema: toolOutputSchema,
 });
 
-/** Calls `flush` at most once per interval while changes keep arriving. */
+/**
+ * Calls `flush` at most once per interval while changes keep arriving. The
+ * interval may be a function, read each time a write is scheduled.
+ */
 export class ProgressWriter {
   readonly #clock: Clock;
-  readonly #intervalMs: number;
+  readonly #intervalMs: () => number;
   readonly #flush: () => Promise<void>;
   readonly #onError: (error: unknown) => void;
   #last = Number.NEGATIVE_INFINITY;
@@ -65,12 +87,12 @@ export class ProgressWriter {
 
   constructor(
     clock: Clock,
-    intervalMs: number,
+    intervalMs: number | (() => number),
     flush: () => Promise<void>,
     onError: (error: unknown) => void = () => {},
   ) {
     this.#clock = clock;
-    this.#intervalMs = intervalMs;
+    this.#intervalMs = typeof intervalMs === "function" ? intervalMs : () => intervalMs;
     this.#flush = flush;
     this.#onError = onError;
   }
@@ -92,7 +114,7 @@ export class ProgressWriter {
 
   #schedule(): void {
     if (this.#inflight || this.#timer || this.#closed) return;
-    const wait = this.#last + this.#intervalMs - this.#clock.now();
+    const wait = this.#last + this.#intervalMs() - this.#clock.now();
     if (wait <= 0) {
       this.#run();
       return;

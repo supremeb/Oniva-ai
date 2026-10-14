@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ManualClock, realClock } from "../../src/core/clock.js";
+import {
+  MAX_TIMER_DELAY_MS,
+  ManualClock,
+  realClock,
+  setLongTimer,
+  type TimerHost,
+} from "../../src/core/clock.js";
 
 describe("ManualClock", () => {
   it("fires timers in deadline order and never early", () => {
@@ -85,5 +91,81 @@ describe("realClock", () => {
     await realClock.sleep(5);
     expect(realClock.monotonic() - before).toBeGreaterThanOrEqual(4);
     expect(Math.abs(realClock.now() - Date.now())).toBeLessThan(50);
+  });
+});
+
+/** A fake timer host that records every arm and fires on demand. */
+function fakeHost() {
+  const armed: Array<{ id: number; delay: number; fire: () => void }> = [];
+  const cleared: number[] = [];
+  let next = 0;
+  const host: TimerHost<number> = {
+    setTimeout(callback, delay) {
+      const id = next++;
+      armed.push({ id, delay, fire: callback });
+      return id;
+    },
+    clearTimeout(id) {
+      cleared.push(id);
+    },
+  };
+  const fireLast = () => armed[armed.length - 1]?.fire();
+  return { host, armed, cleared, fireLast };
+}
+
+describe("setLongTimer", () => {
+  it("arms short delays directly", () => {
+    const { host, armed, fireLast } = fakeHost();
+    let hit = 0;
+    setLongTimer(1500, () => hit++, host);
+    expect(armed.map((a) => a.delay)).toEqual([1500]);
+    fireLast();
+    expect(hit).toBe(1);
+  });
+
+  it("chunks delays beyond the setTimeout limit and fires only at the end", () => {
+    const { host, armed, fireLast } = fakeHost();
+    const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+    let hit = 0;
+    setLongTimer(thirtyDays, () => hit++, host);
+    expect(armed[0]?.delay).toBe(MAX_TIMER_DELAY_MS);
+    fireLast();
+    expect(hit).toBe(0);
+    expect(armed.map((a) => a.delay)).toEqual([
+      MAX_TIMER_DELAY_MS,
+      thirtyDays - MAX_TIMER_DELAY_MS,
+    ]);
+    fireLast();
+    expect(hit).toBe(1);
+    expect(armed).toHaveLength(2);
+  });
+
+  it("cancels the chunk that is currently armed", () => {
+    const { host, armed, cleared, fireLast } = fakeHost();
+    let hit = 0;
+    const cancel = setLongTimer(3 * MAX_TIMER_DELAY_MS, () => hit++, host);
+    fireLast();
+    cancel();
+    expect(cleared).toEqual([armed[1]?.id]);
+    fireLast(); // a late fire after cancel does nothing
+    expect(hit).toBe(0);
+    expect(armed).toHaveLength(2);
+  });
+
+  it("treats negative and NaN delays as zero", () => {
+    const { host, armed } = fakeHost();
+    setLongTimer(-5, () => {}, host);
+    setLongTimer(Number.NaN, () => {}, host);
+    expect(armed.map((a) => a.delay)).toEqual([0, 0]);
+  });
+
+  it("realClock does not fire a beyond-limit timer early", async () => {
+    let hit = false;
+    const cancel = realClock.setTimer(MAX_TIMER_DELAY_MS + 10_000, () => {
+      hit = true;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    cancel();
+    expect(hit).toBe(false);
   });
 });

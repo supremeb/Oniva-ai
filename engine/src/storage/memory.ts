@@ -32,6 +32,7 @@ import {
   rejectRequest,
   validateBatch,
   validateFence,
+  validateScopeIds,
   validateStatuses,
 } from "./validate.js";
 
@@ -155,6 +156,12 @@ class MemorySessionStorage implements SessionStorage {
   async getDocument(kind: string, scopeId: string) {
     this.#assertOpen();
     return out(this.#state.documents.get(documentKey(kind, scopeId)));
+  }
+
+  async getDocuments(kind: string, scopeIds: readonly string[]) {
+    this.#assertOpen();
+    validateScopeIds(scopeIds);
+    return scopeIds.map((scopeId) => out(this.#state.documents.get(documentKey(kind, scopeId))));
   }
 
   async listConversations(options?: PageOptions) {

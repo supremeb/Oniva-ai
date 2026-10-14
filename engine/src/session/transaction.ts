@@ -34,6 +34,7 @@ export type SessionReader = Pick<
   | "getSubmission"
   | "submissionByRequestId"
   | "getDocument"
+  | "getDocuments"
   | "listConversations"
   | "listEntries"
   | "listTasks"
@@ -48,6 +49,7 @@ const READ_METHODS = [
   "getSubmission",
   "submissionByRequestId",
   "getDocument",
+  "getDocuments",
   "listConversations",
   "listEntries",
   "listTasks",
@@ -72,13 +74,16 @@ export function wrapReader(
 export type RedactTarget =
   | { record: "entry"; kind: string; field: "payload" }
   | { record: "task"; kind: string; field: "input" | "checkpoint" | "signals" | "outcome" }
-  | { record: "submission"; field: "input" | "result" };
+  | { record: "submission"; field: "input" | "result" }
+  | { record: "document"; kind: string };
 
 /**
  * Host redaction hook (R20). Called on every JSON payload a transaction
  * writes — entry payloads (tool results, messages), task inputs, checkpoints,
- * signals and outcomes (tool arguments, error text), and submission inputs and
- * results — before it is stored or published. It receives a private copy and
+ * signals and outcomes (tool arguments, error text), submission inputs and
+ * results, and every changed document value (live partial messages, streamed
+ * tool output, approval arguments) — before it is stored or published. A
+ * redacted document must still satisfy its definition's schema. It receives a private copy and
  * returns the value to store. It must be deterministic and idempotent: stored
  * values may pass through it again when a record is replaced. A throw rolls
  * the commit back.
@@ -269,6 +274,8 @@ export class Transaction implements SessionReader {
     this.#read((r) => r.submissionByRequestId(conversationId, requestId));
   getDocument: SessionReader["getDocument"] = (kind, scopeId) =>
     this.#read((r) => r.getDocument(kind, scopeId));
+  getDocuments: SessionReader["getDocuments"] = (kind, scopeIds) =>
+    this.#read((r) => r.getDocuments(kind, scopeIds));
   listConversations: SessionReader["listConversations"] = (options) =>
     this.#read((r) => r.listConversations(options));
   listEntries: SessionReader["listEntries"] = (conversationId, options) =>

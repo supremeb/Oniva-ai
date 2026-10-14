@@ -20,7 +20,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { type Clock, realClock } from "../core/clock.js";
 import { SessionFailed, StorageRequestError } from "../core/errors.js";
-import { type JsonValue, jsonByteLength } from "../core/json.js";
+import { assertJson, type JsonValue, jsonByteLength } from "../core/json.js";
 import { type EngineLimits, enforceLimit, resolveLimits } from "../core/limits.js";
 import type { CommitBatch, DocumentRecord, Fence, SessionStorage } from "../storage/types.js";
 import { type DocDefinition, docKey, parseDoc } from "./documents.js";
@@ -229,7 +229,12 @@ export class Session {
     const puts: DocumentRecord[] = [];
     const documents: DocumentChange[] = [];
     for (const draft of w.drafts) {
-      const after = parseDoc(draft.def, draft.scopeId, draft.draftValue());
+      const parsed = parseDoc(draft.def, draft.scopeId, draft.draftValue());
+      // Host redaction (R20) applies to documents too: re-validate the result
+      // so a redactor cannot store a value the definition would reject. The
+      // committed `before` was redacted the same way, so the no-op check
+      // compares like with like.
+      const after = this.#redactDoc(draft.def, draft.scopeId, parsed);
       if (isDeepStrictEqual(after, draft.before ?? draft.def.initial)) continue;
       enforceLimit(this.#limits, "maxDocumentBytes", jsonByteLength(after));
       const data = structuredClone(after);
@@ -254,6 +259,13 @@ export class Session {
   }
 
   // ---- documents ----------------------------------------------------------
+
+  #redactDoc(def: DocDefinition<JsonValue>, scopeId: string, value: JsonValue): JsonValue {
+    if (this.#redact === null) return value;
+    const out = this.#redact(structuredClone(value), { record: "document", kind: def.kind });
+    assertJson(out);
+    return parseDoc(def, scopeId, structuredClone(out));
+  }
 
   async #committedDoc<T extends JsonValue>(
     def: DocDefinition<T>,

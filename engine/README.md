@@ -143,12 +143,25 @@ request:
   (JSON Schema), sideEffect: "none" | "write", idempotent?, timeoutMs,
   requiresApproval? }] }`. Reads and idempotent writes are replay-safe.
 - `POST /internal/tools/{name}/invoke` with `{ args, runId, toolCallId,
-  tenantId, projectId }`, `Idempotency-Key: runId:toolCallId`,
-  `X-Engine-Fence: <token>` and `X-Engine-Session`. A key with a stored
-  outcome returns it without re-running; a token below the session's
-  high-water mark gets `409 { error: "fence_rejected" }`.
+  tenantId, projectId }` and `Idempotency-Key: runId:toolCallId`. A key with
+  a stored outcome returns it without re-running. A started effect runs to
+  completion even if the client disconnects, and its outcome is stored.
 - `GET /internal/tools/invocations/{key}` → the stored outcome, or `404`
-  (used to reconcile after a restart).
+  (used to reconcile after a restart, or once after a non-idempotent write
+  timed out; with no stored outcome the timeout result says the write may
+  have taken effect, `details.outcome: "unknown"`).
+- **Fencing.** While the worker holds a lease, every request (manifest load,
+  invoke, reconcile) carries `X-Engine-Fence: <token>` and `X-Engine-Session`.
+  The gateway raises the session's high-water mark on any fenced request and
+  answers a lower token `409 { error: "fence_rejected" }`; it re-checks an
+  invoke's token when the effect commits. So a new owner's fenced manifest
+  load (done after lease acquisition, before recovery) or reconcile locks out
+  the previous owner's invokes still on the wire, and a `404` from the
+  reconcile route is final. `GatewayToolset.raiseFence()` re-sends the token
+  for a toolset that outlives a lease.
+- Reads retry 5xx, 429 and network failures with full-jitter backoff,
+  honoring `Retry-After` on 429/503 within the tool's deadline. Response
+  bodies over `maxResponseBytes` (default 1 MiB) are an error.
 
 ## Commands
 

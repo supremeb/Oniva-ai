@@ -12,6 +12,7 @@ import {
   type GatewayClientOptions,
   type GatewayToolset,
   gatewayParameters,
+  parseRetryAfter,
 } from "../../src/tools/gateway.js";
 import {
   defineTool,
@@ -263,7 +264,7 @@ describe("gateway invoke", () => {
     expect(gw.invokes("search_docs")).toHaveLength(1);
   });
 
-  it("aborts a call past the tool's timeout and returns a timeout result", async () => {
+  it("aborts a write past the tool's timeout and warns that its outcome is unknown", async () => {
     const tools = fresh();
     (tools[1] as FakeToolSpec).timeoutMs = 50;
     const gw = await startGateway(tools);
@@ -273,12 +274,84 @@ describe("gateway invoke", () => {
     const result = await tool(set, "send_email").execute({ to: "a", body: "b" }, api("c1"));
     expect(Date.now() - started).toBeLessThan(900);
     expect(result.isError).toBe(true);
-    expect(result.details).toMatchObject({ error: "timeout", timeoutMs: 50 });
+    expect(result.details).toMatchObject({ error: "timeout", timeoutMs: 50, outcome: "unknown" });
     expect(String(result.content)).toMatch(/timed out/);
-    // The request was aborted, so the delayed effect never ran.
-    await new Promise((r) => setTimeout(r, 1_100));
-    expect(gw.effects("send_email")).toBe(0);
+    expect(String(result.content)).toContain(
+      "It may have taken effect; check before calling again.",
+    );
+    // The client asked the gateway for a stored outcome once before giving up.
+    expect(
+      gw.requests.filter((r) => r.path === "/internal/tools/invocations/run-1%3Ac1"),
+    ).toHaveLength(1);
+    // A real backend does not cancel on disconnect: the effect still lands.
+    await waitFor(() => gw.effects("send_email") === 1);
+    expect(gw.outcome("run-1:c1")).toEqual({
+      content: "sent to a",
+      details: { messageId: "m-1" },
+    });
     expect(gw.invokes("send_email")).toHaveLength(1);
+  });
+
+  it("a timed-out write whose outcome the gateway already stored returns that outcome", async () => {
+    const tools = fresh();
+    (tools[1] as FakeToolSpec).timeoutMs = 50;
+    const gw = await startGateway(tools);
+    gw.script("send_email", { hangAfterEffect: true });
+    const set = await client(gw);
+    const result = await tool(set, "send_email").execute({ to: "a", body: "b" }, api("c1"));
+    expect(result).toEqual({ content: "sent to a", details: { messageId: "m-1" } });
+    expect(gw.effects("send_email")).toBe(1);
+    expect(gw.invokes("send_email")).toHaveLength(1);
+  });
+
+  it("a timed-out read or idempotent write is a plain timeout without a reconcile", async () => {
+    const tools = fresh();
+    (tools[0] as FakeToolSpec).timeoutMs = 50;
+    const gw = await startGateway(tools);
+    gw.script("search_docs", { hang: true });
+    const set = await client(gw);
+    const result = await tool(set, "search_docs").execute({ query: "q" }, api("c1"));
+    expect(result.details).toEqual({ error: "timeout", timeoutMs: 50 });
+    expect(String(result.content)).not.toContain("may have taken effect");
+    expect(gw.requests.some((r) => r.path.startsWith("/internal/tools/invocations/"))).toBe(false);
+  });
+
+  it("honors Retry-After on a 429 read", async () => {
+    const gw = await startGateway();
+    gw.script("search_docs", { status: 429, headers: { "retry-after": "1" } });
+    const set = await client(gw);
+    const started = Date.now();
+    const result = await tool(set, "search_docs").execute({ query: "q" }, api("c1"));
+    expect(result).toEqual({ content: "found q" });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(950);
+    expect(gw.invokes("search_docs")).toHaveLength(2);
+  });
+
+  it("times out instead of waiting a Retry-After past the tool's deadline", async () => {
+    const gw = await startGateway();
+    gw.script("search_docs", { status: 503, headers: { "retry-after": "30" } });
+    const set = await client(gw);
+    const started = Date.now();
+    const result = await tool(set, "search_docs").execute({ query: "q" }, api("c1"));
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(result.details).toMatchObject({ error: "timeout" });
+    expect(gw.invokes("search_docs")).toHaveLength(1);
+  });
+
+  it("refuses a response body over the size cap", async () => {
+    const tools = fresh();
+    (tools[0] as FakeToolSpec).handler = () => ({ content: "x".repeat(4_096) });
+    const gw = await startGateway(tools);
+    const set = await client(gw, { maxResponseBytes: 1_024 });
+    const result = await tool(set, "search_docs").execute({ query: "q" }, api("c1"));
+    expect(result.isError).toBe(true);
+    expect(result.details).toMatchObject({ error: "gateway_error", reason: "response_too_large" });
+    expect(String(result.content)).toContain("1024 bytes");
+    expect(gw.invokes("search_docs")).toHaveLength(1);
+    const ok = await client(gw, { maxResponseBytes: 8_192 });
+    expect((await tool(ok, "search_docs").execute({ query: "q" }, api("c2"))).isError).toBe(
+      undefined,
+    );
   });
 
   it("rethrows when the caller cancels instead of reporting a timeout", async () => {
@@ -294,13 +367,13 @@ describe("gateway invoke", () => {
 
   it("a fence rejection yields lease_lost and fences the worker", async () => {
     const gw = await startGateway();
-    gw.setHighWater("sess-1", 9);
     const lost: unknown[] = [];
     const set = await client(gw, {
       sessionId: "sess-1",
       fence: () => 3,
       onFenceRejected: (info) => lost.push(info),
     });
+    gw.setHighWater("sess-1", 9);
     const result = await tool(set, "send_email").execute({ to: "a", body: "b" }, api("c1"));
     expect(result.isError).toBe(true);
     expect(result.details).toMatchObject({ error: "lease_lost" });
@@ -310,14 +383,131 @@ describe("gateway invoke", () => {
 
   it("a fence that already reports the lease lost never reaches the gateway", async () => {
     const gw = await startGateway();
+    let lost = false;
     const set = await client(gw, {
       fence: () => {
-        throw new LeaseLost("sess-1", 3);
+        if (lost) throw new LeaseLost("sess-1", 3);
+        return 3;
       },
     });
+    lost = true;
     const result = await tool(set, "send_email").execute({ to: "a", body: "b" }, api("c1"));
     expect(result.details).toMatchObject({ error: "lease_lost" });
     expect(gw.invokes("send_email")).toHaveLength(0);
+  });
+});
+
+describe("gateway backoff", () => {
+  it("parses Retry-After as seconds or an HTTP date", () => {
+    expect(parseRetryAfter("2", 0)).toBe(2_000);
+    expect(parseRetryAfter(null, 0)).toBeUndefined();
+    expect(parseRetryAfter("soon", 0)).toBeUndefined();
+    const now = Date.parse("2026-10-14T10:00:00Z");
+    expect(parseRetryAfter("Wed, 14 Oct 2026 10:00:03 GMT", now)).toBe(3_000);
+    expect(parseRetryAfter("Wed, 14 Oct 2026 09:00:00 GMT", now)).toBe(0);
+  });
+
+  it("jitters read retries over [0, base * 2^n)", async () => {
+    const gw = await startGateway();
+    gw.script("search_docs", { status: 503 }, { status: 503 });
+    const draws: number[] = [];
+    const set = await client(gw, {
+      retry: { attempts: 3, baseDelayMs: 400, maxDelayMs: 400 },
+      random: () => {
+        draws.push(0);
+        return 0;
+      },
+    });
+    const started = Date.now();
+    const result = await tool(set, "search_docs").execute({ query: "q" }, api("c1"));
+    expect(result).toEqual({ content: "found q" });
+    // Two retries with a zero jitter draw: no 400 ms waits.
+    expect(draws).toHaveLength(2);
+    expect(Date.now() - started).toBeLessThan(400);
+  });
+});
+
+describe("gateway fencing", () => {
+  it("fences the manifest load and raises the session's high-water mark", async () => {
+    const gw = await startGateway();
+    await client(gw, { sessionId: "sess-1", fence: () => 5 });
+    const [req] = gw.requests.filter((r) => r.path === "/internal/tools/manifest");
+    expect(req?.headers["x-engine-fence"]).toBe("5");
+    expect(req?.headers["x-engine-session"]).toBe("sess-1");
+    expect(gw.highWater("sess-1")).toBe(5);
+  });
+
+  it("a manifest load with a stale token is rejected and fences the worker", async () => {
+    const gw = await startGateway();
+    gw.setHighWater("sess-1", 9);
+    const lost: unknown[] = [];
+    await expect(
+      client(gw, { sessionId: "sess-1", fence: () => 3, onFenceRejected: (r) => lost.push(r) }),
+    ).rejects.toThrow(LeaseLost);
+    expect(lost).toHaveLength(1);
+  });
+
+  it("raiseFence() lifts the high-water mark so a stale owner's later write is rejected", async () => {
+    const gw = await startGateway();
+    const stale = await client(gw, { sessionId: "sess-1", fence: () => 3 });
+    let token = 3;
+    const successor = await client(gw, { sessionId: "sess-1", fence: () => token });
+    token = 4;
+    await successor.raiseFence();
+    expect(gw.highWater("sess-1")).toBe(4);
+    const result = await tool(stale, "send_email").execute({ to: "a", body: "b" }, api("c1"));
+    expect(result.details).toMatchObject({ error: "lease_lost" });
+    expect(gw.effects("send_email")).toBe(0);
+  });
+
+  it("a successor's reconcile raises the fence before a stale owner's delayed write arrives (AE7)", async () => {
+    const gw = await startGateway();
+    // The manifest was loaded long ago (here: without a lease), so only the
+    // reconcile can raise the mark.
+    const stale = await client(gw, { sessionId: "sess-1", fence: () => 3 });
+    let token: number | null = null;
+    const successor = await client(gw, { sessionId: "sess-1", fence: () => token });
+    token = 4;
+    gw.requests.length = 0;
+    const outcome = await tool(successor, "send_email").reconcile?.({}, reconcileApi("c1"));
+    expect(outcome).toBeNull();
+    const [req] = gw.requests;
+    expect(req?.path).toBe("/internal/tools/invocations/run-1%3Ac1");
+    expect(req?.headers["x-engine-fence"]).toBe("4");
+    expect(req?.headers["x-engine-session"]).toBe("sess-1");
+    // The stale owner's write, delayed on the wire, lands after the 404.
+    const result = await tool(stale, "send_email").execute({ to: "a", body: "b" }, api("c1"));
+    expect(result.details).toMatchObject({ error: "lease_lost" });
+    expect(gw.effects("send_email")).toBe(0);
+  });
+
+  it("a reconcile with a stale token throws LeaseLost and fences the worker", async () => {
+    const gw = await startGateway();
+    const lost: unknown[] = [];
+    const set = await client(gw, {
+      sessionId: "sess-1",
+      fence: () => 3,
+      onFenceRejected: (r) => lost.push(r),
+    });
+    gw.setHighWater("sess-1", 9);
+    gw.storeOutcome("run-1:c1", { content: "sent earlier" });
+    await expect(tool(set, "send_email").reconcile?.({}, reconcileApi("c1"))).rejects.toThrow(
+      LeaseLost,
+    );
+    expect(lost).toEqual([{ tool: "send_email", idempotencyKey: "run-1:c1", token: 3 }]);
+  });
+
+  it("an invoke accepted before the successor raised the fence cannot commit its effect after", async () => {
+    const gw = await startGateway();
+    const stale = await client(gw, { sessionId: "sess-1", fence: () => 3 });
+    gw.delay("send_email", 300);
+    const pending = tool(stale, "send_email").execute({ to: "a", body: "b" }, api("c1"));
+    await waitFor(() => gw.invokes("send_email").length === 1);
+    gw.setHighWater("sess-1", 4);
+    const result = await pending;
+    expect(result.details).toMatchObject({ error: "lease_lost" });
+    expect(gw.effects("send_email")).toBe(0);
+    expect(gw.outcome("run-1:c1")).toBeUndefined();
   });
 });
 

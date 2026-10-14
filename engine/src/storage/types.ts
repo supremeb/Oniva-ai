@@ -236,6 +236,15 @@ export interface SessionStorage {
     requestId: string,
   ): Promise<Stored<SubmissionRecord> | null>;
   getDocument(kind: string, scopeId: string): Promise<Stored<DocumentRecord> | null>;
+  /**
+   * The documents of one kind for many scopes, read as one snapshot: element
+   * `i` is the document for `scopeIds[i]`, or null. At most
+   * {@link MAX_PAGE_LIMIT} ids; more throw `StorageRequestError`.
+   */
+  getDocuments(
+    kind: string,
+    scopeIds: readonly string[],
+  ): Promise<Array<Stored<DocumentRecord> | null>>;
 
   listConversations(options?: PageOptions): Promise<Page<Stored<ConversationRecord>>>;
   /** Throws `StorageRequestError` for an unknown conversation. */

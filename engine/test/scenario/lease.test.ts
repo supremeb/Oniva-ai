@@ -2,7 +2,8 @@
  * AE7: two workers contend for one session. Exactly one serves; the other
  * answers 409 and takes over within TTL plus one heartbeat of the owner dying.
  * A paused owner whose lease was taken over can neither commit nor cause a
- * tool effect once it wakes up.
+ * tool effect once it wakes up, even when the successor makes no gateway
+ * call after reconciling the stale owner's write.
  */
 import { describe, expect, it } from "vitest";
 import type { ToolResultPayload } from "../../src/agent/context-builder.js";
@@ -80,10 +81,6 @@ describe("AE7 lease contention", () => {
         },
         {
           when: { role: "tool_result", tool: "write_once" },
-          respond: { steps: [{ type: "tool_call", name: "ping", arguments: {} }] },
-        },
-        {
-          when: { role: "tool_result", tool: "ping" },
           respond: { steps: [{ type: "text", text: "after takeover" }] },
         },
       ],
@@ -97,7 +94,7 @@ describe("AE7 lease contention", () => {
     });
     const urlA = await a.serving();
     const tokenA = (await a.waitFor("lease_acquired")).token as number;
-    const conversationId = await createConversation(urlA, { tools: ["write_once", "ping"] });
+    const conversationId = await createConversation(urlA, { tools: ["write_once"] });
     const sub = await submit(urlA, conversationId, { text: "FENCE test", requestId: "r1" });
     await a.waitFor("invoke_pending");
     a.kill("SIGSTOP");
@@ -116,10 +113,16 @@ describe("AE7 lease contention", () => {
     expect(settled.status).toBe("done");
     expect((settled.result as { text?: string }).text).toBe("after takeover");
     const results = payloads<ToolResultPayload>(await ins.entries(conversationId), "tool_result");
-    expect(results.map((r) => [r.toolName, r.status])).toEqual([
-      ["write_once", "interrupted"],
-      ["ping", "ok"],
-    ]);
+    // The successor's reconcile found no outcome (404) and the run ended with
+    // no further gateway call. Its fenced manifest load and reconcile alone
+    // raised the session's high-water mark.
+    expect(results.map((r) => [r.toolName, r.status])).toEqual([["write_once", "interrupted"]]);
+    const reconciles = gw.requests.filter(
+      (r) =>
+        r.path.startsWith("/internal/tools/invocations/") &&
+        r.headers["x-engine-session"] === "ae7-paused",
+    );
+    expect(reconciles.map((r) => r.headers["x-engine-fence"])).toEqual([String(tokenB)]);
     expect(gw.highWater("ae7-paused")).toBe(tokenB);
 
     // Wake the stale owner: its delayed request reaches the gateway with the

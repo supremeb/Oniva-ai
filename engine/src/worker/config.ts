@@ -17,6 +17,14 @@
  * | `ENGINE_MAX_TOKENS` | `8192` | reply token budget per request |
  * | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle (KTD11) |
  * | `ENGINE_SUBAGENT_TOOL` | none | register a subagent tool under this name |
+ * | `ENGINE_SHUTDOWN_TIMEOUT_MS` | `10000` | bound on closing the engine at shutdown |
+ * | `ENGINE_DB_CONNECT_TIMEOUT_MS` | min(5000, ttl/3) | new-connection timeout |
+ * | `ENGINE_DB_STATEMENT_TIMEOUT_MS` | min(10000, 2·ttl/3) | server `statement_timeout` |
+ * | `ENGINE_DB_IDLE_TX_TIMEOUT_MS` | statement timeout | `idle_in_transaction_session_timeout` |
+ * | `ENGINE_DB_QUERY_TIMEOUT_MS` | min(statement + 1000, ttl - 1) | client-side query timeout |
+ *
+ * The database timeouts must be below the lease TTL: a query outliving the
+ * lease is wasted (its commit would be fenced) and holds a pooled connection.
  *
  * `ANTHROPIC_API_KEY` is read per model request by the production entry.
  */
@@ -45,11 +53,35 @@ export interface WorkerConfig {
   maxTokens: number;
   progressIntervalMs: number;
   subagentTool: string | null;
+  /** Bound on closing the engine and releasing the lease at shutdown. */
+  shutdownTimeoutMs: number;
+  db: WorkerDbTimeouts;
+}
+
+/** Postgres timeouts for the worker pool, all below the lease TTL. */
+export interface WorkerDbTimeouts {
+  connectTimeoutMs: number;
+  statementTimeoutMs: number;
+  idleInTransactionTimeoutMs: number;
+  queryTimeoutMs: number;
 }
 
 export const DEFAULT_LEASE_TTL_MS = 15_000;
 export const DEFAULT_APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_MAX_TOKENS = 8192;
+export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
+
+/** Database timeout defaults for a lease TTL (each below it). */
+export function defaultDbTimeouts(leaseTtlMs: number): WorkerDbTimeouts {
+  const below = (ms: number) => Math.max(1, Math.min(Math.floor(ms), leaseTtlMs - 1));
+  const statement = below(Math.min(10_000, (leaseTtlMs * 2) / 3));
+  return {
+    connectTimeoutMs: below(Math.min(5_000, leaseTtlMs / 3)),
+    statementTimeoutMs: statement,
+    idleInTransactionTimeoutMs: statement,
+    queryTimeoutMs: below(statement + 1_000),
+  };
+}
 
 /** A configuration problem; the entry points print it and exit non-zero. */
 export class WorkerConfigError extends Error {
@@ -89,6 +121,29 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
   const leaseTtlMs = integer(env, "ENGINE_LEASE_TTL_MS", DEFAULT_LEASE_TTL_MS, 1);
   const retry = text(env, "ENGINE_LEASE_RETRY_MS");
   const approval = integer(env, "ENGINE_APPROVAL_TTL_MS", DEFAULT_APPROVAL_TTL_MS, 0);
+  const dbDefaults = defaultDbTimeouts(leaseTtlMs);
+  const belowTtl = (name: string, fallback: number): number => {
+    const v = integer(env, name, fallback, 1);
+    if (text(env, name) !== null && v >= leaseTtlMs) {
+      throw new WorkerConfigError(
+        `${name} (${v}) must be below ENGINE_LEASE_TTL_MS (${leaseTtlMs})`,
+      );
+    }
+    return v;
+  };
+  const statementTimeoutMs = belowTtl(
+    "ENGINE_DB_STATEMENT_TIMEOUT_MS",
+    dbDefaults.statementTimeoutMs,
+  );
+  const db: WorkerDbTimeouts = {
+    connectTimeoutMs: belowTtl("ENGINE_DB_CONNECT_TIMEOUT_MS", dbDefaults.connectTimeoutMs),
+    statementTimeoutMs,
+    idleInTransactionTimeoutMs: belowTtl("ENGINE_DB_IDLE_TX_TIMEOUT_MS", statementTimeoutMs),
+    queryTimeoutMs: belowTtl(
+      "ENGINE_DB_QUERY_TIMEOUT_MS",
+      Math.max(1, Math.min(statementTimeoutMs + 1_000, leaseTtlMs - 1)),
+    ),
+  };
   return {
     databaseUrl: required(env, "DATABASE_URL"),
     dbSchema: schema,
@@ -112,6 +167,8 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
       0,
     ),
     subagentTool: text(env, "ENGINE_SUBAGENT_TOOL"),
+    shutdownTimeoutMs: integer(env, "ENGINE_SHUTDOWN_TIMEOUT_MS", DEFAULT_SHUTDOWN_TIMEOUT_MS, 1),
+    db,
   };
 }
 
@@ -127,14 +184,48 @@ export function assertNotTestHarnessInProduction(env: WorkerEnv = process.env): 
   }
 }
 
-/** A pool for the configured database and schema. */
-export function createWorkerPool(config: Pick<WorkerConfig, "databaseUrl" | "dbSchema">): pg.Pool {
+/** Server-side session settings, passed as libpq `options` (`-c name=value`). */
+export function workerPoolOptions(
+  config: Pick<WorkerConfig, "dbSchema"> & { db?: WorkerDbTimeouts | undefined },
+): string | undefined {
+  const settings: string[] = [];
+  if (config.dbSchema) settings.push(`-c search_path=${config.dbSchema}`);
+  if (config.db) {
+    settings.push(`-c statement_timeout=${config.db.statementTimeoutMs}`);
+    settings.push(`-c idle_in_transaction_session_timeout=${config.db.idleInTransactionTimeoutMs}`);
+  }
+  return settings.length ? settings.join(" ") : undefined;
+}
+
+/**
+ * A pool for the configured database and schema, with connect, query and
+ * server-side statement / idle-in-transaction timeouts and TCP keepalive, so a
+ * hung or half-open connection is given up instead of holding a pooled client
+ * past the lease. Pool errors (an idle client dropped) go to `log`; the pool
+ * replaces the client on next use.
+ */
+export function createWorkerPool(
+  config: Pick<WorkerConfig, "databaseUrl" | "dbSchema"> & { db?: WorkerDbTimeouts | undefined },
+  log?: (event: string, fields?: Record<string, unknown>) => void,
+): pg.Pool {
+  const options = workerPoolOptions(config);
   const pool = new pg.Pool({
     connectionString: config.databaseUrl,
-    ...(config.dbSchema ? { options: `-c search_path=${config.dbSchema}` } : {}),
+    ...(options ? { options } : {}),
     max: 10,
+    keepAlive: true,
+    ...(config.db
+      ? {
+          connectionTimeoutMillis: config.db.connectTimeoutMs,
+          query_timeout: config.db.queryTimeoutMs,
+        }
+      : {}),
   });
   // A dropped idle connection is replaced on next use; it must not crash the worker.
-  pool.on("error", () => {});
+  pool.on("error", (err) => {
+    log?.("pool_error", {
+      error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    });
+  });
   return pool;
 }

@@ -32,6 +32,7 @@ import type {
   SubmissionRecord,
   TaskRecord,
 } from "./types.js";
+import { MAX_PAGE_LIMIT } from "./types.js";
 
 /** The subset of a test runner's API the suite needs. */
 export interface ConformanceApi {
@@ -421,6 +422,49 @@ export function defineStorageConformanceSuite(
         await rejectsRequest(
           commit({ putDocuments: [doc("plan", c.id, 1), doc("plan", c.id, 2)] }),
         );
+      });
+
+      it("reads many documents of one kind at once, aligned with the scope ids", async () => {
+        const c = await newConversation();
+        const t = task(id("task"), c.id);
+        await commit({
+          createTasks: [t],
+          putDocuments: [
+            doc("plan", c.id, { v: 1 }),
+            doc("plan", t.id, [1]),
+            doc("notes", t.id, 2),
+          ],
+        });
+        const { seq } = await commit({ putDocuments: [doc("plan", t.id, [2], 9)] });
+        const other = await open(`sess-${uuidv7()}`);
+        await commitIn(other, {
+          createConversations: [conversation(id("conversation"))],
+          putDocuments: [doc("plan", "shared-scope", "theirs")],
+        });
+
+        assert.deepEqual(await s.getDocuments("plan", []), []);
+        const got = await s.getDocuments("plan", [t.id, "missing", c.id, "shared-scope", t.id]);
+        assert.deepEqual(got, [
+          { ...doc("plan", t.id, [2], 9), seq },
+          null,
+          { ...doc("plan", c.id, { v: 1 }), seq: seq - 1 },
+          null,
+          { ...doc("plan", t.id, [2], 9), seq },
+        ]);
+        assert.deepEqual(await s.getDocuments("notes", [c.id, t.id]), [
+          null,
+          { ...doc("notes", t.id, 2), seq: seq - 1 },
+        ]);
+        // Returned values are copies.
+        (must(got[0]).data as number[]).push(3);
+        assert.deepEqual((await s.getDocuments("plan", [t.id]))[0]?.data, [2]);
+
+        await rejectsRequest(s.getDocuments("plan", "x" as never));
+        await rejectsRequest(s.getDocuments("plan", [1 as never]));
+        const tooMany = Array.from({ length: MAX_PAGE_LIMIT + 1 }, (_, i) => `scope-${i}`);
+        await rejectsRequest(s.getDocuments("plan", tooMany));
+        await s.close();
+        await assert.rejects(s.getDocuments("plan", [c.id]));
       });
     });
 

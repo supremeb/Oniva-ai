@@ -22,18 +22,29 @@
  * Invoking posts `{ args, runId, toolCallId, tenantId, projectId }` to
  * `/internal/tools/{name}/invoke`. Tenant and project come from the
  * conversation's stored binding, never from the model's arguments. Headers
- * carry the service token, `Idempotency-Key: runId:toolCallId` and, when the
- * worker holds a lease, `X-Engine-Fence: <token>`.
+ * carry the service token and `Idempotency-Key: runId:toolCallId`.
+ *
+ * Fencing: while the worker holds a lease, every request (manifest load,
+ * invoke, reconcile, {@link GatewayToolset.raiseFence}) carries
+ * `X-Engine-Fence: <token>` and `X-Engine-Session`. The gateway raises the
+ * session's high-water mark on any fenced request, so a new owner's manifest
+ * load or reconcile alone locks out the previous owner's invokes still on
+ * the wire. A rejected token (409 `fence_rejected`) calls `onFenceRejected`.
  *
  * Failures become error results rather than throws, with `details.error`:
  * - `timeout`: the tool's `timeoutMs` passed (covering retries); the request
- *   is aborted;
- * - `lease_lost`: the gateway rejected the fence token (409
- *   `fence_rejected`), or the lease was already lost; `onFenceRejected` is
- *   called so the host can fence the worker;
- * - `gateway_error` (an HTTP error status) or `gateway_unavailable` (network
- *   failure). Writes are sent exactly once; reads retry 5xx, 429 and network
- *   failures with exponential backoff.
+ *   is aborted. For a non-idempotent write the outcome is unknown (the
+ *   gateway keeps running a started effect), so the client asks once for an
+ *   outcome stored under the idempotency key and returns it when there is
+ *   one; otherwise the result says the write may have taken effect, with
+ *   `details.outcome: "unknown"`;
+ * - `lease_lost`: the gateway rejected the fence token, or the lease was
+ *   already lost;
+ * - `gateway_error` (an HTTP error status, or a response body over
+ *   `maxResponseBytes`, with `details.reason: "response_too_large"`) or
+ *   `gateway_unavailable` (network failure). Writes are sent exactly once;
+ *   reads retry 5xx, 429 and network failures with full-jitter exponential
+ *   backoff, honoring `Retry-After` on 429/503, within the tool's deadline.
  * A cancelled call (the caller's signal) rejects with the signal's reason.
  *
  * The contract is specified by the fake gateway in
@@ -77,8 +88,9 @@ export interface GatewayRetryOptions {
 }
 
 export interface FenceRejection {
-  tool: string;
-  idempotencyKey: string;
+  /** The tool whose invoke or reconcile was rejected; absent for a manifest load or `raiseFence`. */
+  tool?: string;
+  idempotencyKey?: string;
   token: number | bigint;
 }
 
@@ -101,6 +113,10 @@ export interface GatewayClientOptions {
   retry?: Partial<GatewayRetryOptions>;
   /** Timeout for the manifest load (per attempt). Default 10000. */
   manifestTimeoutMs?: number;
+  /** Largest response body read; a bigger one is an error. Default 1 MiB. */
+  maxResponseBytes?: number;
+  /** Uniform [0, 1) source for backoff jitter. Default `Math.random`. */
+  random?: () => number;
   /** Cancels the manifest load. */
   signal?: AbortSignal;
 }
@@ -113,11 +129,24 @@ export interface GatewayToolset {
   describe(name: string): GatewayToolInfo | undefined;
   /** Whether the manifest asks for human approval before running the tool. */
   requiresApproval(name: string): boolean;
+  /**
+   * Send the current fence token to the gateway (a fenced manifest read), so
+   * it raises the session's high-water mark. Call it right after acquiring a
+   * lease, before recovering the runtime, when the toolset outlives a lease.
+   * Rejects with `LeaseLost` when the gateway refuses the token.
+   */
+  raiseFence(signal?: AbortSignal): Promise<void>;
 }
 
 export type GatewayErrorCode = "timeout" | "lease_lost" | "gateway_error" | "gateway_unavailable";
 
 const DEFAULT_RETRY: GatewayRetryOptions = { attempts: 3, baseDelayMs: 200, maxDelayMs: 2_000 };
+const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
+/** Longest `Retry-After` honored when no tool deadline bounds the wait. */
+const MAX_RETRY_AFTER_MS = 60_000;
+/** Budget for the one reconcile after a write timed out. */
+const TIMEOUT_RECONCILE_MS = 5_000;
+const UNKNOWN_OUTCOME = " It may have taken effect; check before calling again.";
 
 /** Load the manifest and build the gateway's tools. */
 export async function createGatewayTools(options: GatewayClientOptions): Promise<GatewayToolset> {
@@ -133,6 +162,9 @@ export async function createGatewayTools(options: GatewayClientOptions): Promise
       return info ? structuredClone(info) : undefined;
     },
     requiresApproval: (name) => infos.get(name)?.requiresApproval === true,
+    raiseFence: async (signal) => {
+      await http.manifest(signal);
+    },
   };
 }
 
@@ -166,7 +198,8 @@ export function gatewayParameters(schema: JsonObject): z.ZodType<JsonObject> {
 // ---------------------------------------------------------------------------
 
 type Attempt =
-  | { kind: "response"; status: number; body: JsonValue | null }
+  | { kind: "response"; status: number; body: JsonValue | null; retryAfterMs?: number }
+  | { kind: "too_large"; status: number }
   | { kind: "network"; error: unknown };
 
 class Timeout extends Error {}
@@ -177,6 +210,8 @@ class GatewayHttp {
   readonly #fetch: typeof fetch;
   readonly #clock: Clock;
   readonly #retry: GatewayRetryOptions;
+  readonly #maxResponseBytes: number;
+  readonly #random: () => number;
 
   constructor(options: GatewayClientOptions) {
     if (typeof options.baseUrl !== "string" || options.baseUrl.length === 0) {
@@ -193,21 +228,31 @@ class GatewayHttp {
     if (!Number.isSafeInteger(this.#retry.attempts) || this.#retry.attempts < 1) {
       throw new RangeError("gateway retry.attempts must be a positive integer");
     }
+    this.#maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+    if (!Number.isSafeInteger(this.#maxResponseBytes) || this.#maxResponseBytes < 1) {
+      throw new RangeError("gateway maxResponseBytes must be a positive integer");
+    }
+    this.#random = options.random ?? Math.random;
   }
 
-  async manifest(): Promise<GatewayToolInfo[]> {
+  /** Load the manifest, fenced (which also raises the gateway's high-water mark). */
+  async manifest(signal = this.#options.signal): Promise<GatewayToolInfo[]> {
     const url = `${this.#base}/internal/tools/manifest`;
     const timeoutMs = this.#options.manifestTimeoutMs ?? 10_000;
     for (let attempt = 1; ; attempt++) {
-      const res = await this.#send(url, { method: "GET" }, this.#options.signal, timeoutMs);
+      const token = this.#token();
+      const res = await this.#send(
+        url,
+        { method: "GET", headers: this.#headers(undefined, token) },
+        signal,
+        timeoutMs,
+      );
       if (res.kind === "response" && res.status === 200) return parseManifest(res.body);
-      const retryable = res.kind === "network" || isRetryable(res.status);
-      if (!retryable || attempt >= this.#retry.attempts) {
-        const why =
-          res.kind === "network" ? errorText(res.error) : `${res.status} ${messageOf(res.body)}`;
-        throw new Error(`gateway manifest load failed: ${why}`);
+      this.#throwIfFenceRejected(res, token, {});
+      if (!isRetryableAttempt(res) || attempt >= this.#retry.attempts) {
+        throw new Error(`gateway manifest load failed: ${whyFailed(res, this.#maxResponseBytes)}`);
       }
-      await this.#backoff(attempt, this.#options.signal);
+      await this.#backoff(attempt, signal, undefined, retryAfterOf(res));
     }
   }
 
@@ -223,15 +268,35 @@ class GatewayHttp {
     });
   }
 
-  #headers(idempotencyKey?: string, fence?: string): Record<string, string> {
+  #headers(
+    idempotencyKey: string | undefined,
+    token: number | bigint | null,
+  ): Record<string, string> {
     const h: Record<string, string> = {
       authorization: `Bearer ${this.#options.serviceToken}`,
       accept: "application/json",
     };
     if (idempotencyKey !== undefined) h["idempotency-key"] = idempotencyKey;
-    if (fence !== undefined) h["x-engine-fence"] = fence;
+    if (token !== null) h["x-engine-fence"] = String(token);
     if (this.#options.sessionId !== undefined) h["x-engine-session"] = this.#options.sessionId;
     return h;
+  }
+
+  /** The current fence token, or null without a lease. Throws `LeaseLost`. */
+  #token(): number | bigint | null {
+    const fence = this.#options.fence();
+    return fence === null ? null : typeof fence === "object" ? fence.token : fence;
+  }
+
+  /** On a 409 `fence_rejected`: tell the host, then throw `LeaseLost`. */
+  #throwIfFenceRejected(
+    res: Attempt,
+    token: number | bigint | null,
+    where: { tool?: string; idempotencyKey?: string },
+  ): void {
+    if (!isFenceRejection(res)) return;
+    if (token !== null) this.#options.onFenceRejected?.({ ...where, token });
+    throw new LeaseLost(this.#options.sessionId ?? "", Number(token ?? 0));
   }
 
   async #invoke(
@@ -247,8 +312,7 @@ class GatewayHttp {
   ): Promise<ToolResult> {
     let token: number | bigint | null;
     try {
-      const fence = this.#options.fence();
-      token = fence === null ? null : typeof fence === "object" ? fence.token : fence;
+      token = this.#token();
     } catch (err) {
       if (err instanceof LeaseLost) {
         return failure("lease_lost", `${info.name} was not run: this worker lost its lease.`, {});
@@ -266,7 +330,7 @@ class GatewayHttp {
     const init: RequestInit = {
       method: "POST",
       headers: {
-        ...this.#headers(api.idempotencyKey, token === null ? undefined : String(token)),
+        ...this.#headers(api.idempotencyKey, token),
         "content-type": "application/json",
       },
       body,
@@ -279,13 +343,10 @@ class GatewayHttp {
       try {
         res = await this.#send(url, init, api.signal, deadline - this.#clock.monotonic());
       } catch (err) {
-        if (err instanceof Timeout) {
-          return failure("timeout", `${info.name} timed out after ${info.timeoutMs} ms.`, {
-            timeoutMs: info.timeoutMs,
-          });
-        }
+        if (err instanceof Timeout) return this.#timedOut(info, api);
         throw err;
       }
+      if (res.kind === "too_large") return tooLargeFailure(info, res, this.#maxResponseBytes);
       if (res.kind === "response") {
         if (res.status >= 200 && res.status < 300) {
           const outcome = toResult(res.body);
@@ -296,7 +357,7 @@ class GatewayHttp {
             })
           );
         }
-        if (res.status === 409 && errorOf(res.body) === "fence_rejected") {
+        if (isFenceRejection(res)) {
           if (token !== null) {
             this.#options.onFenceRejected?.({
               tool: info.name,
@@ -311,31 +372,64 @@ class GatewayHttp {
           );
         }
       }
-      const retryable = res.kind === "network" || isRetryable(res.status);
-      if (!retryable || attempt >= attempts) return httpFailure(info, res);
+      if (!isRetryableAttempt(res) || attempt >= attempts) return httpFailure(info, res);
       try {
-        await this.#backoff(attempt, api.signal, deadline);
+        await this.#backoff(attempt, api.signal, deadline, retryAfterOf(res));
       } catch (err) {
-        if (err instanceof Timeout) {
-          return failure("timeout", `${info.name} timed out after ${info.timeoutMs} ms.`, {
-            timeoutMs: info.timeoutMs,
-          });
-        }
+        if (err instanceof Timeout) return this.#timedOut(info, api);
         throw err;
       }
     }
   }
 
+  /**
+   * The result for a call past its deadline. A non-idempotent write may have
+   * run (the gateway does not cancel on disconnect), so ask once for a stored
+   * outcome before reporting the outcome unknown.
+   */
+  async #timedOut(
+    info: GatewayToolInfo,
+    api: { signal: AbortSignal; idempotencyKey: string },
+  ): Promise<ToolResult> {
+    const message = `${info.name} timed out after ${info.timeoutMs} ms.`;
+    if (gatewayReplayPolicy(info) === "safe") {
+      return failure("timeout", message, { timeoutMs: info.timeoutMs });
+    }
+    try {
+      const stored = await this.#reconcileOnce(
+        info,
+        api.idempotencyKey,
+        api.signal,
+        Math.min(info.timeoutMs, TIMEOUT_RECONCILE_MS),
+      );
+      if (stored) return stored;
+    } catch {
+      // Unreachable, fenced or failing: the outcome stays unknown.
+      if (api.signal.aborted) throw api.signal.reason;
+    }
+    return failure("timeout", `${message}${UNKNOWN_OUTCOME}`, {
+      timeoutMs: info.timeoutMs,
+      outcome: "unknown",
+    });
+  }
+
+  /**
+   * The outcome stored under `key`, or null when there is none. Fenced, so a
+   * successor's reconcile raises the gateway's high-water mark before the
+   * previous owner's delayed invoke can land.
+   */
   async #reconcile(
     info: GatewayToolInfo,
     key: string,
     signal: AbortSignal,
+    attempts = this.#retry.attempts,
   ): Promise<ToolResult | null> {
     const url = `${this.#base}/internal/tools/invocations/${encodeURIComponent(key)}`;
     for (let attempt = 1; ; attempt++) {
+      const token = this.#token();
       const res = await this.#send(
         url,
-        { method: "GET", headers: this.#headers() },
+        { method: "GET", headers: this.#headers(undefined, token) },
         signal,
         info.timeoutMs,
       );
@@ -347,14 +441,24 @@ class GatewayHttp {
           return outcome;
         }
       }
-      const retryable = res.kind === "network" || isRetryable(res.status);
-      if (!retryable || attempt >= this.#retry.attempts) {
-        const why =
-          res.kind === "network" ? errorText(res.error) : `${res.status} ${messageOf(res.body)}`;
-        throw new Error(`gateway reconcile for ${key} failed: ${why}`);
+      this.#throwIfFenceRejected(res, token, { tool: info.name, idempotencyKey: key });
+      if (!isRetryableAttempt(res) || attempt >= attempts) {
+        throw new Error(
+          `gateway reconcile for ${key} failed: ${whyFailed(res, this.#maxResponseBytes)}`,
+        );
       }
-      await this.#backoff(attempt, signal);
+      await this.#backoff(attempt, signal, undefined, retryAfterOf(res));
     }
+  }
+
+  /** One reconcile attempt within `timeoutMs` (after a write timed out). */
+  #reconcileOnce(
+    info: GatewayToolInfo,
+    key: string,
+    signal: AbortSignal,
+    timeoutMs: number,
+  ): Promise<ToolResult | null> {
+    return this.#reconcile({ ...info, timeoutMs }, key, signal, 1);
   }
 
   /**
@@ -373,10 +477,10 @@ class GatewayHttp {
     const timer = new AbortController();
     const cancel = this.#clock.setTimer(timeoutMs, () => timer.abort(new Timeout()));
     const combined = signal ? AbortSignal.any([signal, timer.signal]) : timer.signal;
-    const headers = init.headers ?? this.#headers();
     try {
-      const res = await this.#fetch(url, { ...init, headers, signal: combined });
-      const text = await res.text();
+      const res = await this.#fetch(url, { ...init, signal: combined });
+      const text = await readCapped(res, this.#maxResponseBytes);
+      if (text === null) return { kind: "too_large", status: res.status };
       let body: JsonValue | null = null;
       if (text.length > 0) {
         try {
@@ -385,7 +489,16 @@ class GatewayHttp {
           body = text;
         }
       }
-      return { kind: "response", status: res.status, body };
+      const retryAfterMs =
+        res.status === 429 || res.status === 503
+          ? parseRetryAfter(res.headers.get("retry-after"), Date.now())
+          : undefined;
+      return {
+        kind: "response",
+        status: res.status,
+        body,
+        ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+      };
     } catch (err) {
       if (signal?.aborted) throw signal.reason;
       if (timer.signal.aborted) throw timer.signal.reason;
@@ -395,13 +508,24 @@ class GatewayHttp {
     }
   }
 
+  /**
+   * Wait before retry `attempt + 1`: the server's `Retry-After` when given,
+   * else full jitter (uniform in [0, min(max, base * 2^(attempt-1))]).
+   * Throws {@link Timeout} when the wait would pass `deadline`.
+   */
   async #backoff(
     attempt: number,
     signal: AbortSignal | undefined,
     deadline?: number,
+    retryAfterMs?: number,
   ): Promise<void> {
     const { baseDelayMs, maxDelayMs } = this.#retry;
-    const delay = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
+    const delay =
+      retryAfterMs !== undefined
+        ? deadline === undefined
+          ? Math.min(retryAfterMs, MAX_RETRY_AFTER_MS)
+          : retryAfterMs
+        : Math.floor(this.#random() * Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1)));
     if (deadline !== undefined && this.#clock.monotonic() + delay >= deadline) throw new Timeout();
     await this.#clock.sleep(delay, signal);
   }
@@ -413,11 +537,82 @@ function isRetryable(status: number): boolean {
   return status >= 500 || status === 429;
 }
 
+function isRetryableAttempt(res: Attempt): boolean {
+  return res.kind === "network" || (res.kind === "response" && isRetryable(res.status));
+}
+
+function isFenceRejection(res: Attempt): boolean {
+  return res.kind === "response" && res.status === 409 && errorOf(res.body) === "fence_rejected";
+}
+
+function retryAfterOf(res: Attempt): number | undefined {
+  return res.kind === "response" ? res.retryAfterMs : undefined;
+}
+
+/** `Retry-After` (delta-seconds or an HTTP date) in ms, or undefined. */
+export function parseRetryAfter(value: string | null, nowMs: number): number | undefined {
+  if (value === null) return undefined;
+  const v = value.trim();
+  if (/^\d+$/.test(v)) return Number(v) * 1_000;
+  const at = Date.parse(v);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - nowMs);
+}
+
+/** The body as text, or null when it exceeds `max` bytes (the rest is not read). */
+async function readCapped(res: Response, max: number): Promise<string | null> {
+  const declared = Number(res.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > max) {
+    await res.body?.cancel().catch(() => {});
+    return null;
+  }
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function whyFailed(res: Attempt, maxBytes: number): string {
+  if (res.kind === "network") return errorText(res.error);
+  if (res.kind === "too_large") return `${res.status}, response body over ${maxBytes} bytes`;
+  return `${res.status} ${messageOf(res.body)}`;
+}
+
+function tooLargeFailure(
+  info: GatewayToolInfo,
+  res: { status: number },
+  maxBytes: number,
+): ToolResult {
+  const ran = res.status >= 200 && res.status < 300;
+  const note =
+    ran && info.sideEffect === "write"
+      ? " The call ran; do not call it again to get the result."
+      : "";
+  return failure(
+    "gateway_error",
+    `${info.name} failed: the gateway's response (${res.status}) exceeded ${maxBytes} bytes.${note}`,
+    { status: res.status, reason: "response_too_large" },
+  );
+}
+
 function failure(code: GatewayErrorCode, content: string, extra: JsonObject): ToolResult {
   return { content, isError: true, details: { error: code, ...extra } };
 }
 
-function httpFailure(info: GatewayToolInfo, res: Attempt): ToolResult {
+function httpFailure(
+  info: GatewayToolInfo,
+  res: Exclude<Attempt, { kind: "too_large" }>,
+): ToolResult {
   const unsent =
     info.sideEffect === "write" ? " It was not retried; check before calling again." : "";
   if (res.kind === "network") {

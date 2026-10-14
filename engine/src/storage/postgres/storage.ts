@@ -6,10 +6,15 @@
  * `engine_sessions` holding the last commit seq and the next creation position.
  *
  * A commit is one transaction:
- * 1. lock the session's lease row `FOR UPDATE` and compare the fence token
- *    (mismatch, expiry or no lease: `LeaseLost`, nothing written);
- * 2. lock the session's counter row, check the batch against stored state;
- * 3. write every record, bump the counters and insert the `engine_commits` row.
+ * 1. lock the session's lease and counter rows in one `SELECT ... FOR UPDATE`
+ *    and compare the fence token (mismatch, expiry or no lease: `LeaseLost`,
+ *    nothing written);
+ * 2. check the batch against stored state;
+ * 3. write every record, then bump the counters and insert the
+ *    `engine_commits` row in one statement.
+ *
+ * A document-only commit is five round trips: BEGIN, lock, upsert, bump,
+ * COMMIT.
  *
  * A rejected batch rolls back, so it consumes no seq and leaves no rows. Unique
  * violations from a cross-session race map to `StorageRequestError`; every
@@ -48,6 +53,7 @@ import {
   rejectRequest,
   validateBatch,
   validateFence,
+  validateScopeIds,
   validateStatuses,
 } from "../validate.js";
 
@@ -147,24 +153,7 @@ class PostgresSessionStorage implements SessionStorage {
 
   async #commitIn(client: PoolClient, b: CommitBatch, token: number): Promise<number> {
     const sid = this.sessionId;
-    const lease = await client.query<{ token: string; live: boolean }>(
-      `SELECT token, expires_at > clock_timestamp() AS live
-         FROM engine_session_leases WHERE session_id = $1 FOR UPDATE`,
-      [sid],
-    );
-    const held = lease.rows[0];
-    if (!held || Number(held.token) !== token || !held.live) throw new LeaseLost(sid, token);
-
-    await client.query(
-      "INSERT INTO engine_sessions (session_id) VALUES ($1) ON CONFLICT DO NOTHING",
-      [sid],
-    );
-    const counters = await client.query<{ last_seq: string; next_pos: string }>(
-      "SELECT last_seq, next_pos FROM engine_sessions WHERE session_id = $1 FOR UPDATE",
-      [sid],
-    );
-    const row = counters.rows[0];
-    if (!row) throw new Error(`session row for ${sid} vanished`);
+    const row = await this.#lockLeaseAndCounters(client, token);
     await this.#checkAgainstState(client, b);
 
     const seq = Number(row.last_seq) + 1;
@@ -292,16 +281,51 @@ class PostgresSessionStorage implements SessionStorage {
       subs.length +
       replacedSubs.length +
       docs.length;
-    await client.query(
-      "UPDATE engine_sessions SET last_seq = $2, next_pos = $3 WHERE session_id = $1",
-      [sid, seq, pos],
+    // Bump the counters and record the commit in one statement.
+    const bumped = await client.query(
+      `WITH bump AS (
+         UPDATE engine_sessions SET last_seq = $2, next_pos = $3
+          WHERE session_id = $1 RETURNING session_id
+       )
+       INSERT INTO engine_commits (session_id, seq, fence_token, record_count)
+       SELECT session_id, $2, $4, $5 FROM bump`,
+      [sid, seq, pos, token, count],
     );
-    await client.query(
-      `INSERT INTO engine_commits (session_id, seq, fence_token, record_count)
-       VALUES ($1, $2, $3, $4)`,
-      [sid, seq, token, count],
-    );
+    if (bumped.rowCount !== 1) throw new Error(`session row for ${sid} vanished`);
     return seq;
+  }
+
+  /**
+   * Lock the session's lease and counter rows in one statement and check the
+   * fence. Mismatch, expiry or no lease: `LeaseLost`, nothing written.
+   */
+  async #lockLeaseAndCounters(
+    client: PoolClient,
+    token: number,
+  ): Promise<{ last_seq: string; next_pos: string }> {
+    const sid = this.sessionId;
+    type Row = { token: string; live: boolean; last_seq: string; next_pos: string };
+    const lock = () =>
+      client.query<Row>(
+        `SELECT l.token, l.expires_at > clock_timestamp() AS live, s.last_seq, s.next_pos
+           FROM engine_session_leases l
+           JOIN engine_sessions s ON s.session_id = l.session_id
+          WHERE l.session_id = $1
+            FOR UPDATE`,
+        [sid],
+      );
+    let held = (await lock()).rows[0];
+    if (!held) {
+      // No lease, or (never on a handle from `open`) no counter row: create
+      // the counter row if missing and look again.
+      const created = await client.query(
+        "INSERT INTO engine_sessions (session_id) VALUES ($1) ON CONFLICT DO NOTHING",
+        [sid],
+      );
+      if (created.rowCount) held = (await lock()).rows[0];
+    }
+    if (!held || Number(held.token) !== token || !held.live) throw new LeaseLost(sid, token);
+    return held;
   }
 
   /** Uniqueness, references and immutable fields against stored state (inside the commit). */
@@ -475,6 +499,22 @@ class PostgresSessionStorage implements SessionStorage {
       kind,
       scopeId,
     ]);
+  }
+
+  async getDocuments(kind: string, scopeIds: readonly string[]) {
+    this.#assertOpen();
+    validateScopeIds(scopeIds);
+    if (scopeIds.length === 0) return [];
+    const { rows } = await this.#pool.query<RecordRow & { scope_id: string }>(
+      `SELECT scope_id, record, seq FROM engine_documents
+        WHERE session_id = $1 AND kind = $2 AND scope_id = ANY($3::text[])`,
+      [this.sessionId, kind, [...new Set(scopeIds)]],
+    );
+    const found = new Map(rows.map((r) => [r.scope_id, r]));
+    return scopeIds.map((scopeId) => {
+      const row = found.get(scopeId);
+      return row ? stored<DocumentRecord>(row) : null;
+    });
   }
 
   listConversations(options?: PageOptions) {

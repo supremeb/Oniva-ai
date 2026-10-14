@@ -204,6 +204,17 @@ export function validateStatuses<T extends string>(
   }
 }
 
+/** Validate the scope ids of a batched document read (at most {@link MAX_PAGE_LIMIT}). */
+export function validateScopeIds(scopeIds: readonly string[]): void {
+  if (!Array.isArray(scopeIds)) reject("scope ids must be an array");
+  if (scopeIds.length > MAX_PAGE_LIMIT) {
+    reject(`at most ${MAX_PAGE_LIMIT} scope ids per read, got ${scopeIds.length}`);
+  }
+  for (const id of scopeIds) {
+    if (typeof id !== "string") reject("scope ids must be strings");
+  }
+}
+
 /** Validate a fence's shape (backends that enforce leases also compare it). */
 export function validateFence(fence: { token: bigint | number } | null): void {
   if (fence === null) return;

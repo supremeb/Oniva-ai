@@ -25,6 +25,7 @@ import {
   LimitExceeded,
   NotOwner,
   SessionFailed,
+  StorageRequestError,
 } from "../core/errors.js";
 import type { JsonObject } from "../core/json.js";
 import { type EngineLimits, resolveLimits } from "../core/limits.js";
@@ -155,6 +156,11 @@ function mapError(err: unknown): HttpError | null {
     return new HttpError(409, "not_owner", undefined, { ownerId: null });
   if (err instanceof LimitExceeded) return new HttpError(413, "limit_exceeded", err.limit);
   if (err instanceof InvalidDocument) return new HttpError(400, "bad_request", err.reason);
+  // Storage refused this one write (a unique-key race such as two submits
+  // with one requestId, or a record it would not accept). The session is
+  // still healthy; a retry re-reads committed state (an idempotent submit
+  // then finds the winner). The storage message is not echoed: it names ids.
+  if (err instanceof StorageRequestError) return new HttpError(409, "conflict", "storage_request");
   if (err instanceof SessionFailed || err instanceof RuntimeStopped || err instanceof WatchClosed) {
     return new HttpError(503, "unavailable");
   }

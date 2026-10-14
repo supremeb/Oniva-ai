@@ -40,7 +40,7 @@
  */
 import type { Clock } from "../core/clock.js";
 import type { Context } from "../core/context.js";
-import type { JsonObject, JsonValue } from "../core/json.js";
+import { type JsonObject, type JsonValue, jsonByteLength } from "../core/json.js";
 import type { EngineLimits } from "../core/limits.js";
 import type { ModelRegistry } from "../models/stream.js";
 import type { Session } from "../session/session.js";
@@ -77,7 +77,13 @@ import {
 import { ENTRY_KINDS, type ToolResultPayload, type ToolResultStatus } from "./context-builder.js";
 import { type AgentErrorReporter, type HookRunner, isToolResult } from "./hooks.js";
 import { authorize, type HostPolicy } from "./policy.js";
-import { appendOutput, ProgressWriter, type ToolOutputState, toolOutputDoc } from "./progress.js";
+import {
+  appendOutput,
+  ProgressWriter,
+  type ToolOutputState,
+  toolOutputDoc,
+  toolOutputIntervalMs,
+} from "./progress.js";
 import { type AgentConfig, agentConfigDoc } from "./prompt.js";
 import { isSubagentTool, SUBAGENT_PHASE, type SubagentLink, subagentPhase } from "./subagents.js";
 
@@ -132,6 +138,23 @@ export type ToolTaskValue = {
 
 export const INTERRUPTED_WARNING =
   "The tool was interrupted by a restart before it reported a result. Its effect may have happened; check before retrying.";
+
+/**
+ * The result for a call whose effect may have happened but whose outcome is
+ * unknown: the standard warning plus the output committed so far.
+ */
+export function interruptedResult(stored: Pick<ToolOutputState, "text" | "truncated">): ToolResult {
+  const partial = stored.text;
+  const content =
+    partial.length > 0
+      ? `${INTERRUPTED_WARNING}\n\nOutput before the interruption${stored.truncated ? " (truncated)" : ""}:\n${partial}`
+      : INTERRUPTED_WARNING;
+  return {
+    content,
+    isError: true,
+    details: { warning: INTERRUPTED_WARNING, partialOutput: partial, truncated: stored.truncated },
+  };
+}
 
 export async function loadConversation(
   deps: Pick<AgentDeps, "session">,
@@ -234,6 +257,52 @@ export async function writeToolResult(
   return done(value);
 }
 
+/**
+ * Bytes kept free for the entry record around the payload (ids, timestamps,
+ * the approval summary, the truncation marker).
+ */
+const ENTRY_ENVELOPE_BYTES = 2048;
+
+export const TRUNCATED_RESULT_MARKER = "[Tool result truncated to fit the entry size limit";
+
+/**
+ * Fit a tool result into one `tool_result` entry of at most `maxEntryBytes`:
+ * oversized `details` are replaced by a note and oversized content is cut
+ * (head kept) with a {@link TRUNCATED_RESULT_MARKER} line. A result that
+ * already fits is returned unchanged. Without this an oversized result would
+ * fault the commit after the tool's effect had happened.
+ */
+export function capToolResult(
+  call: Pick<ToolCallInput, "id" | "name">,
+  result: ToolResult,
+  maxEntryBytes: number,
+): ToolResult {
+  const measure = (r: ToolResult) => jsonByteLength(resultPayload("", call, "ok", r, 0));
+  const budget = Math.max(0, maxEntryBytes - ENTRY_ENVELOPE_BYTES);
+  if (measure(result) <= budget) return result;
+
+  let capped: ToolResult = { ...result };
+  if (measure({ ...capped, content: "" }) > budget / 2) {
+    capped.details = { truncated: true, note: "details dropped: too large for one entry" };
+  }
+  const text =
+    typeof capped.content === "string"
+      ? capped.content
+      : capped.content.map((c) => c.text).join("\n");
+  const marker = (kept: number) =>
+    `\n\n${TRUNCATED_RESULT_MARKER}: kept ${kept} of ${text.length} characters.]`;
+  // Shrink until it fits; JSON escaping makes bytes per character vary.
+  let keep = text.length;
+  for (let i = 0; i < 32 && keep > 0; i++) {
+    const candidate = { ...capped, content: text.slice(0, keep) + marker(keep) };
+    const size = measure(candidate);
+    if (size <= budget) return candidate;
+    keep = Math.max(0, Math.floor(keep * (budget / size) * 0.95) - 16);
+  }
+  capped = { ...capped, content: marker(0).trimStart() };
+  return capped;
+}
+
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 function issuesText(issues: ReadonlyArray<{ path: PropertyKey[]; message: string }>): string {
@@ -259,7 +328,8 @@ export function toolTaskDefinition(
     rt.commit(async (tx) => {
       if (prepare) await prepare(tx);
       if (output) (await tx.doc(toolOutputDoc, task.id)).set(output);
-      return writeToolResult(tx, task, status, result, attempts);
+      const capped = capToolResult(task.input.call, result, deps.limits.maxEntryBytes);
+      return writeToolResult(tx, task, status, capped, attempts);
     });
 
   const fail = (task: State, rt: Scope, status: ToolResultStatus, message: string) =>
@@ -484,26 +554,7 @@ export function toolTaskDefinition(
       }
     }
     ctx.throwIfCancelled();
-    const partial = stored.text;
-    const content =
-      partial.length > 0
-        ? `${INTERRUPTED_WARNING}\n\nOutput before the interruption${stored.truncated ? " (truncated)" : ""}:\n${partial}`
-        : INTERRUPTED_WARNING;
-    return finish(
-      task,
-      rt,
-      "interrupted",
-      {
-        content,
-        isError: true,
-        details: {
-          warning: INTERRUPTED_WARNING,
-          partialOutput: partial,
-          truncated: stored.truncated,
-        },
-      },
-      stored.attempt,
-    );
+    return finish(task, rt, "interrupted", interruptedResult(stored), stored.attempt);
   }
 
   async function run(
@@ -522,7 +573,8 @@ export function toolTaskDefinition(
     let touched = false;
     const writer = new ProgressWriter(
       deps.clock,
-      deps.progressIntervalMs,
+      // Large snapshots are rewritten whole on every write: write them less often.
+      () => toolOutputIntervalMs(deps.progressIntervalMs, output.text.length),
       async () => {
         const snapshot = output;
         await rt.write(async (tx) => {
