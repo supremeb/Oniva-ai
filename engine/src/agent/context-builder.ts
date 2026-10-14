@@ -61,7 +61,11 @@ export type ToolResultStatus =
   /** A human denied the approval the call required. */
   | "denied"
   /** The approval the call required expired before a decision. */
-  | "approval_expired";
+  | "approval_expired"
+  /** The call ran past its time limit. */
+  | "timeout"
+  /** The process running the call lost the session lease before it reported. */
+  | "lease_lost";
 
 export type ToolResultPayload = {
   runId: string;

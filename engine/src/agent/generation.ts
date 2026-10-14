@@ -19,6 +19,14 @@
  * A model error (including a policy denial) fails the run: a `run_error`
  * entry is written and the submission settles `unanswered(model_error)`.
  *
+ * Compaction (`compaction.ts`) hooks into `request`: at its start (a turn
+ * boundary) a finished background summary is placed as the new context head;
+ * past the background threshold a compaction task is started alongside; at
+ * the blocking threshold the request waits on one (resuming `request` with a
+ * {@link RequestCheckpoint}) and a failed compaction settles the input
+ * `unanswered(compaction_failed)`; one `context_overflow` error waits on a
+ * compaction and retries once, a second fails the run with `model_error`.
+ *
  * The inbox (`inbox.ts`) is served at two points: steers queued during a tool
  * round are placed in the `after_tools` commit that spawns the next
  * generation, and the commit that ends a run settles its placed steers and
@@ -27,7 +35,13 @@
 import type { Context } from "../core/context.js";
 import type { JsonValue } from "../core/json.js";
 import { MessageBuilder } from "../models/stream.js";
-import type { AssistantMessage, ModelInput, ToolCallBlock, Usage } from "../models/types.js";
+import type {
+  AssistantMessage,
+  ModelError,
+  ModelInput,
+  ToolCallBlock,
+  Usage,
+} from "../models/types.js";
 import type { Transaction } from "../session/transaction.js";
 import {
   type Committed,
@@ -35,10 +49,24 @@ import {
   done,
   next,
   type TaskDefinition,
+  type TaskOps,
   type TaskScope,
   type TaskState,
   waiting,
 } from "../tasks/define.js";
+import {
+  bindCompactionTask,
+  type CompactionTask,
+  compactionDefaults,
+  compactionDoc,
+  compactionOutcome,
+  compactionTaskDefinition,
+  compactionThresholds,
+  ensureCompaction,
+  estimateContextTokens,
+  placeReadyCompaction,
+  resolveCompactionSettings,
+} from "./compaction.js";
 import {
   type AssistantPayload,
   assistantText,
@@ -73,17 +101,31 @@ export type GenerationInput = {
 
 type RoundCall = { id: string; name: string; taskId: string | null };
 
-export type GenerationCheckpoint = {
+/** `after_tools`: the round's assistant entry and calls. */
+export type RoundCheckpoint = {
   assistantEntryId: string;
   calls: RoundCall[];
-} | null;
+};
+
+/** `request` resumed after waiting on a compaction (or re-run after placing one). */
+export type RequestCheckpoint = {
+  /** The compaction task waited on, or null when a ready summary was placed instead. */
+  compactionTaskId: string | null;
+  /** True once a context overflow has been retried in this request. */
+  overflowRetried: boolean;
+};
+
+export type GenerationCheckpoint = RoundCheckpoint | RequestCheckpoint | null;
 
 /** A generation task's `done` value. */
 export type GenerationValue =
   | { outcome: "answered"; entryId: string }
   | { outcome: "terminated" }
   | { outcome: "continued"; next: string }
-  | { outcome: "failed"; reason: "model_error" };
+  | { outcome: "failed"; reason: "model_error" | "compaction_failed" };
+
+const requestCheckpoint = (cp: GenerationCheckpoint): RequestCheckpoint | null =>
+  cp !== null && "overflowRetried" in cp ? cp : null;
 
 export {
   type SubmissionAnswer,
@@ -104,9 +146,15 @@ export async function clearLive(
 type Scope = TaskScope<GenerationCheckpoint>;
 type State = TaskState<GenerationInput, GenerationCheckpoint>;
 
+/**
+ * The generation task kind. `compaction` is the compaction kind it spawns
+ * (made with default settings when omitted); register it with the runtime
+ * too (`compactionTaskOf(generation)`).
+ */
 export function generationTaskDefinition(
   deps: AgentDeps,
   toolTask: TaskDefinition<ToolTaskInput, ToolTaskCheckpoint>,
+  compaction: CompactionTask = compactionTaskDefinition(deps),
 ): TaskDefinition<GenerationInput, GenerationCheckpoint> {
   const def: TaskDefinition<GenerationInput, GenerationCheckpoint> = defineTask<
     GenerationInput,
@@ -118,6 +166,7 @@ export function generationTaskDefinition(
       after_tools: (task, rt) => afterTools(task, rt),
     },
   });
+  bindCompactionTask(def, compaction);
   return def;
 
   async function request(task: State, rt: Scope, ctx: Context): Promise<Committed> {
@@ -126,21 +175,71 @@ export function generationTaskDefinition(
     const { conversation, agent } = await loadConversation(deps, conversationId);
     const specs = deps.tools.specs(agent.tools);
     const system = systemPayload(agent.systemPrompt, specs);
+    const settings = resolveCompactionSettings(compactionDefaults(compaction), agent.compaction);
+    // Safety net for a harness that did not register the kind (a no-op when it did).
+    rt.runtime.registry.register(compaction);
 
-    let built = buildContext(await listAllEntries(deps.session, conversationId));
-    if (built.system?.fingerprint !== system.fingerprint) {
-      // Replay-tolerant: a rerun after a crash finds the entry and skips this.
-      await rt.write((tx) => {
-        tx.appendEntry({
-          conversationId,
-          taskId: task.id,
-          kind: ENTRY_KINDS.system,
-          payload: system as unknown as JsonValue,
-        });
-      });
-      built = buildContext(await listAllEntries(deps.session, conversationId));
+    // Resumed after waiting on a compaction: a failure ends the run here.
+    const resumed = requestCheckpoint(task.checkpoint);
+    const overflowRetried = resumed?.overflowRetried ?? false;
+    let compacted = false;
+    if (resumed?.compactionTaskId) {
+      const outcome = compactionOutcome(rt.task(resumed.compactionTaskId));
+      if (!outcome.ok) return failRun(task, rt, outcome.error, "compaction_failed", null);
+      compacted = true;
     }
-    // U11 seam: compaction before the request (blocking threshold) goes here.
+
+    // Turn boundary: the system entry if it changed, then a waiting summary.
+    // Replay-tolerant: a rerun after a crash finds both done and skips this.
+    let entries = await listAllEntries(deps.session, conversationId);
+    let built = buildContext(entries);
+    const needSystem = built.system?.fingerprint !== system.fingerprint;
+    const ready = (await deps.session.document(compactionDoc, conversationId)).ready !== null;
+    if (needSystem || ready) {
+      await rt.write(async (tx) => {
+        if (needSystem) {
+          tx.appendEntry({
+            conversationId,
+            taskId: task.id,
+            kind: ENTRY_KINDS.system,
+            payload: system as unknown as JsonValue,
+          });
+        }
+        await placeReadyCompaction(tx, conversationId);
+      });
+      entries = await listAllEntries(deps.session, conversationId);
+      built = buildContext(entries);
+    }
+
+    if (settings.enabled && !compacted) {
+      const estimate = estimateContextTokens(entries);
+      const limits = compactionThresholds(settings, estimate.model);
+      const compactionInput = { runId, round, cause: "threshold" as const };
+      if (estimate.tokens >= limits.blocking) {
+        return rt.commit((tx, ops) =>
+          waitForCompaction(tx, ops, conversationId, compactionInput, built.headEntryId, {
+            compactionTaskId: null,
+            overflowRetried,
+          }),
+        );
+      }
+      if (estimate.tokens > limits.background) {
+        const state = await deps.session.document(compactionDoc, conversationId);
+        const running = state.running !== null && rt.task(state.running)?.status !== "terminal";
+        if (!running && state.ready === null) {
+          await rt.write((tx, ops) =>
+            ensureCompaction(
+              tx,
+              ops,
+              compaction,
+              conversationId,
+              { ...compactionInput, cause: "background" },
+              built.headEntryId,
+            ),
+          );
+        }
+      }
+    }
 
     let input: ModelInput = { messages: built.messages };
     if (specs.length > 0) input.tools = specs;
@@ -194,37 +293,28 @@ export function generationTaskDefinition(
 
     if (terminal.type === "error") {
       ctx.throwIfCancelled();
-      // U11 seam: a `context_overflow` error triggers one compaction and one retry.
       const error = terminal.error;
       const partial = terminal.partial;
-      return rt.commit(async (tx, ops) => {
-        const sub = await tx.getSubmission(submissionId);
-        const inbox = await Inbox.load(tx, conversationId);
-        const payload: RunErrorPayload = { runId, error };
-        tx.appendEntry({
-          conversationId,
-          taskId: task.id,
-          kind: ENTRY_KINDS.runError,
-          payload: payload as unknown as JsonValue,
-        });
-        if (partial.provider !== "") {
-          recordUsage(
-            await tx.doc(usageDoc, conversationId),
-            partial.provider,
-            partial.model,
-            terminal.usage,
+      const spend =
+        partial.provider === ""
+          ? null
+          : { provider: partial.provider, model: partial.model, usage: terminal.usage };
+      if (error.kind === "context_overflow" && settings.enabled && !overflowRetried) {
+        // One compaction, then one retry of this request.
+        return rt.commit(async (tx, ops) => {
+          if (spend) await recordSpend(tx, conversationId, spend);
+          await clearLive(tx, conversationId, task.id);
+          return waitForCompaction(
+            tx,
+            ops,
+            conversationId,
+            { runId, round, cause: "overflow" },
+            built.headEntryId,
+            { compactionTaskId: null, overflowRetried: true },
           );
-        }
-        await clearLive(tx, conversationId, task.id);
-        const unanswered = {
-          reason: "model_error",
-          message: error.message,
-          error: error as unknown as JsonValue,
-        };
-        settleSubmission(tx, sub, "unanswered", unanswered);
-        inbox.endRun(ops, def, runId, "unanswered", unanswered);
-        return done({ outcome: "failed", reason: "model_error" } satisfies GenerationValue);
-      });
+        });
+      }
+      return failRun(task, rt, error, "model_error", spend);
     }
 
     const message = terminal.message;
@@ -304,11 +394,67 @@ export function generationTaskDefinition(
     });
   }
 
+  /**
+   * Inside a request's commit: place a summary that is ready and re-run
+   * `request` on the new head, or wait on the running compaction (starting
+   * one if none runs).
+   */
+  async function waitForCompaction(
+    tx: Transaction,
+    ops: TaskOps,
+    conversationId: string,
+    input: { runId: string; round: number; cause: "threshold" | "overflow" },
+    headEntryId: string | null,
+    cp: RequestCheckpoint,
+  ) {
+    if ((await placeReadyCompaction(tx, conversationId)) !== null) {
+      return next<GenerationCheckpoint>("request", { ...cp, compactionTaskId: null });
+    }
+    const id = await ensureCompaction(tx, ops, compaction, conversationId, input, headEntryId);
+    if (id === null) throw new Error("a blocking compaction was not started");
+    return waiting<GenerationCheckpoint>({
+      on: [id],
+      phase: "request",
+      checkpoint: { ...cp, compactionTaskId: id },
+    });
+  }
+
+  /** End the run unanswered: a `run_error` entry, the spend so far, the submission settled. */
+  function failRun(
+    task: State,
+    rt: Scope,
+    error: ModelError,
+    reason: "model_error" | "compaction_failed",
+    spend: Spend,
+  ): Promise<Committed> {
+    const { runId, submissionId } = task.input;
+    const conversationId = task.conversationId;
+    return rt.commit(async (tx, ops) => {
+      const sub = await tx.getSubmission(submissionId);
+      const inbox = await Inbox.load(tx, conversationId);
+      const payload: RunErrorPayload = { runId, error };
+      tx.appendEntry({
+        conversationId,
+        taskId: task.id,
+        kind: ENTRY_KINDS.runError,
+        payload: payload as unknown as JsonValue,
+      });
+      if (spend) await recordSpend(tx, conversationId, spend);
+      await clearLive(tx, conversationId, task.id);
+      const message =
+        reason === "compaction_failed" ? `compaction failed: ${error.message}` : error.message;
+      const unanswered = { reason, message, error: error as unknown as JsonValue };
+      settleSubmission(tx, sub, "unanswered", unanswered);
+      inbox.endRun(ops, def, runId, "unanswered", unanswered);
+      return done({ outcome: "failed", reason } satisfies GenerationValue);
+    });
+  }
+
   async function afterTools(task: State, rt: Scope): Promise<Committed> {
     const { runId, round, submissionId } = task.input;
     const conversationId = task.conversationId;
     const cp = task.checkpoint;
-    if (cp === null) throw new Error("after_tools without a checkpoint");
+    if (cp === null || !("calls" in cp)) throw new Error("after_tools without a round checkpoint");
 
     const missing: RoundCall[] = [];
     const terminates: boolean[] = [];
@@ -367,6 +513,16 @@ export function generationTaskDefinition(
       return done({ outcome: "continued", next: nextTask.id } satisfies GenerationValue);
     });
   }
+}
+
+type Spend = { provider: string; model: string; usage: Usage } | null;
+
+async function recordSpend(
+  tx: Transaction,
+  conversationId: string,
+  spend: NonNullable<Spend>,
+): Promise<void> {
+  recordUsage(await tx.doc(usageDoc, conversationId), spend.provider, spend.model, spend.usage);
 }
 
 function appendAssistant(

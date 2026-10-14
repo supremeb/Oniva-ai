@@ -1,10 +1,12 @@
 /**
- * Token and cost totals per conversation (`agent.usage` document), overall
- * and per `provider/model`. Updated in the same commit as the reply it counts.
+ * Token and cost totals per conversation (`agent.usage` document), overall,
+ * per `provider/model` and per purpose (`generation`, `compaction`). Updated
+ * in the same commit as the reply or summary it counts.
  */
 import { z } from "zod";
 import type { Usage } from "../models/types.js";
 import { type DocDraft, defineDoc } from "../session/documents.js";
+import type { ModelPurpose } from "./policy.js";
 
 const tallySchema = z.object({
   requests: z.number().int().min(0),
@@ -22,6 +24,8 @@ const usageSchema = z.object({
   requests: z.number().int().min(0),
   total: tallySchema,
   byModel: z.record(z.string(), tallySchema),
+  /** Documents written before purposes were tracked read as empty. */
+  byPurpose: z.record(z.string(), tallySchema).default({}),
 });
 
 export type UsageTotals = z.infer<typeof usageSchema>;
@@ -38,7 +42,7 @@ const emptyTally = (): UsageTally => ({
 export const usageDoc = defineDoc<UsageTotals>({
   kind: "agent.usage",
   scope: "conversation",
-  initial: { requests: 0, total: emptyTally(), byModel: {} },
+  initial: { requests: 0, total: emptyTally(), byModel: {}, byPurpose: {} },
   schema: usageSchema,
 });
 
@@ -59,11 +63,13 @@ export function recordUsage(
   provider: string,
   model: string,
   usage: Usage,
+  purpose: ModelPurpose = "generation",
 ): void {
   draft.update((d) => {
     const key = provider ? `${provider}/${model}` : model || "unknown";
     d.requests += 1;
     d.total = add(d.total, usage);
     d.byModel[key] = add(d.byModel[key] ?? emptyTally(), usage);
+    d.byPurpose[purpose] = add(d.byPurpose[purpose] ?? emptyTally(), usage);
   });
 }

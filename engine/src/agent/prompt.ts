@@ -17,6 +17,33 @@ const THINKING = ["off", "low", "medium", "high", "xhigh", "max"] as const;
 
 export const jsonValue = z.custom<JsonValue>((v) => isJson(v), "not JSON");
 
+const tokens = z.number().int().min(0);
+
+/** Compaction settings (see `compaction.ts`); every field is optional per conversation. */
+export const compactionSettingsSchema = z.object({
+  /** Off: no compaction, and a context overflow fails the run. */
+  enabled: z.boolean(),
+  /** The model's context window in tokens; null to look it up in `contextWindows`. */
+  contextWindow: z.number().int().positive().nullable(),
+  /** Context windows by model id, used when `contextWindow` is null. */
+  contextWindows: z.record(z.string(), z.number().int().positive()),
+  /** Tokens kept free for the reply: requests wait for a compaction at `window - reserve`. */
+  reserveTokens: tokens,
+  /** A background compaction starts at `window - reserve - backgroundMargin`. */
+  backgroundMargin: tokens,
+  /** About this many tokens of recent context stay verbatim after a compaction. */
+  keepRecentTokens: tokens,
+});
+
+export type CompactionSettings = z.infer<typeof compactionSettingsSchema>;
+
+/** Per-conversation compaction overrides: any subset of the settings. */
+export type CompactionOverrides = { [K in keyof CompactionSettings]?: CompactionSettings[K] };
+
+const compactionOverridesSchema = compactionSettingsSchema
+  .partial()
+  .strict() as unknown as z.ZodType<CompactionOverrides>;
+
 const agentConfigSchema = z.object({
   /** System prompt text. */
   systemPrompt: z.string(),
@@ -29,6 +56,8 @@ const agentConfigSchema = z.object({
   depth: z.number().int().min(0),
   /** Host data, passed through to policy and hooks. */
   metadata: z.record(z.string(), jsonValue),
+  /** Compaction overrides for this conversation (over the harness defaults). */
+  compaction: compactionOverridesSchema.nullable().default(null),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
@@ -39,7 +68,15 @@ export type AgentConfigInput = Partial<AgentConfig>;
 export const agentConfigDoc = defineDoc<AgentConfig>({
   kind: "agent.config",
   scope: "conversation",
-  initial: { systemPrompt: "", tools: [], model: null, thinking: null, depth: 0, metadata: {} },
+  initial: {
+    systemPrompt: "",
+    tools: [],
+    model: null,
+    thinking: null,
+    depth: 0,
+    metadata: {},
+    compaction: null,
+  },
   schema: agentConfigSchema,
 });
 

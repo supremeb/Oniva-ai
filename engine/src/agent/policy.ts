@@ -16,8 +16,12 @@ import type { ModelResolution } from "../models/types.js";
 import type { ReplayPolicy, ToolConversation } from "../tools/registry.js";
 import type { AgentConfig } from "./prompt.js";
 
-/** Why a model request is being made. */
-export type ModelPurpose = "generation";
+/**
+ * Why a model request is being made: `generation` answers the conversation,
+ * `compaction` summarizes older context (hosts typically route it to a
+ * cheaper model, e.g. `DEFAULT_ANTHROPIC_SUMMARY_MODEL`).
+ */
+export type ModelPurpose = "generation" | "compaction";
 
 export interface ModelRequestInfo {
   /** Cancelled with the requesting task. */
@@ -26,7 +30,10 @@ export interface ModelRequestInfo {
   conversation: ToolConversation;
   agent: AgentConfig;
   runId: string;
-  /** 0 for a run's first request, then one more per tool round. */
+  /**
+   * 0 for a run's first request, then one more per tool round. For a
+   * compaction: the run and round that started it.
+   */
   round: number;
 }
 
