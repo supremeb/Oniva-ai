@@ -12,7 +12,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -167,6 +167,9 @@ def _parse_uuid(value: Optional[str]) -> Optional[uuid.UUID]:
 
 
 # In-memory executor registry (single-server; swap for Redis in production)
+if TYPE_CHECKING:
+    from app.services.autonomous_executor import AutonomousExecutor
+
 _executors: dict[str, "AutonomousExecutor"] = {}
 _executors_lock = asyncio.Lock()
 

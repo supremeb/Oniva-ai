@@ -81,7 +81,16 @@ dev = [
     "faker==33.1.0",
     "freezegun==1.4.0",
     "aiosqlite==0.20.0",
+    "ruff==0.8.4",
 ]
 
 [tool.uv]
 package = false
+
+[tool.ruff]
+target-version = "py312"
+extend-exclude = ["examples", "migrations/versions"]
+
+[tool.ruff.lint]
+# Baseline: errors only (syntax/runtime/undefined names).
+select = ["E9", "F63", "F7", "F82"]

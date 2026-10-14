@@ -128,7 +128,7 @@ export async function parseChatSSEStream(
 
         case 'info_message':
           if ('message' in data) {
-            handlers.onInfoMessage(data.message, 'title' in data ? data.title : undefined);
+            handlers.onInfoMessage(data.message as string, 'title' in data ? data.title : undefined);
           }
           break;
 
@@ -138,14 +138,14 @@ export async function parseChatSSEStream(
             const toolCallId = ('toolCallId' in data ? data.toolCallId : ('tool_call_id' in data ? data.tool_call_id : undefined)) as string | undefined;
             const args = ('args' in data ? data.args : undefined) as Record<string, unknown> | undefined;
             const producesFile = ('producesFile' in data ? !!data.producesFile : false);
-            handlers.onToolCallStart(toolName, toolCallId, data.label, data.message, args, producesFile);
+            handlers.onToolCallStart(toolName, toolCallId, (data as { label?: string }).label, (data as { message?: string }).message, args, producesFile);
           }
           break;
 
         case 'tool_call_progress':
           if ('tool_name' in data || 'toolName' in data) {
             const toolName = ('tool_name' in data ? data.tool_name : (data as Record<string, unknown>).toolName) as string;
-            handlers.onToolCallProgress(toolName, data.label, data.message);
+            handlers.onToolCallProgress(toolName, (data as { label?: string }).label, (data as { message?: string }).message);
           }
           break;
 
@@ -203,7 +203,7 @@ export async function parseChatSSEStream(
 
         case 'error':
           if ('message' in data) {
-            handlers.onError(data.message);
+            handlers.onError(data.message as string);
           }
           break;
 

@@ -24,7 +24,7 @@ import random
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple
+from typing import Any, Dict, List, Literal, NamedTuple, Optional, Tuple
 from uuid import UUID, uuid4
 
 from cachetools import TTLCache

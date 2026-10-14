@@ -267,6 +267,7 @@ class TestContextualRetrieval:
 class TestDocumentProcessorIntegration:
     """B3 + B6: Document processor uses new chunking + populates metadata."""
 
+    @pytest.mark.xfail(strict=True, reason="KNOWN_FAILURES U13: no embedding API key (env-dependent)")
     @pytest.mark.asyncio
     async def test_process_document_uses_new_chunking(self):
         """Verify process_document calls the new chunk_text, not old _chunk_text."""

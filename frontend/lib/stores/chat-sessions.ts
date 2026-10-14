@@ -597,7 +597,7 @@ export const useChatSessionsStore = create<ChatSessionsStore>()(
                         state.selectedModel = null;
                     }
                 }
-                return state as ChatSessionsStore;
+                return state as unknown as ChatSessionsStore;
             },
         }
     )
