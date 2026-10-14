@@ -43,7 +43,7 @@ from app.api.v1 import projects  # Project Workspaces
 from app.api.v1 import sandbox_proxy  # Sandbox Control Plane (zero-secrets LLM proxy)
 from app.api.v1 import routing_policies  # Model Routing Policies (Deep Work Phase B5)
 from app.api.v1 import workflow_execution  # Workflow Execution SSE (Workflows as Agent Resources)
-from app.core.database import init_db, close_db, AsyncSessionLocal
+from app.core.database import init_db, close_db, SystemSessionLocal
 from app.config import get_settings
 from app.auth.middleware import AuthMiddleware
 from app.middleware.csrf import CSRFMiddleware
@@ -89,63 +89,23 @@ async def lifespan(app: FastAPI):
     ConnectorRegistry.auto_discover()
     print(f"✅ Loaded {len(ConnectorRegistry.list_available())} connectors")
 
-    # Clean up orphaned Deep Work jobs (server crashed while executing)
-    # Note: RLS prevents bulk updates without tenant context.
-    # We iterate per-tenant to properly set context for each.
+    # Recover orphaned jobs/documents (server crashed mid-run). Runs on the system role
+    # (all tenants in one statement) and only touches rows with STALE activity, so jobs that
+    # another replica started recently are never failed.
     try:
-        from sqlalchemy import text as sa_text
-        async with AsyncSessionLocal() as cleanup_db:
-            # Get distinct tenant_ids that have orphaned jobs
-            tenant_rows = (await cleanup_db.execute(sa_text(
-                "SELECT DISTINCT tenant_id FROM background_jobs "
-                "WHERE status IN ('running', 'pending') AND job_type = 'deep_work'"
-            ))).fetchall()
-            total_cleaned = 0
-            for (tid,) in tenant_rows:
-                await cleanup_db.execute(
-                    sa_text("SELECT set_config('app.current_tenant', :tid, true)"),
-                    {"tid": str(tid)},
-                )
-                result = await cleanup_db.execute(sa_text(
-                    "UPDATE background_jobs SET status = 'failed', "
-                    "error = 'Server restarted during execution', "
-                    "completed_at = NOW() "
-                    "WHERE status IN ('running', 'pending') AND job_type = 'deep_work' "
-                    "AND tenant_id = :tid"
-                ), {"tid": str(tid)})
-                total_cleaned += result.rowcount
-                await cleanup_db.commit()
-            if total_cleaned > 0:
-                print(f"✅ Cleaned up {total_cleaned} orphaned Deep Work jobs")
+        from app.services.startup_recovery import (
+            fail_stale_deep_work_jobs, fail_stale_knowledge_documents,
+        )
+        stale = app_settings.STALE_JOB_THRESHOLD_SECONDS
+        n = await fail_stale_deep_work_jobs(
+            SystemSessionLocal, stale, "Server restarted during execution")
+        if n:
+            print(f"✅ Cleaned up {n} stale Deep Work jobs")
+        n = await fail_stale_knowledge_documents(SystemSessionLocal, stale)
+        if n:
+            print(f"✅ Cleaned up {n} stale knowledge documents")
     except Exception as e:
-        print(f"⚠️ Failed to clean orphaned Deep Work jobs: {e}")
-
-    # Clean up orphaned knowledge documents (stuck in uploading/processing after crash)
-    try:
-        from sqlalchemy import text as sa_text_kb
-        async with AsyncSessionLocal() as kb_cleanup_db:
-            tenant_rows = (await kb_cleanup_db.execute(sa_text_kb(
-                "SELECT DISTINCT tenant_id FROM knowledge_documents "
-                "WHERE status IN ('uploading', 'processing')"
-            ))).fetchall()
-            total_cleaned = 0
-            for (tid,) in tenant_rows:
-                await kb_cleanup_db.execute(
-                    sa_text_kb("SELECT set_config('app.current_tenant', :tid, true)"),
-                    {"tid": str(tid)},
-                )
-                result = await kb_cleanup_db.execute(sa_text_kb(
-                    "UPDATE knowledge_documents SET status = 'error', "
-                    "error_message = 'Server restarted during processing. Please re-upload.' "
-                    "WHERE status IN ('uploading', 'processing') "
-                    "AND tenant_id = :tid"
-                ), {"tid": str(tid)})
-                total_cleaned += result.rowcount
-                await kb_cleanup_db.commit()
-            if total_cleaned > 0:
-                print(f"✅ Cleaned up {total_cleaned} orphaned knowledge documents")
-    except Exception as e:
-        print(f"⚠️ Failed to clean orphaned knowledge documents: {e}")
+        print(f"⚠️ Failed startup recovery sweep: {e}")
 
     # Start Workflow Scheduler Daemon
     if app_settings.USE_WORKFLOW_SCHEDULER:
@@ -172,31 +132,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"⚠️ Failed to stop workflow scheduler daemon: {e}")
 
-    # Mark running Deep Work jobs as FAILED on graceful shutdown
+    # Graceful shutdown: only fail stale jobs (we do not track which replica owns a job, so
+    # failing every running job would kill other replicas' work). Fresh jobs of this process
+    # are picked up by the next startup sweep once they go stale.
     try:
-        from sqlalchemy import text as sa_text2
-        async with AsyncSessionLocal() as shutdown_db:
-            tenant_rows = (await shutdown_db.execute(sa_text2(
-                "SELECT DISTINCT tenant_id FROM background_jobs "
-                "WHERE status IN ('running', 'pending') AND job_type = 'deep_work'"
-            ))).fetchall()
-            total = 0
-            for (tid,) in tenant_rows:
-                await shutdown_db.execute(
-                    sa_text2("SELECT set_config('app.current_tenant', :tid, true)"),
-                    {"tid": str(tid)},
-                )
-                result = await shutdown_db.execute(sa_text2(
-                    "UPDATE background_jobs SET status = 'failed', "
-                    "error = 'Server shutting down', "
-                    "completed_at = NOW() "
-                    "WHERE status IN ('running', 'pending') AND job_type = 'deep_work' "
-                    "AND tenant_id = :tid"
-                ), {"tid": str(tid)})
-                total += result.rowcount
-                await shutdown_db.commit()
-            if total > 0:
-                print(f"⚠️ Marked {total} Deep Work jobs as FAILED on shutdown")
+        from app.services.startup_recovery import fail_stale_deep_work_jobs
+        total = await fail_stale_deep_work_jobs(
+            SystemSessionLocal, app_settings.STALE_JOB_THRESHOLD_SECONDS, "Server shutting down")
+        if total > 0:
+            print(f"⚠️ Marked {total} stale Deep Work jobs as FAILED on shutdown")
     except Exception as e:
         print(f"⚠️ Failed to clean Deep Work jobs on shutdown: {e}")
 

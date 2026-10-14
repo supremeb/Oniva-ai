@@ -512,8 +512,8 @@ class WorkflowSchedulerDaemon:
         from app.config import get_settings
         settings = get_settings()
 
-        # Use dedicated DB URL or fall back to main
-        db_url = settings.SCHEDULER_DATABASE_URL or settings.DATABASE_URL
+        # BYPASSRLS system role (oniva_system): polling must see every tenant's schedules
+        db_url = settings.system_database_url
 
         self._engine = create_async_engine(
             db_url,

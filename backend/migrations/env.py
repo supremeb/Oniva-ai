@@ -17,7 +17,11 @@ config = context.config
 
 # Configure SQLAlchemy database URL
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("+asyncpg", ""))
+# Alembic runs as the schema owner (MIGRATION_DATABASE_URL), never as oniva_app.
+config.set_main_option(
+    "sqlalchemy.url",
+    settings.migration_database_url.replace("+asyncpg", "").replace("%", "%%"),
+)
 
 # Setup logging
 if config.config_file_name is not None:

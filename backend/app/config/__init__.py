@@ -29,7 +29,17 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Database
+    # Request-path URL: MUST connect as the NOSUPERUSER NOBYPASSRLS role `oniva_app`.
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@postgres:5432/oniva"
+    # BYPASSRLS role `oniva_system` (scheduler, webhook ingestion, startup recovery, pre-tenant
+    # auth lookups). Falls back to SCHEDULER_DATABASE_URL, then DATABASE_URL (dev/test only).
+    SYSTEM_DATABASE_URL: str = ""
+    # Schema-owner URL used by Alembic (init_db auto-migrate and the CLI). Falls back to DATABASE_URL.
+    MIGRATION_DATABASE_URL: str = ""
+    # Run `alembic upgrade head` at startup. None => True in development, False in production.
+    AUTO_MIGRATE: Optional[bool] = None
+    # Startup recovery only fails jobs whose last activity is older than this.
+    STALE_JOB_THRESHOLD_SECONDS: int = 3600
 
     # Redis
     REDIS_URL: str = "redis://redis:6379"
@@ -102,7 +112,8 @@ class Settings(BaseSettings):
 
     # App Database User (for RLS enforcement)
     APP_DATABASE_USER: str = "oniva_app"
-    APP_DATABASE_PASSWORD: str = "app_password_change_me"
+    # No default: role passwords come from env/secrets (set via ALTER ROLE out-of-band).
+    APP_DATABASE_PASSWORD: str = ""
 
     # ========================================
     # Feature Flags
@@ -324,6 +335,22 @@ class Settings(BaseSettings):
     REDIS_CIRCUIT_TIMEOUT_SECONDS: float = 30.0           # Timeout before half-open
     REDIS_FAIL_FAST_ON_CIRCUIT_OPEN: bool = False         # Raise error vs return None
 
+    @property
+    def system_database_url(self) -> str:
+        """URL of the BYPASSRLS `oniva_system` role (see SYSTEM_DATABASE_URL)."""
+        return self.SYSTEM_DATABASE_URL or self.SCHEDULER_DATABASE_URL or self.DATABASE_URL
+
+    @property
+    def migration_database_url(self) -> str:
+        """Schema-owner URL for Alembic (never the request role)."""
+        return self.MIGRATION_DATABASE_URL or self.DATABASE_URL
+
+    @property
+    def auto_migrate(self) -> bool:
+        if self.AUTO_MIGRATE is not None:
+            return self.AUTO_MIGRATE
+        return self.ENVIRONMENT not in ("production", "prod")
+
     def validate_production_security(self) -> None:
         """Validate that production deployments use secure credentials.
 
@@ -396,7 +423,7 @@ class Settings(BaseSettings):
                     "Generate secure credentials using: python scripts/generate_secrets.py"
                 )
 
-        if any(pattern in self.APP_DATABASE_PASSWORD.lower() for pattern in insecure_db_patterns):
+        if self.APP_DATABASE_PASSWORD and any(pattern in self.APP_DATABASE_PASSWORD.lower() for pattern in insecure_db_patterns):
             errors.append(
                 "APP_DATABASE_PASSWORD contains insecure default value. "
                 "Generate a secure password using: python scripts/generate_secrets.py"
