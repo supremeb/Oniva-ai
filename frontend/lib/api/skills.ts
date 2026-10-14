@@ -14,6 +14,7 @@ export interface Skill {
     mcp_dependencies: string[];
     author: string;
     version: string;
+    mock?: boolean;
     code?: string | null;
     configuration?: Record<string, any>;
     created_at?: string | null;

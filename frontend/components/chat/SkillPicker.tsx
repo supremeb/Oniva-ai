@@ -112,7 +112,10 @@ export const SkillPicker = memo(function SkillPicker({
                                                 weight={isSelected ? 'fill' : 'regular'}
                                             />
                                             <div className="flex-1 min-w-0">
-                                                <div className="text-sm font-medium truncate">{skill.name}</div>
+                                                <div className="text-sm font-medium truncate">
+                                                    {skill.name}
+                                                    {skill.mock && <span className="ml-1.5 rounded border border-amber-500 px-1 text-[10px] text-amber-700">Mock</span>}
+                                                </div>
                                                 {skill.description && (
                                                     <div className="text-xs text-neutral-400 truncate">{skill.description}</div>
                                                 )}

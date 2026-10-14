@@ -71,6 +71,7 @@ async def list_skills(
             enabled=True,
             skill_dependencies=manifest.requires,
             mcp_dependencies=manifest.mcp_dependencies,
+            mock=manifest.mock,
             author=manifest.author,
             version=manifest.version,
             code=None,

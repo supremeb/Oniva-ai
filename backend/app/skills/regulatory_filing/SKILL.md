@@ -10,6 +10,8 @@ tool:
   function: regulatory_filing
   async: true
 
+mock: true
+
 metadata:
   author: oniva
   version: "1.0.0"

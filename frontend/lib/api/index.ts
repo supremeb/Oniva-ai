@@ -12,10 +12,9 @@
  * - Configurable timeouts and retries
  */
 
-// Get the API base URL - hardcoded for reliability
-// Next.js env var inlining is unreliable in client components, so we hardcode the default
-// For production, this should be set via next.config.js publicRuntimeConfig
-export const API_BASE_URL = 'http://localhost:8000';
+// API base URL. NEXT_PUBLIC_API_URL is inlined by Next.js at build time
+// (static property access is required for inlining); falls back to local dev.
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export class APIError extends Error {
   constructor(

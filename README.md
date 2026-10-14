@@ -31,7 +31,7 @@ Oniva is an enterprise-grade platform for building, deploying, and managing AI a
 
 **Core value proposition:**
 - **Visual workflow builder** that non-engineers can drive end-to-end
-- **Durable execution** via DBOS — workflows survive crashes, restarts, and 8+ hour sessions
+- **Postgres-checkpointed workflows** — per-node checkpoints with manual recovery via API (DBOS is declared as a dependency but is not integrated; no automatic resume on boot)
 - **Tamper-proof audit trail** — RSA-2048 signed, hash-chained, 7-year retention
 - **Tenant-isolated** at the database level (PostgreSQL Row Level Security)
 
@@ -41,12 +41,12 @@ Oniva is an enterprise-grade platform for building, deploying, and managing AI a
 
 The Oniva codebase is more than a CRUD frontend over an LLM call. A few things worth a look if you're evaluating engineering depth:
 
-- **State machine + tool masking** (`backend/app/agents/state_machine.py`, `stateful_agent.py`) — agents are wrapped in a 7-state, 15-transition machine that masks unavailable tools at the logits layer, not just at validation time. Survives LLM attempts to call disallowed tools mid-thought.
-- **DBOS-checkpointed durable workflows** (`backend/app/services/durable_workflow_engine.py`) — every workflow step persists transparently; crash mid-execution and the next worker resumes from the last checkpoint with no data loss.
+- **State machine + tool masking** (`backend/app/agents/state_machine.py`, `stateful_agent.py`) — a library implementing an 8-state machine with per-state tool allow-lists (list filtering, not logit masking). It is covered by tests but is not yet wired into the production agent runtime.
+- **Postgres-checkpointed workflows** (`backend/app/services/durable_workflow_engine.py`) — each node writes a checkpoint row; a failed run can be resumed manually through the `/recover` endpoint. Steps are not idempotent (a node that crashed mid-side-effect re-runs), nothing auto-recovers on boot, and DBOS is not used.
 - **Hash-chained, RSA-2048 signed audit log** (`backend/app/services/audit_logger.py`) — every decision the system makes is provably linked to the previous one. Designed for SEC / MiFID II / SOX-style replay.
-- **OpenAPI-spec-driven connector factory** (`backend/app/connectors/openapi/`) — drop in any OpenAPI spec, get a fully sandboxed MCP-style tool with SSRF protection, private-IP blocking, and per-tenant credential resolution.
+- **OpenAPI-spec-driven connector factory** (`backend/app/connectors/openapi/`) — drop in any OpenAPI spec, get an in-process connector tool (MCP-shaped, not the MCP protocol) with SSRF protection, private-IP blocking, and per-tenant credential resolution.
 - **PostgreSQL RLS with transaction-scoped tenant context** (`backend/app/database.py`, migrations 011/043) — `current_setting('app.current_tenant', true)::uuid` gates every query; `db.flush()` + `db.refresh()` keeps the LOCAL setting alive across nested operations.
-- **Three-tier memory** — Redis hot cache → PostgreSQL warm → S3 cold for artifacts; pgvector HNSW indexes for semantic recall.
+- **Session storage, volumes and artifacts** — per-session plan/todo/state files, read-only pre-warmed volumes, and artifact storage (local disk, optional S3), plus pgvector HNSW indexes for semantic recall. There is no Redis/PostgreSQL/S3 three-tier memory.
 
 ---
 
@@ -55,16 +55,19 @@ The Oniva codebase is more than a CRUD frontend over an LLM call. A few things w
 ### Visual workflow builder
 - 30+ node types — agents, logic, transforms, integrations
 - React Flow canvas with real-time streaming execution
-- Automatic checkpointing and crash recovery via DBOS
+- Per-node Postgres checkpointing with manual recovery (no DBOS)
+- Human Approval nodes are simulated: they auto-approve (no real pause/resume yet)
+- Node types without an executor (Data Retrieval, Analysis, Research, Schedule Trigger) are hidden from the palette
 
 ### AI agents
 - Pre-built agents — Data Retrieval, Analysis, Compliance, Research
 - Custom agents with personalized prompts and tool sets
-- State-machine-enforced execution — invalid tool calls are masked, not just rejected
+- State-machine-enforced execution — per-state tool allow-lists exist as a library but are not yet enforced at runtime
 - Test/deploy gates with automated evaluation before production
 
 ### Connectors
-- **4 native MCP connectors** — ServiceNow, Microsoft Teams, OFAC, OpenAPI factory
+- **4 native in-process connectors** (MCP-shaped, not the MCP protocol) — ServiceNow, Microsoft Teams, OFAC, OpenAPI factory
+- **Mock skills** — sanctions_check, kyc_verification, aml_screening, regulatory_filing, risk_assessment, fetch_market_data, get_financial_statements, fetch_economic_indicators and extract_entities return simulated data and are flagged `mock: true` (labelled "Mock" in the UI)
 - **31 OpenAPI-derived connectors** — Stripe, Slack, GitHub, HubSpot, Jira, Notion, and more
 - **Custom imports** — point at any OpenAPI spec, get a sandboxed tool
 
@@ -141,7 +144,6 @@ npm install && npm run dev
   <a href="https://fastapi.tiangolo.com"><img alt="FastAPI" height="40" src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" /></a>
   <a href="https://ai.pydantic.dev"><img alt="Pydantic AI" height="40" src="assets/logos/pydantic-ai.png" /></a>
   <a href="https://www.sqlalchemy.org"><img alt="SQLAlchemy" height="40" src="https://img.shields.io/badge/SQLAlchemy-D71F00?style=for-the-badge&logo=sqlalchemy&logoColor=white" /></a>
-  <a href="https://dbos.dev"><img alt="DBOS" height="40" src="assets/logos/dbos.png" /></a>
   <a href="https://e2b.dev"><img alt="E2B" height="40" src="assets/logos/e2b.svg" /></a>
 </p>
 
@@ -158,7 +160,7 @@ npm install && npm run dev
 | Layer       | Technologies                                                                |
 |-------------|-----------------------------------------------------------------------------|
 | Frontend    | Next.js 15, React, TypeScript, @xyflow/react 12, TanStack Query, Tailwind CSS, Radix UI |
-| Backend     | FastAPI 0.115, Pydantic AI, SQLAlchemy 2.0 async, DBOS, LiteLLM             |
+| Backend     | FastAPI 0.115, Pydantic AI, SQLAlchemy 2.0 async, LiteLLM                  |
 | Sandbox     | E2B (per-tenant code-execution sandboxes)                                   |
 | Database    | PostgreSQL 16 + pgvector, Redis 7                                           |
 | LLM         | OpenAI, Anthropic, OpenRouter (via LiteLLM)                                 |
@@ -191,7 +193,7 @@ Oniva-ai/
 │   ├── app/
 │   │   ├── api/v1/                 # ~399 endpoints across 55 modules
 │   │   ├── agents/                 # Agent + state machine code
-│   │   ├── connectors/             # MCP + OpenAPI connector factory
+│   │   ├── connectors/             # In-process connectors + OpenAPI factory
 │   │   ├── services/               # Durable workflows, sessions, audit
 │   │   └── models/                 # SQLAlchemy 2.0 models
 │   └── migrations/                 # Alembic schema migrations
@@ -206,7 +208,7 @@ Oniva-ai/
 Architecture features are env-controlled. See `backend/app/config/__init__.py` for the source of truth.
 
 ```python
-USE_DURABLE_WORKFLOWS   = True    # DBOS checkpointing
+USE_DURABLE_WORKFLOWS   = True    # Postgres checkpointing (not DBOS)
 USE_FILESYSTEM_SESSIONS = True    # Plan / todo recitation
 USE_VOLUMES             = True    # Pre-warmed input data
 USE_ARTIFACTS           = True    # 7-year compliance storage
@@ -226,7 +228,7 @@ The backend exposes ~399 REST endpoints across 55 modules. A few highlights:
 | `GET /health`                               | Health check                         |
 | `CRUD /api/v1/agents`                       | Agent management                     |
 | `CRUD /api/v1/workflows`                    | Workflow management                  |
-| `POST /api/v1/workflows/execute-durable`    | DBOS-checkpointed execution          |
+| `POST /api/v1/workflows/execute-durable`    | Postgres-checkpointed execution      |
 | `POST /api/v1/chat`                         | Streaming chat                       |
 | `GET /api/v1/workflows/{id}/checkpoints`    | List durable checkpoints             |
 | `POST /api/v1/workflows/{id}/recover`       | Resume from last checkpoint          |
@@ -249,7 +251,7 @@ Full interactive docs at `http://localhost:8000/docs` once running.
 | `DATABASE_URL`          | PostgreSQL connection             | Yes      |
 | `REDIS_URL`             | Redis connection                  | Yes      |
 | `SECRET_KEY`            | JWT signing key (≥32 chars)       | Yes      |
-| `USE_DURABLE_WORKFLOWS` | Enable DBOS checkpointing         | No (default `True`)  |
+| `USE_DURABLE_WORKFLOWS` | Enable Postgres checkpointing    | No (default `True`)  |
 | `USE_STATE_MACHINE`     | Enable state-machine safety layer | No (default `True`)  |
 
 See `.env.example` and `backend/.env.example` for the full list.
@@ -285,7 +287,7 @@ Coverage targets: 70% overall, 90% on critical paths, 95% on agent evaluation su
 - Zero-trust architecture, ephemeral credentials, 15-minute JWT TTL
 - Multi-tenant isolation via PostgreSQL Row Level Security
 - RSA-2048-signed audit log with hash chaining
-- State-machine safety: invalid tool calls are masked at logit time
+- State-machine tool allow-lists (library; not yet enforced at runtime)
 - SSRF protection in the OpenAPI connector (private-IP blocking, scheme validation)
 - Pydantic schemas validate every API boundary
 
@@ -314,5 +316,5 @@ For commercial licensing inquiries: **balachander.ral@gmail.com**
 ---
 
 <p align="center">
-  Built with Next.js · React Flow · FastAPI · Pydantic AI · DBOS · E2B · PostgreSQL · Redis
+  Built with Next.js · React Flow · FastAPI · Pydantic AI · E2B · PostgreSQL · Redis
 </p>

@@ -10,6 +10,8 @@ tool:
   function: get_financial_statements
   async: true
 
+mock: true
+
 metadata:
   author: oniva
   version: "1.0.0"

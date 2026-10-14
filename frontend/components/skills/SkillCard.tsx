@@ -37,6 +37,9 @@ export function SkillCard({ skill, onSelect, className }: SkillCardProps) {
                 </div>
                 <div className="text-xs flex items-center gap-1 text-muted-foreground">
                     <span className="font-mono">v{skill.version}</span>
+                    {skill.mock && (
+                        <Badge variant="outline" className="text-[10px] h-4 px-1 py-0 border-amber-500 text-amber-700" title="Returns simulated data, not a live provider">Mock</Badge>
+                    )}
                     {skill.is_custom ? (
                         <Badge variant="outline" className="text-[10px] h-4 px-1 py-0">Custom</Badge>
                     ) : (
