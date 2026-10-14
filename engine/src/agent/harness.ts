@@ -13,7 +13,8 @@
  *
  * Submissions whose run ended without settling them (a generation aborted or
  * faulted) are settled `unanswered` by the harness, both as it happens and
- * when the harness opens.
+ * when the harness opens, together with the steers placed into that run; the
+ * conversation's next queued input then starts, so follow-ups never stall.
  */
 import { type Clock, realClock } from "../core/clock.js";
 import { type EngineLimits, resolveLimits } from "../core/limits.js";
@@ -36,9 +37,11 @@ import {
   approvalsDoc,
   type DecideApprovalInput,
 } from "./approvals.js";
+import { compactionTaskDefinition } from "./compaction.js";
 import {
   type AgentCore,
   Conversation,
+  isBusy,
   Submission,
   type SubmissionSettled,
 } from "./conversation.js";
@@ -51,9 +54,16 @@ import {
   settleSubmission,
 } from "./generation.js";
 import { type AgentErrorReporter, type AgentHooks, HookRunner } from "./hooks.js";
+import { Inbox } from "./inbox.js";
 import type { HostPolicy } from "./policy.js";
 import { DEFAULT_PROGRESS_INTERVAL_MS } from "./progress.js";
-import { type AgentConfigInput, agentConfigDoc, applyAgentConfig } from "./prompt.js";
+import {
+  type AgentConfigInput,
+  agentConfigDoc,
+  applyAgentConfig,
+  type CompactionOverrides,
+} from "./prompt.js";
+import type { SubmissionUnanswered } from "./submission.js";
 import { type AgentDeps, TOOL_TASK_KIND, toolTaskDefinition } from "./tool-task.js";
 
 export interface AgentSettings {
@@ -88,6 +98,8 @@ export interface HarnessOptions {
   signal?: AbortSignal;
   /** Receives non-fatal errors: hook throws, progress-write failures, late handler throws. */
   onError?: AgentErrorReporter;
+  /** Harness-level compaction settings; a conversation's `agent.compaction` overrides them. */
+  compaction?: CompactionOverrides;
 }
 
 export interface NewConversationInput {
@@ -181,7 +193,8 @@ export class Harness implements AgentCore {
       freshIntents: new Set(),
     };
     const toolTask = toolTaskDefinition(deps);
-    const generation = generationTaskDefinition(deps, toolTask);
+    const compaction = compactionTaskDefinition(deps, options.compaction);
+    const generation = generationTaskDefinition(deps, toolTask, compaction);
 
     // Follow commits before the runtime starts, so no settlement is missed.
     let harness: Harness | null = null;
@@ -194,7 +207,9 @@ export class Harness implements AgentCore {
     let runtime: TaskRuntime;
     try {
       runtime = await TaskRuntime.open(session, {
-        tasks: [generation, toolTask],
+        // Subagents need no kind of their own: they run as the tool task's
+        // `subagent` phase over child conversations of these same kinds.
+        tasks: [generation, toolTask, compaction],
         clock,
         concurrency: settings.concurrency,
         ...(options.signal ? { signal: options.signal } : {}),
@@ -375,7 +390,8 @@ export class Harness implements AgentCore {
       return task === null || task.status === "terminal";
     });
     if (orphans.length === 0) return;
-    await this.runtime.commit(async (tx) => {
+    await this.runtime.commit(async (tx, ops) => {
+      // Reads first: a commit may not read tables after its first write.
       const current: Array<{ sub: SubmissionRecord; task: TaskRecord | null }> = [];
       for (const o of orphans) {
         const sub = await tx.getSubmission(o.id);
@@ -384,6 +400,14 @@ export class Harness implements AgentCore {
           current.push({ sub, task });
         }
       }
+      const inboxes = new Map<string, Inbox>();
+      for (const { sub } of current) {
+        if (!inboxes.has(sub.conversationId)) {
+          inboxes.set(sub.conversationId, await Inbox.load(tx, sub.conversationId));
+        }
+      }
+      const runs: Array<{ conversationId: string; runId: string; result: SubmissionUnanswered }> =
+        [];
       for (const { sub, task } of current) {
         const outcome = task?.outcome ?? null;
         const reason = outcome?.type === "aborted" ? "aborted" : "faulted";
@@ -393,8 +417,27 @@ export class Harness implements AgentCore {
             : outcome?.type === "faulted"
               ? outcome.message
               : "the run ended without an answer";
-        settleSubmission(tx, sub, "unanswered", { reason, message, error: null });
+        const result: SubmissionUnanswered = { reason, message, error: null };
+        settleSubmission(tx, sub, "unanswered", result);
+        inboxes.get(sub.conversationId)?.subs.delete(sub.id);
+        const runId = (task?.input as GenerationInput | undefined)?.runId;
+        if (task?.kind === GENERATION_TASK_KIND && runId !== undefined) {
+          runs.push({ conversationId: sub.conversationId, runId, result });
+        }
         if (task) await clearLive(tx, sub.conversationId, task.id);
+      }
+      // The ended runs settle the steers placed into them, and an idle
+      // conversation starts its next queued input (once).
+      const started = new Set<string>();
+      for (const run of runs) {
+        const inbox = inboxes.get(run.conversationId) as Inbox;
+        const start = !started.has(run.conversationId) && !isBusy(this.runtime, run.conversationId);
+        started.add(run.conversationId);
+        inbox.endRun(ops, this.generation, run.runId, "unanswered", run.result, start);
+      }
+      for (const [conversationId, inbox] of inboxes) {
+        if (started.has(conversationId) || isBusy(this.runtime, conversationId)) continue;
+        inbox.startNext(ops, this.generation);
       }
     });
   }

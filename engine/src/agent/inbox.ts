@@ -179,8 +179,8 @@ export class Inbox {
 
   /**
    * Run `runId` ended: settle the steers placed into it with the run's
-   * result, then start the next queued input. The caller settles the run's
-   * own submission.
+   * result, then (unless `startNext` is false) start the next queued input.
+   * The caller settles the run's own submission.
    */
   endRun(
     ops: TaskOps,
@@ -188,6 +188,7 @@ export class Inbox {
     runId: string,
     status: "done" | "unanswered",
     result: SubmissionAnswer | SubmissionUnanswered,
+    startNext = true,
   ): void {
     const value = this.draft.value;
     const mine = value.placed.filter((p) => p.runId === runId);
@@ -198,7 +199,7 @@ export class Inbox {
         if (settleSubmission(this.tx, sub, status, result)) this.subs.delete(p.submissionId);
       }
     }
-    this.startNext(ops, generation);
+    if (startNext) this.startNext(ops, generation);
   }
 
   /**

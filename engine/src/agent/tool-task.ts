@@ -28,6 +28,14 @@
  * happened and carries the output committed so far. The tool is not run
  * again.
  *
+ * A subagent tool (`subagents.ts`) leaves `start` / `approved` for the
+ * `subagent` phase instead of `execute`: it runs a child conversation the
+ * task owns and waits for its answer without a running invocation.
+ *
+ * Result statuses: a failed result whose `details.error` is `timeout` or
+ * `lease_lost` (the tool gateway's failure codes) gets that status; any other
+ * failure is `error`.
+ *
  * A task aborted while awaiting approval closes its request as `cancelled`.
  */
 import type { Clock } from "../core/clock.js";
@@ -46,6 +54,7 @@ import {
   type TaskDefinition,
   type TaskScope,
   type TaskState,
+  type Transition,
   waiting,
 } from "../tasks/define.js";
 import type {
@@ -70,6 +79,7 @@ import { type AgentErrorReporter, type HookRunner, isToolResult } from "./hooks.
 import { authorize, type HostPolicy } from "./policy.js";
 import { appendOutput, ProgressWriter, type ToolOutputState, toolOutputDoc } from "./progress.js";
 import { type AgentConfig, agentConfigDoc } from "./prompt.js";
+import { isSubagentTool, SUBAGENT_PHASE, type SubagentLink, subagentPhase } from "./subagents.js";
 
 export const TOOL_TASK_KIND = "agent.tool";
 
@@ -107,8 +117,11 @@ export type ToolTaskInput = {
   after: string[];
 };
 
-/** The intent: the final, authorized arguments. */
-export type ToolTaskCheckpoint = { arguments: JsonObject } | null;
+/**
+ * The intent: the final, authorized arguments. A subagent call also records
+ * its child conversation and submission once it has created them.
+ */
+export type ToolTaskCheckpoint = { arguments: JsonObject; subagent?: SubagentLink } | null;
 
 /** A tool task's `done` value. */
 export type ToolTaskValue = {
@@ -184,6 +197,43 @@ export function resultPayload(
   };
 }
 
+/** Gateway failure codes (`details.error`) with their own result status. */
+const FAILURE_STATUSES: ReadonlySet<string> = new Set<ToolResultStatus>(["timeout", "lease_lost"]);
+
+/** The status of a tool's own result: `ok`, a gateway failure status, or `error`. */
+export function resultStatus(result: ToolResult): ToolResultStatus {
+  if (!result.isError) return "ok";
+  const d = result.details;
+  const code =
+    typeof d === "object" && d !== null && !Array.isArray(d) ? (d as JsonObject).error : undefined;
+  return typeof code === "string" && FAILURE_STATUSES.has(code)
+    ? (code as ToolResultStatus)
+    : "error";
+}
+
+/**
+ * Inside a tool task's commit: append its `tool_result` entry (carrying the
+ * approval when the call needed one) and return the task's `done`.
+ */
+export async function writeToolResult(
+  tx: Transaction,
+  task: TaskState<ToolTaskInput, ToolTaskCheckpoint>,
+  status: ToolResultStatus,
+  result: ToolResult,
+  attempts: number,
+): Promise<Transition<ToolTaskCheckpoint>> {
+  const payload = resultPayload(task.input.runId, task.input.call, status, result, attempts);
+  if (task.phase === "approved" || Object.hasOwn(task.signals, APPROVAL_SIGNAL)) {
+    const item = await approvalOf(tx, task.conversationId, task.id);
+    if (item && item.status !== "pending" && item.status !== "cancelled") {
+      payload.approval = resultApproval(item, tx.now);
+    }
+  }
+  const entryId = appendToolResult(tx, task.conversationId, task.id, payload);
+  const value: ToolTaskValue = { entryId, status, terminate: payload.terminate };
+  return done(value);
+}
+
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 function issuesText(issues: ReadonlyArray<{ path: PropertyKey[]; message: string }>): string {
@@ -209,16 +259,7 @@ export function toolTaskDefinition(
     rt.commit(async (tx) => {
       if (prepare) await prepare(tx);
       if (output) (await tx.doc(toolOutputDoc, task.id)).set(output);
-      const payload = resultPayload(task.input.runId, task.input.call, status, result, attempts);
-      if (task.phase === "approved" || Object.hasOwn(task.signals, APPROVAL_SIGNAL)) {
-        const item = await approvalOf(tx, task.conversationId, task.id);
-        if (item && item.status !== "pending" && item.status !== "cancelled") {
-          payload.approval = resultApproval(item, tx.now);
-        }
-      }
-      const entryId = appendToolResult(tx, task.conversationId, task.id, payload);
-      const value: ToolTaskValue = { entryId, status, terminate: payload.terminate };
-      return done(value);
+      return writeToolResult(tx, task, status, result, attempts);
     });
 
   const fail = (task: State, rt: Scope, status: ToolResultStatus, message: string) =>
@@ -309,6 +350,9 @@ export function toolTaskDefinition(
             });
           }
           case "allow": {
+            if (isSubagentTool(tool)) {
+              return rt.commit(() => next(SUBAGENT_PHASE, { arguments: args }));
+            }
             const intent = await rt.commit(() => next("execute", { arguments: args }));
             deps.freshIntents.add(task.id);
             return intent;
@@ -357,9 +401,11 @@ export function toolTaskDefinition(
             0,
           );
         }
-        const intent = await rt.commit(() =>
-          next("execute", { arguments: task.checkpoint?.arguments ?? {} }),
-        );
+        const approvedArgs = task.checkpoint?.arguments ?? {};
+        if (isSubagentTool(deps.tools.get(task.input.call.name))) {
+          return rt.commit(() => next(SUBAGENT_PHASE, { arguments: approvedArgs }));
+        }
+        const intent = await rt.commit(() => next("execute", { arguments: approvedArgs }));
         deps.freshIntents.add(task.id);
         return intent;
       },
@@ -392,6 +438,8 @@ export function toolTaskDefinition(
         }
         return run(task, rt, ctx, tool, parsed.data, args, conversation, agent, attempt);
       },
+
+      [SUBAGENT_PHASE]: (task, rt) => subagentPhase(deps, task, rt, writeToolResult),
     },
     onAbort: async (task, scope) => {
       if (task.phase !== "approved") return;
@@ -424,7 +472,7 @@ export function toolTaskDefinition(
       try {
         const outcome = await tool.reconcile(args, api);
         if (outcome !== null && isToolResult(outcome)) {
-          return finish(task, rt, outcome.isError ? "error" : "ok", outcome, stored.attempt);
+          return finish(task, rt, resultStatus(outcome), outcome, stored.attempt);
         }
       } catch (err) {
         ctx.throwIfCancelled();
@@ -509,20 +557,19 @@ export function toolTaskDefinition(
     };
 
     let result: ToolResult;
-    let status: ToolResultStatus;
+    let failed = false;
     try {
       const value = await tool.execute(parsedArgs, api);
       if (isToolResult(value)) {
         result = value;
-        status = value.isError ? "error" : "ok";
       } else {
         result = { content: `Tool ${call.name} returned an invalid result.`, isError: true };
-        status = "error";
+        failed = true;
       }
     } catch (err) {
       ctx.throwIfCancelled();
       result = { content: `Tool ${call.name} failed: ${errorText(err)}`, isError: true };
-      status = "error";
+      failed = true;
     } finally {
       await writer.close();
     }
@@ -539,7 +586,7 @@ export function toolTaskDefinition(
       },
       task.id,
     );
-    if (status === "ok" && result.isError) status = "error";
+    const status: ToolResultStatus = failed ? "error" : resultStatus(result);
     return finish(task, rt, status, result, attempt, touched ? output : undefined);
   }
 }

@@ -16,7 +16,9 @@
  * {@link LeaseKeeper} holds a lease for a worker: it heartbeats every `ttl/3`
  * and self-fences — aborting its signal and reporting `LeaseLost` — once the
  * monotonic clock passes `lastRenewal + ttl − safetyMargin`, which is before
- * the database would let another worker take over.
+ * the database would let another worker take over. A host that learns of the
+ * loss first (a fence rejection from the tool gateway) calls
+ * {@link LeaseKeeper.fenceNow}.
  */
 import { hostname } from "node:os";
 import type { Pool } from "pg";
@@ -283,6 +285,23 @@ export class LeaseKeeper {
     await this.#store.release(this.sessionId, this.ownerId, this.token);
   }
 
+  /**
+   * Self-fence now, without waiting for the watchdog: for a host that learns
+   * from elsewhere that its lease is gone (e.g. the tool gateway rejected the
+   * fence token). Aborts {@link signal} with `LeaseLost`, calls `onLost` once
+   * and gives the lease back best-effort so a successor need not wait for it
+   * to lapse. A no-op once the lease is lost or released; never throws.
+   */
+  fenceNow(reason?: string): void {
+    if (this.#state !== "held") return;
+    this.#fenceOut(reason);
+    try {
+      this.#store.release(this.sessionId, this.ownerId, this.token).catch(() => {});
+    } catch {
+      // Best-effort: the lease lapses on its own.
+    }
+  }
+
   #scheduleHeartbeat(): void {
     if (this.#state !== "held") return;
     this.#cancelHeartbeat = this.#clock.setTimer(this.ttlMs / 3, () => {
@@ -336,11 +355,12 @@ export class LeaseKeeper {
     });
   }
 
-  #fenceOut(): void {
+  #fenceOut(reason?: string): void {
     if (this.#state !== "held") return;
     this.#state = "lost";
     this.#stopTimers();
     const error = new LeaseLost(this.sessionId, this.token);
+    if (reason) error.message = `${error.message}: ${reason}`;
     this.#abort.abort(error);
     try {
       this.#onLost?.(error);

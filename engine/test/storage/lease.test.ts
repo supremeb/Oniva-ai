@@ -347,6 +347,48 @@ describe("lease keeper timing (manual clock)", () => {
     assert.equal(keeper.lost, true);
   });
 
+  it("fenceNow self-fences at once, reports the loss once and gives the lease back", async () => {
+    const clock = new ManualClock();
+    const store = new StubStore();
+    const lost: LeaseLost[] = [];
+    const keeper = await start(store, clock, (e) => lost.push(e));
+    keeper.fenceNow("gateway rejected the fence");
+    assert.equal(keeper.lost, true);
+    assert.equal(keeper.state, "lost");
+    assert.ok(keeper.signal.aborted);
+    assert.ok(keeper.signal.reason instanceof LeaseLost);
+    assert.match((keeper.signal.reason as LeaseLost).message, /gateway rejected the fence/);
+    assert.equal(lost.length, 1);
+    assert.throws(() => keeper.fence(), LeaseLost);
+    assert.equal(clock.pendingTimers(), 0);
+    await clock.advanceAsync(0);
+    assert.equal(store.released, 1, "the lease is given back best-effort");
+    keeper.fenceNow();
+    assert.equal(lost.length, 1);
+    await keeper.release();
+    assert.equal(store.released, 1);
+  });
+
+  it("fenceNow after a release, or with a failing store, changes nothing and never throws", async () => {
+    const clock = new ManualClock();
+    const store = new StubStore();
+    const lost: LeaseLost[] = [];
+    const keeper = await start(store, clock, (e) => lost.push(e));
+    await keeper.release();
+    keeper.fenceNow();
+    assert.equal(keeper.state, "released");
+    assert.equal(lost.length, 0);
+
+    const failing = new StubStore();
+    failing.release = () => Promise.reject(new Error("down"));
+    const k2 = await start(failing, clock, () => {
+      throw new Error("callback throws");
+    });
+    k2.fenceNow();
+    await clock.advanceAsync(0);
+    assert.equal(k2.lost, true);
+  });
+
   it("fences immediately when a renewal reports the lease gone", async () => {
     const clock = new ManualClock();
     const store = new StubStore();
