@@ -19,4 +19,7 @@ export {
   type StorageFixture,
 } from "./storage/conformance.js";
 export { MemoryStorageProvider } from "./storage/memory.js";
+export * from "./storage/postgres/lease.js";
+export * from "./storage/postgres/migrate.js";
+export { PostgresStorageProvider } from "./storage/postgres/storage.js";
 export * from "./storage/types.js";
