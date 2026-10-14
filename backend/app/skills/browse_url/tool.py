@@ -10,7 +10,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.agents.skills.context import SkillContext
-from app.security.url_validator import is_url_safe
+from app.security.url_validator import SecurityError, safe_request
 
 
 async def browse_url(
@@ -29,14 +29,13 @@ async def browse_url(
     Returns:
         Webpage content (text or HTML)
     """
-    # SSRF protection: validate URL before fetching
-    error = is_url_safe(url)
-    if error:
-        return {"url": url, "error": error, "status": "blocked"}
-
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+    # SSRF protection: every redirect hop is validated and the connection is
+    # pinned to the validated IP (see safe_request).
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
         try:
-            response = await client.get(
+            response = await safe_request(
+                client,
+                "GET",
                 url,
                 headers={"User-Agent": "Mozilla/5.0 (compatible; Oniva/1.0)"},
             )
@@ -66,6 +65,8 @@ async def browse_url(
                     "content": html[:50000],  # Limit HTML size
                     "content_type": "html",
                 }
+        except SecurityError as e:
+            return {"url": url, "error": str(e), "status": "blocked"}
         except Exception as e:
             return {
                 "url": url,

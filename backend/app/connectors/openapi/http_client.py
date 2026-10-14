@@ -8,64 +8,26 @@ Provides secure HTTP operations with:
 - Retry with exponential backoff
 """
 
+import asyncio
 import ipaddress
-import socket
+import logging
 from typing import Any
 from urllib.parse import urlparse
+
 import httpx
-import asyncio
-import logging
+
+from app.security import url_validator
+from app.security.url_validator import SecurityError, is_ip_blocked, safe_request
 
 logger = logging.getLogger(__name__)
 
-
-class SecurityError(Exception):
-    """Raised when a security check fails."""
-    pass
-
-
-# IP ranges that should never be accessed
-BLOCKED_IP_RANGES = [
-    ipaddress.ip_network("10.0.0.0/8"),       # Private Class A
-    ipaddress.ip_network("172.16.0.0/12"),    # Private Class B
-    ipaddress.ip_network("192.168.0.0/16"),   # Private Class C
-    ipaddress.ip_network("169.254.0.0/16"),   # Link-local / Cloud metadata
-    ipaddress.ip_network("127.0.0.0/8"),      # Loopback
-    ipaddress.ip_network("0.0.0.0/8"),        # Current network
-    ipaddress.ip_network("224.0.0.0/4"),      # Multicast
-    ipaddress.ip_network("240.0.0.0/4"),      # Reserved
-    ipaddress.ip_network("100.64.0.0/10"),    # Carrier-grade NAT
-    ipaddress.ip_network("::1/128"),          # IPv6 loopback
-    ipaddress.ip_network("fc00::/7"),         # IPv6 private
-    ipaddress.ip_network("fe80::/10"),        # IPv6 link-local
-]
-
-
-def is_ip_blocked(ip_str: str) -> bool:
-    """Check if IP address falls within blocked ranges."""
-    try:
-        ip = ipaddress.ip_address(ip_str)
-        for network in BLOCKED_IP_RANGES:
-            if ip in network:
-                return True
-        return False
-    except ValueError:
-        # Invalid IP format - block to be safe
-        return True
+# Only these methods are safe to repeat automatically.
+IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 async def resolve_hostname(hostname: str) -> list[str]:
-    """Resolve hostname to IP addresses."""
-    try:
-        loop = asyncio.get_event_loop()
-        # Use getaddrinfo for both IPv4 and IPv6
-        result = await loop.run_in_executor(
-            None,
-            lambda: socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        )
-        return list(set(addr[4][0] for addr in result))
-    except socket.gaierror as e:
-        raise SecurityError(f"DNS resolution failed for {hostname}: {e}")
+    """Resolve hostname to IP addresses (async, non-blocking)."""
+    return await url_validator.resolve_hostname(hostname)
 
 
 async def validate_url_safe(url: str) -> str:
@@ -151,8 +113,7 @@ class SafeHTTPClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=self.timeout,
-                follow_redirects=True,
-                max_redirects=5,
+                follow_redirects=False,  # redirects are followed (and validated) by safe_request
             )
         return self._client
 
@@ -168,11 +129,8 @@ class SafeHTTPClient:
 
         Returns parsed JSON/YAML spec.
         """
-        # Validate URL safety
-        safe_url = await validate_url_safe(url)
-
-        # Fetch with retry
-        response = await self._request_with_retry("GET", safe_url)
+        # Every hop is validated and pinned inside _request_with_retry
+        response = await self._request_with_retry("GET", url)
 
         # Parse response
         content_type = response.headers.get("content-type", "")
@@ -203,12 +161,9 @@ class SafeHTTPClient:
 
         For API calls to external services.
         """
-        # Validate URL safety
-        safe_url = await validate_url_safe(url)
-
         return await self._request_with_retry(
             method=method,
-            url=safe_url,
+            url=url,
             headers=headers,
             params=params,
             json_body=json_body,
@@ -224,25 +179,30 @@ class SafeHTTPClient:
         json_body: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
     ) -> httpx.Response:
-        """Make request with exponential backoff retry."""
+        """Make a validated request; only idempotent methods are retried."""
         client = await self._get_client()
+        method = method.upper()
+        attempts = self.max_retries if method in IDEMPOTENT_METHODS else 1
         merged_headers = {**self.default_headers, **(headers or {})}
 
         last_error: Exception | None = None
 
-        for attempt in range(self.max_retries):
+        for attempt in range(attempts):
             try:
-                response = await client.request(
-                    method=method,
-                    url=url,
+                response = await safe_request(
+                    client,
+                    method,
+                    url,
+                    resolver=resolve_hostname,
+                    schemes=("https",),
                     headers=merged_headers,
                     params=params,
                     json=json_body,
                     data=data,
                 )
 
-                # Retry on 5xx errors
-                if response.status_code >= 500:
+                # Retry on 5xx errors (idempotent methods only)
+                if response.status_code >= 500 and attempts > 1:
                     last_error = httpx.HTTPStatusError(
                         f"Server error: {response.status_code}",
                         request=response.request,
@@ -254,6 +214,8 @@ class SafeHTTPClient:
                 return response
 
             except (httpx.TimeoutException, httpx.NetworkError) as e:
+                if attempts == 1:
+                    raise
                 last_error = e
                 logger.warning(f"Request attempt {attempt + 1} failed: {e}")
                 await self._backoff(attempt)

@@ -6,6 +6,7 @@ Extends BaseConnector to integrate with the existing connector architecture.
 """
 
 from typing import Any
+from urllib.parse import quote, urlparse
 import logging
 
 from app.connectors.base import BaseConnector, ConnectorMetadata
@@ -38,6 +39,7 @@ class OpenAPIConnector(BaseConnector):
         spec: dict[str, Any],
         metadata: ConnectorMetadata | None = None,
         auth_config: AuthConfig | None = None,
+        allowed_base_url: str | None = None,
     ):
         """
         Initialize connector from OpenAPI spec.
@@ -46,6 +48,9 @@ class OpenAPIConnector(BaseConnector):
             spec: Parsed OpenAPI specification dict
             metadata: Optional connector metadata (generated from spec if not provided)
             auth_config: Optional auth config (detected from spec if not provided)
+            allowed_base_url: The configured API base URL. When given it always
+                wins over the spec's ``servers`` (a spec is untrusted input), and
+                credentials are only ever sent to this host.
         """
         # Parse the spec
         self._parser = OpenAPIParser(spec)
@@ -72,6 +77,15 @@ class OpenAPIConnector(BaseConnector):
 
         # Initialize tool generator
         self._tool_generator = ToolGenerator(self._parsed_spec)
+
+        # Credentials are bound to this base URL, never to a spec-supplied one.
+        self._base_url: str = (allowed_base_url or self._tool_generator.base_url).rstrip("/")
+        spec_base = self._tool_generator.base_url
+        if allowed_base_url and urlparse(spec_base).hostname != urlparse(self._base_url).hostname:
+            logger.warning(
+                "Spec servers URL %s differs from configured base %s; using configured base",
+                spec_base, self._base_url,
+            )
         self._tools: list[dict[str, Any]] | None = None
 
         # HTTP client and auth (set during authenticate)
@@ -90,6 +104,7 @@ class OpenAPIConnector(BaseConnector):
         spec_url: str,
         metadata: ConnectorMetadata | None = None,
         auth_config: AuthConfig | None = None,
+        allowed_base_url: str | None = None,
     ) -> "OpenAPIConnector":
         """
         Create connector from OpenAPI spec URL.
@@ -99,7 +114,7 @@ class OpenAPIConnector(BaseConnector):
         client = SafeHTTPClient()
         try:
             spec = await client.fetch_spec(spec_url)
-            return cls(spec, metadata, auth_config)
+            return cls(spec, metadata, auth_config, allowed_base_url=allowed_base_url)
         finally:
             await client.close()
 
@@ -146,6 +161,7 @@ class OpenAPIConnector(BaseConnector):
             registry_entry["spec_url"],
             metadata,
             auth_config,
+            allowed_base_url=registry_entry.get("base_url"),
         )
 
         # Authenticate if credentials provided
@@ -213,7 +229,7 @@ class OpenAPIConnector(BaseConnector):
         # Try a simple request to verify credentials
         try:
             # Use first server URL as health check endpoint
-            base_url = self._tool_generator.base_url
+            base_url = self._base_url
             await self._http_client.request("HEAD", base_url)
             return {
                 "status": "healthy",
@@ -266,7 +282,8 @@ class OpenAPIConnector(BaseConnector):
         meta = tool.get("_meta", {})
         path = meta.get("path", "/")
         method = meta.get("method", "GET")
-        base_url = meta.get("base_url", self._tool_generator.base_url)
+        # Always the configured base; a per-tool/spec base_url never receives credentials.
+        base_url = self._base_url
 
         # Build request
         url = f"{base_url}{path}"
@@ -289,8 +306,11 @@ class OpenAPIConnector(BaseConnector):
             location = prop.get("x-param-location", "query")
 
             if location == "path":
-                # Replace path parameter
-                url = url.replace(f"{{{arg_name}}}", str(arg_value))
+                # Encode so "../admin" cannot escape its path segment
+                segment = str(arg_value)
+                if segment in ("", ".", ".."):
+                    raise ValueError(f"Invalid path parameter {arg_name!r}: {segment!r}")
+                url = url.replace(f"{{{arg_name}}}", quote(segment, safe=""))
             elif location == "header":
                 headers[arg_name] = str(arg_value)
             elif location == "query":
