@@ -18,6 +18,7 @@ execution: code
   2. `reports/Oniva engine roadmap.md` (Phases 0–1).
   3. The code audits in `research_notes/Oniva harness rebuild on Pi/`, read in this order: `code_tools_security.md`, `code_workflow_data.md`, `code_agent_runtime.md`, `code_quality_ops.md`, `code_frontend.md`. File:line citations there are leads to re-verify, not facts.
 - **Stop conditions:** stop and surface instead of guessing if:
+  - migration drift between Alembic and the models is too large to catch up safely;
   - a fix would break a user-visible feature that has no safe replacement;
   - running as the non-superuser role reveals RLS policies too broken to fix within a unit;
   - the dependency set cannot resolve on the declared Python.
@@ -73,13 +74,13 @@ RLS is bypassed because the app connects as a superuser. The pinned dependencies
 **Phase 1 — safety net**
 - R8. The dependency set resolves and is locked with uv. Test-only packages are split out, and unused packages are removed.
 - R9. A Postgres test tier runs Alembic and exercises RLS as `oniva_app`, `SKIP LOCKED`, and the `FOR UPDATE` paths.
-- R10. The app connects as the non-superuser `oniva_app`. Scheduler and webhook work uses a separate, narrowly granted role.
+- R10. The app connects as the non-superuser `oniva_app`. Scheduler, webhook ingestion, startup recovery and pre-tenant auth lookups use a separate, narrowly granted role.
   - Startup refuses to run as a superuser or as a role with BYPASSRLS.
   - A test fails if any `tenant_id` table lacks FORCE RLS.
 - R11. The production boot path works:
-  - the URL validator accepts Postgres URLs;
-  - k8s supplies `ENCRYPTION_SALT` and `CORS_ORIGINS`;
-  - Alembic replaces `create_all`.
+  - the URL validator accepts Postgres URLs and rejects only weak passwords;
+  - k8s supplies `ENCRYPTION_SALT` and `CORS_ORIGINS`.
+  - (Alembic replacing `create_all` is owned by U9.)
 - R12. Workflows report failure truthfully:
   - executor `"error"` is normalized to `"failed"`;
   - `tokens_used` is read correctly;
@@ -129,9 +130,12 @@ RLS is bypassed because the app connects as a superuser. The pinned dependencies
   - `AuthMiddleware` denies by default.
   - Public routes are an explicit allow-list: health, login/refresh, SAML/OAuth callbacks, and webhooks, which use HMAC.
   - Code tools without a sandbox return a refusal result. They never fall back.
-- **KTD4 — Two database roles.**
-  - `oniva_app` (RLS enforced) serves requests.
-  - `oniva_system` (BYPASSRLS, narrowly granted) is used only by the scheduler, webhook ingestion and startup recovery, through an explicitly named session factory.
+- **KTD4 — Two database roles, built on what exists.**
+  - Migration 011 already creates `oniva_app`, and config already has `APP_DATABASE_USER`/`APP_DATABASE_PASSWORD` and `SCHEDULER_DATABASE_URL` (used in `workflow_scheduler.py`). Reuse them; do not create duplicate roles.
+  - The request engine (`app/core/database.py`) connects as `oniva_app` via `DATABASE_URL`.
+  - A `SYSTEM_DATABASE_URL` (falling back to `SCHEDULER_DATABASE_URL`) connects as a BYPASSRLS system role. It is used only by the scheduler, webhook ingestion, startup recovery, and pre-tenant auth lookups (login, signup, check-email, token user lookup), through an explicitly named session factory.
+  - Alembic runs as the schema owner (`MIGRATION_DATABASE_URL`), never as `oniva_app`.
+  - Remove the default `app_password_change_me`; role passwords come from env/secrets.
 - **KTD5 — Fixtures record the current contract.** Golden fixtures capture what the backend emits today, quirks included. Phase 4 maps those quirks deliberately; this plan does not fix them.
 - **KTD6 — Quarantine, don't delete.** Known-failing tests get `xfail(strict=True)` with a reason and an issue reference. A strict `xfail` that starts passing fails CI, which forces removal of the marker.
 
@@ -140,6 +144,7 @@ RLS is bypassed because the app connects as a superuser. The pinned dependencies
 ```mermaid
 flowchart LR
   U1[U1 deps + lock] --> P0
+  U1 --> U8
   subgraph P0[Phase 0, disjoint batches]
     U2[U2 auth + connectors]
     U3[U3 code exec]
@@ -148,7 +153,8 @@ flowchart LR
     U6[U6 outbound HTTP]
     U7[U7 honesty + frontend]
   end
-  P0 --> U8[U8 Postgres tier]
+  U8[U8 Postgres tier + drift]
+  P0 --> U9
   U8 --> U9[U9 real tenancy]
   U9 --> U10[U10 boot/config]
   U8 --> U11[U11 workflow correctness]
@@ -173,14 +179,14 @@ flowchart LR
 |---|---|---|---|
 | U1 | Resolvable deps + uv lock | `backend/pyproject.toml`, `backend/uv.lock`, `backend/requirements*.txt` | — |
 | U2 | Deny-by-default auth, connector lockdown | `backend/app/auth/middleware.py`, `backend/app/api/v1/connectors.py`, `backend/app/connectors/registry.py` | U1 |
-| U3 | Remove in-process code execution | `backend/app/agents/skills/execute_python/`, `backend/app/agents/skills/code.py`, `backend/app/node_executors/code_executor.py` | U1 |
+| U3 | Remove in-process code execution | `backend/app/agents/skills/code.py`, `backend/app/node_executors/code_executor.py`, `backend/app/agents/tools/bash_tool.py` | U1 |
 | U4 | Sandbox key isolation | `backend/app/services/sandbox_executor.py`, `backend/app/services/deep_work/engine.py` | U1 |
-| U5 | Tool-policy bypasses | `backend/app/services/xml_tool_rescue.py`, `backend/app/node_executors/http_executor.py`, `backend/app/agents/base.py` | U1 |
-| U6 | Outbound HTTP safety | `backend/app/security/url_validator.py`, `backend/app/connectors/http_client.py` | U1 |
+| U5 | Tool-policy bypasses | `backend/app/services/xml_tool_rescue.py`, `backend/app/node_executors/http_executor.py`, `backend/app/agents/base.py` | U1, U2 |
+| U6 | Outbound HTTP safety | `backend/app/security/url_validator.py`, `backend/app/connectors/openapi/http_client.py` | U1 |
 | U7 | Product honesty + frontend URL | `frontend/lib/api/index.ts`, workflow builder palette, `README.md` | U1 |
-| U8 | Postgres test tier | `backend/tests/conftest.py`, `backend/tests/postgres/` | U2–U7 |
-| U9 | Real tenancy | `backend/app/db/*`, `backend/migrations/versions/*`, `backend/app/main.py` | U8 |
-| U10 | Boot and config | `backend/app/config.py`, `k8s/*`, `docker-compose.prod.yml` | U9 |
+| U8 | Postgres test tier + migration drift | `backend/tests/postgres/`, `backend/migrations/versions/*` | U1 |
+| U9 | Real tenancy | `backend/app/core/database.py`, `backend/app/config/__init__.py`, `backend/migrations/versions/*`, `backend/app/main.py`, auth router | U2, U8 |
+| U10 | Boot and config | `backend/app/config/__init__.py`, `k8s/*`, `docker-compose.prod.yml` | U9 |
 | U11 | Workflow correctness | `backend/app/services/workflow_orchestrator.py`, `backend/app/services/durable_workflow_engine.py`, `backend/app/node_executors/*` | U8 |
 | U12 | Golden event fixtures | `backend/tests/contracts/` | U8 |
 | U13 | CI | `.github/workflows/backend.yml`, `.github/workflows/frontend.yml` | U10, U11, U12 |
@@ -211,7 +217,7 @@ flowchart LR
 - `backend/app/services/agent_resolver.py`
 - tests in `backend/tests/security/test_auth_default_deny.py` and `test_connector_isolation.py`
 **Approach:**
-- The middleware returns 401 when no user resolves, except on the explicit public allow-list (KTD3).
+- The middleware today sets `user=None` and calls through; auth relies on per-route dependencies. Make it return 401 when no user resolves, except on an explicit allow-list built by enumerating `app.routes`: health (`/health`, `/health/live`, `/health/ready`), login/refresh/signup/check-email/onboarding register, SAML/OAuth callbacks, webhook inbound routes (HMAC-authenticated), `api/v1/sandbox_proxy` (sandbox proxy-token auth), and docs routes in non-production. Keep SSE `?token=`/cookie auth working. Keep `app/middleware/csrf.py` exemptions consistent.
 - Connector routes require a permission and check tenant ownership.
 - The registry hands out per-call clients built from the tenant's stored credentials. `connect` writes encrypted credentials to the tenant's connector row, never to a singleton.
 - Wire credentials on the chat path, so the `authenticate()` that is currently never called runs per call.
@@ -229,18 +235,18 @@ flowchart LR
 **Goal:** close P0 #2.
 **Requirements:** R3, AE2.
 **Files:**
-- `backend/app/agents/skills/execute_python/tool_legacy.py` (delete)
-- `backend/app/agents/skills/code.py`
-- `backend/app/node_executors/code_executor.py`
-- `backend/app/agents/tools/bash_tool.py` (delete, dead)
-- `backend/app/services/session_memory.py`, which references a nonexistent tool
+- `backend/app/agents/skills/code.py` (in-process `exec` ~274; `ENABLE_SANDBOX` branch ~204)
+- `backend/app/node_executors/code_executor.py` (~87)
+- `backend/app/agents/tools/bash_tool.py` (delete, dead) and its references in `backend/app/services/session_memory.py`
+- existing tests to delete or rewrite: `backend/tests/test_bash_tool.py`, `backend/tests/test_session_memory.py`, `backend/tests/test_execute_python_skill.py`, `backend/tests/test_code_security.py` (whichever exist)
+- also check `backend/app/skills/*` and `backend/app/agents/skills/sandbox.py` for other exec paths
 - tests in `backend/tests/security/test_no_inprocess_exec.py`
 **Approach:**
 - Every code path routes to the E2B executor.
 - When the sandbox is disabled, the tool returns a clear refusal. No `exec`/`eval` of supplied code remains anywhere: verify with a grep test over `app/` for `exec(` / `eval(` on non-literal input.
 **Execution note:** start with the AE2 payload test failing.
 **Test scenarios:**
-- Covers AE2. The escape payload, run through each of the three entry points with the sandbox off, is refused and no subprocess is spawned. Assert by patching `subprocess.Popen`.
+- Covers AE2. The escape payload, run through each entry point (the code skill in `code.py`, the workflow code node, and any other exec path found) with the sandbox off, is refused and no subprocess is spawned. Assert by patching `subprocess.Popen`.
 - With the sandbox on and a mocked E2B, code is forwarded and the result is returned.
 - The grep-guard test fails if a new `exec(`/`eval(` of a variable appears in `app/`.
 **Verification:** the tests pass, and no runtime import references the deleted files.
@@ -252,12 +258,12 @@ flowchart LR
 **Files:**
 - `backend/app/services/sandbox_executor.py`
 - `backend/app/services/deep_work/engine.py` (~895)
-- `backend/app/config.py`, for the defaults
-- token proxy module (locate it)
+- `backend/app/config/__init__.py`, for the defaults
+- `backend/app/services/sandbox_tokens.py`, `backend/app/api/v1/sandbox_proxy.py`
 - tests in `backend/tests/security/test_sandbox_keys.py`
 **Approach:**
-- Turn the control-plane token proxy on by default.
-- Remove real-key injection.
+- The control plane already exists: `ENABLE_SANDBOX_CONTROL_PLANE` (default false), `SANDBOX_PROXY_URL` (default empty), `app/services/sandbox_tokens.py`, `app/api/v1/sandbox_proxy.py`. Default the control plane on.
+- Remove the real-key branch entirely (`_build_sandbox_env_vars(api_keys)`, `deep_work/engine.py` ~895 and ~419-423). With `ENABLE_SANDBOX` on and no `SANDBOX_PROXY_URL`, refuse to start sandboxes (fail closed) with a clear error. Document the local-dev proxy URL.
 - The proxy enforces the model allow-list and real usage-based cost.
 - Add an egress allow-list config passed to E2B.
 - Enforce `_MAX_COST_PER_EXECUTION`.
@@ -297,7 +303,7 @@ flowchart LR
 **Requirements:** R6.
 **Files:**
 - `backend/app/security/url_validator.py`
-- `backend/app/connectors/http_client.py` (~231-262)
+- `backend/app/connectors/openapi/http_client.py` (`_request_with_retry`; `follow_redirects=True` ~154)
 - the OpenAPI connector factory
 - the `browse_url` skill
 - tests in `backend/tests/security/test_ssrf.py`
@@ -342,12 +348,14 @@ flowchart LR
 **Goal:** real Postgres behavior is tested.
 **Requirements:** R9.
 **Files:**
-- `backend/tests/conftest.py`
 - `backend/tests/postgres/conftest.py` (new)
+- a catch-up migration under `backend/migrations/versions/`
 - `backend/tests/postgres/test_migrations.py`, `test_skip_locked.py`, `test_background_dispatch.py`
 - `backend/app/services/background_dispatch.py` (~36-62)
 **Approach:**
-- Add a session fixture per KTD2 that runs `alembic upgrade head`.
+- First, a drift audit: run `alembic upgrade head` on an empty Postgres and compare against `Base.metadata` (alembic `compare_metadata`). Write a catch-up migration for anything that exists only via `create_all` (at least `sandbox_executions`) and make sure the `vector` extension is created by a migration. If drift is too large to catch up safely, stop and surface it.
+- Add a session fixture per KTD2 that runs `alembic upgrade head` as the owner role. If pgvector is unavailable locally (`CREATE EXTENSION vector` fails), skip the whole Postgres tier locally with a clear reason; CI always runs it.
+- Keep Postgres-tier fixtures in `backend/tests/postgres/conftest.py` so `backend/tests/conftest.py` is not contended with Phase 0 units.
 - Fix the `count(*) ... FOR UPDATE` query: lock the rows via a subquery or use an advisory lock.
 **Test scenarios:**
 - Alembic upgrades to a single head on an empty DB, and downgrade/upgrade of the last revision works.
@@ -361,16 +369,17 @@ flowchart LR
 **Goal:** RLS actually applies.
 **Requirements:** R10, AE5.
 **Files:**
-- `backend/app/db/session.py` (or equivalent)
-- `backend/app/config.py`
+- `backend/app/core/database.py`
+- `backend/app/config/__init__.py`
+- the auth router and user lookup service (login, signup, check-email, token user lookup)
 - `backend/app/main.py` (~90-121, the startup sweep)
 - a new Alembic revision for roles and policies
 - `backend/app/services/workflow_scheduler.py`
 - the webhook trigger service
 - tests in `backend/tests/postgres/test_rls.py`
 **Approach:**
-- The request path connects as `oniva_app`.
-- `oniva_system` handles the scheduler, webhook and startup paths through a named factory (KTD4).
+- The request path connects as `oniva_app` (KTD4); `oniva_system` (via `SYSTEM_DATABASE_URL`) handles the scheduler, webhook and startup paths through a named factory.
+- Pre-tenant auth lookups (login, signup, check-email, onboarding register, token user lookup) go through the system factory with a narrow query surface, so removing the permissive `users` policy does not break authentication.
 - On startup, assert `NOT rolsuper AND NOT rolbypassrls` for the request role.
 - The migration:
   - adds policies plus FORCE to `approval_requests`, `teams`, `team_memberships` and `sandbox_executions`;
@@ -383,6 +392,7 @@ flowchart LR
 - Tenant A's context never sees tenant B's rows; parametrize over the tables.
 - A meta-test fails if any table with a `tenant_id` column lacks FORCE RLS.
 - Startup as a superuser raises and refuses to serve.
+- Login, signup and check-email work end to end with the app connected as `oniva_app`.
 - The scheduler claims due schedules through the system role.
 - The startup sweep does not fail a job whose heartbeat is fresh.
 **Verification:** the tests pass on the Postgres tier.
@@ -392,12 +402,12 @@ flowchart LR
 **Goal:** the production boot path works.
 **Requirements:** R11.
 **Files:**
-- `backend/app/config.py` (~381-388)
+- `backend/app/config/__init__.py` (~381-388)
 - `k8s/*.yaml`
 - `docker-compose.prod.yml`
 - `backend/tests/test_config_production.py`
 **Approach:**
-- Fix the validator so it rejects insecure values, not Postgres URLs.
+- The DB-URL check (`app/config/__init__.py` ~381) is effectively dead code. Replace it: parse with `sqlalchemy.engine.make_url` and check only the password against a list of known-weak values; never substring-match `postgres`/`test` in the whole URL. Apply the same rule to `APP_DATABASE_PASSWORD`.
 - k8s:
   - add `ENCRYPTION_SALT` and `CORS_ORIGINS`;
   - fix `$(DB_PASSWORD)` expansion;
@@ -406,7 +416,8 @@ flowchart LR
   - pin image tags via kustomize variables.
 - Document the read-only rootfs session path: mount a volume or move sessions to `/tmp`.
 **Test scenarios:**
-- `ENVIRONMENT=production` with a valid asyncpg URL validates.
+- `ENVIRONMENT=production` with a valid asyncpg URL validates, including one whose user and host contain `postgres`.
+- A URL with password `postgres` or `password` is rejected.
 - The same with the default `SECRET_KEY` fails.
 - A YAML lint test checks that the k8s manifests reference the required env keys.
 **Verification:** the tests pass, and the app boots locally with production-like env against the test Postgres.
