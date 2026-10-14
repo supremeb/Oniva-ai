@@ -64,6 +64,8 @@ ROLE_PERMISSIONS: dict[str, Set[str]] = {
         "agents:delete_own",  # Can only delete own agents
         # Limited settings access
         "settings:read",
+        # Connectors: browse the catalog and see own tenant's status (manage is admin+)
+        "connectors:read",
         # Limited API key access
         "api_keys:read",
         "api_keys:manage_own",
@@ -73,6 +75,7 @@ ROLE_PERMISSIONS: dict[str, Set[str]] = {
         "workflows:read",
         "agents:read",
         "settings:read",
+        "connectors:read",
     },
 }
 

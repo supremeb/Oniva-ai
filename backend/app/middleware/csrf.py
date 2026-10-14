@@ -15,6 +15,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
+from app.auth.middleware import is_public_route
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         # Check exempt paths
         path = request.url.path
+        # Routes on the auth allow-list authenticate themselves (login, HMAC
+        # webhooks, OAuth client credentials, SAML, proxy tokens) and carry no
+        # ambient cookie authority, so a CSRF token cannot apply to them.
+        if is_public_route(request.method, path):
+            return await call_next(request)
         if path in CSRF_EXEMPT_PATHS:
             return await call_next(request)
         for prefix in CSRF_EXEMPT_PREFIXES:

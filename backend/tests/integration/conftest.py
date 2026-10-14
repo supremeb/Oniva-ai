@@ -137,18 +137,15 @@ def test_connector():
 
     # Save existing state
     saved_connectors = dict(ConnectorRegistry._connectors)
-    saved_instances = dict(ConnectorRegistry._instances)
 
     # Register test connector
     connector = TestMarketDataConnector()
     ConnectorRegistry._connectors["test_market_data"] = TestMarketDataConnector
-    ConnectorRegistry._instances["test_market_data"] = connector
 
     yield connector
 
     # Restore state to prevent test pollution
     ConnectorRegistry._connectors = saved_connectors
-    ConnectorRegistry._instances = saved_instances
 
 
 # ---------------------------------------------------------------------------
