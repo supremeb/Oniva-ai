@@ -11,6 +11,10 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 
+# Longest wait honored in-process; anything longer is rejected, never truncated.
+MAX_IN_PROCESS_WAIT_SECONDS = 300
+
+
 class WaitExecutor(BaseNodeExecutor):
     """Executor for Wait/Delay node - pauses workflow execution"""
 
@@ -33,6 +37,18 @@ class WaitExecutor(BaseNodeExecutor):
             if wait_type == "duration":
                 duration = node_data.get("duration", 0)
                 unit = node_data.get("durationUnit", "seconds")
+                if (
+                    isinstance(duration, bool)
+                    or not isinstance(duration, (int, float))
+                    or duration < 0
+                    or unit not in ("seconds", "minutes", "hours", "days")
+                ):
+                    return NodeExecutionResult(
+                        node_id=context.node_id,
+                        status="failed",
+                        error=f"Invalid wait duration: {duration!r} {unit!r}",
+                        elapsed_ms=int((time.time() - start_time) * 1000)
+                    )
 
                 # Convert to seconds
                 multipliers = {
@@ -126,16 +142,22 @@ class WaitExecutor(BaseNodeExecutor):
                     elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
-            # Actually wait (in production, this would be handled by DBOS checkpointing)
+            # Waits run in-process, so they must fit the in-process limit. Longer waits
+            # need a durable timer (checkpoint a wake time and resume later), which does
+            # not exist yet: reject them rather than silently waiting for less time.
+            if wait_seconds > MAX_IN_PROCESS_WAIT_SECONDS:
+                return NodeExecutionResult(
+                    node_id=context.node_id,
+                    status="failed",
+                    error=(
+                        f"Wait of {wait_seconds:.0f}s exceeds the {MAX_IN_PROCESS_WAIT_SECONDS}s "
+                        "this node can honor in-process; durable long waits are not supported yet"
+                    ),
+                    elapsed_ms=int((time.time() - start_time) * 1000)
+                )
+
             if wait_seconds > 0:
-                # For short waits, actually sleep
-                # For longer waits in production, use DBOS checkpoint with wake time
-                if wait_seconds <= 60:
-                    await asyncio.sleep(wait_seconds)
-                else:
-                    # In production with DBOS, we'd checkpoint here and resume later
-                    # For now, cap at 60 seconds for demo purposes
-                    await asyncio.sleep(min(wait_seconds, 60))
+                await asyncio.sleep(wait_seconds)
 
             elapsed_ms = int((time.time() - start_time) * 1000)
 

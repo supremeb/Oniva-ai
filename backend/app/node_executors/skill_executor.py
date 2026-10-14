@@ -188,9 +188,9 @@ class SkillExecutor(BaseNodeExecutor):
             if not skill_name:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error="Skill name not specified",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Get skill from registry
@@ -198,18 +198,18 @@ class SkillExecutor(BaseNodeExecutor):
             if not skill:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error=f"Skill '{skill_name}' not found in registry",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Check if skill is enabled
             if not skill.enabled:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error=f"Skill '{skill_name}' is disabled",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Prepare skill inputs with variable substitution
@@ -258,16 +258,16 @@ class SkillExecutor(BaseNodeExecutor):
                     except Exception as fallback_error:
                         return NodeExecutionResult(
                             node_id=context.node_id,
-                            status="error",
+                            status="failed",
                             error=f"Skill execution failed: {str(fallback_error)}",
-                            execution_time=time.time() - start_time
+                            elapsed_ms=int((time.time() - start_time) * 1000)
                         )
                 else:
                     return NodeExecutionResult(
                         node_id=context.node_id,
-                        status="error",
+                        status="failed",
                         error=f"Skill execution failed: {str(e)}",
-                        execution_time=time.time() - start_time
+                        elapsed_ms=int((time.time() - start_time) * 1000)
                     )
 
             execution_time = time.time() - start_time
@@ -296,7 +296,7 @@ class SkillExecutor(BaseNodeExecutor):
                 node_id=context.node_id,
                 status="success",
                 output=output.model_dump(),
-                execution_time=execution_time
+                elapsed_ms=int((execution_time) * 1000)
             )
 
         except Exception as e:
@@ -320,7 +320,7 @@ class SkillExecutor(BaseNodeExecutor):
 
             return NodeExecutionResult(
                 node_id=context.node_id,
-                status="error",
+                status="failed",
                 error=error_message,
-                execution_time=execution_time
+                elapsed_ms=int((execution_time) * 1000)
             )

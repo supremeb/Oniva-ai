@@ -151,9 +151,9 @@ class ConnectorExecutor(BaseNodeExecutor):
             if not connector_id_str:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error="Connector ID not specified",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             try:
@@ -161,9 +161,9 @@ class ConnectorExecutor(BaseNodeExecutor):
             except ValueError:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error=f"Invalid connector ID: {connector_id_str}",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Get connector from database
@@ -174,17 +174,17 @@ class ConnectorExecutor(BaseNodeExecutor):
             if not connector:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error=f"Connector not found: {connector_id}",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             if not connector.is_active:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error=f"Connector '{connector.name}' is not active",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Get query and inputs with variable substitution
@@ -226,9 +226,9 @@ class ConnectorExecutor(BaseNodeExecutor):
             else:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error=f"Unsupported connector type: {connector_type}",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             execution_time = time.time() - start_time
@@ -245,20 +245,20 @@ class ConnectorExecutor(BaseNodeExecutor):
                 node_id=context.node_id,
                 status="success",
                 output=output.model_dump(),
-                execution_time=execution_time
+                elapsed_ms=int((execution_time) * 1000)
             )
 
         except httpx.HTTPError as e:
             return NodeExecutionResult(
                 node_id=context.node_id,
-                status="error",
+                status="failed",
                 error=f"HTTP error: {str(e)}",
-                execution_time=time.time() - start_time
+                elapsed_ms=int((time.time() - start_time) * 1000)
             )
         except Exception as e:
             return NodeExecutionResult(
                 node_id=context.node_id,
-                status="error",
+                status="failed",
                 error=f"Connector execution failed: {str(e)}",
-                execution_time=time.time() - start_time
+                elapsed_ms=int((time.time() - start_time) * 1000)
             )

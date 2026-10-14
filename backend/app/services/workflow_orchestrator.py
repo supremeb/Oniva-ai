@@ -36,6 +36,44 @@ import logging
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+class BranchState:
+    """Tracks which edges/nodes are live after IF/ELSE and classifier decisions.
+
+    An edge with a non-empty ``sourceHandle`` that differs from the branch the
+    source node chose is *not taken*. A node whose incoming edges are all dead
+    (not taken, or coming from a skipped node) is skipped; a node with at least
+    one live incoming edge runs exactly once (join semantics).
+    """
+
+    def __init__(self, edges: List[Dict[str, Any]]):
+        self._edges = edges
+        self._incoming: Dict[str, List[int]] = defaultdict(list)
+        for idx, edge in enumerate(edges):
+            self._incoming[edge["target"]].append(idx)
+        self.not_taken: set = set()
+        self.skipped: set = set()
+
+    def record(self, node_id: str, result: NodeExecutionResult) -> None:
+        """Register the branch chosen by a node (no-op for non-branching nodes)."""
+        if result.status != "success" or result.next_node_id is None:
+            return
+        for idx, edge in enumerate(self._edges):
+            handle = edge.get("sourceHandle")
+            if edge["source"] == node_id and handle and handle != result.next_node_id:
+                self.not_taken.add(idx)
+
+    def should_skip(self, node_id: str) -> bool:
+        incoming = self._incoming.get(node_id)
+        if not incoming:
+            return False
+        return all(
+            self._edges[i]["source"] in self.skipped or i in self.not_taken
+            for i in incoming
+        )
+
+    def mark_skipped(self, node_id: str) -> None:
+        self.skipped.add(node_id)
+
 
 class WorkflowOrchestrator:
     """
@@ -283,6 +321,7 @@ class WorkflowOrchestrator:
         total_tokens = 0
         final_status = "completed"
         error_message = None
+        branches = BranchState(edges)
 
         try:
             for node_id in execution_order:
@@ -310,6 +349,12 @@ class WorkflowOrchestrator:
                 node = self._get_node(nodes, node_id)
                 node_type = node.get("type", "").lower()
                 node_name = node.get("data", {}).get("label") or node.get("data", {}).get("name") or node_type
+
+                # Untaken IF/ELSE or classifier branch: skip, do not execute
+                if branches.should_skip(node_id):
+                    branches.mark_skipped(node_id)
+                    results[node_id] = self.skipped_result(node_id)
+                    continue
 
                 # Get inputs from predecessor nodes
                 inputs = self._get_node_inputs(node_id, edges, node_outputs)
@@ -351,14 +396,13 @@ class WorkflowOrchestrator:
                     "input": inputs if inputs else None,
                     "output": result.output if result.output else None,
                     "error": result.error,
-                    "token_usage": result.token_usage if hasattr(result, 'token_usage') and result.token_usage else None,
-                    "reasoning": result.reasoning if hasattr(result, 'reasoning') else None,
+                    "token_usage": self.token_usage_of(result),
+                    "reasoning": result.reasoning,
                 }
                 execution_trace.append(trace_step)
 
                 # Accumulate token usage
-                if hasattr(result, 'token_usage') and result.token_usage:
-                    total_tokens += result.token_usage.get('total', 0)
+                total_tokens += result.tokens_used or 0
 
                 # Store output for downstream nodes
                 if result.output:
@@ -371,14 +415,8 @@ class WorkflowOrchestrator:
                         reachable = self._get_reachable_nodes(target_node_id, edges)
                         consumed_node_ids.update(reachable)
 
-                # Handle branching (IF/ELSE, Classifier)
-                if result.next_node_id and node_type in ["ifelse", "classifier"]:
-                    # Find edges that match the branch
-                    branch_targets = self._get_branch_targets(
-                        node_id, result.next_node_id, edges, nodes
-                    )
-                    # Continue execution will follow the matched branch
-                    # (topological sort already handles this)
+                # Branching (IF/ELSE, Classifier): edges to untaken handles go dead
+                branches.record(node_id, result)
 
                 # Check for node failure
                 if result.status == "failed":
@@ -403,7 +441,7 @@ class WorkflowOrchestrator:
             execution_log.status = final_status
             execution_log.results = {k: v.model_dump() for k, v in results.items()}
             execution_log.error = error_message
-            execution_log.nodes_executed = len(results)
+            execution_log.nodes_executed = self.count_executed(results)
             execution_log.total_tokens = total_tokens
             execution_log.duration_ms = total_duration_ms
             execution_log.execution_trace = execution_trace
@@ -426,12 +464,32 @@ class WorkflowOrchestrator:
             "execution_id": str(execution_log.id) if execution_log else None,
             "status": final_status,
             "results": {k: v.model_dump() for k, v in results.items()},
-            "executed_nodes": len(results),
+            "executed_nodes": self.count_executed(results),
             "total_nodes": len(nodes),
             "total_tokens": total_tokens,
             "duration_ms": total_duration_ms,
             "error": error_message,
         }
+
+    @staticmethod
+    def skipped_result(node_id: str) -> NodeExecutionResult:
+        """Result recorded for a node on an untaken branch (never executed)."""
+        return NodeExecutionResult(
+            node_id=node_id,
+            status="skipped",
+            output=None,
+            reasoning="Skipped: not on the branch taken",
+        )
+
+    @staticmethod
+    def count_executed(results: Dict[str, NodeExecutionResult]) -> int:
+        """Nodes that actually ran (skipped-branch nodes do not count)."""
+        return sum(1 for r in results.values() if r.status != "skipped")
+
+    @staticmethod
+    def token_usage_of(result: NodeExecutionResult) -> Optional[Dict[str, int]]:
+        """Trace-friendly token usage built from the executor's ``tokens_used``."""
+        return {"total": result.tokens_used} if result.tokens_used else None
 
     def _get_input_node_ids(self, node_id: str, edges: List[Dict]) -> List[str]:
         """Get list of predecessor node IDs for a given node."""
@@ -609,11 +667,24 @@ class WorkflowOrchestrator:
         total_tokens = 0
         final_status = "completed"
         error_message = None
+        branches = BranchState(edges)
 
         for node_id in execution_order:
             if node_id in consumed_node_ids:
                 continue
-                
+
+            if branches.should_skip(node_id):
+                branches.mark_skipped(node_id)
+                skipped = self.skipped_result(node_id)
+                results[node_id] = skipped
+                yield {
+                    "type": "node_complete",
+                    "node_id": node_id,
+                    "result": skipped.model_dump(),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                continue
+
             # Yield progress update
             yield {
                 "type": "progress",
@@ -679,18 +750,19 @@ class WorkflowOrchestrator:
                     "input": inputs if inputs else None,
                     "output": result.output if result.output else None,
                     "error": result.error,
-                    "token_usage": result.token_usage if hasattr(result, 'token_usage') and result.token_usage else None,
+                    "token_usage": self.token_usage_of(result),
                 }
                 execution_trace.append(trace_step)
 
                 # Accumulate token usage
-                if hasattr(result, 'token_usage') and result.token_usage:
-                    total_tokens += result.token_usage.get('total', 0)
+                total_tokens += result.tokens_used or 0
 
                 # Track failed nodes
                 if result.status == "failed":
                     final_status = "failed"
                     error_message = result.error
+
+                branches.record(node_id, result)
 
                 # If this is an iteration node, mark all reachable nodes as consumed
                 if node_type == "iteration" and result.status == "success":
@@ -706,6 +778,10 @@ class WorkflowOrchestrator:
                     "result": result.model_dump(),
                     "timestamp": datetime.utcnow().isoformat()
                 }
+
+                # A failed node stops the run, as in execute_workflow
+                if result.status == "failed":
+                    break
 
             except Exception as e:
                 final_status = "failed"
@@ -729,6 +805,7 @@ class WorkflowOrchestrator:
                     "error": str(e),
                     "timestamp": datetime.utcnow().isoformat()
                 }
+                break
 
         # Update execution log with final results
         if execution_log:
@@ -736,22 +813,20 @@ class WorkflowOrchestrator:
             execution_log.status = final_status
             execution_log.completed_at = datetime.utcnow()
             execution_log.duration_ms = total_duration_ms
-            execution_log.nodes_executed = len(results)
+            execution_log.nodes_executed = self.count_executed(results)
             execution_log.execution_trace = execution_trace
-            execution_log.total_tokens = total_tokens if total_tokens > 0 else None
-            execution_log.error_message = error_message
-            # Get final output from last output node
-            for node in reversed(nodes):
-                if node.get("type", "").lower() == "output" and node["id"] in node_outputs:
-                    execution_log.output_data = node_outputs[node["id"]]
-                    break
+            execution_log.total_tokens = total_tokens
+            execution_log.error = error_message
+            execution_log.results = {k: v.model_dump() for k, v in results.items()}
             await self.db.commit()
 
         # Yield final completion
         yield {
             "type": "complete",
+            "status": final_status,
+            "error": error_message,
             "results": {k: v.model_dump() for k, v in results.items()},
-            "executed_nodes": len(results),
+            "executed_nodes": self.count_executed(results),
             "total_nodes": len(nodes),
             "timestamp": datetime.utcnow().isoformat()
         }
@@ -909,24 +984,6 @@ class WorkflowOrchestrator:
                         inputs[source_id] = node_outputs[source_id]
 
         return inputs
-
-    def _get_branch_targets(
-        self,
-        node_id: str,
-        branch_id: str,
-        edges: List[Dict],
-        nodes: List[Dict]
-    ) -> List[str]:
-        """
-        Get target nodes for a specific branch (IF/ELSE source handle)
-        """
-        targets = []
-        for edge in edges:
-            if edge["source"] == node_id:
-                source_handle = edge.get("sourceHandle", "")
-                if source_handle == branch_id or not source_handle:
-                    targets.append(edge["target"])
-        return targets
 
     async def _extract_entities_background(
         self,
