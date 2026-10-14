@@ -7,30 +7,29 @@
  * `submission.wait()` resolves once the submission settles `done` or
  * `unanswered`.
  *
- * U8 extends `submit` with `requestId` idempotency and busy handling
- * (`whenBusy: "followUp" | "steer" | "reject"`); today a busy conversation
- * rejects with `ConversationBusy`. Runs start through {@link startRun}, which
- * follow-ups reuse.
+ * `submit` is idempotent by `requestId` and handles a busy conversation
+ * through the inbox (`whenBusy: "followUp" | "steer" | "reject"`); see
+ * `submission.ts` and `inbox.ts`. `abort()` withdraws queued inputs and
+ * aborts the current run.
  */
 import { ConversationBusy } from "../core/errors.js";
 import type { JsonValue } from "../core/json.js";
-import type { TextContent } from "../models/types.js";
 import type { Session } from "../session/session.js";
-import type { Transaction } from "../session/transaction.js";
-import type {
-  ConversationRecord,
-  EntryRecord,
-  SubmissionRecord,
-  TaskRecord,
+import {
+  type ConversationRecord,
+  type EntryRecord,
+  MAX_PAGE_LIMIT,
+  type SubmissionRecord,
 } from "../storage/types.js";
-import type { TaskDefinition, TaskOps } from "../tasks/define.js";
+import type { TaskDefinition } from "../tasks/define.js";
 import type { TaskRuntime } from "../tasks/runtime.js";
-import { ENTRY_KINDS, type UserPayload } from "./context-builder.js";
+import type { UserPayload } from "./context-builder.js";
 import {
   GENERATION_TASK_KIND,
   type GenerationCheckpoint,
   type GenerationInput,
 } from "./generation.js";
+import { appendUserEntry, DISPLAY_ENTRY_KIND, Inbox, startRun } from "./inbox.js";
 import { type LiveState, liveDoc } from "./progress.js";
 import {
   type AgentConfig,
@@ -38,8 +37,24 @@ import {
   agentConfigDoc,
   applyAgentConfig,
 } from "./prompt.js";
+import {
+  normalizeSubmit,
+  Submission,
+  type SubmissionSettled,
+  type SubmissionWritten,
+  type SubmitInput,
+  settleSubmission,
+} from "./submission.js";
 import { listAllEntries } from "./tool-task.js";
 import { type UsageTotals, usageDoc } from "./usage.js";
+
+export { startRun } from "./inbox.js";
+export {
+  inputContent,
+  Submission,
+  type SubmissionSettled,
+  type SubmitInput,
+} from "./submission.js";
 
 /** What conversations and submissions need from the harness. */
 export interface AgentCore {
@@ -49,38 +64,6 @@ export interface AgentCore {
   waitForSubmission(id: string): Promise<SubmissionSettled>;
 }
 
-export interface SubmitInput {
-  /** Plain-text input (shorthand for `content`). */
-  text?: string;
-  content?: string | TextContent[];
-  /** Caller's id for the input; unique per conversation. Defaults to the submission id. */
-  requestId?: string;
-}
-
-export interface SubmissionSettled {
-  status: "done" | "unanswered";
-  /** `SubmissionAnswer` when done, `SubmissionUnanswered` otherwise. */
-  result: JsonValue;
-  record: SubmissionRecord;
-}
-
-export class Submission {
-  constructor(
-    readonly core: AgentCore,
-    readonly id: string,
-  ) {}
-
-  /** The committed record, or null for an unknown id. */
-  async record(): Promise<SubmissionRecord | null> {
-    return this.core.session.reader.getSubmission(this.id);
-  }
-
-  /** Resolves once the submission is `done` or `unanswered`. */
-  wait(): Promise<SubmissionSettled> {
-    return this.core.waitForSubmission(this.id);
-  }
-}
-
 /** Whether a run is active in the conversation (committed state). */
 export function isBusy(runtime: TaskRuntime, conversationId: string): boolean {
   return runtime
@@ -88,39 +71,6 @@ export function isBusy(runtime: TaskRuntime, conversationId: string): boolean {
     .some(
       (t) => t.kind === GENERATION_TASK_KIND && t.status !== "terminal" && t.parentTaskId === null,
     );
-}
-
-/** Start a run for `submissionId`: spawn its first generation task. */
-export function startRun(
-  tx: Transaction,
-  ops: TaskOps,
-  generation: TaskDefinition<GenerationInput, GenerationCheckpoint>,
-  conversationId: string,
-  submissionId: string,
-  runId: string = tx.mintId("task"),
-): TaskRecord {
-  return ops.spawn(generation, {
-    id: runId,
-    conversationId,
-    parentTaskId: null,
-    input: { runId, submissionId, round: 0 },
-  });
-}
-
-export function inputContent(input: SubmitInput): string | TextContent[] {
-  const content = input.content ?? input.text;
-  if (typeof content === "string") {
-    if (content.length === 0) throw new TypeError("input text must not be empty");
-    return content;
-  }
-  if (
-    Array.isArray(content) &&
-    content.length > 0 &&
-    content.every((p) => p?.type === "text" && typeof p.text === "string")
-  ) {
-    return structuredClone(content);
-  }
-  throw new TypeError("submit needs text or text content");
 }
 
 export class Conversation {
@@ -154,35 +104,123 @@ export class Conversation {
     return isBusy(this.core.runtime, this.id);
   }
 
-  /** Store an input and start answering it. Rejects with `ConversationBusy` during a run. */
+  /**
+   * Store an input. An existing submission with the same `requestId` is
+   * returned as is. Otherwise, in one commit: a display-only write is
+   * appended and settled; an input starts a run when the conversation is
+   * idle, and when it is busy is queued as a follow-up or steer, or rejected
+   * with `ConversationBusy` (storing nothing).
+   */
   async submit(input: SubmitInput): Promise<Submission> {
-    const content = inputContent(input);
+    const { record, requestId } = normalizeSubmit(input);
+    const reader = this.core.session.reader;
+    if (requestId !== null) {
+      const existing = await reader.submissionByRequestId(this.id, requestId);
+      if (existing) return new Submission(this.core, existing.id);
+    }
     const id = await this.core.runtime.commit(async (tx, ops) => {
+      // Reads first: a commit may not read tables after its first write.
       const conv = await tx.getConversation(this.id);
       if (!conv) throw new Error(`unknown conversation ${this.id}`);
-      if (isBusy(this.core.runtime, this.id)) throw new ConversationBusy(this.id);
+      if (requestId !== null) {
+        const existing = await tx.submissionByRequestId(this.id, requestId);
+        if (existing) return existing.id;
+      }
+      const inbox = await Inbox.load(tx, this.id);
+
       const submissionId = tx.mintId("submission");
-      const runId = tx.mintId("task");
-      tx.createSubmission({
+      const base = {
         id: submissionId,
         conversationId: this.id,
-        requestId: input.requestId ?? submissionId,
-        input: { content } as JsonValue,
-        status: "active",
-        result: null,
-        taskId: runId,
-      });
-      const payload: UserPayload = { submissionId, content };
-      tx.appendEntry({
-        conversationId: this.id,
-        taskId: null,
-        kind: ENTRY_KINDS.user,
-        payload: payload as unknown as JsonValue,
-      });
+        requestId: requestId ?? submissionId,
+        input: record as unknown as JsonValue,
+      };
+      if (record.type === "write") {
+        const payload: UserPayload = { submissionId, content: record.content };
+        const entry = tx.appendEntry({
+          conversationId: this.id,
+          taskId: null,
+          kind: DISPLAY_ENTRY_KIND,
+          payload: payload as unknown as JsonValue,
+        });
+        const written: SubmissionWritten = { entryId: entry.id, displayOnly: true };
+        tx.createSubmission({
+          ...base,
+          status: "done",
+          result: written as unknown as JsonValue,
+          taskId: null,
+        });
+        return submissionId;
+      }
+
+      let busy = isBusy(this.core.runtime, this.id);
+      if (busy && record.whenBusy === "reject") throw new ConversationBusy(this.id);
+      // An idle conversation with a backlog (its last run ended without
+      // reaching the inbox, e.g. it faulted) serves the backlog first.
+      if (!busy && inbox.queued > 0) {
+        if (record.whenBusy === "reject") throw new ConversationBusy(this.id);
+        busy = inbox.startNext(ops, this.core.generation) !== null;
+      }
+      if (busy) {
+        tx.createSubmission({ ...base, status: "pending", result: null, taskId: null });
+        inbox.enqueue(submissionId, record.whenBusy === "steer" ? "steer" : "followUp");
+        return submissionId;
+      }
+      const runId = tx.mintId("task");
+      tx.createSubmission({ ...base, status: "active", result: null, taskId: runId });
+      appendUserEntry(tx, this.id, submissionId, record.content);
       startRun(tx, ops, this.core.generation, this.id, submissionId, runId);
       return submissionId;
     });
     return new Submission(this.core, id);
+  }
+
+  /**
+   * Withdraw queued inputs (`unanswered(withdrawn)`), settle the current
+   * run's inputs `unanswered(aborted)` and abort every live task of the
+   * conversation. Resolves once those tasks are terminal, leaving the
+   * conversation idle.
+   */
+  async abort(reason = "aborted"): Promise<void> {
+    await this.info();
+    const runtime = this.core.runtime;
+    await runtime.commit(async (tx, ops) => {
+      const active: SubmissionRecord[] = [];
+      for (let cursor: string | null = null; ; ) {
+        const page = await tx.listSubmissions(this.id, {
+          statuses: ["active"],
+          limit: MAX_PAGE_LIMIT,
+          cursor,
+        });
+        active.push(...page.items);
+        cursor = page.nextCursor;
+        if (cursor === null) break;
+      }
+      const inbox = await Inbox.load(tx, this.id);
+      inbox.withdrawAll();
+      for (const sub of active) {
+        settleSubmission(tx, sub, "unanswered", {
+          reason: "aborted",
+          message: reason,
+          error: null,
+        });
+      }
+      (await tx.doc(liveDoc, this.id)).set(liveDoc.initial);
+      ops.abortConversation(this.id, reason);
+    });
+    for (;;) {
+      const live = runtime
+        .tasks({ conversationId: this.id })
+        .filter((t) => t.status !== "terminal");
+      if (live.length === 0) break;
+      await Promise.all(live.map((t) => runtime.waitForTask(t.id)));
+    }
+    // Inputs queued while the abort was finishing start now.
+    await runtime.commit(async (tx, ops) => {
+      if (isBusy(runtime, this.id)) return;
+      const inbox = await Inbox.load(tx, this.id);
+      inbox.startNext(ops, this.core.generation);
+    });
   }
 
   /** Every entry, in order. */

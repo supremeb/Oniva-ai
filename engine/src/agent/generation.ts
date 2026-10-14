@@ -18,13 +18,17 @@
  *
  * A model error (including a policy denial) fails the run: a `run_error`
  * entry is written and the submission settles `unanswered(model_error)`.
+ *
+ * The inbox (`inbox.ts`) is served at two points: steers queued during a tool
+ * round are placed in the `after_tools` commit that spawns the next
+ * generation, and the commit that ends a run settles its placed steers and
+ * starts the next queued input.
  */
 import type { Context } from "../core/context.js";
 import type { JsonValue } from "../core/json.js";
 import { MessageBuilder } from "../models/stream.js";
 import type { AssistantMessage, ModelInput, ToolCallBlock, Usage } from "../models/types.js";
 import type { Transaction } from "../session/transaction.js";
-import type { SubmissionRecord } from "../storage/types.js";
 import {
   type Committed,
   defineTask,
@@ -42,8 +46,10 @@ import {
   ENTRY_KINDS,
   type RunErrorPayload,
 } from "./context-builder.js";
+import { Inbox } from "./inbox.js";
 import { liveDoc, ProgressWriter } from "./progress.js";
 import { systemPayload } from "./prompt.js";
+import { settleSubmission } from "./submission.js";
 import {
   type AgentDeps,
   appendToolResult,
@@ -79,28 +85,11 @@ export type GenerationValue =
   | { outcome: "continued"; next: string }
   | { outcome: "failed"; reason: "model_error" };
 
-/** `done` result of a submission. */
-export type SubmissionAnswer = { entryId: string | null; text: string; terminated: boolean };
-
-/** `unanswered` result of a submission. */
-export type SubmissionUnanswered = {
-  reason: string;
-  message: string;
-  error: JsonValue;
-};
-
-/** Settle a submission still open (pending or active); a settled one is left alone. */
-export function settleSubmission(
-  tx: Transaction,
-  sub: SubmissionRecord | null,
-  status: "done" | "unanswered",
-  result: SubmissionAnswer | SubmissionUnanswered,
-): boolean {
-  if (!sub || (sub.status !== "pending" && sub.status !== "active")) return false;
-  const { seq: _seq, ...rec } = sub as SubmissionRecord & { seq?: number };
-  tx.replaceSubmission({ ...rec, status, result: result as unknown as JsonValue });
-  return true;
-}
+export {
+  type SubmissionAnswer,
+  type SubmissionUnanswered,
+  settleSubmission,
+} from "./submission.js";
 
 /** Clear the live document if it belongs to `taskId`. */
 export async function clearLive(
@@ -208,8 +197,9 @@ export function generationTaskDefinition(
       // U11 seam: a `context_overflow` error triggers one compaction and one retry.
       const error = terminal.error;
       const partial = terminal.partial;
-      return rt.commit(async (tx) => {
+      return rt.commit(async (tx, ops) => {
         const sub = await tx.getSubmission(submissionId);
+        const inbox = await Inbox.load(tx, conversationId);
         const payload: RunErrorPayload = { runId, error };
         tx.appendEntry({
           conversationId,
@@ -226,11 +216,13 @@ export function generationTaskDefinition(
           );
         }
         await clearLive(tx, conversationId, task.id);
-        settleSubmission(tx, sub, "unanswered", {
+        const unanswered = {
           reason: "model_error",
           message: error.message,
           error: error as unknown as JsonValue,
-        });
+        };
+        settleSubmission(tx, sub, "unanswered", unanswered);
+        inbox.endRun(ops, def, runId, "unanswered", unanswered);
         return done({ outcome: "failed", reason: "model_error" } satisfies GenerationValue);
       });
     }
@@ -243,6 +235,7 @@ export function generationTaskDefinition(
     const calls = message.blocks.filter((b): b is ToolCallBlock => b.type === "tool_call");
     return rt.commit(async (tx, ops) => {
       const sub = await tx.getSubmission(submissionId);
+      const inbox = await Inbox.load(tx, conversationId);
       const entryId = appendAssistant(tx, task, message, terminal.usage);
       recordUsage(
         await tx.doc(usageDoc, conversationId),
@@ -253,11 +246,9 @@ export function generationTaskDefinition(
       await clearLive(tx, conversationId, task.id);
 
       if (calls.length === 0) {
-        settleSubmission(tx, sub, "done", {
-          entryId,
-          text: assistantText(message),
-          terminated: false,
-        });
+        const answer = { entryId, text: assistantText(message), terminated: false };
+        settleSubmission(tx, sub, "done", answer);
+        inbox.endRun(ops, def, runId, "done", answer);
         return done({ outcome: "answered", entryId } satisfies GenerationValue);
       }
 
@@ -338,6 +329,7 @@ export function generationTaskDefinition(
 
     return rt.commit(async (tx, ops) => {
       const sub = await tx.getSubmission(submissionId);
+      const inbox = await Inbox.load(tx, conversationId);
       for (const call of missing) {
         const t = call.taskId === null ? null : rt.task(call.taskId);
         const why =
@@ -355,15 +347,19 @@ export function generationTaskDefinition(
         );
       }
       if (terminated) {
-        settleSubmission(tx, sub, "done", { entryId: null, text: "", terminated: true });
+        const answer = { entryId: null, text: "", terminated: true };
+        settleSubmission(tx, sub, "done", answer);
+        inbox.endRun(ops, def, runId, "done", answer);
         return done({ outcome: "terminated" } satisfies GenerationValue);
       }
-      // U8 seam: steers queued during this round are appended here, after the
-      // tool results and before the next request.
       const nextTask = ops.spawn(def, {
         input: { runId, submissionId, round: round + 1 },
         parentTaskId: null,
       });
+      // Steers queued during this round land here: after the round's tool
+      // results, before the next request, in the same run.
+      inbox.advance(runId, nextTask.id);
+      inbox.placeSteers(runId, nextTask.id);
       if (sub && (sub.status === "active" || sub.status === "pending")) {
         const { seq: _seq, ...rec } = sub;
         tx.replaceSubmission({ ...rec, taskId: nextTask.id });
