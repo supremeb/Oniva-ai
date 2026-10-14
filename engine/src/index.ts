@@ -23,3 +23,6 @@ export * from "./storage/postgres/lease.js";
 export * from "./storage/postgres/migrate.js";
 export { PostgresStorageProvider } from "./storage/postgres/storage.js";
 export * from "./storage/types.js";
+export * from "./tasks/define.js";
+export * from "./tasks/runtime.js";
+export { ABORT_REASONS, type TaskErrorContext, type TaskErrorReporter } from "./tasks/scheduler.js";
