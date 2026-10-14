@@ -81,8 +81,18 @@ class Settings(BaseSettings):
     E2B_TEMPLATE_ID: str = ""  # Custom E2B template (e.g. "oniva-agent" with data science stack)
 
     # Sandbox Control Plane: proxy-based LLM access (no real keys in sandbox)
-    ENABLE_SANDBOX_CONTROL_PLANE: bool = False  # When True, sandboxes get proxy tokens instead of real LLM keys
-    SANDBOX_PROXY_URL: str = ""  # Publicly reachable backend URL (e.g. https://api.oniva.ai)
+    # Sandboxes ALWAYS get a proxy token, never a real LLM key. This flag is retained only for
+    # backward compatibility with feature_flags; it no longer gates a real-key fallback (removed).
+    ENABLE_SANDBOX_CONTROL_PLANE: bool = True
+    # URL the *sandbox* can reach this backend at. REQUIRED when ENABLE_SANDBOX is on (fail closed).
+    # Local dev: E2B VMs cannot reach localhost, so expose the backend with a tunnel, e.g.
+    #   ngrok http 8000  ->  SANDBOX_PROXY_URL=https://<id>.ngrok-free.app
+    SANDBOX_PROXY_URL: str = ""
+    # Comma-separated hosts/CIDRs the sandbox may reach (the proxy host is always added).
+    # Everything else is denied. "*" disables egress restriction (explicit opt-out).
+    SANDBOX_EGRESS_ALLOW: str = "pypi.org,files.pythonhosted.org"
+    # Comma-separated model allow-list enforced by the sandbox LLM proxy. Empty = DEFAULT_LLM_MODEL only.
+    SANDBOX_ALLOWED_MODELS: str = ""
 
     # Connectors via E2B sandbox (Code Mode: 2 tools per connector instead of N)
     USE_SANDBOX_CONNECTORS: bool = False  # Requires ENABLE_SANDBOX=True

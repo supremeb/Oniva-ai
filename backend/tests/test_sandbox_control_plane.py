@@ -17,7 +17,6 @@ from uuid import uuid4
 
 from app.services.sandbox_tokens import (
     SandboxTokenMetadata,
-    _COST_CAP_USD,
     _REDIS_KEY_PREFIX,
     _TOKEN_PREFIX,
 )
@@ -133,9 +132,12 @@ class TestSandboxProxy:
         mock_gateway.complete = AsyncMock(return_value=mock_llm_response)
 
         with patch("app.api.v1.sandbox_proxy.validate_sandbox_token", return_value=meta), \
+             patch("app.api.v1.sandbox_proxy.get_settings") as gs, \
              patch("app.api.v1.sandbox_proxy.LLMGateway", return_value=mock_gateway), \
              patch("app.api.v1.sandbox_proxy.increment_sandbox_token_usage", new_callable=AsyncMock):
 
+            gs.return_value.SANDBOX_ALLOWED_MODELS = "gpt-4o-mini"
+            gs.return_value.DEFAULT_LLM_MODEL = "openai/gpt-4o-mini"
             from app.api.v1.sandbox_proxy import proxy_chat_completions
 
             body = SandboxProxyChatRequest(
@@ -179,10 +181,9 @@ class TestSandboxProxy:
 
     @pytest.mark.asyncio
     async def test_proxy_cost_cap_exceeded(self):
-        """Cumulative tokens_used over threshold → 429."""
+        """Accumulated real cost over _MAX_COST_PER_EXECUTION → 429."""
         from fastapi import HTTPException
 
-        # tokens_used = 1_000_000 → estimated_cost = $3.00 > $2.00 cap
         meta = SandboxTokenMetadata(
             tenant_id=str(uuid4()),
             user_id=str(uuid4()),
@@ -191,9 +192,13 @@ class TestSandboxProxy:
             created_at=1709500000.0,
             tokens_used=1_000_000,
             requests_count=100,
+            cost_usd=3.00,
         )
 
-        with patch("app.api.v1.sandbox_proxy.validate_sandbox_token", return_value=meta):
+        with patch("app.api.v1.sandbox_proxy.validate_sandbox_token", return_value=meta), \
+             patch("app.api.v1.sandbox_proxy.get_settings") as gs:
+            gs.return_value.SANDBOX_ALLOWED_MODELS = "gpt-4o-mini"
+            gs.return_value.DEFAULT_LLM_MODEL = "openai/gpt-4o-mini"
             from app.api.v1.sandbox_proxy import proxy_chat_completions
             from app.schemas.sandbox_proxy import SandboxProxyChatRequest, SandboxProxyChatMessage
 

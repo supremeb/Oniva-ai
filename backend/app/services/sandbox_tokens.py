@@ -17,7 +17,7 @@ from app.services.redis_ha import get_redis_service
 
 _TOKEN_PREFIX = "sbx_tok_"
 _REDIS_KEY_PREFIX = "sandbox_token:"
-_COST_CAP_USD = 2.00
+_MICRO = 1_000_000  # cost is stored as integer micro-USD (atomic HINCRBY)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +31,7 @@ class SandboxTokenMetadata:
     created_at: float
     tokens_used: int
     requests_count: int
+    cost_usd: float = 0.0  # real, usage-based spend reported by the gateway
 
     @classmethod
     def from_redis(cls, data: dict[str, str]) -> "SandboxTokenMetadata":
@@ -42,6 +43,7 @@ class SandboxTokenMetadata:
             created_at=float(data.get("created_at", 0)),
             tokens_used=int(data.get("tokens_used", 0)),
             requests_count=int(data.get("requests_count", 0)),
+            cost_usd=int(data.get("cost_micro_usd", 0)) / _MICRO,
         )
 
 
@@ -66,6 +68,7 @@ async def create_sandbox_token(
             "created_at": str(time.time()),
             "tokens_used": "0",
             "requests_count": "0",
+            "cost_micro_usd": "0",
         })
         pipe.expire(redis_key, ttl_seconds)
         await redis.execute_pipeline(pipe)
@@ -94,10 +97,14 @@ async def revoke_sandbox_token(token: str) -> None:
     await redis.delete(f"{_REDIS_KEY_PREFIX}{token}")
 
 
-async def increment_sandbox_token_usage(token: str, tokens_used: int) -> int:
-    """Atomically increment token usage counter. Returns new total."""
+async def increment_sandbox_token_usage(
+    token: str, tokens_used: int, cost_usd: float = 0.0,
+) -> int:
+    """Atomically increment token + real-cost counters. Returns new token total."""
     redis = await get_redis_service()
     redis_key = f"{_REDIS_KEY_PREFIX}{token}"
     # Also increment request count
     await redis.hincrby(redis_key, "requests_count", 1)
+    if cost_usd > 0:
+        await redis.hincrby(redis_key, "cost_micro_usd", max(1, round(cost_usd * _MICRO)))
     return await redis.hincrby(redis_key, "tokens_used", tokens_used)

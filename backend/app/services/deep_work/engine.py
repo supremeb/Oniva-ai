@@ -31,25 +31,6 @@ from app.services.run_event_service import emit_run_event
 
 logger = logging.getLogger(__name__)
 
-# Map internal provider keys to the env var names expected by libraries
-# running inside the E2B sandbox (Browser Use, LangChain, etc.).
-_LLM_KEY_TO_ENV = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-}
-
-
-def _build_sandbox_env_vars(api_keys: dict[str, str]) -> dict[str, str]:
-    """Convert resolved tenant LLM keys into sandbox environment variables."""
-    env = {}
-    for provider, env_name in _LLM_KEY_TO_ENV.items():
-        key = api_keys.get(provider)
-        if key:
-            env[env_name] = key
-    return env
-
-
 async def _build_control_plane_env_vars(
     tenant_id: str,
     user_id: str,
@@ -59,9 +40,16 @@ async def _build_control_plane_env_vars(
 ) -> tuple[str, dict[str, str]]:
     """Build sandbox env vars using control plane proxy (zero-secrets).
 
-    Returns (token, env_vars). Only sets OpenAI vars — only SDK used in sandboxes.
+    The ONLY way deep-work gives a sandbox LLM access. Fails closed when no
+    proxy URL is configured. Returns (token, env_vars).
     """
     from app.services.sandbox_tokens import create_sandbox_token
+
+    if not proxy_url:
+        raise RuntimeError(
+            "SANDBOX_PROXY_URL is not set; refusing to start a sandbox without the "
+            "control-plane proxy (real provider keys are never injected)."
+        )
 
     token = await create_sandbox_token(tenant_id, user_id, session_id, worker_id)
     env_vars = {
@@ -413,22 +401,17 @@ class DeepWorkEngine:
                 # Eager sandbox creation per worker
                 if executor:
                     try:
-                        # Zero-secrets: use proxy token instead of real keys
-                        settings_ref = get_settings()
-                        sandbox_token = None
-                        if settings_ref.ENABLE_SANDBOX_CONTROL_PLANE and settings_ref.SANDBOX_PROXY_URL:
-                            sandbox_token, sandbox_env = await _build_control_plane_env_vars(
-                                self._tenant_id, self._user_id,
-                                self._session_id, task.worker_id,
-                                settings_ref.SANDBOX_PROXY_URL,
-                            )
-                        else:
-                            sandbox_env = _build_sandbox_env_vars(api_keys)
+                        # Zero-secrets: proxy token only, never real keys
+                        sandbox_token, sandbox_env = await _build_control_plane_env_vars(
+                            self._tenant_id, self._user_id,
+                            self._session_id, task.worker_id,
+                            get_settings().SANDBOX_PROXY_URL,
+                        )
                         sandbox = await executor.get_or_create(
                             session_id=self._session_id,
                             worker_id=task.worker_id,
                             api_key=e2b_key,
-                            env_vars=sandbox_env or None,
+                            env_vars=sandbox_env,
                         )
                         # Store token on handle for revocation at teardown
                         if sandbox_token:
@@ -892,14 +875,18 @@ class DeepWorkEngine:
 
         from app.services.sandbox_executor import get_sandbox_executor
         executor = get_sandbox_executor()
-        sandbox_env = _build_sandbox_env_vars(api_keys)
+        sandbox_token, sandbox_env = await _build_control_plane_env_vars(
+            self._tenant_id, self._user_id, self._session_id, "output_agent",
+            settings.SANDBOX_PROXY_URL,
+        )
 
         sandbox = await executor.get_or_create(
             session_id=self._session_id,
             worker_id="output_agent",
             api_key=e2b_key,
-            env_vars=sandbox_env or None,
+            env_vars=sandbox_env,
         )
+        sandbox.token = sandbox_token  # revoked on teardown
 
         try:
             # Load output generator prompt
