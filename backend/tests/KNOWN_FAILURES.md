@@ -4,6 +4,8 @@ Command: `cd backend && uv run pytest -q -p no:cacheprovider` (Python 3.12.11, v
 Result: **16 failed, 1256 passed, 6 skipped** (1278 collected, ~54s). Audit baseline on unpinned deps was 1206 passed / 13 failed.
 No test was modified in U1. Note: pytest also collects `app/tests` and `examples/`.
 
+**U8 note:** `pytest.ini` now sets `testpaths = tests`, so `app/tests/*` and `examples/*` are no longer collected by a bare `uv run pytest`. That removes 3 rows below (`app/tests/skills/test_document.py::...::test_parse_pdf`, both `examples/test_workflows.py` tests): the bare-run baseline is 13 failures from `tests/`. Those 3 still fail if run by explicit path.
+
 | Test id | Likely cause |
 |---|---|
 | app/tests/skills/test_document.py::TestDocumentSkills::test_parse_pdf | patches `PdfReader`, which `app.agents.skills.document` no longer exposes |
