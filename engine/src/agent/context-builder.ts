@@ -25,6 +25,7 @@ import type {
   Usage,
 } from "../models/types.js";
 import type { EntryRecord } from "../storage/types.js";
+import type { ToolResultApproval } from "./approvals.js";
 import type { SystemPayload } from "./prompt.js";
 
 export const ENTRY_KINDS = Object.freeze({
@@ -57,8 +58,10 @@ export type ToolResultStatus =
   | "limit_exceeded"
   | "interrupted"
   | "aborted"
-  /** `authorizeTool` asked for approval; durable approvals are not wired in yet. */
-  | "approval_unsupported";
+  /** A human denied the approval the call required. */
+  | "denied"
+  /** The approval the call required expired before a decision. */
+  | "approval_expired";
 
 export type ToolResultPayload = {
   runId: string;
@@ -71,6 +74,8 @@ export type ToolResultPayload = {
   terminate: boolean;
   /** Execution attempts (0 when the tool never ran). */
   attempts: number;
+  /** How the approval the call required ended (absent when none was required). */
+  approval?: ToolResultApproval;
 };
 
 export type RunErrorPayload = {

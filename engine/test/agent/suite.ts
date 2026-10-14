@@ -254,27 +254,6 @@ export function defineAgentSuite(backend: AgentBackend): void {
       await w.crash();
     });
 
-    it("requireApproval is reported as approval_unsupported until approvals land", async () => {
-      const fx = await backend.fixture();
-      const log: string[] = [];
-      const policy: HostPolicy = {
-        resolveModelRequest: allowAll.resolveModelRequest,
-        authorizeTool: () => ({ decision: "requireApproval", reason: "needs a human" }),
-      };
-      fx.provider.enqueue(fakeToolCall("read", { path: "a" }, { id: "c1" }), fakeText("ok"));
-      const w = await fx.open({ tools: [readTool(log)], policy });
-      const conv = await w.harness.createConversation({
-        tenantId: "t1",
-        projectId: "p1",
-        agent: AGENT,
-      });
-      await (await conv.submit({ text: "x" })).wait();
-      const [result] = results(await conv.entries());
-      expect(result.status).toBe("approval_unsupported");
-      expect(log).toEqual([]);
-      await w.crash();
-    });
-
     it("invalid arguments yield invalid_arguments without executing", async () => {
       const fx = await backend.fixture();
       const log: string[] = [];
@@ -601,7 +580,7 @@ export function defineAgentSuite(backend: AgentBackend): void {
       await w.crash();
     });
 
-    it("rejects a submit while a run is active", async () => {
+    it("rejects a submit with whenBusy reject while a run is active", async () => {
       const fx = await backend.fixture();
       const block = defineTool({
         name: "block",
@@ -617,7 +596,7 @@ export function defineAgentSuite(backend: AgentBackend): void {
         agent: { systemPrompt: "s", tools: ["block"] },
       });
       await conv.submit({ text: "x" });
-      await expect(conv.submit({ text: "y" })).rejects.toMatchObject({
+      await expect(conv.submit({ text: "y", whenBusy: "reject" })).rejects.toMatchObject({
         code: "conversation_busy",
       });
       await w.crash();

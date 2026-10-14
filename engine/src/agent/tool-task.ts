@@ -9,7 +9,13 @@
  *   re-validate, then ask `HostPolicy.authorizeTool` about the final
  *   arguments. `block` (or a throwing policy) commits a `blocked` result;
  *   `allow` commits the intent: a transition to `execute` whose checkpoint
- *   holds the final arguments.
+ *   holds the final arguments. `requireApproval` commits an approval request
+ *   together with `waiting({ signal: "approval", until: expiresAt })`, to
+ *   resume in `approved` with the final arguments as the checkpoint.
+ * - `approved` (U9, R10): woken by `decideApproval`'s signal or by the
+ *   deadline. `approve` commits the intent exactly as `allow` does; `deny`
+ *   commits a `denied` result; the deadline commits `approval_expired` and
+ *   closes the request. The wait holds no running task.
  * - `execute`: run the tool, stream its partial output (throttled) to the
  *   task's `agent.tool_output` document, run the `afterTool` hooks and commit
  *   the `tool_result` entry together with the task's `done`.
@@ -22,10 +28,7 @@
  * happened and carries the output committed so far. The tool is not run
  * again.
  *
- * Approvals (U9) slot in between authorization and intent: `requireApproval`
- * will commit an approval record and `waiting({ signal: "approval" })`, and
- * an approval resumes into the same intent commit. Until then the call gets
- * an `approval_unsupported` result.
+ * A task aborted while awaiting approval closes its request as `cancelled`.
  */
 import type { Clock } from "../core/clock.js";
 import type { Context } from "../core/context.js";
@@ -53,6 +56,15 @@ import type {
   ToolRegistry,
   ToolResult,
 } from "../tools/registry.js";
+import {
+  APPROVAL_SIGNAL,
+  approvalOf,
+  approvalsDoc,
+  closeApproval,
+  decisionFromSignal,
+  requestApproval,
+  resultApproval,
+} from "./approvals.js";
 import { ENTRY_KINDS, type ToolResultPayload, type ToolResultStatus } from "./context-builder.js";
 import { type AgentErrorReporter, type HookRunner, isToolResult } from "./hooks.js";
 import { authorize, type HostPolicy } from "./policy.js";
@@ -192,10 +204,18 @@ export function toolTaskDefinition(
     result: ToolResult,
     attempts: number,
     output?: ToolOutputState,
+    prepare?: (tx: Transaction) => Promise<unknown>,
   ): Promise<Committed> =>
     rt.commit(async (tx) => {
+      if (prepare) await prepare(tx);
       if (output) (await tx.doc(toolOutputDoc, task.id)).set(output);
       const payload = resultPayload(task.input.runId, task.input.call, status, result, attempts);
+      if (task.phase === "approved" || Object.hasOwn(task.signals, APPROVAL_SIGNAL)) {
+        const item = await approvalOf(tx, task.conversationId, task.id);
+        if (item && item.status !== "pending" && item.status !== "cancelled") {
+          payload.approval = resultApproval(item, tx.now);
+        }
+      }
       const entryId = appendToolResult(tx, task.conversationId, task.id, payload);
       const value: ToolTaskValue = { entryId, status, terminate: payload.terminate };
       return done(value);
@@ -267,25 +287,81 @@ export function toolTaskDefinition(
         switch (verdict.decision) {
           case "block":
             return fail(task, rt, "blocked", `Blocked by policy: ${verdict.reason}`);
-          case "requireApproval":
-            // Replaced by a durable approval wait in U9.
-            return finish(
-              task,
-              rt,
-              "approval_unsupported",
-              {
-                content: `This call requires approval${verdict.reason ? ` (${verdict.reason})` : ""}, which is not available here.`,
-                isError: true,
-                details: { reason: verdict.reason ?? null, expiresAt: verdict.expiresAt ?? null },
-              },
-              0,
-            );
+          case "requireApproval": {
+            const expiresAt = verdict.expiresAt ?? null;
+            return rt.commit(async (tx) => {
+              await requestApproval(tx, {
+                conversationId: task.conversationId,
+                toolTaskId: task.id,
+                runId,
+                toolCallId: call.id,
+                toolName: call.name,
+                arguments: args,
+                reason: verdict.reason ?? null,
+                expiresAt,
+              });
+              return waiting({
+                signal: APPROVAL_SIGNAL,
+                until: expiresAt,
+                phase: "approved",
+                checkpoint: { arguments: args },
+              });
+            });
+          }
           case "allow": {
             const intent = await rt.commit(() => next("execute", { arguments: args }));
             deps.freshIntents.add(task.id);
             return intent;
           }
         }
+      },
+
+      approved: async (task, rt) => {
+        const decision = decisionFromSignal(task.signals[APPROVAL_SIGNAL]);
+        if (decision === null) {
+          if (task.wake?.reason !== "deadline") {
+            // Woken without a decision or deadline: keep waiting.
+            const doc = await deps.session.document(approvalsDoc, task.conversationId);
+            const own = doc.items.find((i) => i.toolTaskId === task.id);
+            return rt.commit(() =>
+              waiting({
+                signal: APPROVAL_SIGNAL,
+                until: own?.expiresAt ?? null,
+                phase: "approved",
+              }),
+            );
+          }
+          return finish(
+            task,
+            rt,
+            "approval_expired",
+            {
+              content:
+                "The approval this call required expired before a decision. The tool did not run.",
+              isError: true,
+            },
+            0,
+            undefined,
+            (tx) => closeApproval(tx, task.conversationId, task.id, "expired"),
+          );
+        }
+        if (decision.decision === "deny") {
+          return finish(
+            task,
+            rt,
+            "denied",
+            {
+              content: `The call was denied by a human${decision.note ? `: ${decision.note}` : "."} The tool did not run.`,
+              isError: true,
+            },
+            0,
+          );
+        }
+        const intent = await rt.commit(() =>
+          next("execute", { arguments: task.checkpoint?.arguments ?? {} }),
+        );
+        deps.freshIntents.add(task.id);
+        return intent;
       },
 
       execute: async (task, rt, ctx) => {
@@ -316,6 +392,12 @@ export function toolTaskDefinition(
         }
         return run(task, rt, ctx, tool, parsed.data, args, conversation, agent, attempt);
       },
+    },
+    onAbort: async (task, scope) => {
+      if (task.phase !== "approved") return;
+      await scope.commit(async (tx) => {
+        await closeApproval(tx, task.conversationId, task.id, "cancelled");
+      });
     },
   });
 

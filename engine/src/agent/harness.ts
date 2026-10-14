@@ -7,6 +7,10 @@
  * whatever the previous process left: a generation re-requests, a tool task
  * cut off between intent and result is recovered (see `tool-task.ts`).
  *
+ * Tool calls that need approval wait durably (U9); `decideApproval` records a
+ * human decision and resumes the call, `approvals` lists a conversation's
+ * requests.
+ *
  * Submissions whose run ended without settling them (a generation aborted or
  * faulted) are settled `unanswered` by the harness, both as it happens and
  * when the harness opens.
@@ -27,6 +31,12 @@ import { RuntimeStopped, type TaskDefinition } from "../tasks/define.js";
 import { TaskRuntime } from "../tasks/runtime.js";
 import { type ToolDefinition, ToolRegistry } from "../tools/registry.js";
 import {
+  type ApprovalItem,
+  applyDecision,
+  approvalsDoc,
+  type DecideApprovalInput,
+} from "./approvals.js";
+import {
   type AgentCore,
   Conversation,
   Submission,
@@ -44,7 +54,7 @@ import { type AgentErrorReporter, type AgentHooks, HookRunner } from "./hooks.js
 import type { HostPolicy } from "./policy.js";
 import { DEFAULT_PROGRESS_INTERVAL_MS } from "./progress.js";
 import { type AgentConfigInput, agentConfigDoc, applyAgentConfig } from "./prompt.js";
-import { type AgentDeps, toolTaskDefinition } from "./tool-task.js";
+import { type AgentDeps, TOOL_TASK_KIND, toolTaskDefinition } from "./tool-task.js";
 
 export interface AgentSettings {
   /** Minimum ms between progress commits (partial model and tool output). */
@@ -249,6 +259,21 @@ export class Harness implements AgentCore {
       throw err;
     }
     return promise;
+  }
+
+  /**
+   * Decide a pending approval: verify the conversation owns the tool call,
+   * record the decision with `principal` and signal the call, in one commit.
+   * Rejects with `ApprovalRejected` (writing nothing) for a call of another
+   * conversation, an expired or already decided request, or bad input.
+   */
+  decideApproval(input: DecideApprovalInput): Promise<ApprovalItem> {
+    return this.runtime.commit((tx, ops) => applyDecision(tx, ops, input, TOOL_TASK_KIND));
+  }
+
+  /** A conversation's approval requests (pending and closed), oldest first. */
+  async approvals(conversationId: string): Promise<ApprovalItem[]> {
+    return (await this.session.document(approvalsDoc, conversationId)).items;
   }
 
   /** Resolves once no task handler is running and nothing is due. */
