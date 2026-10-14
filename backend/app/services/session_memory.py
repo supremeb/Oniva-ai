@@ -275,5 +275,5 @@ async def get_recitation_context(tenant_id: str, session_id: str, user_id: str =
 - Review the plan and todo list above before responding
 - Update todo.md after completing tasks
 - Save large outputs to artifacts/ directory
-- Use bash_tool for file operations, data processing, and API calls
+- Use the available workspace file tools and the sandboxed execute_python skill for file operations and data processing
 """

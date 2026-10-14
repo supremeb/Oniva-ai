@@ -31,11 +31,9 @@ Execute Python code in an E2B Firecracker microVM sandbox.
 - Network isolated by Firecracker
 - Output files saved to workspace/code_outputs/
 
-### Legacy In-Process (ENABLE_SANDBOX=False)
-- Falls back to restricted in-process sandbox
-- AST validation blocks dangerous patterns
-- Timeout: 5 seconds (max: 30)
-- Limited to safe builtins and allowed imports
+### Sandbox disabled (ENABLE_SANDBOX=False)
+- The skill refuses with `success: false` and an explanatory error.
+- Code is never executed inside the API process.
 
 ## Parameters
 
@@ -56,16 +54,10 @@ Execute Python code in an E2B Firecracker microVM sandbox.
 }
 ```
 
-## Response (Legacy Mode)
+## Response (sandbox disabled)
 
 ```json
-{
-  "success": true,
-  "output": "6\n",
-  "result": "6",
-  "errors": null,
-  "error": null
-}
+{"success": false, "output": null, "error": "Code execution is unavailable: the sandbox is not enabled. ..."}
 ```
 
 ## Agent Guidance
@@ -80,4 +72,4 @@ Execute Python code in an E2B Firecracker microVM sandbox.
 - Timeout changed: 5s (in-process) -> 60s (E2B remote)
 - New parameter: `input_files` for workspace file upload
 - E2B mode returns `pending_review` status instead of immediate results
-- Legacy mode preserved as fallback when ENABLE_SANDBOX=False
+- The in-process fallback has been removed; ENABLE_SANDBOX=False now refuses

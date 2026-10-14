@@ -251,7 +251,7 @@ class TestRecitationContext:
         assert "Instructions" in context
         assert "Review the plan" in context
         assert "Update todo.md" in context
-        assert "bash_tool" in context
+        assert "bash_tool" not in context
 
     @pytest.mark.asyncio
     async def test_recitation_with_default_templates(self):
