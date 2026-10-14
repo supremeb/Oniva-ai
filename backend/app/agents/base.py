@@ -160,6 +160,7 @@ class BaseAgent:
         project_name: Optional[str] = None,
         project_file_names: Optional[List[str]] = None,
         rag_service: Optional[Any] = None,
+        rag_sink: Optional[list] = None,
     ) -> str:
         """
         Build context with recitation, preferences, learnings, and episodic memory.
@@ -318,8 +319,11 @@ class BaseAgent:
                     # Use user-friendly heading based on context
                     rag_heading = "## Relevant Content from Project Files" if is_project_chat else "## Relevant Knowledge Base Documents"
                     context_parts.append(f"\n{rag_heading}\n{rag_context}")
-                    # Stash raw results so chat.py can emit SSE source events
-                    self._last_rag_results = rag_results
+                    # Hand raw results to the caller's request-scoped sink so chat.py
+                    # can emit SSE source events. Never stored on the shared agent
+                    # singleton (that leaked sources across concurrent tenants).
+                    if rag_sink is not None:
+                        rag_sink.extend(rag_results)
             except asyncio.TimeoutError:
                 logger.warning("Auto-RAG query timed out (>2.5s), continuing without KB context")
                 # Timeout may leave the DB session in a bad state; rollback to recover
@@ -866,6 +870,7 @@ class BaseAgent:
         project_name = kwargs.pop('project_name', None)
         project_file_names = kwargs.pop('project_file_names', None)
         web_search_instruction = kwargs.pop('web_search_instruction', None)
+        rag_sink = kwargs.pop('rag_sink', None)
 
         # Resolve API keys
         api_keys = {}
@@ -905,6 +910,7 @@ class BaseAgent:
             project_knowledge_base_id=project_knowledge_base_id,
             project_name=project_name,
             project_file_names=project_file_names,
+            rag_sink=rag_sink,
         )
 
         # Resolve effective model + API key (override > project > tenant > agent default)

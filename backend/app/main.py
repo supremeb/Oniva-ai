@@ -257,14 +257,6 @@ else:
     # Production with no CORS_ORIGINS - this should fail at validation
     cors_origins = []
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    max_age=3600,  # Cache preflight requests for 1 hour
-)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Rate limiting middleware - ALWAYS enabled for security
@@ -295,6 +287,18 @@ except ImportError as e:
 app.add_middleware(TenantMiddleware, fail_open=app_settings.DEBUG)
 app.add_middleware(CSRFMiddleware)
 app.add_middleware(AuthMiddleware)
+
+# CORS must be registered LAST so it is the OUTERMOST middleware: auth/CSRF/tenant/
+# rate-limit short-circuit responses (401/403/429) then still carry CORS headers,
+# and OPTIONS preflights are answered before auth.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
+)
 
 # Routes
 app.include_router(health.router, tags=["health"])

@@ -326,6 +326,7 @@ class CacheAdornment(BaseAdornment):
     def _compute_cache_key(self, context: NodeExecutionContext) -> str:
         """Compute a cache key based on context"""
         key_parts = [
+            f"tenant:{context.tenant_id or ''}",  # cross-tenant isolation
             self.cache_key_prefix or context.node_id,
             context.node_type,
         ]

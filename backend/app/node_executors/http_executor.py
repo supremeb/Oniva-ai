@@ -9,11 +9,6 @@ access to internal services.
 
 from app.node_executors import BaseNodeExecutor, NodeExecutionContext, NodeExecutionResult
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.config import get_settings
-from app.models.api_key import APIKey
-from app.core.encryption import get_encryption_service
-from app.services.api_key_cache import get_api_key_cache
 from app.services.export_control import ExportControlService
 import time
 import httpx
@@ -32,119 +27,9 @@ class HTTPExecutor(BaseNodeExecutor):
     # HTTP node makes arbitrary external API calls
     makes_external_calls = True
 
-    # Mapping of known API domains to their provider names and header configuration
-    # Provider names match the API key settings in the database
-    KNOWN_API_PROVIDERS = {
-        "api.exa.ai": {
-            "provider": "exa",
-            "header": "x-api-key",
-            "env_var": "EXA_API_KEY",
-        },
-        "api.perplexity.ai": {
-            "provider": "perplexity",
-            "header": "Authorization",
-            "env_var": "PERPLEXITY_API_KEY",
-            "format": "Bearer {key}",
-        },
-        "api.tavily.com": {
-            "provider": "tavily",
-            "header": "Authorization",
-            "env_var": "TAVILY_API_KEY",
-            "format": "Bearer {key}",
-        },
-    }
-
-    async def _get_api_key(
-        self,
-        provider: str,
-        db: AsyncSession,
-        user_id: str
-    ) -> Optional[str]:
-        """Get API key for provider from cache, database, or environment.
-
-        Priority:
-        1. Redis cache (fastest)
-        2. User's database-stored keys (personalized)
-        3. Server environment variables (fallback)
-        """
-        cache = get_api_key_cache()
-
-        # Check cache first
-        cached_key = await cache.get(user_id, provider)
-        if cached_key:
-            logger.debug(f"Using cached API key for provider={provider}")
-            return cached_key
-
-        # Try database - get user's default key for this provider
-        try:
-            stmt = (
-                select(APIKey)
-                .where(APIKey.user_id == user_id)
-                .where(APIKey.provider == provider)
-                .where(APIKey.is_active == True)
-                .where(APIKey.is_default == True)
-            )
-            result = await db.execute(stmt)
-            api_key_record = result.scalar_one_or_none()
-
-            if api_key_record:
-                encryption = get_encryption_service()
-                decrypted_key = encryption.decrypt(api_key_record.encrypted_key)
-                # Cache for future requests
-                await cache.set(user_id, provider, decrypted_key)
-                logger.debug(f"Using user-configured API key for provider={provider}")
-                return decrypted_key
-        except Exception as e:
-            logger.warning(f"Error fetching API key from database: {e}")
-
-        # Fall back to environment
-        settings = get_settings()
-        env_mapping = {
-            "exa": settings.EXA_API_KEY,
-            "perplexity": settings.PERPLEXITY_API_KEY,
-            "tavily": getattr(settings, 'TAVILY_API_KEY', None),
-        }
-        env_key = env_mapping.get(provider)
-        if env_key:
-            logger.debug(f"Using environment API key for provider={provider}")
-        return env_key
-
-    async def _inject_api_key(
-        self,
-        url: str,
-        headers: Dict[str, str],
-        db: AsyncSession,
-        user_id: str
-    ) -> Dict[str, str]:
-        """Auto-inject API keys for known services.
-
-        Looks up user-configured keys first, then falls back to server environment.
-        This allows workflows to use HTTP nodes without requiring users to
-        pass API keys in the workflow definition.
-        """
-        for domain, config in self.KNOWN_API_PROVIDERS.items():
-            if domain in url:
-                header_name = config["header"]
-                provider = config["provider"]
-
-                # Get API key (user's key or fallback to env)
-                api_key = await self._get_api_key(provider, db, user_id)
-
-                if api_key:
-                    # Check if header needs formatting (e.g., Bearer token)
-                    if "format" in config:
-                        api_key = config["format"].format(key=api_key)
-
-                    # Only set if not already set or if placeholder wasn't replaced
-                    current_value = headers.get(header_name, "")
-                    if not current_value or "{{" in current_value:
-                        headers[header_name] = api_key
-                        logger.debug(f"Injected API key for {domain}")
-                else:
-                    logger.warning(f"No API key found for {provider} - request may fail")
-                break
-
-        return headers
+    # SECURITY: no provider-key injection. Credentials are sent only when the
+    # workflow explicitly configures them in headers; matching substrings of the
+    # URL (e.g. "api.exa.ai" in a path) must never attach server/user keys.
 
     async def execute(
         self,
@@ -192,9 +77,6 @@ class HTTPExecutor(BaseNodeExecutor):
                     for k, v in headers.items()
                 }
 
-            # Auto-inject API keys for known services (user-configured or env fallback)
-            headers = await self._inject_api_key(url, headers, db, context.user_id)
-            
             # Validate URL
             if not url:
                 return NodeExecutionResult(
