@@ -201,20 +201,9 @@ def run_alembic(url: str, *args: str) -> subprocess.CompletedProcess:
 
 @pytest.fixture
 def pg_migrated_url(pg_server, pg_has_vector):
-    """Sync owner URL of an empty DB; ``alembic upgrade head`` is run by the test itself.
-
-    Migration 011 hard-codes ``GRANT CONNECT ON DATABASE oniva``, hence the DB name.
-    ``alembic_version`` is pre-created wide because revision ids exceed varchar(32); see
-    DRIFT.md.
-    """
+    """Sync owner URL of an empty DB; ``alembic upgrade head`` is run by the test itself."""
     if not pg_has_vector:
         pytest.skip("pgvector extension not available for this Postgres "
                     "(brew pgvector ships only for postgresql@17/18); CI runs this tier fully")
     pg_server.recreate_db("oniva")
-    url = pg_server.url("oniva")
-    engine = create_engine(url)
-    with engine.begin() as conn:
-        conn.execute(text(
-            "CREATE TABLE alembic_version (version_num varchar(255) NOT NULL PRIMARY KEY)"))
-    engine.dispose()
-    return url
+    return pg_server.url("oniva")

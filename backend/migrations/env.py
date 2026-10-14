@@ -27,6 +27,22 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def _ensure_wide_version_table(connection) -> None:
+    """Create/widen alembic_version.version_num to varchar(255) (long revision ids)."""
+    from sqlalchemy import text
+
+    if connection.dialect.name != "postgresql":
+        return
+    connection.execute(text(
+        "CREATE TABLE IF NOT EXISTS alembic_version "
+        "(version_num varchar(255) NOT NULL PRIMARY KEY)"
+    ))
+    connection.execute(text(
+        "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE varchar(255)"
+    ))
+    connection.commit()
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode"""
     url = config.get_main_option("sqlalchemy.url")
@@ -53,6 +69,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        _ensure_wide_version_table(connection)
         context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
