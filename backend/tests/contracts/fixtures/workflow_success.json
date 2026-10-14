@@ -1,0 +1,341 @@
+{
+  "orchestrator_events": [
+    {
+      "type": "progress",
+      "node_id": "start-1",
+      "status": "running",
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_input_received",
+      "node_id": "start-1",
+      "inputs": {},
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_started",
+      "node_id": "start-1",
+      "node_type": "start",
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "start-1",
+      "result": {
+        "node_id": "start-1",
+        "status": "success",
+        "output": {
+          "variables": {
+            "name": "Oniva",
+            "sys.workflow_state": "initialized",
+            "sys.session_id": "<id-1>"
+          },
+          "query": ""
+        },
+        "error": null,
+        "elapsed_ms": "<duration>",
+        "tokens_used": null,
+        "reasoning": null,
+        "next_node_id": null,
+        "timestamp": "<timestamp>",
+        "classification": "internal"
+      },
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "progress",
+      "node_id": "tmpl-1",
+      "status": "running",
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_input_received",
+      "node_id": "tmpl-1",
+      "inputs": {
+        "start-1": {
+          "variables": {
+            "name": "Oniva",
+            "sys.workflow_state": "initialized",
+            "sys.session_id": "<id-1>"
+          },
+          "query": ""
+        }
+      },
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_started",
+      "node_id": "tmpl-1",
+      "node_type": "template",
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "tmpl-1",
+      "result": {
+        "node_id": "tmpl-1",
+        "status": "success",
+        "output": {
+          "output": "Hello Oniva",
+          "text": "Hello Oniva",
+          "template": "Hello {{name}}"
+        },
+        "error": null,
+        "elapsed_ms": "<duration>",
+        "tokens_used": null,
+        "reasoning": null,
+        "next_node_id": null,
+        "timestamp": "<timestamp>",
+        "classification": "internal"
+      },
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "progress",
+      "node_id": "out-1",
+      "status": "running",
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_input_received",
+      "node_id": "out-1",
+      "inputs": {
+        "tmpl-1": {
+          "output": "Hello Oniva",
+          "text": "Hello Oniva",
+          "template": "Hello {{name}}"
+        }
+      },
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_started",
+      "node_id": "out-1",
+      "node_type": "output",
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "out-1",
+      "result": {
+        "node_id": "out-1",
+        "status": "success",
+        "output": {
+          "greeting": {
+            "tmpl-1": "Hello Oniva"
+          },
+          "final": true
+        },
+        "error": null,
+        "elapsed_ms": "<duration>",
+        "tokens_used": null,
+        "reasoning": null,
+        "next_node_id": null,
+        "timestamp": "<timestamp>",
+        "classification": "internal"
+      },
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "complete",
+      "status": "completed",
+      "error": null,
+      "results": {
+        "start-1": {
+          "node_id": "start-1",
+          "status": "success",
+          "output": {
+            "variables": {
+              "name": "Oniva",
+              "sys.workflow_state": "initialized",
+              "sys.session_id": "<id-1>"
+            },
+            "query": ""
+          },
+          "error": null,
+          "elapsed_ms": "<duration>",
+          "tokens_used": null,
+          "reasoning": null,
+          "next_node_id": null,
+          "timestamp": "<timestamp>",
+          "classification": "internal"
+        },
+        "tmpl-1": {
+          "node_id": "tmpl-1",
+          "status": "success",
+          "output": {
+            "output": "Hello Oniva",
+            "text": "Hello Oniva",
+            "template": "Hello {{name}}"
+          },
+          "error": null,
+          "elapsed_ms": "<duration>",
+          "tokens_used": null,
+          "reasoning": null,
+          "next_node_id": null,
+          "timestamp": "<timestamp>",
+          "classification": "internal"
+        },
+        "out-1": {
+          "node_id": "out-1",
+          "status": "success",
+          "output": {
+            "greeting": {
+              "tmpl-1": "Hello Oniva"
+            },
+            "final": true
+          },
+          "error": null,
+          "elapsed_ms": "<duration>",
+          "tokens_used": null,
+          "reasoning": null,
+          "next_node_id": null,
+          "timestamp": "<timestamp>",
+          "classification": "internal"
+        }
+      },
+      "executed_nodes": 3,
+      "total_nodes": 3,
+      "timestamp": "<timestamp>"
+    }
+  ],
+  "sse_events": [
+    {
+      "event": "workflow_progress",
+      "id": "1",
+      "data": {
+        "workflowId": "<id-2>",
+        "stepId": "start-1",
+        "label": "Start",
+        "status": "active",
+        "message": "Executing...",
+        "elapsedMs": "<duration>"
+      }
+    },
+    {
+      "event": "workflow_progress",
+      "id": "2",
+      "data": {
+        "workflowId": "<id-2>",
+        "stepId": "start-1",
+        "label": "Start",
+        "status": "complete",
+        "message": "Done",
+        "elapsedMs": "<duration>"
+      }
+    },
+    {
+      "event": "workflow_progress",
+      "id": "3",
+      "data": {
+        "workflowId": "<id-2>",
+        "stepId": "tmpl-1",
+        "label": "Greeting",
+        "status": "active",
+        "message": "Executing...",
+        "elapsedMs": "<duration>"
+      }
+    },
+    {
+      "event": "workflow_progress",
+      "id": "4",
+      "data": {
+        "workflowId": "<id-2>",
+        "stepId": "tmpl-1",
+        "label": "Greeting",
+        "status": "complete",
+        "message": "Done",
+        "elapsedMs": "<duration>"
+      }
+    },
+    {
+      "event": "workflow_progress",
+      "id": "5",
+      "data": {
+        "workflowId": "<id-2>",
+        "stepId": "out-1",
+        "label": "Result",
+        "status": "active",
+        "message": "Executing...",
+        "elapsedMs": "<duration>"
+      }
+    },
+    {
+      "event": "workflow_progress",
+      "id": "6",
+      "data": {
+        "workflowId": "<id-2>",
+        "stepId": "out-1",
+        "label": "Result",
+        "status": "complete",
+        "message": "Done",
+        "elapsedMs": "<duration>"
+      }
+    },
+    {
+      "event": "workflow_complete",
+      "id": "7",
+      "data": {
+        "workflowId": "<id-2>",
+        "workflowName": "Contract Workflow",
+        "results": {
+          "start-1": {
+            "node_id": "start-1",
+            "status": "success",
+            "output": {
+              "variables": {
+                "name": "Oniva",
+                "sys.workflow_state": "initialized",
+                "sys.session_id": "<id-3>"
+              },
+              "query": ""
+            },
+            "error": null,
+            "elapsed_ms": "<duration>",
+            "tokens_used": null,
+            "reasoning": null,
+            "next_node_id": null,
+            "timestamp": "<timestamp>",
+            "classification": "internal"
+          },
+          "tmpl-1": {
+            "node_id": "tmpl-1",
+            "status": "success",
+            "output": {
+              "output": "Hello Oniva",
+              "text": "Hello Oniva",
+              "template": "Hello {{name}}"
+            },
+            "error": null,
+            "elapsed_ms": "<duration>",
+            "tokens_used": null,
+            "reasoning": null,
+            "next_node_id": null,
+            "timestamp": "<timestamp>",
+            "classification": "internal"
+          },
+          "out-1": {
+            "node_id": "out-1",
+            "status": "success",
+            "output": {
+              "greeting": {
+                "tmpl-1": "Hello Oniva"
+              },
+              "final": true
+            },
+            "error": null,
+            "elapsed_ms": "<duration>",
+            "tokens_used": null,
+            "reasoning": null,
+            "next_node_id": null,
+            "timestamp": "<timestamp>",
+            "classification": "internal"
+          }
+        },
+        "executedNodes": 3,
+        "totalNodes": 3,
+        "elapsedMs": "<duration>"
+      }
+    }
+  ]
+}

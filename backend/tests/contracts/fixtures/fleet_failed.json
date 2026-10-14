@@ -1,0 +1,33 @@
+{
+  "events": [
+    {
+      "event": "progress",
+      "data": {
+        "job_id": "<id-1>",
+        "status": "failed",
+        "progress": 0,
+        "current_step": null,
+        "message": "Progress: 0%",
+        "timestamp": "<timestamp>"
+      }
+    },
+    {
+      "event": "failed",
+      "data": {
+        "job_id": "<id-1>",
+        "status": "failed",
+        "result": null,
+        "error": "LLM call failed: provider exploded",
+        "duration_ms": "<duration>",
+        "execution_trace": [],
+        "completed_at": "<timestamp>"
+      }
+    }
+  ],
+  "final_job": {
+    "status": "failed",
+    "progress": 0,
+    "result": null,
+    "error": "LLM call failed: provider exploded"
+  }
+}

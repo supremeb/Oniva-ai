@@ -1,0 +1,101 @@
+{
+  "events": [
+    {
+      "event": "progress",
+      "data": {
+        "job_id": "<id-1>",
+        "status": "cancelled",
+        "progress": 100,
+        "current_step": null,
+        "message": "Progress: 100%",
+        "timestamp": "<timestamp>"
+      }
+    },
+    {
+      "event": "step",
+      "data": {
+        "step": 1,
+        "type": "tool_call",
+        "tool_name": "web_search",
+        "tool_args": {
+          "query": "fleet contract"
+        },
+        "tool_result_preview": "{\"results\": [{\"title\": \"Fleet\", \"url\": \"https://example.com/fleet\"}], \"query\": \"fleet contract\"}",
+        "duration_ms": "<duration>",
+        "timestamp": "<timestamp>",
+        "token_usage": {
+          "input": 100,
+          "output": 20,
+          "total": 120
+        }
+      }
+    },
+    {
+      "event": "step",
+      "data": {
+        "step": 2,
+        "type": "text_response",
+        "content_preview": "All done: found one result.",
+        "duration_ms": "<duration>",
+        "timestamp": "<timestamp>",
+        "token_usage": {
+          "input": 100,
+          "output": 20,
+          "total": 120
+        }
+      }
+    },
+    {
+      "event": "cancelled",
+      "data": {
+        "job_id": "<id-1>",
+        "status": "cancelled",
+        "result": null,
+        "error": null,
+        "duration_ms": "<duration>",
+        "execution_trace": [
+          {
+            "step": 1,
+            "type": "tool_call",
+            "tool_name": "web_search",
+            "tool_args": {
+              "query": "fleet contract"
+            },
+            "tool_result_preview": "{\"results\": [{\"title\": \"Fleet\", \"url\": \"https://example.com/fleet\"}], \"query\": \"fleet contract\"}",
+            "duration_ms": "<duration>",
+            "timestamp": "<timestamp>",
+            "token_usage": {
+              "input": 100,
+              "output": 20,
+              "total": 120
+            }
+          },
+          {
+            "step": 2,
+            "type": "text_response",
+            "content_preview": "All done: found one result.",
+            "duration_ms": "<duration>",
+            "timestamp": "<timestamp>",
+            "token_usage": {
+              "input": 100,
+              "output": 20,
+              "total": 120
+            }
+          }
+        ],
+        "completed_at": "<timestamp>"
+      }
+    }
+  ],
+  "final_job": {
+    "status": "cancelled",
+    "progress": 100,
+    "result": {
+      "output": "All done: found one result.",
+      "tool_calls_made": 1,
+      "iterations": 2,
+      "duration_seconds": "<duration>"
+    },
+    "error": null
+  }
+}

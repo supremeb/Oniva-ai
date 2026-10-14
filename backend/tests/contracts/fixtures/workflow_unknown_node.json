@@ -1,0 +1,231 @@
+{
+  "orchestrator_events": [
+    {
+      "type": "progress",
+      "node_id": "start-1",
+      "status": "running",
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_input_received",
+      "node_id": "start-1",
+      "inputs": {},
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_started",
+      "node_id": "start-1",
+      "node_type": "start",
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "start-1",
+      "result": {
+        "node_id": "start-1",
+        "status": "success",
+        "output": {
+          "variables": {
+            "name": "Oniva",
+            "sys.workflow_state": "initialized",
+            "sys.session_id": "<id-1>"
+          },
+          "query": ""
+        },
+        "error": null,
+        "elapsed_ms": "<duration>",
+        "tokens_used": null,
+        "reasoning": null,
+        "next_node_id": null,
+        "timestamp": "<timestamp>",
+        "classification": "internal"
+      },
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "progress",
+      "node_id": "mystery-1",
+      "status": "running",
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_input_received",
+      "node_id": "mystery-1",
+      "inputs": {
+        "start-1": {
+          "variables": {
+            "name": "Oniva",
+            "sys.workflow_state": "initialized",
+            "sys.session_id": "<id-1>"
+          },
+          "query": ""
+        }
+      },
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_started",
+      "node_id": "mystery-1",
+      "node_type": "does_not_exist",
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "mystery-1",
+      "result": {
+        "node_id": "mystery-1",
+        "status": "skipped",
+        "output": {
+          "message": "No executor for node type: does_not_exist"
+        },
+        "error": null,
+        "elapsed_ms": "<duration>",
+        "tokens_used": null,
+        "reasoning": null,
+        "next_node_id": null,
+        "timestamp": "<timestamp>",
+        "classification": "internal"
+      },
+      "timestamp": "<timestamp>"
+    },
+    {
+      "type": "complete",
+      "status": "completed",
+      "error": null,
+      "results": {
+        "start-1": {
+          "node_id": "start-1",
+          "status": "success",
+          "output": {
+            "variables": {
+              "name": "Oniva",
+              "sys.workflow_state": "initialized",
+              "sys.session_id": "<id-1>"
+            },
+            "query": ""
+          },
+          "error": null,
+          "elapsed_ms": "<duration>",
+          "tokens_used": null,
+          "reasoning": null,
+          "next_node_id": null,
+          "timestamp": "<timestamp>",
+          "classification": "internal"
+        },
+        "mystery-1": {
+          "node_id": "mystery-1",
+          "status": "skipped",
+          "output": {
+            "message": "No executor for node type: does_not_exist"
+          },
+          "error": null,
+          "elapsed_ms": "<duration>",
+          "tokens_used": null,
+          "reasoning": null,
+          "next_node_id": null,
+          "timestamp": "<timestamp>",
+          "classification": "internal"
+        }
+      },
+      "executed_nodes": 1,
+      "total_nodes": 2,
+      "timestamp": "<timestamp>"
+    }
+  ],
+  "sse_events": [
+    {
+      "event": "workflow_progress",
+      "id": "1",
+      "data": {
+        "workflowId": "<id-2>",
+        "stepId": "start-1",
+        "label": "Start",
+        "status": "active",
+        "message": "Executing...",
+        "elapsedMs": "<duration>"
+      }
+    },
+    {
+      "event": "workflow_progress",
+      "id": "2",
+      "data": {
+        "workflowId": "<id-2>",
+        "stepId": "start-1",
+        "label": "Start",
+        "status": "complete",
+        "message": "Done",
+        "elapsedMs": "<duration>"
+      }
+    },
+    {
+      "event": "workflow_progress",
+      "id": "3",
+      "data": {
+        "workflowId": "<id-2>",
+        "stepId": "mystery-1",
+        "label": "does_not_exist",
+        "status": "active",
+        "message": "Executing...",
+        "elapsedMs": "<duration>"
+      }
+    },
+    {
+      "event": "workflow_progress",
+      "id": "4",
+      "data": {
+        "workflowId": "<id-2>",
+        "stepId": "mystery-1",
+        "label": "does_not_exist",
+        "status": "complete",
+        "message": "Done",
+        "elapsedMs": "<duration>"
+      }
+    },
+    {
+      "event": "workflow_complete",
+      "id": "5",
+      "data": {
+        "workflowId": "<id-2>",
+        "workflowName": "Contract Workflow",
+        "results": {
+          "start-1": {
+            "node_id": "start-1",
+            "status": "success",
+            "output": {
+              "variables": {
+                "name": "Oniva",
+                "sys.workflow_state": "initialized",
+                "sys.session_id": "<id-3>"
+              },
+              "query": ""
+            },
+            "error": null,
+            "elapsed_ms": "<duration>",
+            "tokens_used": null,
+            "reasoning": null,
+            "next_node_id": null,
+            "timestamp": "<timestamp>",
+            "classification": "internal"
+          },
+          "mystery-1": {
+            "node_id": "mystery-1",
+            "status": "skipped",
+            "output": {
+              "message": "No executor for node type: does_not_exist"
+            },
+            "error": null,
+            "elapsed_ms": "<duration>",
+            "tokens_used": null,
+            "reasoning": null,
+            "next_node_id": null,
+            "timestamp": "<timestamp>",
+            "classification": "internal"
+          }
+        },
+        "executedNodes": 1,
+        "totalNodes": 2,
+        "elapsedMs": "<duration>"
+      }
+    }
+  ]
+}

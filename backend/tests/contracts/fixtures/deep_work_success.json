@@ -1,0 +1,431 @@
+{
+  "events": [
+    {
+      "event": "deep_work_engine_planned",
+      "data": {
+        "sub_queries": [
+          "market size"
+        ]
+      }
+    },
+    {
+      "event": "deep_work_engine_phase",
+      "data": {
+        "phase": "researching"
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_started",
+      "data": {
+        "worker_id": "w1",
+        "sub_query": "market size"
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_activity",
+      "data": {
+        "worker_id": "w1",
+        "activity_type": "tool_call",
+        "description": "Searching: market size",
+        "recent_actions": [
+          "Searching: market size"
+        ]
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_activity",
+      "data": {
+        "worker_id": "w1",
+        "activity_type": "findings",
+        "description": "Found 1 finding (1 total)",
+        "recent_actions": [
+          "Searching: market size"
+        ]
+      }
+    },
+    {
+      "event": "source_update",
+      "data": {
+        "sources": [
+          {
+            "type": "url",
+            "title": "Source for market size",
+            "url": "https://example.com/market-size"
+          }
+        ],
+        "connectors": []
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_complete",
+      "data": {
+        "worker_id": "w1",
+        "learning_count": 1,
+        "tool_call_count": 2,
+        "source_count": 1,
+        "top_findings": [
+          "Finding about market size. More detail follows."
+        ],
+        "duration_seconds": "<duration>",
+        "error": null
+      }
+    },
+    {
+      "event": "deep_work_engine_phase",
+      "data": {
+        "phase": "reflecting"
+      }
+    },
+    {
+      "event": "deep_work_engine_reflection",
+      "data": {
+        "score": 55,
+        "gaps": [
+          "pricing"
+        ],
+        "round": 0,
+        "continuing": true
+      }
+    },
+    {
+      "event": "deep_work_engine_gap_tasks",
+      "data": {
+        "sub_queries": [
+          {
+            "worker_id": "gap-1",
+            "sub_query": "pricing details"
+          }
+        ],
+        "round": 0
+      }
+    },
+    {
+      "event": "deep_work_engine_phase",
+      "data": {
+        "phase": "researching"
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_started",
+      "data": {
+        "worker_id": "gap-1",
+        "sub_query": "pricing details"
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_activity",
+      "data": {
+        "worker_id": "gap-1",
+        "activity_type": "tool_call",
+        "description": "Searching: pricing details",
+        "recent_actions": [
+          "Searching: pricing details"
+        ]
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_activity",
+      "data": {
+        "worker_id": "gap-1",
+        "activity_type": "findings",
+        "description": "Found 1 finding (1 total)",
+        "recent_actions": [
+          "Searching: pricing details"
+        ]
+      }
+    },
+    {
+      "event": "source_update",
+      "data": {
+        "sources": [
+          {
+            "type": "url",
+            "title": "Source for pricing details",
+            "url": "https://example.com/pricing-details"
+          }
+        ],
+        "connectors": []
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_complete",
+      "data": {
+        "worker_id": "gap-1",
+        "learning_count": 1,
+        "tool_call_count": 2,
+        "source_count": 1,
+        "top_findings": [
+          "Finding about pricing details. More detail follows."
+        ],
+        "duration_seconds": "<duration>",
+        "error": null
+      }
+    },
+    {
+      "event": "deep_work_engine_phase",
+      "data": {
+        "phase": "reflecting"
+      }
+    },
+    {
+      "event": "deep_work_engine_reflection",
+      "data": {
+        "score": 90,
+        "gaps": [],
+        "round": 1,
+        "continuing": false
+      }
+    },
+    {
+      "event": "deep_work_engine_phase",
+      "data": {
+        "phase": "synthesizing"
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_activity",
+      "data": {
+        "worker_id": "synthesizer",
+        "activity_type": "synthesis",
+        "description": "Planning report structure..."
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_activity",
+      "data": {
+        "worker_id": "synthesizer",
+        "activity_type": "synthesis",
+        "description": "Writing section 1/2: Market..."
+      }
+    },
+    {
+      "event": "deep_work_engine_synthesis_chunk",
+      "data": {
+        "content": "\n## Market\n\n"
+      }
+    },
+    {
+      "event": "deep_work_engine_synthesis_chunk",
+      "data": {
+        "content": "Section body "
+      }
+    },
+    {
+      "event": "deep_work_engine_synthesis_chunk",
+      "data": {
+        "content": "text [1]."
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_activity",
+      "data": {
+        "worker_id": "synthesizer",
+        "activity_type": "synthesis",
+        "description": "Writing section 2/2: Players..."
+      }
+    },
+    {
+      "event": "deep_work_engine_synthesis_chunk",
+      "data": {
+        "content": "\n## Players\n\n"
+      }
+    },
+    {
+      "event": "deep_work_engine_synthesis_chunk",
+      "data": {
+        "content": "Section body "
+      }
+    },
+    {
+      "event": "deep_work_engine_synthesis_chunk",
+      "data": {
+        "content": "text [1]."
+      }
+    },
+    {
+      "event": "deep_work_engine_worker_activity",
+      "data": {
+        "worker_id": "synthesizer",
+        "activity_type": "synthesis",
+        "description": "Writing executive summary and takeaways..."
+      }
+    },
+    {
+      "event": "deep_work_engine_synthesis_chunk",
+      "data": {
+        "content": "## Executive Summary\n\nA summary. "
+      }
+    },
+    {
+      "event": "deep_work_engine_synthesis_chunk",
+      "data": {
+        "content": "\n\n## Key Takeaways\n\n1. A takeaway [1]."
+      }
+    },
+    {
+      "event": "deep_work_engine_synthesis_chunk",
+      "data": {
+        "content": "\n## Sources\n1. [Source for market size](https://example.com/market-size)\n2. [Source for pricing details](https://example.com/pricing-details)"
+      }
+    },
+    {
+      "event": "workspace_update",
+      "data": {
+        "action": "create",
+        "path": "report.md",
+        "size": 303
+      }
+    },
+    {
+      "event": "deep_work_engine_phase",
+      "data": {
+        "phase": "completed"
+      }
+    },
+    {
+      "event": "deep_work_engine_complete",
+      "data": {
+        "report_length": 303
+      }
+    }
+  ],
+  "engine_raised": null,
+  "report": "# Contract Report\n\n## Executive Summary\n\nA summary.\n\n\n## Market\n\nSection body text [1].\n\n## Players\n\nSection body text [1].\n\n## Key Takeaways\n\n1. A takeaway [1].\n\n## Sources\n1. [Source for market size](https://example.com/market-size)\n2. [Source for pricing details](https://example.com/pricing-details)",
+  "full_state": {
+    "session_id": "dwsession0001",
+    "conversation_id": "<id-1>",
+    "status": "completed",
+    "plan": {
+      "title": "Contract Research",
+      "sub_queries": [
+        {
+          "worker_id": "w1",
+          "sub_query": "market size",
+          "tools": [
+            "web_search"
+          ],
+          "max_iterations": 8,
+          "task_type": "research",
+          "output_type": null
+        },
+        {
+          "worker_id": "gap-1",
+          "sub_query": "pricing details",
+          "tools": [
+            "web_search"
+          ],
+          "max_iterations": 8,
+          "task_type": "research",
+          "output_type": null
+        }
+      ],
+      "deliverable": null,
+      "deliverable_description": null
+    },
+    "todos": [
+      {
+        "text": "market size",
+        "status": "completed"
+      },
+      {
+        "text": "pricing details",
+        "status": "completed"
+      }
+    ],
+    "steps": [],
+    "workspace_files": [
+      {
+        "name": "report.md",
+        "path": "report.md",
+        "size": 303,
+        "type": "md",
+        "modified_at": "<timestamp>"
+      }
+    ],
+    "summary": "# Contract Report\n\n## Executive Summary\n\nA summary.\n\n\n## Market\n\nSection body text [1].\n\n## Players\n\nSection body text [1].\n\n## Key Takeaways\n\n1. A takeaway [1].\n\n## Sources\n1. [Source for market size](https://example.com/market-size)\n2. [Source for pricing details](https://example.com/pricing-details)",
+    "key_findings": [],
+    "sources": [
+      {
+        "type": "url",
+        "title": "Source for market size",
+        "url": "https://example.com/market-size",
+        "domain": null,
+        "query": null
+      },
+      {
+        "type": "url",
+        "title": "Source for pricing details",
+        "url": "https://example.com/pricing-details",
+        "domain": null,
+        "query": null
+      }
+    ],
+    "connectors": [],
+    "is_engine": true,
+    "engine_report": "# Contract Report\n\n## Executive Summary\n\nA summary.\n\n\n## Market\n\nSection body text [1].\n\n## Players\n\nSection body text [1].\n\n## Key Takeaways\n\n1. A takeaway [1].\n\n## Sources\n1. [Source for market size](https://example.com/market-size)\n2. [Source for pricing details](https://example.com/pricing-details)",
+    "engine_phase": null,
+    "artifacts": null,
+    "error": null,
+    "workers": [
+      {
+        "worker_id": "w1",
+        "sub_query": "market size",
+        "status": "complete",
+        "learning_count": 1,
+        "source_count": 1,
+        "duration_seconds": "<duration>"
+      },
+      {
+        "worker_id": "gap-1",
+        "sub_query": "pricing details",
+        "status": "complete",
+        "learning_count": 1,
+        "source_count": 1,
+        "duration_seconds": "<duration>"
+      }
+    ]
+  },
+  "persisted_engine_state": {
+    "completed_workers": [
+      {
+        "worker_id": "w1",
+        "sub_query": "market size",
+        "status": "complete",
+        "learning_count": 1,
+        "source_count": 1,
+        "duration_seconds": "<duration>"
+      },
+      {
+        "worker_id": "gap-1",
+        "sub_query": "pricing details",
+        "status": "complete",
+        "learning_count": 1,
+        "source_count": 1,
+        "duration_seconds": "<duration>"
+      }
+    ],
+    "sources": [
+      {
+        "type": "url",
+        "title": "Source for market size",
+        "url": "https://example.com/market-size"
+      },
+      {
+        "type": "url",
+        "title": "Source for pricing details",
+        "url": "https://example.com/pricing-details"
+      }
+    ],
+    "phase": "completed",
+    "artifacts": []
+  },
+  "files": [
+    "<id-2>/dwsession0001/engine_learnings.json",
+    "<id-2>/dwsession0001/engine_plan.json",
+    "<id-2>/dwsession0001/engine_report.md",
+    "<id-2>/dwsession0001/engine_state.json",
+    "<id-2>/dwsession0001/workers/gap-1_learnings.json",
+    "<id-2>/dwsession0001/workers/w1_learnings.json",
+    "<id-2>/dwsession0001/workspace/report.md"
+  ]
+}
