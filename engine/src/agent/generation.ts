@@ -36,7 +36,7 @@
  */
 import type { Context } from "../core/context.js";
 import type { JsonValue } from "../core/json.js";
-import { MessageBuilder } from "../models/stream.js";
+import { MessageBuilder, modelError } from "../models/stream.js";
 import type {
   AssistantMessage,
   ModelError,
@@ -79,7 +79,7 @@ import {
 } from "./context-builder.js";
 import { Inbox } from "./inbox.js";
 import { liveDoc, ProgressWriter, toolOutputDoc } from "./progress.js";
-import { systemPayload } from "./prompt.js";
+import { type AgentConfig, systemPayload } from "./prompt.js";
 import { settleSubmission } from "./submission.js";
 import {
   type AgentDeps,
@@ -151,6 +151,19 @@ export async function clearLive(
 type Scope = TaskScope<GenerationCheckpoint>;
 type State = TaskState<GenerationInput, GenerationCheckpoint>;
 
+/** The denial that ends a run past its configured round cap or deadline, else null. */
+function runLimitError(agent: AgentConfig, round: number, now: number): ModelError | null {
+  if (agent.maxRounds !== null && round >= agent.maxRounds) {
+    return modelError("denied", `the run reached its limit of ${agent.maxRounds} model rounds`, {
+      code: "max_rounds",
+    });
+  }
+  if (agent.deadlineMs !== null && now >= agent.deadlineMs) {
+    return modelError("denied", "the run deadline has passed", { code: "run_deadline" });
+  }
+  return null;
+}
+
 /**
  * The generation task kind. `compaction` is the compaction kind it spawns
  * (made with default settings when omitted); register it with the runtime
@@ -178,6 +191,8 @@ export function generationTaskDefinition(
     const { runId, round, submissionId } = task.input;
     const conversationId = task.conversationId;
     const { conversation, agent } = await loadConversation(deps, conversationId);
+    const exceeded = runLimitError(agent, round, deps.clock.now());
+    if (exceeded) return failRun(task, rt, exceeded, "model_error", null, null);
     const specs = deps.tools.specs(agent.tools);
     const system = systemPayload(agent.systemPrompt, specs);
     const settings = resolveCompactionSettings(compactionDefaults(compaction), agent.compaction);

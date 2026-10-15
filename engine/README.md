@@ -69,7 +69,7 @@ routes also need `X-Oniva-Tenant` / `X-Oniva-Project` matching the conversation.
 | `GET /v1/health` | `{ status, sessionId, ownerId, owner }` (no auth) |
 | `POST /v1/conversations` | create (`{ id?, agent? }`) → 201 |
 | `POST /v1/conversations/:id/submissions` | submit (`{ text \| content, requestId?, whenBusy?, type? }`; `Idempotency-Key` header works too) → 202 |
-| `PUT /v1/conversations/:id/agent` | partial agent config (`systemPrompt`, `tools`, `model`, `thinking`, `depth`, `metadata`, `compaction`); unknown or mistyped fields → 400 and nothing committed; applies from the next model request and arrives at watchers as a patch to `/agent` → 200 `{ conversationId, agent }` |
+| `PUT /v1/conversations/:id/agent` | partial agent config (`systemPrompt`, `tools`, `model`, `thinking`, `depth`, `metadata`, `compaction`, `maxRounds`, `deadlineMs`); unknown or mistyped fields → 400 and nothing committed; applies from the next model request and arrives at watchers as a patch to `/agent` → 200 `{ conversationId, agent }` |
 | `GET /v1/conversations/:id/watch` | SSE watch stream (`id:` is the cursor; resume with `Last-Event-ID` or `?cursor=`) |
 | `DELETE /v1/conversations/:id/submissions/:submissionId` | cancel a still-queued input; it settles `unanswered(withdrawn)` → 200 `{ conversationId, submissionId, cancelled: true }`; 404 unknown submission, 409 `not_queued` if it already started, was placed into a run or settled |
 | `POST /v1/conversations/:id/abort` | abort queued and running work; answers once the run is idle |
@@ -82,6 +82,12 @@ A `user` entry's payload carries `requestId` (the caller's id, or the submission
 The watch view's `toolOutput` is keyed by tool task id; each value is `{ text, truncated, attempt, toolCallId, toolName }`, so a client can attach live output to the right call when tools run in parallel (`toolCallId` matches the `tool_call` block id and the `tool_result` entry's `toolCallId`; null only on documents written before these fields existed).
 
 The watch view's `compaction` is `{ running: boolean, cause?, startedAt? }`: `running` is true while a context compaction task is in flight, with `cause` (`background`, `threshold` or `overflow`) and `startedAt` (ISO time) alongside; when idle it is `{ running: false }`. It carries no task id or summary text, and arrives in snapshots and as patches to `/compaction` when a compaction starts and when it lands or fails.
+
+The watch view's `subagents` is keyed by the id of the parent's tool task that spawned each child conversation: `{ conversationId, submissionId, status, startedAt, endedAt?, toolCalls, recent, usage }`. `status` is `running` until the child's input settles, then `done`, `aborted` or `failed`; `toolCalls` counts the child's model tool calls; `recent` holds the child's last five tool calls (oldest first), each `name(arguments)` clipped to 160 characters; `usage` is the child's own tally. It is `{}` for a conversation with no subagents, and arrives in snapshots and as patches to `/subagents/<toolTaskId>`. The child's transcript and tool tasks stay in the child conversation (watch it by id).
+
+Agent config `maxRounds` (model rounds per run) and `deadlineMs` (absolute engine-clock epoch ms) are null by default. A model request past either ends the run with a `run_error` of kind `denied` and code `max_rounds` or `run_deadline`; subagent children inherit both.
+
+A subagent tool's model, tools and system prompt can be set per run in the parent's `agent.metadata.subagents[<toolName>]` (`{ model?, tools?, systemPrompt? }`), which wins over the static `createSubagentTool` options. `maxDepth` is never read from metadata. A malformed entry fails the call with an error result and creates no child.
 
 The watch view's `run` is `{ active: boolean, runId?, startedAt? }`: `active` is true for as long as the conversation has an unfinished run, including while tools execute, approvals are pending and between model rounds (when `live` is already cleared); `runId` and `startedAt` (ISO time) accompany it while active, and when idle it is `{ active: false }`. It arrives in snapshots and as patches to `/run` when a run starts and when it ends.
 
@@ -117,6 +123,7 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_MAX_TOKENS` | `8192` | reply budget |
 | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle |
 | `ENGINE_SUBAGENT_TOOL` | none | register a subagent tool under this name |
+| `ENGINE_SUBAGENT_TOOLS` | none | comma-separated subagent tool names to register (with `ENGINE_SUBAGENT_TOOL`, deduplicated) |
 
 `ENGINE_TEST_HARNESS` together with `NODE_ENV=production` makes the worker
 refuse to start. `npm run worker:test` runs the scenario-test entry point

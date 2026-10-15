@@ -106,6 +106,8 @@ export interface WorkerOptions {
   approvalTtlMs?: number | null;
   /** Register a subagent tool under this name. */
   subagentTool?: string | null;
+  /** Register a subagent tool under each of these names (with `subagentTool`, deduplicated). */
+  subagentTools?: readonly string[];
   // biome-ignore lint/suspicious/noExplicitAny: tools with any argument type
   tools?: ToolDefinition<any>[];
   /** Engine clock (approval expiry, deadlines, throttling). Leases use the database clock. */
@@ -391,7 +393,12 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
     const tools = [
       ...(gateway?.tools ?? []),
       ...(options.tools ?? []),
-      ...(options.subagentTool ? [createSubagentTool({ name: options.subagentTool })] : []),
+      ...[
+        ...new Set([
+          ...(options.subagentTool ? [options.subagentTool] : []),
+          ...(options.subagentTools ?? []),
+        ]),
+      ].map((name) => createSubagentTool({ name })),
     ];
     const base = new PostgresStorageProvider(pool);
     const storage = options.wrapStorage ? options.wrapStorage(base) : base;

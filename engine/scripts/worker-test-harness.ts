@@ -206,6 +206,7 @@ async function main(): Promise<number> {
         : null,
     approvalTtlMs: config.approvalTtlMs,
     subagentTool: config.subagentTool,
+    subagentTools: config.subagentTools,
     clock,
     settings: { progressIntervalMs: config.progressIntervalMs },
     wrapStorage: (provider) => timedStorage(provider, samples),

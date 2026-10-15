@@ -71,6 +71,7 @@ async function main(): Promise<number> {
         : null,
     approvalTtlMs: config.approvalTtlMs,
     subagentTool: config.subagentTool,
+    subagentTools: config.subagentTools,
     settings: { progressIntervalMs: config.progressIntervalMs },
     redact: maskSecrets,
     closeTimeoutMs: config.shutdownTimeoutMs,

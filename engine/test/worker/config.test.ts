@@ -33,6 +33,7 @@ describe("workerConfigFromEnv", () => {
       progressIntervalMs: 100,
       dbSchema: null,
       subagentTool: null,
+      subagentTools: [],
       shutdownTimeoutMs: DEFAULT_SHUTDOWN_TIMEOUT_MS,
       db: {
         connectTimeoutMs: 5_000,
@@ -41,6 +42,18 @@ describe("workerConfigFromEnv", () => {
         queryTimeoutMs: 11_000,
       },
     });
+  });
+
+  it("collects subagent tools from ENGINE_SUBAGENT_TOOL and ENGINE_SUBAGENT_TOOLS, deduplicated", () => {
+    const c = workerConfigFromEnv({
+      ...BASE,
+      ENGINE_SUBAGENT_TOOL: "delegate",
+      ENGINE_SUBAGENT_TOOLS: "research_worker, reflector,delegate,",
+    });
+    expect(c.subagentTools).toEqual(["delegate", "research_worker", "reflector"]);
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_SUBAGENT_TOOLS: "bad name" })).toThrow(
+      WorkerConfigError,
+    );
   });
 
   it("derives database timeouts below a short lease TTL", () => {

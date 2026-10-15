@@ -20,6 +20,7 @@
  * | `ENGINE_MAX_TOKENS` | `8192` | reply token budget per request |
  * | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle (KTD11) |
  * | `ENGINE_SUBAGENT_TOOL` | none | register a subagent tool under this name |
+ * | `ENGINE_SUBAGENT_TOOLS` | none | comma-separated subagent tool names to register (with `ENGINE_SUBAGENT_TOOL`, deduplicated) |
  * | `ENGINE_SHUTDOWN_TIMEOUT_MS` | `10000` | bound on closing the engine at shutdown |
  * | `ENGINE_DB_CONNECT_TIMEOUT_MS` | min(5000, ttl/3) | new-connection timeout |
  * | `ENGINE_DB_STATEMENT_TIMEOUT_MS` | min(10000, 2·ttl/3) | server `statement_timeout` |
@@ -62,6 +63,8 @@ export interface WorkerConfig {
   maxTokens: number;
   progressIntervalMs: number;
   subagentTool: string | null;
+  /** Every subagent tool to register: `ENGINE_SUBAGENT_TOOL` then `ENGINE_SUBAGENT_TOOLS`, deduplicated. */
+  subagentTools: string[];
   /** Bound on closing the engine and releasing the lease at shutdown. */
   shutdownTimeoutMs: number;
   db: WorkerDbTimeouts;
@@ -103,6 +106,25 @@ export class WorkerConfigError extends Error {
 function text(env: WorkerEnv, name: string): string | null {
   const v = env[name]?.trim();
   return v ? v : null;
+}
+
+const SUBAGENT_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+function subagentTools(env: WorkerEnv): string[] {
+  const names = [
+    text(env, "ENGINE_SUBAGENT_TOOL"),
+    ...(text(env, "ENGINE_SUBAGENT_TOOLS")?.split(",") ?? []),
+  ]
+    .map((n) => n?.trim() ?? "")
+    .filter((n) => n !== "");
+  for (const name of names) {
+    if (!SUBAGENT_TOOL_NAME.test(name)) {
+      throw new WorkerConfigError(
+        `ENGINE_SUBAGENT_TOOL(S) must be tool names (letters, digits, _ and -), got ${JSON.stringify(name)}`,
+      );
+    }
+  }
+  return [...new Set(names)];
 }
 
 function required(env: WorkerEnv, name: string): string {
@@ -197,6 +219,7 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
       0,
     ),
     subagentTool: text(env, "ENGINE_SUBAGENT_TOOL"),
+    subagentTools: subagentTools(env),
     shutdownTimeoutMs: integer(env, "ENGINE_SHUTDOWN_TIMEOUT_MS", DEFAULT_SHUTDOWN_TIMEOUT_MS, 1),
     db,
   };
