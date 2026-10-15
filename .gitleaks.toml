@@ -20,6 +20,12 @@ paths = [
   '''backend/app/tests/skills/test_security\.py''',
   '''backend/tests/test_harness\.py''',
 
+  # Backend and engine test suites use synthetic service tokens, fake API
+  # keys and fake PEM blocks to exercise auth, redaction and gateway logic.
+  # Production code under backend/app and engine/src stays fully scanned.
+  '''^backend/tests/''',
+  '''^engine/test/''',
+
   # User-facing API docs that show example bearer tokens / API keys
   # (placeholders ending with "...").
   '''frontend/content/docs/api-reference/authentication\.mdx''',
