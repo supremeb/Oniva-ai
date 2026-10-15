@@ -13,6 +13,7 @@
  */
 
 import { type ApprovalsState, approvalsDoc } from "../agent/approvals.js";
+import { COMPACTION_TASK_KIND, type CompactionState, compactionDoc } from "../agent/compaction.js";
 import { type InboxState, inboxDoc } from "../agent/inbox.js";
 import { type LiveState, liveDoc, type ToolOutputState, toolOutputDoc } from "../agent/progress.js";
 import { type AgentConfig, agentConfigDoc } from "../agent/prompt.js";
@@ -34,6 +35,46 @@ export interface ConversationView {
   agent: AgentConfig;
   /** Partial output by tool task id; each carries the `toolCallId` / `toolName` it belongs to. */
   toolOutput: { [toolTaskId: string]: ToolOutputState };
+  /** Whether a context compaction is in flight (derived from the `agent.compaction` document). */
+  compaction: CompactionView;
+}
+
+/** A conversation's compaction as a client sees it; no task ids or summary text. */
+export interface CompactionView {
+  running: boolean;
+  /** Why it started: `background`, `threshold` or `overflow`. Only while running. */
+  cause?: string;
+  /** ISO time the running compaction started. Only while running. */
+  startedAt?: string;
+}
+
+const IDLE_COMPACTION: CompactionView = Object.freeze({ running: false });
+
+/** What the view needs of a compaction task, by task id. */
+interface CompactionTaskInfo {
+  cause?: string;
+  startedAt: string;
+}
+
+function compactionInfo(t: { createdAt: number; input: unknown }): CompactionTaskInfo {
+  const cause = (t.input as { cause?: unknown } | null)?.cause;
+  return {
+    ...(typeof cause === "string" ? { cause } : {}),
+    startedAt: new Date(t.createdAt).toISOString(),
+  };
+}
+
+function compactionView(
+  doc: CompactionState,
+  tasks: ReadonlyMap<string, CompactionTaskInfo>,
+): CompactionView {
+  if (doc.running === null) return { ...IDLE_COMPACTION };
+  const info = tasks.get(doc.running);
+  return {
+    running: true,
+    ...(info?.cause !== undefined ? { cause: info.cause } : {}),
+    ...(info ? { startedAt: info.startedAt } : {}),
+  };
 }
 
 type DocKey = "live" | "inbox" | "approvals" | "usage" | "agent";
@@ -61,6 +102,8 @@ export interface ViewState {
   view: ConversationView;
   /** Tool tasks of the conversation (whose output belongs to the view). */
   toolTasks: Set<string>;
+  /** Compaction tasks of the conversation (their cause and start time). */
+  compactionTasks: Map<string, CompactionTaskInfo>;
 }
 
 function entryOf(e: EntryRecord): EntryRecord {
@@ -88,11 +131,15 @@ export async function loadViewState(session: Session, conversationId: string): P
     if (cursor === null) break;
   }
   const toolTasks = new Set<string>();
+  const compactionTasks = new Map<string, CompactionTaskInfo>();
   const toolOutput: ConversationView["toolOutput"] = {};
   for (let cursor: string | null = null; ; ) {
     const page = await reader.listTasks({ conversationId, limit: MAX_PAGE_LIMIT, cursor });
     const ids = page.items.filter((t) => t.kind === TOOL_TASK_KIND).map((t) => t.id);
     // One batched read per page of tasks (a page holds at most MAX_PAGE_LIMIT).
+    for (const t of page.items) {
+      if (t.kind === COMPACTION_TASK_KIND) compactionTasks.set(t.id, compactionInfo(t));
+    }
     const docs = ids.length === 0 ? [] : await reader.getDocuments(toolOutputDoc.kind, ids);
     ids.forEach((id, i) => {
       toolTasks.add(id);
@@ -110,8 +157,12 @@ export async function loadViewState(session: Session, conversationId: string): P
     usage: await session.document(usageDoc, conversationId),
     agent: await session.document(agentConfigDoc, conversationId),
     toolOutput,
+    compaction: compactionView(
+      await session.document(compactionDoc, conversationId),
+      compactionTasks,
+    ),
   };
-  return { view, toolTasks };
+  return { view, toolTasks, compactionTasks };
 }
 
 /** Read a conversation's view from committed state. Throws `UnknownConversation`. */
@@ -132,11 +183,13 @@ export function applyCommitToView(
   conversationId: string,
   event: CommitEvent,
 ): JsonPatchOp[] {
-  const { view, toolTasks } = state;
+  const { view, toolTasks, compactionTasks } = state;
   const ops: JsonPatchOp[] = [];
   for (const task of event.batch.createTasks ?? []) {
     if (task.conversationId === conversationId && task.kind === TOOL_TASK_KIND) {
       toolTasks.add(task.id);
+    } else if (task.conversationId === conversationId && task.kind === COMPACTION_TASK_KIND) {
+      compactionTasks.set(task.id, compactionInfo(task));
     }
   }
   for (const entry of event.batch.appendEntries ?? []) {
@@ -154,6 +207,16 @@ export function applyCommitToView(
     if (key !== undefined && change.scopeId === conversationId) {
       ops.push(...diffJson(view[key] as JsonValue, change.after, `/${key}`));
       (view as unknown as Record<string, JsonValue>)[key] = structuredClone(change.after);
+    } else if (change.kind === compactionDoc.kind && change.scopeId === conversationId) {
+      const next = compactionView(change.after as unknown as CompactionState, compactionTasks);
+      ops.push(
+        ...diffJson(
+          view.compaction as unknown as JsonValue,
+          next as unknown as JsonValue,
+          "/compaction",
+        ),
+      );
+      view.compaction = next;
     } else if (change.kind === toolOutputDoc.kind && toolTasks.has(change.scopeId)) {
       const path = `/toolOutput/${escapePointerToken(change.scopeId)}`;
       const current = Object.hasOwn(view.toolOutput, change.scopeId)

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { COMPACTION_TASK_KIND, compactionDoc } from "../../src/agent/compaction.js";
 import { toolOutputDoc } from "../../src/agent/progress.js";
 import { TOOL_TASK_KIND } from "../../src/agent/tool-task.js";
 import { newId } from "../../src/core/ids.js";
+import type { CommitEvent } from "../../src/session/publish.js";
 import type { Session } from "../../src/session/session.js";
 import { MemoryStorageProvider } from "../../src/storage/memory.js";
 import type { SessionStorage, TaskRecord } from "../../src/storage/types.js";
-import { loadViewState } from "../../src/watch/view.js";
+import { applyCommitToView, loadViewState } from "../../src/watch/view.js";
 
 const task = (conversationId: string, kind: string): TaskRecord => ({
   id: newId("task"),
@@ -102,5 +104,120 @@ describe("view load", () => {
       toolName: "work",
     });
     expect([...state.toolTasks].sort()).toEqual([...tools.map((t) => t.id), silent.id].sort());
+  });
+});
+
+describe("view compaction", () => {
+  const started = 1_700_000_000_000;
+
+  async function conversation() {
+    const storage = await new MemoryStorageProvider().open("sess-compaction");
+    const conversationId = newId("conversation");
+    await storage.commit(
+      {
+        createConversations: [
+          { id: conversationId, tenantId: "t", projectId: "p", ownerTaskId: null, createdAt: 1 },
+        ],
+      },
+      null,
+    );
+    return { storage, conversationId };
+  }
+
+  const event = (
+    conversationId: string,
+    running: string | null,
+    createTasks: TaskRecord[] = [],
+  ): CommitEvent => ({
+    sessionId: "sess-compaction",
+    seq: 1,
+    batch: { createTasks },
+    documents: [
+      {
+        kind: compactionDoc.kind,
+        scopeId: conversationId,
+        before: null,
+        after: { running, ready: null, backgroundFailedAt: null },
+      },
+    ],
+  });
+
+  it("is idle when no compaction document exists", async () => {
+    const { storage, conversationId } = await conversation();
+    const { session } = sessionOver(storage, true);
+    const state = await loadViewState(session, conversationId);
+    expect(state.view.compaction).toEqual({ running: false });
+  });
+
+  it("loads a running compaction with its cause and start, without task ids", async () => {
+    const { storage, conversationId } = await conversation();
+    const t = {
+      ...task(conversationId, COMPACTION_TASK_KIND),
+      input: { runId: "r", round: 1, cause: "threshold" },
+      createdAt: started,
+    };
+    await storage.commit(
+      {
+        createTasks: [t],
+        putDocuments: [
+          {
+            kind: compactionDoc.kind,
+            scopeId: conversationId,
+            data: { running: t.id, ready: null, backgroundFailedAt: null },
+            updatedAt: 2,
+          },
+        ],
+      },
+      null,
+    );
+    const session = {
+      ...sessionOver(storage, true).session,
+      document: async (def: { kind: string; initial: unknown }, scopeId: string) =>
+        (await storage.getDocument(def.kind, scopeId))?.data ?? structuredClone(def.initial),
+    } as unknown as Session;
+    const state = await loadViewState(session, conversationId);
+    expect(state.view.compaction).toEqual({
+      running: true,
+      cause: "threshold",
+      startedAt: new Date(started).toISOString(),
+    });
+    expect(JSON.stringify(state.view.compaction)).not.toContain(t.id);
+  });
+
+  it("patches when a compaction starts and clears when it lands", async () => {
+    const { storage, conversationId } = await conversation();
+    const { session } = sessionOver(storage, true);
+    const state = await loadViewState(session, conversationId);
+    const t = {
+      ...task(conversationId, COMPACTION_TASK_KIND),
+      input: { runId: "r", round: 1, cause: "background" },
+      createdAt: started,
+    };
+
+    const start = applyCommitToView(state, conversationId, event(conversationId, t.id, [t]));
+    expect(state.view.compaction).toEqual({
+      running: true,
+      cause: "background",
+      startedAt: new Date(started).toISOString(),
+    });
+    expect(start.length).toBeGreaterThan(0);
+    expect(start.every((op) => op.path.startsWith("/compaction"))).toBe(true);
+
+    // A commit that leaves the compaction running changes nothing.
+    expect(applyCommitToView(state, conversationId, event(conversationId, t.id))).toEqual([]);
+
+    const land = applyCommitToView(state, conversationId, event(conversationId, null));
+    expect(state.view.compaction).toEqual({ running: false });
+    expect(land.length).toBeGreaterThan(0);
+    expect(land.every((op) => op.path.startsWith("/compaction"))).toBe(true);
+  });
+
+  it("ignores another conversation's compaction", async () => {
+    const { storage, conversationId } = await conversation();
+    const { session } = sessionOver(storage, true);
+    const state = await loadViewState(session, conversationId);
+    const ops = applyCommitToView(state, conversationId, event("other", "task-x"));
+    expect(ops).toEqual([]);
+    expect(state.view.compaction).toEqual({ running: false });
   });
 });
