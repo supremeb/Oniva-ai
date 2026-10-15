@@ -138,7 +138,11 @@ export class Conversation {
         input: toSubmissionInput(record),
       };
       if (record.type === "write") {
-        const payload: UserPayload = { submissionId, content: record.content };
+        const payload: UserPayload = {
+          submissionId,
+          content: record.content,
+          requestId: base.requestId,
+        };
         const entry = tx.appendEntry({
           conversationId: this.id,
           taskId: null,
@@ -170,7 +174,7 @@ export class Conversation {
       }
       const runId = tx.mintId("task");
       tx.createSubmission({ ...base, status: "active", result: null, taskId: runId });
-      appendUserEntry(tx, this.id, submissionId, record.content);
+      appendUserEntry(tx, this.id, submissionId, record.content, base.requestId);
       startRun(tx, ops, this.core.generation, this.id, submissionId, runId);
       return submissionId;
     });

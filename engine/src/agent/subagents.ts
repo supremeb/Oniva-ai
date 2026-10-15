@@ -254,7 +254,7 @@ function spawnChild(
       result: null,
       taskId: runId,
     });
-    appendUserEntry(tx, child.id, submissionId, prompt);
+    appendUserEntry(tx, child.id, submissionId, prompt, `subagent:${task.id}`);
     startRun(tx, ops, generation, child.id, submissionId, runId);
     return waiting({
       on: [runId],

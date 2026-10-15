@@ -62,6 +62,23 @@ const agentConfigSchema = z.object({
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 
+/**
+ * Validate a partial agent config from an untrusted caller. Unknown fields
+ * and wrongly typed values fail; the result holds only the given fields.
+ */
+export function parseAgentConfigInput(
+  value: unknown,
+): { ok: true; value: AgentConfigInput } | { ok: false; reason: string } {
+  const parsed = agentConfigSchema.partial().strict().safeParse(value);
+  if (parsed.success) return { ok: true, value: parsed.data as AgentConfigInput };
+  const issue = parsed.error.issues[0];
+  const path = issue?.path.join(".") ?? "";
+  return {
+    ok: false,
+    reason: `${path === "" ? "agent" : `agent.${path}`}: ${issue?.message ?? "invalid"}`,
+  };
+}
+
 /** Fields a caller may give when creating or reconfiguring a conversation. */
 export type AgentConfigInput = Partial<AgentConfig>;
 

@@ -78,8 +78,10 @@ export function appendUserEntry(
   conversationId: string,
   submissionId: string,
   content: UserPayload["content"],
+  requestId?: string,
 ): string {
-  const payload: UserPayload = { submissionId, content };
+  const payload: UserPayload =
+    requestId === undefined ? { submissionId, content } : { submissionId, content, requestId };
   return tx.appendEntry({
     conversationId,
     taskId: null,
@@ -136,7 +138,7 @@ export class Inbox {
       const sub = this.#pending(head.submissionId);
       if (!sub) continue;
       const runId = this.tx.mintId("task");
-      appendUserEntry(this.tx, this.conversationId, sub.id, storedContent(sub));
+      appendUserEntry(this.tx, this.conversationId, sub.id, storedContent(sub), sub.requestId);
       this.#update(sub, { status: "active", taskId: runId });
       startRun(this.tx, ops, generation, this.conversationId, sub.id, runId);
       return sub.id;
@@ -159,7 +161,7 @@ export class Inbox {
     for (const s of steers) {
       const sub = this.#pending(s.submissionId);
       if (!sub) continue;
-      appendUserEntry(this.tx, this.conversationId, sub.id, storedContent(sub));
+      appendUserEntry(this.tx, this.conversationId, sub.id, storedContent(sub), sub.requestId);
       this.#update(sub, { status: "active", taskId: nextTaskId });
       value.placed.push({ submissionId: sub.id, runId });
       placed.push(sub.id);

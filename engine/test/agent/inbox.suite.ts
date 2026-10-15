@@ -141,6 +141,7 @@ export function defineInboxSuite(backend: AgentBackend): void {
       expect(payload(entries[4] as EntryRecord)).toEqual({
         submissionId: steer.id,
         content: "use blue",
+        requestId: steer.id,
       });
       const runIds = entries.filter((e) => e.kind === "assistant").map((e) => payload(e).runId);
       expect(new Set(runIds).size).toBe(1);

@@ -40,6 +40,12 @@ export const ENTRY_KINDS = Object.freeze({
 export type UserPayload = {
   submissionId: string;
   content: string | TextContent[];
+  /**
+   * The submission's `requestId` (the caller's id, or the submission id when
+   * none was given), so a client can match its optimistic message to this
+   * entry. Absent on entries written before this field existed.
+   */
+  requestId?: string;
 };
 
 export type AssistantPayload = {

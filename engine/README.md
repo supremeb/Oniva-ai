@@ -69,9 +69,12 @@ routes also need `X-Oniva-Tenant` / `X-Oniva-Project` matching the conversation.
 | `GET /v1/health` | `{ status, sessionId, ownerId, owner }` (no auth) |
 | `POST /v1/conversations` | create (`{ id?, agent? }`) → 201 |
 | `POST /v1/conversations/:id/submissions` | submit (`{ text \| content, requestId?, whenBusy?, type? }`; `Idempotency-Key` header works too) → 202 |
+| `PUT /v1/conversations/:id/agent` | partial agent config (`systemPrompt`, `tools`, `model`, `thinking`, `depth`, `metadata`, `compaction`); unknown or mistyped fields → 400 and nothing committed; applies from the next model request and arrives at watchers as a patch to `/agent` → 200 `{ conversationId, agent }` |
 | `GET /v1/conversations/:id/watch` | SSE watch stream (`id:` is the cursor; resume with `Last-Event-ID` or `?cursor=`) |
 | `POST /v1/conversations/:id/abort` | abort queued and running work; answers once the run is idle |
 | `POST /v1/conversations/:id/approvals/:toolTaskId/decision` | `{ decision: "approve" \| "deny", note? }`, principal in `X-Oniva-Principal` |
+
+A `user` entry's payload carries `requestId` (the caller's id, or the submission id when none was given) next to `submissionId`, so a client can match its optimistic message to the entry.
 
 A worker that does not hold the session lease answers `409 { error: "not_owner", ownerId }`.
 

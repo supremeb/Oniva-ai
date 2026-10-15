@@ -17,12 +17,16 @@
  * - `POST /v1/conversations/:id/approvals/:toolTaskId/decision` decides an
  *   approval. Body: `{ decision: "approve" | "deny", note? }`; the principal
  *   comes from `X-Oniva-Principal`. → 200
+ * - `PUT /v1/conversations/:id/agent` updates the agent configuration. Body:
+ *   a partial agent config (unknown or mistyped fields → 400, nothing
+ *   committed); it applies from the next model request and reaches watchers
+ *   as a patch to `/agent`. → 200 `{ conversationId, agent }`
  * - `GET /v1/health` (no auth).
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ApprovalDecisionKind } from "../agent/approvals.js";
 import type { Harness } from "../agent/harness.js";
-import type { AgentConfigInput } from "../agent/prompt.js";
+import { type AgentConfigInput, parseAgentConfigInput } from "../agent/prompt.js";
 import { normalizeSubmit, type SubmitInput } from "../agent/submission.js";
 import { StorageRequestError } from "../core/errors.js";
 import type { JsonObject } from "../core/json.js";
@@ -66,7 +70,7 @@ export interface RouteContext {
 export type RouteResult = { status: number; body: JsonObject } | null;
 
 export interface Route {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT";
   /** Path segments; `:name` captures one. */
   pattern: string;
   auth: boolean;
@@ -186,6 +190,22 @@ export const ROUTES: readonly Route[] = Object.freeze([
           requestId: record?.requestId ?? null,
           status: record?.status ?? null,
         },
+      };
+    },
+  },
+  {
+    method: "PUT",
+    pattern: "/v1/conversations/:id/agent",
+    auth: true,
+    async handle(ctx) {
+      const body = await ctx.readJson();
+      const conv = await ctx.conversation();
+      const parsed = parseAgentConfigInput(body);
+      if (!parsed.ok) throw bad(parsed.reason);
+      const agent = await ctx.harness.conversation(conv.id).configure(parsed.value);
+      return {
+        status: 200,
+        body: { conversationId: conv.id, agent: agent as unknown as JsonObject },
       };
     },
   },
