@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState, useCallback } from 'react';
+import { memo, useState, useCallback, type ReactNode } from 'react';
 import {
   CheckCircle,
   CircleNotch,
@@ -16,10 +16,20 @@ import type { EngineWorkerState } from '@/lib/types/deep-work';
 
 interface WorkerActivityCardProps {
   worker: EngineWorkerState;
+  /** Extra expanded content (the engine card's read-only transcript). Called only while expanded. */
+  renderDetail?: () => ReactNode;
 }
+
+const STATUS_TEXT: Record<EngineWorkerState['status'], string> = {
+  idle: 'Queued',
+  researching: 'Researching',
+  complete: 'Done',
+  error: 'Failed',
+};
 
 export const WorkerActivityCard = memo(function WorkerActivityCard({
   worker,
+  renderDetail,
 }: WorkerActivityCardProps) {
   const [expanded, setExpanded] = useState(false);
   const toggleExpand = useCallback(() => setExpanded((v) => !v), []);
@@ -42,6 +52,8 @@ export const WorkerActivityCard = memo(function WorkerActivityCard({
 
   return (
     <div
+      data-testid="worker-row"
+      data-status={worker.status}
       className={cn(
         'rounded-lg border transition-colors',
         isError
@@ -54,6 +66,7 @@ export const WorkerActivityCard = memo(function WorkerActivityCard({
       {/* ── Header row (always visible, clickable) ── */}
       <button
         onClick={toggleExpand}
+        aria-expanded={expanded}
         className="w-full flex items-center gap-2 px-3 py-2 text-left"
       >
         {/* Caret */}
@@ -69,10 +82,12 @@ export const WorkerActivityCard = memo(function WorkerActivityCard({
         ) : isComplete ? (
           <CheckCircle className="h-3.5 w-3.5 text-neutral-500 flex-shrink-0" weight="fill" />
         ) : isActive ? (
-          <CircleNotch className="h-3.5 w-3.5 text-blue-500 flex-shrink-0 animate-spin" />
+          <CircleNotch className="h-3.5 w-3.5 text-blue-500 flex-shrink-0 animate-spin motion-reduce:animate-none" />
         ) : (
           <MagnifyingGlass className="h-3.5 w-3.5 text-neutral-400 flex-shrink-0" />
         )}
+
+        <span className="sr-only">{STATUS_TEXT[worker.status]}: </span>
 
         {/* Sub-query text */}
         <span
@@ -87,7 +102,7 @@ export const WorkerActivityCard = memo(function WorkerActivityCard({
         {/* Right side: shimmer action (active) or summary (complete) or error */}
         <span className="ml-auto flex-shrink-0 max-w-[45%] truncate text-right">
           {isActive && latestAction ? (
-            <span className="text-xs text-blue-500/80 animate-pulse">
+            <span className="text-xs text-blue-500/80 animate-pulse motion-reduce:animate-none">
               {latestAction}
             </span>
           ) : isError && worker.error ? (
@@ -113,7 +128,7 @@ export const WorkerActivityCard = memo(function WorkerActivityCard({
                 return (
                   <li key={i} className="flex items-center gap-1.5">
                     {isCurrent ? (
-                      <div className="h-1 w-1 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
+                      <div className="h-1 w-1 rounded-full bg-blue-400 animate-pulse motion-reduce:animate-none flex-shrink-0" />
                     ) : (
                       <CheckCircle className="h-2.5 w-2.5 text-neutral-400 flex-shrink-0" weight="fill" />
                     )}
@@ -155,8 +170,10 @@ export const WorkerActivityCard = memo(function WorkerActivityCard({
             </ul>
           )}
 
+          {renderDetail?.()}
+
           {/* Fallback: no actions, no findings, no error */}
-          {!worker.recentActions?.length && !worker.completionSummary?.findings?.length && !worker.error && (
+          {!renderDetail && !worker.recentActions?.length && !worker.completionSummary?.findings?.length && !worker.error && (
             <p className="text-xs text-neutral-400 mt-1.5 italic">Waiting...</p>
           )}
         </div>

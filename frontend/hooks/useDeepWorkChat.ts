@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDeepWorkStore, selectIsDeepWorkActive, selectCurrentActivity, selectConversationId } from '@/lib/stores/deep-work';
 import { useChatSessionsStore } from '@/lib/stores/chat-sessions';
 import { getDeepWorkFullState } from '@/lib/api/deep-work';
+import { isEngineRuntimeSession, useEngineSessionStore } from '@/components/deep-work/engineSession';
 
 export function useDeepWorkChat(currentSessionId: string | null) {
     const queryClient = useQueryClient();
@@ -45,6 +46,25 @@ export function useDeepWorkChat(currentSessionId: string | null) {
     useEffect(() => {
         if (!currentSessionId || !fullState) return;
 
+        // Engine-runtime sessions: no hydration and no EventSource. The card reads the
+        // run from its watch stream; only the ids are needed. Not gated on the flag:
+        // existing engine runs stay readable after a tenant switches back (R3).
+        if (isEngineRuntimeSession(fullState)) {
+            const prev = useEngineSessionStore.getState().session;
+            if (!prev || prev.sessionId !== fullState.session_id || prev.chatId !== currentSessionId) {
+                useEngineSessionStore.getState().setSession({
+                    sessionId: fullState.session_id,
+                    conversationId: fullState.conversation_id,
+                    chatId: currentSessionId,
+                    status: fullState.status,
+                    error: fullState.error ?? null,
+                    planTitle: fullState.plan?.title ?? null,
+                });
+            }
+            return;
+        }
+        if (useEngineSessionStore.getState().session) useEngineSessionStore.getState().setSession(null);
+
         const store = useDeepWorkStore.getState();
 
         // If SSE is already connected for this conversation, it's the source of truth
@@ -76,11 +96,18 @@ export function useDeepWorkChat(currentSessionId: string | null) {
             if (store.eventSource) {
                 store.disconnectEvents();
             }
+            useEngineSessionStore.getState().setSession(null);
         };
     }, [currentSessionId]);
 
+    // Engine session for this chat, if any.
+    const engineSession = useEngineSessionStore((s) => s.session);
+    const engineTerminal = useEngineSessionStore((s) => s.terminal);
+    const isEngineForThisChat = engineSession != null && engineSession.chatId === currentSessionId;
+
     // Derived state: only show deep work UI in the chat session that spawned it
-    const isDeepWorkForThisChat = deepWorkConversationId != null && deepWorkConversationId === currentSessionId;
+    const isDeepWorkForThisChat =
+        isEngineForThisChat || (deepWorkConversationId != null && deepWorkConversationId === currentSessionId);
     const isAwaitingDeepWorkInput = deepWorkStatus === 'awaiting_input' && isDeepWorkForThisChat;
 
     // Refresh sidebar when Deep Work completes
@@ -90,9 +117,26 @@ export function useDeepWorkChat(currentSessionId: string | null) {
         }
     }, [deepWorkStatus, queryClient]);
 
+    const [resultMessage, setResultMessage] = useState<{ role: 'assistant'; content: string } | null>(null);
+
+    // Engine sessions: the run's own terminal state (observed live by the card) drives the
+    // result message, once per session. A rejoin of a finished run never reports a terminal
+    // transition, so nothing is duplicated and no message text is inspected.
+    const engineSavedRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!engineTerminal || !isEngineForThisChat || !engineSession || !currentSessionId) return;
+        if (engineTerminal.sessionId !== engineSession.sessionId) return;
+        queryClient.invalidateQueries({ queryKey: ['chat-sessions'] });
+        if (engineTerminal.status !== 'completed') return;
+        if (engineSavedRef.current === engineSession.sessionId) return;
+        engineSavedRef.current = engineSession.sessionId;
+        const content = `Research on "${engineSession.planTitle || 'your query'}" is complete. See the report below.`;
+        setResultMessage({ role: 'assistant', content });
+        addMessageToSession(currentSessionId, { role: 'assistant', content });
+    }, [engineTerminal, engineSession, isEngineForThisChat, currentSessionId, queryClient, addMessageToSession]);
+
     // Save deep work results as an assistant chat message on completion
     const deepWorkResultSavedRef = useRef<string | null>(null);
-    const [resultMessage, setResultMessage] = useState<{ role: 'assistant'; content: string } | null>(null);
     useEffect(() => {
         if (deepWorkStatus !== 'completed' || !deepWorkSummary || !isDeepWorkForThisChat) return;
         const sessionId = currentSessionId;
@@ -129,6 +173,7 @@ export function useDeepWorkChat(currentSessionId: string | null) {
         isAwaitingDeepWorkInput,
         currentActivity,
         resultMessage,
+        engineSession: isEngineForThisChat ? engineSession : null,
 
         // Actions
         deepWorkRespondToQuestion,

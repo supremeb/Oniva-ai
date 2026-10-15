@@ -29,6 +29,8 @@ import type { MessagePart } from '@/lib/models';
 import type { EngineWorkerState } from '@/lib/types/deep-work';
 import { FilePreview } from '@/components/chat/shared/data/FilePreview';
 import ReactMarkdown from 'react-markdown';
+import { DeepWorkEngineCard } from './DeepWorkEngineCard';
+import { useEngineSessionStore } from './engineSession';
 
 /**
  * DeepWorkCard — unified Perplexity-style card for deep work.
@@ -37,7 +39,7 @@ import ReactMarkdown from 'react-markdown';
  *   planning → awaiting_approval → executing → completed
  *                                            → error
  */
-export const DeepWorkCard = memo(function DeepWorkCard() {
+const DeepWorkLegacyCard = memo(function DeepWorkLegacyCard() {
   const {
     status,
     plan,
@@ -455,4 +457,14 @@ export const DeepWorkCard = memo(function DeepWorkCard() {
       )}
     </div>
   );
+});
+
+/**
+ * Engine-runtime sessions (published by `useDeepWorkChat`) render from the
+ * watch view; everything else keeps the legacy store-driven card.
+ */
+export const DeepWorkCard = memo(function DeepWorkCard() {
+  const engineSession = useEngineSessionStore((s) => s.session);
+  if (engineSession) return <DeepWorkEngineCard session={engineSession} />;
+  return <DeepWorkLegacyCard />;
 });
