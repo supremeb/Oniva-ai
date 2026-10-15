@@ -1,0 +1,226 @@
+{
+  "legacy": "chat_tool_call",
+  "view": {
+    "entries": [
+      {
+        "id": "ent_<id-1>",
+        "conversationId": "conv_<id-2>",
+        "taskId": null,
+        "kind": "user",
+        "payload": {
+          "submissionId": "subm_<id-3>",
+          "content": "What is the contract?",
+          "requestId": "req-1"
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-4>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-5>",
+        "kind": "system",
+        "payload": {
+          "text": "You are helpful.",
+          "tools": [
+            "web_search",
+            "save_report"
+          ],
+          "fingerprint": "88f4dceb2649aa16a0d065ca2bd2ccc402e8102960bfa044bde5bd006faa58ff"
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-6>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-5>",
+        "kind": "assistant",
+        "payload": {
+          "runId": "task_<id-5>",
+          "round": 0,
+          "message": {
+            "role": "assistant",
+            "provider": "fake",
+            "model": "fake-1",
+            "blocks": [
+              {
+                "type": "thinking",
+                "thinking": "Need to search the web. Then write a report."
+              },
+              {
+                "type": "tool_call",
+                "id": "call_search_1",
+                "name": "web_search",
+                "arguments": {
+                  "query": "oniva contract"
+                }
+              }
+            ],
+            "stopReason": "tool_use"
+          },
+          "usage": {
+            "inputTokens": 10,
+            "outputTokens": 20,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-7>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-8>",
+        "kind": "tool_result",
+        "payload": {
+          "runId": "task_<id-5>",
+          "toolCallId": "call_search_1",
+          "toolName": "web_search",
+          "status": "ok",
+          "content": "{\"results\":[{\"title\":\"Oniva\",\"url\":\"https://example.com/oniva\",\"snippet\":\"a snippet\"}]}",
+          "isError": false,
+          "details": null,
+          "terminate": false,
+          "attempts": 1
+        },
+        "createdAt": 1001200
+      },
+      {
+        "id": "ent_<id-9>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-10>",
+        "kind": "assistant",
+        "payload": {
+          "runId": "task_<id-5>",
+          "round": 1,
+          "message": {
+            "role": "assistant",
+            "provider": "fake",
+            "model": "fake-1",
+            "blocks": [
+              {
+                "type": "tool_call",
+                "id": "call_report_1",
+                "name": "save_report",
+                "arguments": {
+                  "filename": "report.md",
+                  "report_content": "# Report"
+                }
+              }
+            ],
+            "stopReason": "tool_use"
+          },
+          "usage": {
+            "inputTokens": 51,
+            "outputTokens": 16,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        "createdAt": 1001200
+      },
+      {
+        "id": "ent_<id-11>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-12>",
+        "kind": "tool_result",
+        "payload": {
+          "runId": "task_<id-5>",
+          "toolCallId": "call_report_1",
+          "toolName": "save_report",
+          "status": "ok",
+          "content": "{\"success\":true,\"filename\":\"report.md\",\"size\":8,\"download_url\":\"/files/report.md\"}",
+          "isError": false,
+          "details": null,
+          "terminate": false,
+          "attempts": 1
+        },
+        "createdAt": 1001500
+      },
+      {
+        "id": "ent_<id-13>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-14>",
+        "kind": "assistant",
+        "payload": {
+          "runId": "task_<id-5>",
+          "round": 2,
+          "message": {
+            "role": "assistant",
+            "provider": "fake",
+            "model": "fake-1",
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Done: see the report."
+              }
+            ],
+            "stopReason": "end_turn"
+          },
+          "usage": {
+            "inputTokens": 88,
+            "outputTokens": 6,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        "createdAt": 1001500
+      }
+    ],
+    "live": {
+      "runId": null,
+      "taskId": null,
+      "message": null
+    },
+    "inbox": {
+      "queue": [],
+      "placed": []
+    },
+    "approvals": {
+      "items": []
+    },
+    "usage": {
+      "requests": 3,
+      "total": {
+        "requests": 3,
+        "inputTokens": 149,
+        "outputTokens": 42,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "costUsd": null
+      },
+      "byModel": {
+        "fake/fake-1": {
+          "requests": 3,
+          "inputTokens": 149,
+          "outputTokens": 42,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "costUsd": null
+        }
+      },
+      "byPurpose": {
+        "generation": {
+          "requests": 3,
+          "inputTokens": 149,
+          "outputTokens": 42,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "costUsd": null
+        }
+      }
+    },
+    "agent": {
+      "systemPrompt": "You are helpful.",
+      "tools": [
+        "web_search",
+        "save_report"
+      ],
+      "model": null,
+      "thinking": null,
+      "depth": 0,
+      "metadata": {},
+      "compaction": null
+    },
+    "toolOutput": {}
+  }
+}

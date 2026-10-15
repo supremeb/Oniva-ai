@@ -169,10 +169,39 @@ export async function loadConversation(
   const rec = await deps.session.reader.getConversation(conversationId);
   if (!rec) throw new Error(`unknown conversation ${conversationId}`);
   const agent = await deps.session.document(agentConfigDoc, conversationId);
+  const rootId = await rootConversationId(deps.session, rec);
   return {
-    conversation: { id: rec.id, tenantId: rec.tenantId, projectId: rec.projectId },
+    conversation: {
+      id: rec.id,
+      tenantId: rec.tenantId,
+      projectId: rec.projectId,
+      ...(rootId !== rec.id ? { rootId } : {}),
+    },
     agent,
   };
+}
+
+/**
+ * The top-level conversation above `rec`: follow each owning task to its
+ * conversation until a conversation has no owner. A broken or cyclic chain
+ * stops at the last conversation reached.
+ */
+async function rootConversationId(
+  session: AgentDeps["session"],
+  rec: { id: string; ownerTaskId: string | null },
+): Promise<string> {
+  let id = rec.id;
+  let owner = rec.ownerTaskId;
+  const seen = new Set([id]);
+  while (owner !== null) {
+    const task = await session.reader.getTask(owner);
+    if (!task || seen.has(task.conversationId)) break;
+    id = task.conversationId;
+    seen.add(id);
+    const parent = await session.reader.getConversation(id);
+    owner = parent ? parent.ownerTaskId : null;
+  }
+  return id;
 }
 
 export async function listAllEntries(
@@ -507,7 +536,13 @@ export function toolTaskDefinition(
             return recover(task, rt, ctx, tool, parsed.data, conversation, stored);
           attempt = stored.attempt + 1;
           await rt.write(async (tx) => {
-            (await tx.doc(toolOutputDoc, task.id)).set({ text: "", truncated: false, attempt });
+            (await tx.doc(toolOutputDoc, task.id)).set({
+              text: "",
+              truncated: false,
+              attempt,
+              toolCallId: call.id,
+              toolName: call.name,
+            });
           });
         }
         return run(task, rt, ctx, tool, parsed.data, args, conversation, agent, attempt);
@@ -573,7 +608,13 @@ export function toolTaskDefinition(
     attempt: number,
   ): Promise<Committed> {
     const { call, runId } = task.input;
-    let output: ToolOutputState = { text: "", truncated: false, attempt };
+    let output: ToolOutputState = {
+      text: "",
+      truncated: false,
+      attempt,
+      toolCallId: call.id,
+      toolName: call.name,
+    };
     let touched = false;
     const writer = new ProgressWriter(
       deps.clock,

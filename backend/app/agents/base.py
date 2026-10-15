@@ -256,28 +256,10 @@ class BaseAgent:
 
         # 4a. Project context (name, instructions, files)
         is_project_chat = bool(project_name)
-        if is_project_chat:
-            project_context_lines = [
-                f"You are chatting within the project \"{project_name}\".",
-                "All your responses should be relevant to this project.",
-            ]
-            if project_instructions and project_instructions.strip():
-                project_context_lines.append(f"\nProject Instructions:\n{project_instructions}")
-            if project_file_names:
-                file_list = "\n".join(f"  - {fn}" for fn in project_file_names)
-                project_context_lines.append(
-                    f"\nProject Files ({len(project_file_names)}):\n{file_list}\n"
-                    "When the user asks about files, reference these by name. "
-                    "Relevant content from these files will be provided below when available."
-                )
-            context_parts.append("<project-context>\n" + "\n".join(project_context_lines) + "\n</project-context>")
-        elif project_instructions and project_instructions.strip():
-            # Fallback: instructions without name (shouldn't normally happen)
-            context_parts.append(
-                "<project-instructions>\n"
-                f"{project_instructions}\n"
-                "</project-instructions>"
-            )
+        from app.services.agent_resolver import build_project_context
+        project_block = build_project_context(project_name, project_instructions, project_file_names)
+        if project_block:
+            context_parts.append(project_block)
 
         # Merge project KB into active KBs for RAG
         if project_knowledge_base_id:

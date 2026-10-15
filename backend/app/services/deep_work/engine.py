@@ -26,6 +26,7 @@ from app.services.deep_work.models import (
 )
 from app.services.deep_work.event_sink import EventSink, SSEQueueSink, NullSink
 from app.services.llm_gateway import LLMGateway, LLMRequest, resolve_model_for_tier, resolve_model_for_policy, resolve_all_llm_keys
+from app.services.deep_work.synthesis import build_sources_section, select_learnings as _select_learnings
 from app.services.session_storage import SessionStorage
 from app.services.run_event_service import emit_run_event
 
@@ -819,22 +820,7 @@ class DeepWorkEngine:
 
     def _build_sources_section(self, learnings: list[Learning]) -> str:
         """Build deterministic sources section from learnings."""
-        parts = ["\n## Sources"]
-        seen_urls: dict[str, int] = {}
-        for l in learnings:
-            if l.source_url and l.source_url not in seen_urls:
-                seen_urls[l.source_url] = len(seen_urls) + 1
-                # Use source_title if available, otherwise extract a readable
-                # title from the fact (first sentence, up to 120 chars).
-                title = getattr(l, "source_title", None) or ""
-                if not title:
-                    # Take first sentence or first 120 chars, whichever is shorter
-                    first_sentence = l.fact.split(". ")[0]
-                    title = first_sentence[:120]
-                parts.append(
-                    f"{seen_urls[l.source_url]}. [{title}]({l.source_url})"
-                )
-        return "\n".join(parts)
+        return build_sources_section(learnings)
 
     # ── Output Phase ─────────────────────────────────────────────
 
@@ -1144,28 +1130,3 @@ def _is_retryable(exc: Exception) -> bool:
     if status_code in (429, 500, 502, 503, 504):
         return True
     return False
-
-
-def _select_learnings(
-    learnings: list[Learning], max_tokens: int = 15_000,
-) -> list[Learning]:
-    """Deduplicate and truncate learnings to fit within synthesizer context."""
-    # 1. Dedup by fact prefix
-    seen: set[str] = set()
-    unique: list[Learning] = []
-    for l in learnings:
-        key = l.fact[:100].lower().strip()
-        if key not in seen:
-            seen.add(key)
-            unique.append(l)
-    # 2. Sort by confidence, take top-N within token budget
-    unique.sort(key=lambda l: l.confidence, reverse=True)
-    selected: list[Learning] = []
-    est_tokens = 0
-    for l in unique:
-        t = len(l.fact + (l.quote or "")) // 4
-        if est_tokens + t > max_tokens:
-            break
-        selected.append(l)
-        est_tokens += t
-    return selected

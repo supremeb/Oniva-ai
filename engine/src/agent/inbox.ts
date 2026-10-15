@@ -17,6 +17,7 @@
  *   boundary) starts the next run in the same commit.
  */
 import { z } from "zod";
+import type { TextContent } from "../models/types.js";
 import { type DocDraft, defineDoc } from "../session/documents.js";
 import type { Transaction } from "../session/transaction.js";
 import type { SubmissionRecord, TaskRecord } from "../storage/types.js";
@@ -31,18 +32,45 @@ import {
   updateSubmission,
 } from "./submission.js";
 
+/** The first {@link INBOX_PREVIEW_CHARS} characters of an input's text. */
+export function previewOf(content: string | TextContent[]): string {
+  const text = typeof content === "string" ? content : content.map((c) => c.text).join("");
+  return Array.from(text).slice(0, INBOX_PREVIEW_CHARS).join("");
+}
+
 /** Entry kind of a display-only write; ignored by the context builder. */
 export const DISPLAY_ENTRY_KIND = "display";
 
 export type InboxMode = "followUp" | "steer";
 
+/** Longest text preview kept on a queued item. */
+export const INBOX_PREVIEW_CHARS = 200;
+
+/**
+ * A queued input. `preview` (the first {@link INBOX_PREVIEW_CHARS} characters
+ * of its text) and `requestId` are absent on items queued before they existed.
+ */
+export type InboxQueueItem = {
+  submissionId: string;
+  mode: InboxMode;
+  preview?: string;
+  requestId?: string;
+};
+
 export type InboxState = {
-  queue: Array<{ submissionId: string; mode: InboxMode }>;
+  queue: InboxQueueItem[];
   placed: Array<{ submissionId: string; runId: string }>;
 };
 
-const inboxSchema: z.ZodType<InboxState> = z.object({
-  queue: z.array(z.object({ submissionId: z.string(), mode: z.enum(["followUp", "steer"]) })),
+const inboxSchema = z.object({
+  queue: z.array(
+    z.object({
+      submissionId: z.string(),
+      mode: z.enum(["followUp", "steer"]),
+      preview: z.exactOptional(z.string()),
+      requestId: z.exactOptional(z.string()),
+    }),
+  ),
   placed: z.array(z.object({ submissionId: z.string(), runId: z.string() })),
 });
 
@@ -78,8 +106,10 @@ export function appendUserEntry(
   conversationId: string,
   submissionId: string,
   content: UserPayload["content"],
+  requestId?: string,
 ): string {
-  const payload: UserPayload = { submissionId, content };
+  const payload: UserPayload =
+    requestId === undefined ? { submissionId, content } : { submissionId, content, requestId };
   return tx.appendEntry({
     conversationId,
     taskId: null,
@@ -119,9 +149,40 @@ export class Inbox {
     return this.draft.value.queue.length;
   }
 
-  /** Queue a pending submission. */
-  enqueue(submissionId: string, mode: InboxMode): void {
-    this.draft.value.queue.push({ submissionId, mode });
+  /** Queue a pending submission, keeping a short preview of its text. */
+  enqueue(
+    submissionId: string,
+    mode: InboxMode,
+    content?: string | TextContent[],
+    requestId?: string,
+  ): void {
+    this.draft.value.queue.push({
+      submissionId,
+      mode,
+      ...(content === undefined ? {} : { preview: previewOf(content) }),
+      ...(requestId === undefined ? {} : { requestId }),
+    });
+  }
+
+  /**
+   * Withdraw one still-queued input, settling it `unanswered(withdrawn)`.
+   * False when it is not queued (already placed, started or settled).
+   */
+  cancel(submissionId: string): boolean {
+    const { queue } = this.draft.value;
+    if (!queue.some((q) => q.submissionId === submissionId)) return false;
+    this.draft.value.queue = queue.filter((q) => q.submissionId !== submissionId);
+    const sub = this.subs.get(submissionId) ?? null;
+    if (
+      settleSubmission(this.tx, sub, "unanswered", {
+        reason: "withdrawn",
+        message: "the input was cancelled before it was answered",
+        error: null,
+      })
+    ) {
+      this.subs.delete(submissionId);
+    }
+    return true;
   }
 
   /**
@@ -136,7 +197,7 @@ export class Inbox {
       const sub = this.#pending(head.submissionId);
       if (!sub) continue;
       const runId = this.tx.mintId("task");
-      appendUserEntry(this.tx, this.conversationId, sub.id, storedContent(sub));
+      appendUserEntry(this.tx, this.conversationId, sub.id, storedContent(sub), sub.requestId);
       this.#update(sub, { status: "active", taskId: runId });
       startRun(this.tx, ops, generation, this.conversationId, sub.id, runId);
       return sub.id;
@@ -159,7 +220,7 @@ export class Inbox {
     for (const s of steers) {
       const sub = this.#pending(s.submissionId);
       if (!sub) continue;
-      appendUserEntry(this.tx, this.conversationId, sub.id, storedContent(sub));
+      appendUserEntry(this.tx, this.conversationId, sub.id, storedContent(sub), sub.requestId);
       this.#update(sub, { status: "active", taskId: nextTaskId });
       value.placed.push({ submissionId: sub.id, runId });
       placed.push(sub.id);

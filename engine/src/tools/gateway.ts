@@ -57,6 +57,7 @@ import type { JsonObject, JsonValue } from "../core/json.js";
 import type { TextContent } from "../models/types.js";
 import type { Fence } from "../storage/types.js";
 import {
+  backendConversationIds,
   defineTool,
   type ReplayPolicy,
   type ToolConversation,
@@ -326,6 +327,7 @@ class GatewayHttp {
       toolCallId: api.toolCallId,
       tenantId: api.conversation.tenantId,
       projectId: api.conversation.projectId,
+      ...backendConversationIds(api.conversation),
     });
     const init: RequestInit = {
       method: "POST",

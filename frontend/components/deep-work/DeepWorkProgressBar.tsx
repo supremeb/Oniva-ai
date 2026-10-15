@@ -3,6 +3,7 @@
 import { useMemo, useRef } from 'react';
 import { useDeepWorkStore, selectIsDeepWorkActive } from '@/lib/stores/deep-work';
 import { useShallow } from 'zustand/react/shallow';
+import { useEngineSessionStore } from './engineSession';
 
 /**
  * Compact progress bar that sits above the chat input area during deep work execution.
@@ -17,6 +18,10 @@ export function DeepWorkProgressBar() {
     })),
   );
   const isActive = useDeepWorkStore(selectIsDeepWorkActive);
+  // Engine-runtime sessions show their own progress inside DeepWorkEngineCard, which reads the
+  // run from the watch view. This bar reads the legacy store (idle during an engine run), so it
+  // would duplicate the card at best and flash stale numbers at worst: hide it for them.
+  const hasEngineSession = useEngineSessionStore((s) => s.session !== null);
 
   const completedTodos = useMemo(
     () => todos.filter((t) => t.status === 'completed').length,
@@ -43,8 +48,8 @@ export function DeepWorkProgressBar() {
   }, [todos.length, completedTodos, enginePhase, status]);
 
   // Only show during active execution
-  const isExecuting = isActive && (status === 'executing' || status === 'paused');
-  if (!isExecuting) return null;
+  const isExecuting = isActive && status === 'executing';
+  if (!isExecuting || hasEngineSession) return null;
 
   const phase =
     enginePhase === 'generating_output'

@@ -1260,3 +1260,49 @@ async def resolve_model_for_policy(
 
     # 4. Fallback to mid tier
     return await resolve_model_for_tier(db, tenant_id, "mid", agent_config)
+
+
+# ============================================================================
+# Engine model policy helpers (internal API; no LiteLLM loop is touched)
+# ============================================================================
+
+async def get_tenant_own_key_providers(
+    db: AsyncSession,
+    tenant_id: UUID,
+) -> List[ProviderConfig]:
+    """Enabled providers whose key is the tenant's own stored key, ordered by priority.
+
+    Unlike get_tenant_providers this never falls back to platform environment keys and
+    bypasses the in-memory cache, so a revoked key stops working immediately.
+    """
+    from app.core.database import set_tenant_context
+
+    await set_tenant_context(db, str(tenant_id))
+    result = await db.execute(
+        select(LLMProvider)
+        .where(LLMProvider.tenant_id == tenant_id, LLMProvider.is_enabled == True)  # noqa: E712
+        .order_by(LLMProvider.priority)
+    )
+    encryption = get_encryption_service()
+    configs: List[ProviderConfig] = []
+    for p in result.scalars().all():
+        if not p.api_key_encrypted:
+            continue
+        try:
+            api_key = encryption.decrypt(p.api_key_encrypted)
+        except Exception:
+            logger.warning("Failed to decrypt API key for provider %s", p.name)
+            continue
+        if api_key:
+            configs.append(ProviderConfig(
+                id=p.id, name=p.name, provider_type=p.provider_type, api_base=p.api_base,
+                api_key=api_key, default_model=p.default_model, priority=p.priority or 0,
+                workflow_builder_model=p.workflow_builder_model,
+            ))
+    return configs
+
+
+def strip_provider_prefix(model_id: str) -> str:
+    """'anthropic/claude-sonnet-4-5' -> 'claude-sonnet-4-5' (the bare id a provider adapter expects)."""
+    normalized = normalize_model_id(model_id)
+    return normalized.split("/", 1)[1] if "/" in normalized else normalized

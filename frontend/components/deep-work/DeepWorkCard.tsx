@@ -29,6 +29,8 @@ import type { MessagePart } from '@/lib/models';
 import type { EngineWorkerState } from '@/lib/types/deep-work';
 import { FilePreview } from '@/components/chat/shared/data/FilePreview';
 import ReactMarkdown from 'react-markdown';
+import { DeepWorkEngineCard } from './DeepWorkEngineCard';
+import { useEngineSessionStore } from './engineSession';
 
 /**
  * DeepWorkCard — unified Perplexity-style card for deep work.
@@ -37,7 +39,7 @@ import ReactMarkdown from 'react-markdown';
  *   planning → awaiting_approval → executing → completed
  *                                            → error
  */
-export const DeepWorkCard = memo(function DeepWorkCard() {
+const DeepWorkLegacyCard = memo(function DeepWorkLegacyCard() {
   const {
     status,
     plan,
@@ -70,6 +72,7 @@ export const DeepWorkCard = memo(function DeepWorkCard() {
   const skipClarification = useDeepWorkStore((s) => s.skipClarification);
   const engineRawPlan = useDeepWorkStore((s) => s.engineRawPlan);
   const setDeliverable = useDeepWorkStore((s) => s.setDeliverable);
+  const planFailure = useDeepWorkStore((s) => s.planFailure);
 
   // Intake answer tracking (local state — not persisted)
   const [intakeAnswers, setIntakeAnswers] = useState<Record<number, string>>({});
@@ -279,6 +282,12 @@ export const DeepWorkCard = memo(function DeepWorkCard() {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-neutral-900">Research failed</p>
               <p className="text-sm text-neutral-500 mt-1">{error || 'An unexpected error occurred'}</p>
+              {planFailure?.text && (
+                <details className="mt-2">
+                  <summary className="text-xs text-neutral-400 cursor-pointer select-none">What the model returned</summary>
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-50 p-2 text-xs text-neutral-600">{planFailure.text}</pre>
+                </details>
+              )}
             </div>
             <button
               onClick={handleRetry}
@@ -294,7 +303,7 @@ export const DeepWorkCard = memo(function DeepWorkCard() {
   }
 
   // ── Executing / Completed state ──
-  const isExecuting = isActive && (status === 'executing' || status === 'paused');
+  const isExecuting = isActive && status === 'executing';
   const isCompleted = status === 'completed';
 
   return (
@@ -455,4 +464,14 @@ export const DeepWorkCard = memo(function DeepWorkCard() {
       )}
     </div>
   );
+});
+
+/**
+ * Engine-runtime sessions (published by `useDeepWorkChat`) render from the
+ * watch view; everything else keeps the legacy store-driven card.
+ */
+export const DeepWorkCard = memo(function DeepWorkCard() {
+  const engineSession = useEngineSessionStore((s) => s.session);
+  if (engineSession) return <DeepWorkEngineCard session={engineSession} />;
+  return <DeepWorkLegacyCard />;
 });

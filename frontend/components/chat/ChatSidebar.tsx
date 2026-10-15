@@ -31,6 +31,11 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useEngineChatMode } from '@/lib/hooks/useFeature';
+import { useConversationUnion } from '@/hooks/useConversationUnion';
+import { useUpdateEngineConversation, useArchiveEngineConversation } from '@/hooks/useEngineConversationActions';
+import { useEngineNav } from '@/lib/stores/engine-nav';
+import type { ConversationListItem } from '@/lib/api/conversation-union';
 import type { ChatSession as BackendChatSession } from '@/lib/types/chat-panels';
 
 interface ChatSidebarProps {
@@ -226,6 +231,65 @@ const SessionItem = memo(function SessionItem({
     );
 });
 
+// Engine conversation item: open, rename, pin, delete (archive)
+const EngineSessionItem = memo(function EngineSessionItem({
+    item,
+    isActive,
+    onSelect,
+}: {
+    item: ConversationListItem;
+    isActive: boolean;
+    onSelect: (item: ConversationListItem) => void;
+}) {
+    const [mode, setMode] = useState<'view' | 'rename' | 'delete'>('view');
+    const update = useUpdateEngineConversation();
+    const archive = useArchiveEngineConversation();
+
+    if (mode === 'rename') {
+        return (
+            <RenameInput
+                initialValue={item.title || 'New Chat'}
+                onSave={(title) => {
+                    update.mutate({ id: item.id, title });
+                    setMode('view');
+                }}
+                onCancel={() => setMode('view')}
+            />
+        );
+    }
+
+    if (mode === 'delete') {
+        return (
+            <DeleteConfirmation
+                onConfirm={() => {
+                    archive.mutate(item.id);
+                    setMode('view');
+                }}
+                onCancel={() => setMode('view')}
+            />
+        );
+    }
+
+    return (
+        <div
+            className={cn(
+                'w-full flex items-center gap-1 px-2 py-1.5 rounded-md transition-colors text-sm text-left group cursor-pointer',
+                isActive ? 'bg-muted' : 'hover:bg-muted'
+            )}
+        >
+            <button onClick={() => onSelect(item)} className="flex-1 truncate text-left min-w-0">
+                {item.title || 'New Chat'}
+            </button>
+            <SessionOptionsMenu
+                onRename={() => setMode('rename')}
+                onDelete={() => setMode('delete')}
+                onTogglePin={() => update.mutate({ id: item.id, pinned: !item.pinned })}
+                isPinned={!!item.pinned}
+            />
+        </div>
+    );
+});
+
 // Local (localStorage) session item with options menu (rename + delete only)
 const LocalSessionItem = memo(function LocalSessionItem({
     session,
@@ -342,14 +406,46 @@ export const ChatSidebar = memo(function ChatSidebar({ className }: ChatSidebarP
     }, [hasMounted, storeSessions]);
     const sessions = backendSessions ?? [];
 
+    const engineMode = useEngineChatMode() === 'engine';
+    const { data: unionItems } = useConversationUnion(engineMode);
+    const engineNav = useEngineNav();
+    const engineItems = useMemo(
+        () => (engineMode ? (unionItems ?? []).filter((i) => i.source === 'engine') : []),
+        [engineMode, unionItems]
+    );
+
     // Split into pinned and recent
     const pinnedSessions = sessions.filter((s) => s.is_pinned);
+    const pinnedEngine = engineItems.filter((i) => i.pinned);
     const recentSessions = sessions.filter((s) => !s.is_pinned);
+    // Recents: legacy sessions (unchanged behavior) with engine conversations merged in by recency.
+    const recentRows = useMemo(() => {
+        type Row = { kind: 'legacy'; at: number; session: BackendChatSession } | { kind: 'engine'; at: number; item: ConversationListItem };
+        const rows: Row[] = [
+            ...recentSessions.map((session): Row => ({ kind: 'legacy', at: new Date(session.updated_at).getTime(), session })),
+            ...engineItems.filter((i) => !i.pinned).map((item): Row => ({ kind: 'engine', at: new Date(item.updated_at).getTime(), item })),
+        ];
+        return engineItems.some((i) => !i.pinned) ? rows.sort((a, b) => b.at - a.at) : rows;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [backendSessions, engineItems]);
 
     // Show backend sessions if available, otherwise localStorage fallback
-    const hasBackendSessions = backendSessions !== undefined && backendSessions.length > 0;
+    const hasBackendSessions = (backendSessions !== undefined && backendSessions.length > 0) || engineItems.length > 0;
+
+    const handleSelectEngine = (item: ConversationListItem) => {
+        setCurrentSession(null);
+        engineNav.open(item.id);
+        if (item.project_id) {
+            setCurrentProject(item.project_id);
+            router.push(`/chat/projects/${item.project_id}?c=${encodeURIComponent(item.id)}`);
+        } else {
+            if (currentProjectId) setCurrentProject(null);
+            router.push(`/chat?c=${encodeURIComponent(item.id)}`);
+        }
+    };
 
     const handleNewSession = () => {
+        if (engineMode) engineNav.open(null);
         const id = createSession();
         setCurrentSession(id);
         if (currentProjectId) {
@@ -478,7 +574,7 @@ export const ChatSidebar = memo(function ChatSidebar({ className }: ChatSidebarP
                     </div>
 
                     {/* Pinned Sessions */}
-                    {hasBackendSessions && pinnedSessions.length > 0 && (
+                    {hasBackendSessions && (pinnedSessions.length > 0 || pinnedEngine.length > 0) && (
                         <div className="mb-4">
                             <div className="flex items-center gap-1 mb-2 px-1">
                                 <PushPin className="h-3 w-3 text-muted-foreground" weight="fill" />
@@ -487,6 +583,14 @@ export const ChatSidebar = memo(function ChatSidebar({ className }: ChatSidebarP
                                 </span>
                             </div>
                             <div className="space-y-0.5">
+                                {pinnedEngine.map((item) => (
+                                    <EngineSessionItem
+                                        key={`e-${item.id}`}
+                                        item={item}
+                                        isActive={engineNav.conversationId === item.id}
+                                        onSelect={handleSelectEngine}
+                                    />
+                                ))}
                                 {pinnedSessions.map((session) => (
                                     <SessionItem
                                         key={session.id}
@@ -511,17 +615,26 @@ export const ChatSidebar = memo(function ChatSidebar({ className }: ChatSidebarP
                                     <div key={i} className="h-8 rounded-md bg-muted/50 animate-pulse mx-2" />
                                 ))
                             ) : hasBackendSessions ? (
-                                recentSessions.length === 0 ? (
+                                recentRows.length === 0 ? (
                                     <p className="text-xs text-muted-foreground px-2 py-1">No recent chats</p>
                                 ) : (
-                                    recentSessions.map((session) => (
-                                        <SessionItem
-                                            key={session.id}
-                                            session={session}
-                                            isActive={currentSessionId === session.id && !currentProjectId}
-                                            onSelect={handleSelectSession}
-                                        />
-                                    ))
+                                    recentRows.map((row) =>
+                                        row.kind === 'engine' ? (
+                                            <EngineSessionItem
+                                                key={`e-${row.item.id}`}
+                                                item={row.item}
+                                                isActive={engineNav.conversationId === row.item.id}
+                                                onSelect={handleSelectEngine}
+                                            />
+                                        ) : (
+                                            <SessionItem
+                                                key={row.session.id}
+                                                session={row.session}
+                                                isActive={currentSessionId === row.session.id && !currentProjectId}
+                                                onSelect={handleSelectSession}
+                                            />
+                                        )
+                                    )
                                 )
                             ) : (
                                 // Fallback to localStorage sessions

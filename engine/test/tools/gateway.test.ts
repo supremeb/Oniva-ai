@@ -2,6 +2,7 @@
  * Tool gateway client (U13) against the fake gateway.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { createSubagentTool } from "../../src/agent/subagents.js";
 import { Context } from "../../src/core/context.js";
 import { LeaseLost } from "../../src/core/errors.js";
 import type { JsonObject } from "../../src/core/json.js";
@@ -213,6 +214,8 @@ describe("gateway invoke", () => {
       toolCallId: "c1",
       tenantId: "t1",
       projectId: "p1",
+      conversationId: "conv-1",
+      engineConversationId: "conv-1",
     });
     expect(gw.effects("send_email")).toBe(1);
   });
@@ -559,9 +562,46 @@ describe("gateway tools in the agent loop (memory backend)", () => {
     const [result] = results(await conv.entries());
     expect(result).toMatchObject({ status: "ok", content: "sent to a@x" });
     const [req] = gw.invokes("send_email");
-    expect(req?.body).toMatchObject({ tenantId: "t9", projectId: "p9", toolCallId: "c1" });
+    expect(req?.body).toMatchObject({
+      tenantId: "t9",
+      projectId: "p9",
+      toolCallId: "c1",
+      conversationId: conv.id,
+      engineConversationId: conv.id,
+    });
     expect(req?.headers["idempotency-key"]).toMatch(/:c1$/);
     expect(gw.effects("send_email")).toBe(1);
+    await w.crash();
+  });
+
+  it("a subagent's gateway call carries the root conversation id, and its own as engineConversationId", async () => {
+    const { gw, set, fx } = await setup();
+    const research = createSubagentTool({
+      name: "research",
+      description: "Research",
+      systemPrompt: "child",
+      tools: ["search_docs"],
+    });
+    fx.provider.enqueue(
+      fakeToolCall("research", { prompt: "dig" }, { id: "c1" }),
+      fakeToolCall("search_docs", { query: "x" } as JsonObject, { id: "k1" }),
+      fakeText("found"),
+      fakeText("done"),
+    );
+    const w = await fx.open({ tools: [...set.tools, research] });
+    const conv = await w.harness.createConversation({
+      tenantId: "t9",
+      projectId: "p9",
+      agent: { systemPrompt: "s", tools: ["research"] },
+    });
+    const settled = await (await conv.submit({ text: "go" })).wait();
+    expect(settled.status).toBe("done");
+    const [req] = gw.invokes("search_docs");
+    const body = req?.body as Any;
+    expect(body.conversationId).toBe(conv.id);
+    expect(body.engineConversationId).toMatch(/^conv_/);
+    expect(body.engineConversationId).not.toBe(conv.id);
+    expect(body.tenantId).toBe("t9");
     await w.crash();
   });
 

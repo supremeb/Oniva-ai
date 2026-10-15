@@ -1,7 +1,7 @@
 """Chat Session model for storing chat history."""
 from __future__ import annotations
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, Integer, func, update, cast
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, UniqueConstraint, func, update, cast
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import relationship
@@ -206,3 +206,37 @@ class ChatSession(Base):
                         return text[:50] + ('...' if len(text) > 50 else '')
 
         return "New Chat"
+
+
+class ChatSessionMessage(Base):
+    """Read-model row: one legacy chat message with its renderable parts (chat-on-engine U10).
+
+    Projected from ``chat_sessions.messages`` by ``app.services.chat_backfill`` and dual-written
+    by ``persist_session``. The JSONB column stays the legacy source of truth; ``parts`` are
+    copied as-is (``metadata.parts``) or synthesized as a single text part from ``content``.
+    """
+    __tablename__ = 'chat_session_messages'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('tenants.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('chat_sessions.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    seq = Column(Integer, nullable=False)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False, server_default='', default='')
+    parts = Column(JSONB, nullable=False, default=list)
+    # False when ``parts`` failed the schema check; the row is kept and flagged, never dropped.
+    parts_valid = Column(Boolean, nullable=False, server_default='true', default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint('session_id', 'seq', name='uq_chat_session_messages_session_seq'),
+    )

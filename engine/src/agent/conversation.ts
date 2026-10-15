@@ -138,7 +138,11 @@ export class Conversation {
         input: toSubmissionInput(record),
       };
       if (record.type === "write") {
-        const payload: UserPayload = { submissionId, content: record.content };
+        const payload: UserPayload = {
+          submissionId,
+          content: record.content,
+          requestId: base.requestId,
+        };
         const entry = tx.appendEntry({
           conversationId: this.id,
           taskId: null,
@@ -165,16 +169,37 @@ export class Conversation {
       }
       if (busy) {
         tx.createSubmission({ ...base, status: "pending", result: null, taskId: null });
-        inbox.enqueue(submissionId, record.whenBusy === "steer" ? "steer" : "followUp");
+        inbox.enqueue(
+          submissionId,
+          record.whenBusy === "steer" ? "steer" : "followUp",
+          record.content,
+          base.requestId,
+        );
         return submissionId;
       }
       const runId = tx.mintId("task");
       tx.createSubmission({ ...base, status: "active", result: null, taskId: runId });
-      appendUserEntry(tx, this.id, submissionId, record.content);
+      appendUserEntry(tx, this.id, submissionId, record.content, base.requestId);
       startRun(tx, ops, this.core.generation, this.id, submissionId, runId);
       return submissionId;
     });
     return new Submission(this.core, id);
+  }
+
+  /**
+   * Cancel one still-queued input, settling it `unanswered(withdrawn)` in one
+   * commit. `"cancelled"` when it was queued; `"not_queued"` when it already
+   * started, was placed into a run or settled (nothing changes);
+   * `"unknown"` when no such submission exists in this conversation.
+   */
+  async cancelSubmission(submissionId: string): Promise<"cancelled" | "not_queued" | "unknown"> {
+    await this.info();
+    return this.core.runtime.commit(async (tx) => {
+      const sub = await tx.getSubmission(submissionId);
+      if (!sub || sub.conversationId !== this.id) return "unknown";
+      const inbox = await Inbox.load(tx, this.id);
+      return inbox.cancel(submissionId) ? "cancelled" : "not_queued";
+    });
   }
 
   /**

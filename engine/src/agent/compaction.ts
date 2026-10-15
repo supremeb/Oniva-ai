@@ -320,7 +320,8 @@ export function renderTranscript(plan: CompactionPlan): string {
       const text = assistantText(message);
       if (text.length > 0) lines.push(`[assistant]\n${clip(text)}`);
       for (const b of message.blocks) {
-        if (b.type === "tool_call") {
+        // A partial reply's tool calls were never run.
+        if (b.type === "tool_call" && payloadOf(e, ENTRY_KINDS.assistant).partial !== true) {
           lines.push(`[assistant called tool ${b.name}]\n${clip(JSON.stringify(b.arguments))}`);
         }
       }
@@ -556,6 +557,10 @@ export function compactionTaskDefinition(
     }
     const message = terminal.message;
     const spend = { provider: message.provider, model: message.model, usage: terminal.usage };
+    await deps.hooks.afterCompaction(
+      { conversation, agent, runId, round, taskId: task.id, message, usage: terminal.usage },
+      task.id,
+    );
     const summary = assistantText(message).trim();
     if (summary.length === 0) {
       const error = modelError("provider", "the summary request returned no text", {

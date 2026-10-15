@@ -13,7 +13,7 @@ from app.models.document import Document
 from app.models.audit_log import AuditLog
 from app.models.audit_event import AuditEvent
 from app.models.skills import Skill, SkillExecution
-from app.models.chat_session import ChatSession
+from app.models.chat_session import ChatSession, ChatSessionMessage
 from app.models.agent_version import AgentVersion
 from app.models.agent_alias import AgentAlias
 from app.models.background_job import BackgroundJob, JobStatus, JobType
@@ -59,6 +59,8 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.routing_policy import RoutingPolicy
 from app.models.run_event import RunEvent
+from app.models.engine import ToolInvocation, EngineFence, EngineConversation
+from app.models.deep_work_run import DeepWorkRun
 
 __all__ = [
     'Base',
@@ -162,4 +164,8 @@ __all__ = [
     'RoutingPolicy',
     # Run Observability (Platform Architecture Hardening E-1)
     'RunEvent',
+    'ToolInvocation',
+    'EngineFence',
+    'EngineConversation',
+    'DeepWorkRun',
 ]

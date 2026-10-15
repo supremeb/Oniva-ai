@@ -65,8 +65,8 @@ export interface MessageRendererProps {
   handlers?: {
     onToolRetry?: (toolId: string) => void;
     onQuestionAnswer?: (questionId: string, answer: { optionIds: string[]; otherValue?: string }) => void;
-    onApprove?: (approvalId: string) => void;
-    onReject?: (approvalId: string) => void;
+    onApprove?: (approvalId: string) => void | Promise<void>;
+    onReject?: (approvalId: string) => void | Promise<void>;
     onFormSubmit?: (formId: string, values: Record<string, string>) => void;
     onOAuthAuthorize?: (oauthId: string) => void;
     onLinkClick?: (url: string) => void;
@@ -174,6 +174,11 @@ export const MessageRenderer = memo(function MessageRenderer({
             riskLevel={part.riskLevel}
             items={part.items}
             status={part.status}
+            toolName={part.toolName}
+            expiresAt={part.expiresAt}
+            note={part.note}
+            readOnly={part.canDecide === false}
+            resolvedAsLine={part.toolTaskId !== undefined}
             onApprove={handlers.onApprove ? () => handlers.onApprove?.(part.id) : undefined}
             onReject={handlers.onReject ? () => handlers.onReject?.(part.id) : undefined}
           />

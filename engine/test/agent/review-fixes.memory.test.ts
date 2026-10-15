@@ -240,7 +240,7 @@ describe("live tool output cost", () => {
     expect(toolOutputIntervalMs(100, 9000)).toBe(LARGE_TOOL_OUTPUT_INTERVAL_MS);
     expect(toolOutputIntervalMs(500, 9000)).toBe(500);
     expect(toolOutputIntervalMs(0, 9000)).toBe(0);
-    const s = appendOutput({ text: "", truncated: false, attempt: 1 }, "a".repeat(20_000));
+    const s = appendOutput(toolOutputDoc.initial, "a".repeat(20_000));
     expect(s.text.length).toBe(MAX_TOOL_OUTPUT_CHARS);
     expect(s.truncated).toBe(true);
   });

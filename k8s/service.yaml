@@ -49,3 +49,17 @@ spec:
   - port: 6379
     targetPort: 6379
   type: ClusterIP
+---
+# Cluster-internal only (ClusterIP, no ingress route).
+apiVersion: v1
+kind: Service
+metadata:
+  name: oniva-engine
+  namespace: oniva
+spec:
+  selector:
+    app: oniva-engine
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP

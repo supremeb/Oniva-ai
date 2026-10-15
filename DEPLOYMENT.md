@@ -273,6 +273,42 @@ docker compose -f docker-compose.prod.yml up -d --scale app=4
 kubectl scale -n oniva deployment/oniva-api --replicas=4
 ```
 
+## Engine (durable agent runtime)
+
+The engine is a separate Node worker (`engine/`, image built from `engine/Dockerfile.prod`) with its
+own Postgres database. One worker serves one `ENGINE_SESSION_ID`, so run exactly one replica
+(`Recreate` rollout in k8s). It is optional: the backend routes stay off until `ENABLE_ENGINE_API=true`.
+
+| Variable | Where | Meaning |
+|----------|-------|---------|
+| `ENGINE_GATEWAY_TOKEN` | backend + engine | Bearer for `/internal` (engine -> backend). `/internal` is mounted only when set |
+| `ENGINE_SERVICE_TOKEN` | backend + engine | Bearer the backend presents to the engine |
+| `ENGINE_GATEWAY_TOKEN_PREVIOUS` | backend | Old gateway token, accepted only during rotation |
+| `ENGINE_URL` / `ENGINE_SESSION_ID` | backend | Where the worker is and which session it serves |
+| `ENABLE_ENGINE_API` | backend | Exposes `/api/v1/engine/conversations` (default `false`) |
+| `ENABLE_ENGINE_CHAT` | backend | Global ceiling for engine chat (default `false`); a tenant also needs `features.ENABLE_ENGINE_CHAT` |
+| `INTERNAL_ALLOW_PLAINTEXT` | backend | Allows an `http://` `ENGINE_URL` in production (in-cluster / compose network only) |
+| `DATABASE_URL` | engine | The engine's own Postgres (`ENGINE_DATABASE_URL` secret in k8s, `engine-db` in compose) |
+| `ENGINE_GATEWAY_URL`, `ENGINE_POLICY=backend`, `ENGINE_POLICY_URL` | engine | Point at the backend; the worker holds no model key |
+
+The three tokens must be distinct, at least 32 characters, and different from `SECRET_KEY`; production
+validation rejects equal tokens, a missing token with `ENABLE_ENGINE_API` on, and a plaintext
+`ENGINE_URL` without the opt-in.
+
+**`/internal` is never public.** nginx answers 404 for `/internal` (`nginx/nginx.conf`), the k8s ingress
+carries the same rule as a server snippet and has no route for it, the engine Service is a ClusterIP,
+and a NetworkPolicy admits only API pods to the engine. The engine reaches `oniva-api:8000` /
+`app:8000` directly inside the cluster or compose network. If your ingress controller disables
+snippets, enforce the block in your edge proxy instead.
+
+**Rotating `ENGINE_GATEWAY_TOKEN`**: set the old value as `ENGINE_GATEWAY_TOKEN_PREVIOUS` and the new
+one as `ENGINE_GATEWAY_TOKEN` on the backend, roll the backend, update the engine's
+`ENGINE_GATEWAY_TOKEN` and roll it, then remove `ENGINE_GATEWAY_TOKEN_PREVIOUS`. Rotate
+`ENGINE_SERVICE_TOKEN` by rolling backend and engine together (a short window of 502s on the
+engine routes).
+
+**Smoke test**: `ONIVA_E2E=1 uv run pytest -m e2e tests/e2e/test_engine_smoke.py` (needs Node 22, `initdb`/`pg_ctl`).
+
 ## Security Checklist
 
 - [ ] Change all default passwords

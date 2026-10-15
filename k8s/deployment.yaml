@@ -116,6 +116,24 @@ spec:
               name: oniva-secrets
               key: OPENROUTER_API_KEY
               optional: true
+        # Engine seams: ENGINE_GATEWAY_TOKEN guards /internal (engine -> backend);
+        # ENGINE_SERVICE_TOKEN is presented to the engine (backend -> engine).
+        - name: ENGINE_GATEWAY_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: ENGINE_GATEWAY_TOKEN
+        - name: ENGINE_SERVICE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: ENGINE_SERVICE_TOKEN
+        - name: ENGINE_GATEWAY_TOKEN_PREVIOUS
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: ENGINE_GATEWAY_TOKEN_PREVIOUS
+              optional: true
         resources:
           requests:
             memory: "2Gi"
@@ -366,3 +384,93 @@ spec:
       - name: redis-data
         persistentVolumeClaim:
           claimName: redis-pvc
+---
+# One engine worker serves one session (ENGINE_SESSION_ID): keep replicas at 1 and
+# Recreate so a rollout never runs two owners of the lease at once.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oniva-engine
+  namespace: oniva
+  labels:
+    app: oniva-engine
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: oniva-engine
+  template:
+    metadata:
+      labels:
+        app: oniva-engine
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: engine
+        image: oniva-engine
+        ports:
+        - containerPort: 8080
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: ENGINE_PORT
+          value: "8080"
+        - name: ENGINE_SESSION_ID
+          valueFrom:
+            configMapKeyRef:
+              name: oniva-config
+              key: ENGINE_SESSION_ID
+        - name: ENGINE_SERVICE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: ENGINE_SERVICE_TOKEN
+        - name: ENGINE_GATEWAY_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: ENGINE_GATEWAY_TOKEN
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: ENGINE_DATABASE_URL
+        # Cluster-internal only: the Service oniva-api is never routed by the ingress for /internal.
+        - name: ENGINE_GATEWAY_URL
+          value: "http://oniva-api:8000"
+        - name: ENGINE_POLICY
+          value: backend
+        - name: ENGINE_POLICY_URL
+          value: "http://oniva-api:8000"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /v1/health
+            port: 8080
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /v1/health
+            port: 8080
+          initialDelaySeconds: 20
+          periodSeconds: 10
+      volumes:
+      - name: tmp
+        emptyDir: {}

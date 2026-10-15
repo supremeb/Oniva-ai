@@ -35,7 +35,6 @@ interface ConversationInputProps {
     knowledgePopover?: React.ReactNode;
     // Deep Work mode
     isDeepWorkExecuting?: boolean;
-    isAwaitingDeepWorkInput?: boolean;
     deepWorkActivity?: string | null;
     // Model display
     modelName?: string;
@@ -67,7 +66,6 @@ export const ConversationInput = memo(function ConversationInput({
     webSearchPopover,
     knowledgePopover,
     isDeepWorkExecuting,
-    isAwaitingDeepWorkInput,
     deepWorkActivity,
     modelName,
 }: ConversationInputProps) {
@@ -96,11 +94,9 @@ export const ConversationInput = memo(function ConversationInput({
         }
     }, [onSubmit]);
 
-    const deepWorkPlaceholder = isAwaitingDeepWorkInput
-        ? 'Respond to the agent\'s question...'
-        : isDeepWorkExecuting
-            ? 'Agent is working autonomously...'
-            : undefined;
+    const deepWorkPlaceholder = isDeepWorkExecuting
+        ? 'Agent is working autonomously...'
+        : undefined;
     return (
         <div className="w-full max-w-[680px] mx-auto">
             <div className={cn(
@@ -126,7 +122,7 @@ export const ConversationInput = memo(function ConversationInput({
                     onChange={(e) => onChange(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={deepWorkPlaceholder || "How can I help you today"}
-                    disabled={isDeepWorkExecuting && !isAwaitingDeepWorkInput}
+                    disabled={isDeepWorkExecuting}
                     rows={1}
                     className={cn(
                         'w-full pl-5 pr-5 pt-3.5 pb-12 bg-transparent resize-none',
@@ -134,7 +130,7 @@ export const ConversationInput = memo(function ConversationInput({
                         'text-[14px] text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400',
                         'focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0',
                         'rounded-xl',
-                        isDeepWorkExecuting && !isAwaitingDeepWorkInput && 'opacity-50 cursor-not-allowed'
+                        isDeepWorkExecuting && 'opacity-50 cursor-not-allowed'
                     )}
                 />
 

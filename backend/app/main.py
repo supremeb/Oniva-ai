@@ -104,6 +104,11 @@ async def lifespan(app: FastAPI):
         n = await fail_stale_knowledge_documents(SystemSessionLocal, stale)
         if n:
             print(f"✅ Cleaned up {n} stale knowledge documents")
+        if app_settings.ENGINE_GATEWAY_TOKEN:
+            from app.services.startup_recovery import interrupt_stale_tool_invocations
+            n = await interrupt_stale_tool_invocations(SystemSessionLocal)
+            if n:
+                print(f"✅ Marked {n} stale engine tool invocations as interrupted")
     except Exception as e:
         print(f"⚠️ Failed startup recovery sweep: {e}")
 
@@ -369,6 +374,14 @@ app.include_router(projects.router, prefix="/api/v1/projects", tags=["projects"]
 
 # Sandbox Control Plane: zero-secrets LLM proxy
 app.include_router(sandbox_proxy.router, prefix="/api/v1", tags=["sandbox-proxy"])
+
+# Engine-facing /internal namespace: mounted only when ENGINE_GATEWAY_TOKEN is set.
+from app.internal_api.router import mount_internal_router
+mount_internal_router(app, app_settings)
+
+# Browser-facing engine conversations: only when ENABLE_ENGINE_API and the engine is configured.
+from app.api.v1.engine_conversations import mount_engine_conversations
+mount_engine_conversations(app, app_settings)
 
 @app.get("/")
 async def root():

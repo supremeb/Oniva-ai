@@ -1,0 +1,135 @@
+{
+  "legacy": "chat_error",
+  "view": {
+    "entries": [
+      {
+        "id": "ent_<id-1>",
+        "conversationId": "conv_<id-2>",
+        "taskId": null,
+        "kind": "user",
+        "payload": {
+          "submissionId": "subm_<id-3>",
+          "content": "What is the contract?",
+          "requestId": "req-1"
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-4>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-5>",
+        "kind": "system",
+        "payload": {
+          "text": "You are helpful.",
+          "tools": [
+            "web_search",
+            "save_report"
+          ],
+          "fingerprint": "88f4dceb2649aa16a0d065ca2bd2ccc402e8102960bfa044bde5bd006faa58ff"
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-6>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-5>",
+        "kind": "assistant",
+        "payload": {
+          "runId": "task_<id-5>",
+          "round": 0,
+          "partial": true,
+          "message": {
+            "role": "assistant",
+            "provider": "fake",
+            "model": "fake-1",
+            "blocks": [
+              {
+                "type": "text",
+                "text": "partial "
+              }
+            ],
+            "stopReason": "error"
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-7>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-5>",
+        "kind": "run_error",
+        "payload": {
+          "runId": "task_<id-5>",
+          "error": {
+            "kind": "rate_limited",
+            "message": "API rate limit exceeded. Please try again in a moment.",
+            "retryable": true
+          }
+        },
+        "createdAt": 1000000
+      }
+    ],
+    "live": {
+      "runId": null,
+      "taskId": null,
+      "message": null
+    },
+    "inbox": {
+      "queue": [],
+      "placed": []
+    },
+    "approvals": {
+      "items": []
+    },
+    "usage": {
+      "requests": 1,
+      "total": {
+        "requests": 1,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "costUsd": null
+      },
+      "byModel": {
+        "fake/fake-1": {
+          "requests": 1,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "costUsd": null
+        }
+      },
+      "byPurpose": {
+        "generation": {
+          "requests": 1,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "costUsd": null
+        }
+      }
+    },
+    "agent": {
+      "systemPrompt": "You are helpful.",
+      "tools": [
+        "web_search",
+        "save_report"
+      ],
+      "model": null,
+      "thinking": null,
+      "depth": 0,
+      "metadata": {},
+      "compaction": null
+    },
+    "toolOutput": {}
+  }
+}

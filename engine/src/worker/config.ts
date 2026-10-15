@@ -12,11 +12,15 @@
  * | `ENGINE_LEASE_TTL_MS` | `15000` | lease time-to-live; heartbeats every ttl/3 |
  * | `ENGINE_LEASE_RETRY_MS` | ttl/3 | how often a standby worker retries the lease |
  * | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
+ * | `ENGINE_POLICY` | `backend` when `ENGINE_POLICY_URL` is set, else `local` | `backend`: model, key and quota come from the backend per request; `local`: `ENGINE_MODEL` and `ANTHROPIC_API_KEY` |
+ * | `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` under `ENGINE_POLICY=backend` | backend origin serving `/internal/models/{policy,usage}`; authenticated with the gateway token |
+ * | `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
  * | `ENGINE_APPROVAL_TTL_MS` | `86400000` | approval expiry; `0` for none |
  * | `ENGINE_MODEL` / `ENGINE_SUMMARY_MODEL` | Anthropic defaults | model ids |
  * | `ENGINE_MAX_TOKENS` | `8192` | reply token budget per request |
  * | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle (KTD11) |
  * | `ENGINE_SUBAGENT_TOOL` | none | register a subagent tool under this name |
+ * | `ENGINE_SUBAGENT_TOOLS` | none | comma-separated subagent tool names to register (with `ENGINE_SUBAGENT_TOOL`, deduplicated) |
  * | `ENGINE_SHUTDOWN_TIMEOUT_MS` | `10000` | bound on closing the engine at shutdown |
  * | `ENGINE_DB_CONNECT_TIMEOUT_MS` | min(5000, ttl/3) | new-connection timeout |
  * | `ENGINE_DB_STATEMENT_TIMEOUT_MS` | min(10000, 2·ttl/3) | server `statement_timeout` |
@@ -31,6 +35,7 @@
 import pg from "pg";
 import { DEFAULT_PROGRESS_INTERVAL_MS } from "../agent/progress.js";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_ANTHROPIC_SUMMARY_MODEL } from "../models/anthropic.js";
+import { DEFAULT_POLICY_TIMEOUT_MS } from "./backend-policy.js";
 
 export type WorkerEnv = Readonly<Record<string, string | undefined>>;
 
@@ -46,6 +51,11 @@ export interface WorkerConfig {
   leaseRetryMs: number | null;
   gatewayUrl: string | null;
   gatewayToken: string | null;
+  /** `backend`: the backend resolves every model request and records usage. */
+  policy: "local" | "backend";
+  /** Backend origin for the policy and usage endpoints; set iff `policy` is `backend`. */
+  policyUrl: string | null;
+  policyTimeoutMs: number;
   /** Null: approvals never expire. */
   approvalTtlMs: number | null;
   model: string;
@@ -53,6 +63,8 @@ export interface WorkerConfig {
   maxTokens: number;
   progressIntervalMs: number;
   subagentTool: string | null;
+  /** Every subagent tool to register: `ENGINE_SUBAGENT_TOOL` then `ENGINE_SUBAGENT_TOOLS`, deduplicated. */
+  subagentTools: string[];
   /** Bound on closing the engine and releasing the lease at shutdown. */
   shutdownTimeoutMs: number;
   db: WorkerDbTimeouts;
@@ -94,6 +106,25 @@ export class WorkerConfigError extends Error {
 function text(env: WorkerEnv, name: string): string | null {
   const v = env[name]?.trim();
   return v ? v : null;
+}
+
+const SUBAGENT_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+function subagentTools(env: WorkerEnv): string[] {
+  const names = [
+    text(env, "ENGINE_SUBAGENT_TOOL"),
+    ...(text(env, "ENGINE_SUBAGENT_TOOLS")?.split(",") ?? []),
+  ]
+    .map((n) => n?.trim() ?? "")
+    .filter((n) => n !== "");
+  for (const name of names) {
+    if (!SUBAGENT_TOOL_NAME.test(name)) {
+      throw new WorkerConfigError(
+        `ENGINE_SUBAGENT_TOOL(S) must be tool names (letters, digits, _ and -), got ${JSON.stringify(name)}`,
+      );
+    }
+  }
+  return [...new Set(names)];
 }
 
 function required(env: WorkerEnv, name: string): string {
@@ -144,6 +175,24 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
       Math.max(1, Math.min(statementTimeoutMs + 1_000, leaseTtlMs - 1)),
     ),
   };
+  const policyMode = text(env, "ENGINE_POLICY");
+  if (policyMode !== null && policyMode !== "local" && policyMode !== "backend") {
+    throw new WorkerConfigError(
+      `ENGINE_POLICY must be "local" or "backend", got ${JSON.stringify(policyMode)}`,
+    );
+  }
+  const gatewayUrl = text(env, "ENGINE_GATEWAY_URL");
+  const policyUrlEnv = text(env, "ENGINE_POLICY_URL");
+  const policy = policyMode ?? (policyUrlEnv === null ? "local" : "backend");
+  const policyUrl = policy === "backend" ? (policyUrlEnv ?? gatewayUrl) : null;
+  if (policy === "backend" && policyUrl === null) {
+    throw new WorkerConfigError(
+      "ENGINE_POLICY=backend requires ENGINE_POLICY_URL or ENGINE_GATEWAY_URL",
+    );
+  }
+  if (policy === "backend" && text(env, "ENGINE_GATEWAY_TOKEN") === null) {
+    throw new WorkerConfigError("ENGINE_POLICY=backend requires ENGINE_GATEWAY_TOKEN");
+  }
   return {
     databaseUrl: required(env, "DATABASE_URL"),
     dbSchema: schema,
@@ -154,8 +203,11 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
     ownerId: text(env, "ENGINE_OWNER_ID"),
     leaseTtlMs,
     leaseRetryMs: retry === null ? null : integer(env, "ENGINE_LEASE_RETRY_MS", 0, 1),
-    gatewayUrl: text(env, "ENGINE_GATEWAY_URL"),
+    gatewayUrl,
     gatewayToken: text(env, "ENGINE_GATEWAY_TOKEN"),
+    policy,
+    policyUrl,
+    policyTimeoutMs: integer(env, "ENGINE_POLICY_TIMEOUT_MS", DEFAULT_POLICY_TIMEOUT_MS, 1),
     approvalTtlMs: approval === 0 ? null : approval,
     model: text(env, "ENGINE_MODEL") ?? DEFAULT_ANTHROPIC_MODEL,
     summaryModel: text(env, "ENGINE_SUMMARY_MODEL") ?? DEFAULT_ANTHROPIC_SUMMARY_MODEL,
@@ -167,6 +219,7 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
       0,
     ),
     subagentTool: text(env, "ENGINE_SUBAGENT_TOOL"),
+    subagentTools: subagentTools(env),
     shutdownTimeoutMs: integer(env, "ENGINE_SHUTDOWN_TIMEOUT_MS", DEFAULT_SHUTDOWN_TIMEOUT_MS, 1),
     db,
   };

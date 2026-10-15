@@ -52,7 +52,7 @@ engine were in flight when this was recorded. Re-record
 - Synthesis streams the heading and body of each section as separate `synthesis_chunk`s, then the executive summary/takeaways stream, then the deterministic `## Sources` block. The assembled `report` has stray blank lines around the executive summary. `report_length` (characters) differs from `workspace_update.size` (bytes).
 - `full_state` (recovery contract, `_build_full_state`) is derived from files, not events: `summary` duplicates `engine_report`, `engine_phase` is `null` once completed, `steps` is `[]`, `todos` are derived from the plan (gap tasks included because the plan is re-saved), `workers` is `engine_state.completed_workers`, `sources[]` gain `domain: null, query: null`. `persisted_engine_state` and `files` record the on-disk state.
 - **Failure (`deep_work_failure`)**: orchestrator returns non-JSON. The engine emits **zero events** and raises `ValidationError` (no retry). The `deep_work_engine_error {message}` event is produced by the API layer (`deep_work.py` `_run_engine`), which is not driven here. The `run_failed` run event is patched out.
-- Not driven: legacy `AutonomousExecutor` events (`deep_work_start`, `step_activity`, `step_complete`, ...; needs Redis flags and the executor's own session wiring), the output phase (`deep_work_engine_output_*`, `sandbox_screenshot`, needs a sandbox), cancellation, and the dropped-on-full-queue behaviour.
+- Not driven: the removed v1 `AutonomousExecutor` events (`deep_work_start`, `step_activity`, `step_complete`, ...), the output phase (`deep_work_engine_output_*`, `sandbox_screenshot`, needs a sandbox), cancellation, and the dropped-on-full-queue behaviour.
 
 ### fleet_completed / fleet_failed / fleet_cancelled
 - Each fixture: `{events, final_job}`. `events` is the output of `stream_job_progress` after the run has finished.
@@ -69,3 +69,10 @@ engine were in flight when this was recorded. Re-record
 - `workflow_complete.results` is the unfiltered orchestrator results map. The start node's output includes the full variable bag, including internal `sys.workflow_state` and `sys.session_id`.
 - A node type with no executor is reported as `status: skipped` by the orchestrator but as `workflow_progress.status: "complete"`, message "Done" by the endpoint, and its label falls back to the raw node type (`does_not_exist`).
 - `failed` / `halted` / `node_error` branches and LLM/agent/connector nodes are not driven (they need keys, a sandbox, or approval state, and those executors are being changed in parallel work).
+
+### chat_engine_text / chat_engine_tool_call / chat_engine_error (engine path, U12)
+- Each fixture is `{legacy, view}`: the conversation view the real engine produced for the same scripted conversation as the legacy fixture named in `legacy` (normalized by the recorder). The source is `frontend/lib/engine/__fixtures__/chat_views.json`; `tests/contracts/test_engine_chat_fixtures.py` keeps the copies in sync (re-record with `ONIVA_RECORD_CONTRACTS=1`), checks each view still holds the legacy user message, response and tool names, and fails when a legacy `chat_*` fixture has no `chat_engine_*` counterpart.
+- The adapter output (`viewToMessages`) is compared to the legacy `message_parts` in `frontend/lib/engine/__tests__/viewToMessages.test.ts`. Deliberate differences from legacy (KTD6), each asserted there:
+  - `tool_call` parts carry `toolName` (legacy omitted it) and no `label` or `error: null`; `durationMs` is measured from entry timestamps.
+  - The error path keeps the partial assistant text and a `run_error` entry (legacy persisted nothing).
+  - `source` parts use `description` consistently; the legacy `partIndex` quirks disappear.

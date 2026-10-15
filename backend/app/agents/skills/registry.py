@@ -213,6 +213,7 @@ BUILTIN_SKILLS = [
         description="Check multiple entities against OFAC/EU sanctions lists in one call. Preferred over individual sanctions_check for bulk screening.",
         category="compliance",
         module_path="app.agents.skills.compliance",
+        mock=True,
         required_feature="ENABLE_COMPLIANCE",
     ),
     SkillManifest(
@@ -220,6 +221,7 @@ BUILTIN_SKILLS = [
         description="Perform KYC verification for multiple entities in one call. Preferred over individual kyc_verification for bulk checks.",
         category="compliance",
         module_path="app.agents.skills.compliance",
+        mock=True,
         required_feature="ENABLE_COMPLIANCE",
     ),
     SkillManifest(
@@ -350,6 +352,80 @@ BUILTIN_SKILLS = [
         description="Get the input schema for a specific connector tool before invoking it",
         category="connector",
         module_path="app.agents.skills.connectors"
+    ),
+    # Deep Work gateway tools (engine path only; not in any legacy agent's skill set)
+    SkillManifest(
+        name="dw_start_round",
+        description="Register a Deep Work research round and its workers (server-enforced caps)",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_tools"
+    ),
+    SkillManifest(
+        name="dw_save_learnings",
+        description="Save a Deep Work research worker's learnings",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_tools"
+    ),
+    SkillManifest(
+        name="dw_record_reflection",
+        description="Record the reflection on a Deep Work research round",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_tools"
+    ),
+    SkillManifest(
+        name="dw_write_section",
+        description="Write or replace a section of the Deep Work report",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_tools"
+    ),
+    SkillManifest(
+        name="dw_finalize",
+        description="Finish the Deep Work report with the deterministic Sources block",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_tools"
+    ),
+    SkillManifest(
+        name="dw_get_learnings",
+        description="Read the saved Deep Work learnings",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_tools"
+    ),
+    SkillManifest(
+        name="dw_get_report",
+        description="Read the Deep Work report written so far",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_tools"
+    ),
+    # Deep Work sandbox and output tools (engine path, U5)
+    SkillManifest(
+        name="shell_exec",
+        description="Run a shell command in the Deep Work sandbox",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_sandbox"
+    ),
+    SkillManifest(
+        name="dw_browser_navigate",
+        description="Browse a URL with a headless browser in the Deep Work sandbox",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_sandbox"
+    ),
+    SkillManifest(
+        name="dw_browser_screenshot",
+        description="Screenshot a URL in the Deep Work sandbox",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_sandbox"
+    ),
+    SkillManifest(
+        name="inspect_artifact",
+        description="Inspect a generated file in the Deep Work output sandbox",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_sandbox"
+    ),
+    SkillManifest(
+        name="publish_artifact",
+        description="Publish a Deep Work deliverable from the output sandbox",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_sandbox"
     ),
 ]
 

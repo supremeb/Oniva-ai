@@ -33,6 +33,7 @@ describe("workerConfigFromEnv", () => {
       progressIntervalMs: 100,
       dbSchema: null,
       subagentTool: null,
+      subagentTools: [],
       shutdownTimeoutMs: DEFAULT_SHUTDOWN_TIMEOUT_MS,
       db: {
         connectTimeoutMs: 5_000,
@@ -41,6 +42,18 @@ describe("workerConfigFromEnv", () => {
         queryTimeoutMs: 11_000,
       },
     });
+  });
+
+  it("collects subagent tools from ENGINE_SUBAGENT_TOOL and ENGINE_SUBAGENT_TOOLS, deduplicated", () => {
+    const c = workerConfigFromEnv({
+      ...BASE,
+      ENGINE_SUBAGENT_TOOL: "delegate",
+      ENGINE_SUBAGENT_TOOLS: "research_worker, reflector,delegate,",
+    });
+    expect(c.subagentTools).toEqual(["delegate", "research_worker", "reflector"]);
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_SUBAGENT_TOOLS: "bad name" })).toThrow(
+      WorkerConfigError,
+    );
   });
 
   it("derives database timeouts below a short lease TTL", () => {
@@ -201,5 +214,39 @@ describe("workerHostPolicy", () => {
       clock: new ManualClock(),
     });
     expect(keyless.resolveModelRequest(info("generation", null))).toMatchObject({ ok: false });
+  });
+});
+
+describe("backend policy configuration", () => {
+  it("defaults to the local policy", () => {
+    expect(workerConfigFromEnv(BASE)).toMatchObject({
+      policy: "local",
+      policyUrl: null,
+      policyTimeoutMs: 5_000,
+    });
+  });
+
+  it("selects the backend policy by ENGINE_POLICY_URL or ENGINE_POLICY=backend", () => {
+    const token = { ...BASE, ENGINE_GATEWAY_TOKEN: "gw" };
+    expect(workerConfigFromEnv({ ...token, ENGINE_POLICY_URL: "https://b" })).toMatchObject({
+      policy: "backend",
+      policyUrl: "https://b",
+    });
+    expect(
+      workerConfigFromEnv({ ...token, ENGINE_POLICY: "backend", ENGINE_GATEWAY_URL: "https://g" }),
+    ).toMatchObject({ policy: "backend", policyUrl: "https://g" });
+    expect(
+      workerConfigFromEnv({ ...token, ENGINE_POLICY: "local", ENGINE_POLICY_URL: "https://b" }),
+    ).toMatchObject({ policy: "local", policyUrl: null });
+  });
+
+  it("rejects an unknown mode, a missing URL or a missing gateway token", () => {
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_POLICY: "x" })).toThrow(WorkerConfigError);
+    expect(() =>
+      workerConfigFromEnv({ ...BASE, ENGINE_POLICY: "backend", ENGINE_GATEWAY_TOKEN: "gw" }),
+    ).toThrow(/ENGINE_POLICY_URL/);
+    expect(() =>
+      workerConfigFromEnv({ ...BASE, ENGINE_POLICY: "backend", ENGINE_POLICY_URL: "https://b" }),
+    ).toThrow(/ENGINE_GATEWAY_TOKEN/);
   });
 });

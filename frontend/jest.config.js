@@ -9,11 +9,15 @@ const createJestConfig = nextJest({
 const customJestConfig = {
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   testEnvironment: 'jest-environment-jsdom',
+  // Playwright specs (run with `npx playwright test`) are not jest tests.
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.next/', '<rootDir>/e2e/'],
   moduleNameMapper: {
     '^@/components/(.*)$': '<rootDir>/components/$1',
     '^@/pages/(.*)$': '<rootDir>/pages/$1',
     '^@/lib/(.*)$': '<rootDir>/lib/$1',
     '^@/hooks/(.*)$': '<rootDir>/hooks/$1',
+    // Catch-all so @/types, @/app and any other root-level alias resolve (mirrors tsconfig paths)
+    '^@/(.*)$': '<rootDir>/$1',
   }
 }
 

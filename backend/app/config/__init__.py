@@ -5,6 +5,7 @@ Note: This __init__.py includes the full Settings class because this package
 shadows the original app/config.py module.
 """
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from typing import Optional
@@ -181,15 +182,12 @@ class Settings(BaseSettings):
     # Deep Work Mode (unified autonomous execution)
     # Replaces separate Deep Research toggle with unified plan-first UX
     # Deep Work Engine (orchestrator-worker) configuration
-    DEEP_WORK_MAX_WORKERS: int = 7                # Max parallel workers per deep work session
+    DEEP_WORK_MAX_WORKERS: int = 10               # Max research workers per round (matches the legacy plan limit)
     DEEP_WORK_MAX_REFLECTION_ROUNDS: int = 3      # Max reflection rounds (0 = no reflection)
-    DEEP_WORK_COMPLETENESS_THRESHOLD: int = 80    # Reflection score threshold for completion
     # ========================================
     ENABLE_DEEP_WORK: bool = True                 # Master toggle for autonomous execution
-    DEEP_WORK_MAX_TOOL_CALLS: int = 100           # Budget: max tool calls per session
     DEEP_WORK_MAX_DURATION_SEC: int = 1800        # Budget: max time (30 min)
     DEEP_WORK_MAX_LEARNINGS_PER_WORKER: int = 30  # Max learnings before worker stops
-    DEEP_WORK_SYNTHESIS_MAX_TOKENS: int = 10000   # Max tokens for synthesis output
 
     # ========================================
     # Intelligent Routing (Phase B1)
@@ -338,11 +336,47 @@ class Settings(BaseSettings):
     REDIS_CONNECT_TIMEOUT: float = 5.0                    # Connection timeout in seconds
     REDIS_MAX_CONNECTIONS: int = 50                       # Maximum connection pool size
 
+    # Engine interfaces (@oniva/engine). Two secrets, one per direction:
+    # ENGINE_GATEWAY_TOKEN guards /internal (engine -> backend); the router is mounted only when set.
+    # ENGINE_SERVICE_TOKEN is what the backend presents to the engine (backend -> engine).
+    ENGINE_URL: str = ""
+    ENGINE_SESSION_ID: str = ""
+    ENGINE_SERVICE_TOKEN: Optional[str] = None
+    ENGINE_GATEWAY_TOKEN: Optional[str] = None
+    ENGINE_GATEWAY_TOKEN_PREVIOUS: Optional[str] = None  # accepted during rotation
+    ENABLE_ENGINE_API: bool = False
+    ENABLE_ENGINE_CHAT: bool = False  # global gate for engine-backed chat; tenants opt in via settings.features
+    ENABLE_ENGINE_DEEP_WORK: bool = False  # global gate for engine-backed Deep Work; tenants opt in via settings.features
+    ENGINE_REQUEST_TIMEOUT_S: float = 30.0
+    # Legacy POST /api/v1/chat: when a stored session is supplied, rebuild model history from the
+    # stored messages and ignore client-supplied assistant/tool parts (anti-forgery). Set to
+    # false (CHAT_SERVER_HISTORY=false) to restore the old client-trusted history.
+    CHAT_SERVER_HISTORY: bool = True
+    INTERNAL_ALLOW_PLAINTEXT: bool = False  # allow a non-https ENGINE_URL in production
+
     # Redis Circuit Breaker Settings
     REDIS_CIRCUIT_BREAKER_ENABLED: bool = True            # Enable circuit breaker
     REDIS_CIRCUIT_FAILURE_THRESHOLD: int = 5              # Failures before opening circuit
     REDIS_CIRCUIT_TIMEOUT_SECONDS: float = 30.0           # Timeout before half-open
     REDIS_FAIL_FAST_ON_CIRCUIT_OPEN: bool = False         # Raise error vs return None
+
+    @model_validator(mode="after")
+    def _validate_engine_tokens(self) -> "Settings":
+        tokens = {
+            "ENGINE_GATEWAY_TOKEN": self.ENGINE_GATEWAY_TOKEN,
+            "ENGINE_GATEWAY_TOKEN_PREVIOUS": self.ENGINE_GATEWAY_TOKEN_PREVIOUS,
+            "ENGINE_SERVICE_TOKEN": self.ENGINE_SERVICE_TOKEN,
+        }
+        present = {k: v for k, v in tokens.items() if v}
+        for name, value in present.items():
+            if len(value) < 32:
+                raise ValueError(f"{name} must be at least 32 characters")
+            if value == self.SECRET_KEY:
+                raise ValueError(f"{name} must differ from SECRET_KEY")
+        values = list(present.values())
+        if len(set(values)) != len(values):
+            raise ValueError("ENGINE_GATEWAY_TOKEN, ENGINE_GATEWAY_TOKEN_PREVIOUS and ENGINE_SERVICE_TOKEN must differ from each other")
+        return self
 
     @property
     def system_database_url(self) -> str:
@@ -491,6 +525,14 @@ class Settings(BaseSettings):
             errors.append(
                 "DEBUG must be False in production. "
                 "Set DEBUG=false in your environment."
+            )
+
+        # 6. Engine URL must be https unless explicitly overridden
+        if (self.ENGINE_URL and not self.INTERNAL_ALLOW_PLAINTEXT
+                and not self.ENGINE_URL.lower().startswith("https://")):
+            errors.append(
+                "ENGINE_URL must use https in production (or set INTERNAL_ALLOW_PLAINTEXT=true "
+                "for a trusted private network)."
             )
 
         # If any errors, crash the application with clear instructions

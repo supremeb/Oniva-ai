@@ -51,6 +51,10 @@ describe("watch stream", () => {
     expect(first && "snapshot" in first).toBe(true);
     client.apply(first as WatchFrame);
     expect(Object.values((client.view as Any).toolOutput).length).toBe(1);
+    expect(Object.values((client.view as Any).toolOutput)[0]).toMatchObject({
+      toolCallId: "c1",
+      toolName: "work",
+    });
     expect((client.view as Any).entries.length).toBeGreaterThan(0);
 
     gates[0].open();

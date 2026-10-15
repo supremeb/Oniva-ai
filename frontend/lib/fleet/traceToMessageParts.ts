@@ -6,6 +6,7 @@
 import type { ExecutionTraceStep } from '@/lib/types/chat-panels';
 import type { MessagePart } from '@/lib/models';
 import type { ToolCallMeta } from '@/hooks/useStreamingParts';
+import { buildTextPart, buildThinkingPart, buildToolCallPart } from '@/lib/chat/parts';
 
 /** Map trace step status → MessagePart tool_call status */
 function mapToolStatus(status: ExecutionTraceStep['status']): 'pending' | 'running' | 'success' | 'error' {
@@ -60,8 +61,7 @@ export function traceToMessageParts(steps: ExecutionTraceStep[]): TraceConversio
 
         const status = errorMsg ? 'error' as const : 'success' as const;
 
-        parts.push({
-          type: 'tool_call',
+        parts.push(buildToolCallPart({
           id,
           toolName,
           status,
@@ -69,7 +69,7 @@ export function traceToMessageParts(steps: ExecutionTraceStep[]): TraceConversio
           result: resultObj,
           error: errorMsg,
           durationMs: raw.duration_ms as number | undefined,
-        } as MessagePart);
+        }));
 
         toolCallMeta.set(id, {
           id,
@@ -85,10 +85,7 @@ export function traceToMessageParts(steps: ExecutionTraceStep[]): TraceConversio
         // text_response — agent's final or intermediate text
         const content = (raw.content_preview as string) || '';
         if (content) {
-          parts.push({
-            type: 'text',
-            content,
-          } as MessagePart);
+          parts.push(buildTextPart(content));
         }
       }
       continue;
@@ -101,19 +98,13 @@ export function traceToMessageParts(steps: ExecutionTraceStep[]): TraceConversio
     if (nodeType === 'tool') {
       // If tool has reasoning, emit a thinking part first
       if (step.reasoning) {
-        parts.push({
-          type: 'thinking',
-          variant: 'accordion',
-          thinkingContent: step.reasoning,
-          isThinking: false,
-        } as MessagePart);
+        parts.push(buildThinkingPart({ content: step.reasoning, isThinking: false }));
       }
 
       const toolName = step.node_id || 'tool';
       const status = mapToolStatus(step.status);
 
-      parts.push({
-        type: 'tool_call',
+      parts.push(buildToolCallPart({
         id,
         toolName,
         status,
@@ -121,7 +112,7 @@ export function traceToMessageParts(steps: ExecutionTraceStep[]): TraceConversio
         result: step.output,
         error: step.error,
         durationMs: step.duration_ms,
-      } as MessagePart);
+      }));
 
       toolCallMeta.set(id, {
         id,
@@ -136,24 +127,16 @@ export function traceToMessageParts(steps: ExecutionTraceStep[]): TraceConversio
         sources: [],
       });
     } else if (nodeType === 'llm') {
-      parts.push({
-        type: 'thinking',
-        variant: 'accordion',
-        thinkingContent: step.reasoning || 'Thinking...',
+      parts.push(buildThinkingPart({
+        content: step.reasoning || 'Thinking...',
         isThinking: step.status === 'running',
-      } as MessagePart);
+      }));
     } else if (nodeType === 'start') {
-      parts.push({
-        type: 'text',
-        content: step.reasoning || 'Agent started',
-      } as MessagePart);
+      parts.push(buildTextPart(step.reasoning || 'Agent started'));
     } else {
       // Generic step — only emit if there's meaningful content
       if (step.reasoning || step.output) {
-        parts.push({
-          type: 'text',
-          content: step.reasoning || JSON.stringify(step.output),
-        } as MessagePart);
+        parts.push(buildTextPart(step.reasoning || JSON.stringify(step.output)));
       }
     }
   }

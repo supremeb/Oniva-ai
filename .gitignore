@@ -17,7 +17,7 @@ eggs/
 .eggs/
 # lib/ - removed, was incorrectly ignoring frontend/lib source code
 lib64/
-parts/
+/parts/
 sdist/
 var/
 wheels/

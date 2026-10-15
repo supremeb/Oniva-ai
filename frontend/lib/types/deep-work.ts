@@ -9,8 +9,6 @@ export type DeepWorkStatus =
   | 'planning'
   | 'awaiting_approval'
   | 'executing'
-  | 'paused'
-  | 'awaiting_input'
   | 'completed'
   | 'error'
   | 'stopped';
@@ -114,22 +112,6 @@ export interface WorkspaceFile {
 }
 
 // ── API request/response ────────────────────────────────────
-export interface ExecuteDeepWorkRequest {
-  agent_id: string;
-  plan: DeepWorkPlan;
-  message: string;
-  conversation_id?: string;
-}
-
-export interface ExecuteDeepWorkResponse {
-  session_id: string;
-  job_id: string;
-}
-
-export interface HumanInputRequest {
-  input: string;
-}
-
 // ── Source / connector tracking ──────────────────────────────
 export interface DeepWorkSource {
   type: 'search' | 'url' | 'knowledge_base';
@@ -150,24 +132,7 @@ export interface SourceUpdateEvent {
   connectors: DeepWorkConnector[];
 }
 
-export interface SessionStatusResponse {
-  session_id: string;
-  status: string;
-  current_step: number;
-  total_steps: number;
-  elapsed_seconds: number;
-  // Full state for refresh recovery
-  original_message?: string;
-  plan?: { title: string; steps: string[] };
-  todos: DeepWorkTodo[];
-  sources: DeepWorkSource[];
-  connectors: DeepWorkConnector[];
-  summary?: string;
-  key_findings: string[];
-}
-
 // ── Deep Work Engine (orchestrator-worker) types ────────────
-// Separate from existing AutonomousExecutor types above.
 
 export type EnginePhase = 'researching' | 'reflecting' | 'synthesizing' | 'generating_output';
 

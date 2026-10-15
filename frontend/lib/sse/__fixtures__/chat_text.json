@@ -1,0 +1,56 @@
+{
+  "events": [
+    {
+      "event": "text_delta",
+      "id": "1",
+      "data": {
+        "delta": "Hello",
+        "partIndex": 0
+      }
+    },
+    {
+      "event": "text_delta",
+      "id": "2",
+      "data": {
+        "delta": ", ",
+        "partIndex": 0
+      }
+    },
+    {
+      "event": "text_delta",
+      "id": "3",
+      "data": {
+        "delta": "world.",
+        "partIndex": 0
+      }
+    },
+    {
+      "event": "done",
+      "id": "4",
+      "data": {
+        "messageId": "<id-1>",
+        "sessionId": "<id-2>",
+        "model": "contract-test-model",
+        "usage": {
+          "input_tokens": 50,
+          "output_tokens": 5
+        }
+      }
+    }
+  ],
+  "persisted_messages": [
+    {
+      "message": "What is the contract?",
+      "response": "Hello, world.",
+      "reasoning": null,
+      "message_parts": [
+        {
+          "type": "text",
+          "content": "Hello, world.",
+          "isStreaming": false
+        }
+      ],
+      "model": "contract-test-model"
+    }
+  ]
+}

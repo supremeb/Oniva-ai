@@ -3,16 +3,16 @@ Deep Work API — Autonomous agent execution with plan-first UX.
 
 Endpoints for starting, controlling, and observing Deep Work sessions.
 
-Two execution modes:
-1. AutonomousExecutor (legacy): POST /deep-work/execute — single-agent sequential loop
-2. Orchestrator-Worker Engine (v2): POST /deep-work/engine — multi-agent parallel pipeline
+Execution: Orchestrator-Worker pipeline (POST /deep-work/engine), on the legacy
+v2 path or on @oniva/engine behind the per-tenant flag. The v1 single-agent
+executor is gone; its sessions stay readable (status, full-state, workspace).
 """
 
 import asyncio
 import json
 import logging
 import uuid
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -24,6 +24,8 @@ from sse_starlette.sse import EventSourceResponse
 from app.auth.dependencies import get_current_user_id, get_current_tenant_id
 from app.config import get_settings
 from app.core.database import get_db, AsyncSessionLocal, set_tenant_context
+from app.api.v1 import deep_work_engine as engine_dw
+from app.services import deep_work_state as dws
 from app.models.background_job import BackgroundJob, JobStatus, JobType, JobTrigger
 
 logger = logging.getLogger(__name__)
@@ -35,27 +37,6 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
-
-class PlanSchema(BaseModel):
-    title: str
-    steps: List[str]
-
-
-class ExecuteRequest(BaseModel):
-    agent_id: Optional[str] = None
-    plan: PlanSchema
-    message: str
-    conversation_id: Optional[str] = None
-
-
-class ExecuteResponse(BaseModel):
-    session_id: str
-    job_id: str
-
-
-class HumanInputRequest(BaseModel):
-    input: str
-
 
 class TodoSchema(BaseModel):
     text: str
@@ -112,6 +93,8 @@ class DeepWorkFullStateResponse(BaseModel):
     sources: list[SourceSchema] = []
     connectors: list[ConnectorSchema] = []
     is_engine: bool = False
+    # "engine": run on @oniva/engine (the watch view is the live state). "legacy": v1/v2 executors.
+    runtime: str = "legacy"
     engine_report: str | None = None
     engine_phase: str | None = None
     artifacts: list[dict] | None = None
@@ -125,12 +108,16 @@ class SessionListItem(BaseModel):
     status: str
     plan_title: str | None = None
     created_at: str | None = None
+    updated_at: str | None = None
+    source: str = "legacy"  # "legacy" | "engine"
 
 
 class EnginePlanResponse(BaseModel):
     title: str
     steps: list[str]
     raw_plan: dict
+    session_id: str | None = None  # engine path only
+    conversation_id: str | None = None  # engine path only
 
 
 class DeepWorkEngineRequest(BaseModel):
@@ -139,12 +126,20 @@ class DeepWorkEngineRequest(BaseModel):
     conversation_id: str | None = None
     plan: dict | None = None  # Pre-approved plan from /engine/plan
     enriched_query: str | None = None  # Enriched query from intake clarification
+    # Engine path only (ignored by the legacy pipeline):
+    project_id: str | None = None
+    knowledge_base_ids: list[str] = Field(default_factory=list)
+    connector_ids: list[str] = Field(default_factory=list)
+    chat_id: str | None = None  # originating chat; lets a refreshed chat find the run
 
 
 class ClarifyRequest(BaseModel):
     query: str = Field(..., min_length=5, max_length=5000)
     available_kbs: list[str] = Field(default_factory=list)
     available_connectors: list[str] = Field(default_factory=list)
+    project_id: str | None = None  # Engine path only
+    session_id: str | None = None  # Engine path only: reuse the session
+    chat_id: str | None = None  # Engine path only: originating chat
 
 
 # ---------------------------------------------------------------------------
@@ -166,14 +161,7 @@ def _parse_uuid(value: Optional[str]) -> Optional[uuid.UUID]:
         return None
 
 
-# In-memory executor registry (single-server; swap for Redis in production)
-if TYPE_CHECKING:
-    from app.services.autonomous_executor import AutonomousExecutor
-
-_executors: dict[str, "AutonomousExecutor"] = {}
-_executors_lock = asyncio.Lock()
-
-# In-memory engine task registry (separate from _executors — coexistence)
+# In-memory engine task registry
 _engine_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -231,170 +219,6 @@ async def _update_job_status(
         await db.commit()
 
 
-# ---------------------------------------------------------------------------
-# POST /deep-work/execute — start autonomous execution
-# ---------------------------------------------------------------------------
-
-@router.post("/deep-work/execute", response_model=ExecuteResponse)
-async def execute_deep_work(
-    body: ExecuteRequest,
-    db: AsyncSession = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-    tenant_id: UUID = Depends(get_current_tenant_id),
-):
-    """
-    Start a Deep Work session. Creates a BackgroundJob, initialises the
-    AutonomousExecutor, and spawns the agent loop as an async task.
-    Returns session_id + job_id immediately.
-    """
-    _check_feature_enabled()
-
-    session_id = str(uuid.uuid4())
-
-    # Persist a BackgroundJob for tracking
-    job = BackgroundJob(
-        id=uuid.uuid4(),
-        tenant_id=tenant_id,
-        user_id=user_id,
-        job_type=JobType.DEEP_WORK.value,
-        status=JobStatus.PENDING.value,
-        trigger=JobTrigger.MANUAL.value,
-        session_id=session_id,
-        conversation_id=_parse_uuid(body.conversation_id),
-        agent_id=_parse_uuid(body.agent_id),
-        input_data={
-            "plan": body.plan.model_dump(),
-            "message": body.message,
-            "conversation_id": body.conversation_id,
-        },
-    )
-    db.add(job)
-    job_id = str(job.id)
-    await db.commit()
-
-    # Spawn background execution
-    asyncio.create_task(
-        _run_deep_work(
-            job_id=job_id,
-            session_id=session_id,
-            agent_id=body.agent_id,
-            plan=body.plan.model_dump(),
-            message=body.message,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            conversation_id=body.conversation_id,
-        )
-    )
-
-    return ExecuteResponse(session_id=session_id, job_id=job_id)
-
-
-async def _run_deep_work(
-    job_id: str,
-    session_id: str,
-    agent_id: str,
-    plan: dict,
-    message: str,
-    user_id: UUID,
-    tenant_id: UUID,
-    conversation_id: str | None = None,
-):
-    """Background task that drives the AutonomousExecutor."""
-    from app.services.autonomous_executor import AutonomousExecutor
-    from app.services.session_storage import get_session_storage
-    from app.agents.skills.registry import SkillRegistry
-    from app.services.llm_gateway import LLMGateway
-
-    async with AsyncSessionLocal() as db:
-        await set_tenant_context(db, str(tenant_id))
-        try:
-            # Mark job as running
-            result = await db.execute(
-                select(BackgroundJob).where(BackgroundJob.id == uuid.UUID(job_id))
-            )
-            job = result.scalar_one_or_none()
-            if job:
-                job.start()
-                await db.commit()
-
-            # Re-set tenant context (commit ends transaction-scoped setting)
-            await set_tenant_context(db, str(tenant_id))
-
-            # Load agent config
-            agent_config = None
-            agent_uuid = _parse_uuid(agent_id)
-            if agent_uuid:
-                from app.models.custom_agent import CustomAgent
-                agent_result = await db.execute(
-                    select(CustomAgent).where(CustomAgent.id == agent_uuid)
-                )
-                agent_config = agent_result.scalar_one_or_none()
-
-            # Build executor
-            sse_queue: asyncio.Queue = asyncio.Queue()
-            executor = AutonomousExecutor(
-                session_storage=get_session_storage(),
-                skill_registry=SkillRegistry(),
-                llm_gateway=LLMGateway(db),
-                sse_queue=sse_queue,
-            )
-
-            # Store executor for control endpoints (lock prevents TOCTOU race)
-            async with _executors_lock:
-                if session_id in _executors:
-                    raise HTTPException(409, "Session already active")
-                _executors[session_id] = executor
-
-            # Initialise session files
-            todo_items = plan.get("steps", [])
-            await executor.start_session(
-                agent_config=agent_config,
-                plan=plan,
-                todo_items=todo_items,
-                message=message,
-                user_id=str(user_id),
-                tenant_id=str(tenant_id),
-                session_id=session_id,
-                conversation_id=conversation_id,
-            )
-
-            # Store SSE queue for the events endpoint
-            _sse_queues[session_id] = sse_queue
-
-            # Run the agent loop
-            await executor.execute(session_id)
-
-            # Mark job complete (re-set tenant context after executor may have committed)
-            await set_tenant_context(db, str(tenant_id))
-            result = await db.execute(
-                select(BackgroundJob).where(BackgroundJob.id == uuid.UUID(job_id))
-            )
-            job = result.scalar_one_or_none()
-            if job:
-                job.complete()
-                await db.commit()
-
-        except Exception as e:
-            logger.exception(f"Deep Work execution failed: {e}")
-            # Use a fresh session for error handling (original may be in broken state)
-            try:
-                async with AsyncSessionLocal() as fail_db:
-                    await set_tenant_context(fail_db, str(tenant_id))
-                    result = await fail_db.execute(
-                        select(BackgroundJob).where(BackgroundJob.id == uuid.UUID(job_id))
-                    )
-                    job = result.scalar_one_or_none()
-                    if job:
-                        job.fail(str(e))
-                        await fail_db.commit()
-            except Exception as inner_e:
-                logger.error(f"Failed to mark Deep Work job {job_id} as failed: {inner_e}")
-        finally:
-            async with _executors_lock:
-                _executors.pop(session_id, None)
-            _sse_queues.pop(session_id, None)
-
-
 # SSE queues per session
 _sse_queues: dict[str, asyncio.Queue] = {}
 
@@ -423,6 +247,12 @@ async def get_full_state_by_conversation(
     conv_uuid = _parse_uuid(conversation_id)
     if not conv_uuid:
         raise HTTPException(status_code=404, detail="No Deep Work session for this conversation")
+
+    run = await dws.load_run(engine_dw.reading(db), tenant_id, conv_uuid)
+    if run is None:  # the id may be the chat the run was started from (refresh / reopen)
+        run = await dws.load_run_by_chat(engine_dw.reading(db), tenant_id, conv_uuid)
+    if run is not None:
+        return await engine_dw.full_state(db, run, user_id)
 
     try:
         return await _build_full_state(db, conv_uuid, user_id, tenant_id)
@@ -606,159 +436,6 @@ async def _build_full_state(
 
 
 # ---------------------------------------------------------------------------
-# GET /deep-work/{session_id}/events — SSE event stream
-# ---------------------------------------------------------------------------
-
-@router.get("/deep-work/{session_id}/events")
-async def deep_work_events(
-    session_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-    tenant_id: UUID = Depends(get_current_tenant_id),
-):
-    """
-    SSE stream for a Deep Work session. Client connects and receives
-    events as the AutonomousExecutor runs. Supports Last-Event-ID for
-    reconnection.
-    """
-    _check_feature_enabled()
-
-    # Verify ownership before streaming
-    await _verify_session_ownership(db, session_id, tenant_id, user_id)
-
-    queue = _sse_queues.get(session_id)
-    if queue is None:
-        raise HTTPException(status_code=404, detail="Session not found or completed")
-
-    async def stream():
-        try:
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=30)
-                    yield {
-                        "event": event["type"],
-                        "id": event.get("id", ""),
-                        "data": json.dumps(event.get("data", {})),
-                    }
-                    # Check for terminal events
-                    if event["type"] in ("deep_work_complete", "deep_work_error"):
-                        break
-                except asyncio.TimeoutError:
-                    # Send keepalive comment
-                    yield {"comment": "keepalive"}
-        except asyncio.CancelledError:
-            pass
-
-    return EventSourceResponse(
-        stream(),
-        media_type="text/event-stream",
-        ping=15,
-        send_timeout=30.0,
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-# ---------------------------------------------------------------------------
-# POST /deep-work/{session_id}/pause
-# ---------------------------------------------------------------------------
-
-@router.post("/deep-work/{session_id}/pause")
-async def pause_deep_work(
-    session_id: str,
-    db: AsyncSession = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-    tenant_id: UUID = Depends(get_current_tenant_id),
-):
-    """Pause an active Deep Work session after the current step completes."""
-    _check_feature_enabled()
-    await _verify_session_ownership(db, session_id, tenant_id, user_id)
-
-    executor = _executors.get(session_id)
-    if executor is None:
-        raise HTTPException(status_code=404, detail="No active session")
-
-    await executor.pause(session_id)
-    return {"status": "pausing"}
-
-
-# ---------------------------------------------------------------------------
-# POST /deep-work/{session_id}/resume
-# ---------------------------------------------------------------------------
-
-@router.post("/deep-work/{session_id}/resume")
-async def resume_deep_work(
-    session_id: str,
-    db: AsyncSession = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-    tenant_id: UUID = Depends(get_current_tenant_id),
-):
-    """Resume a paused Deep Work session."""
-    _check_feature_enabled()
-    await _verify_session_ownership(db, session_id, tenant_id, user_id)
-
-    executor = _executors.get(session_id)
-    if executor is None:
-        raise HTTPException(status_code=404, detail="No active session")
-
-    await executor.resume(session_id)
-    return {"status": "resuming"}
-
-
-# ---------------------------------------------------------------------------
-# POST /deep-work/{session_id}/stop
-# ---------------------------------------------------------------------------
-
-@router.post("/deep-work/{session_id}/stop")
-async def stop_deep_work(
-    session_id: str,
-    db: AsyncSession = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-    tenant_id: UUID = Depends(get_current_tenant_id),
-):
-    """Stop a Deep Work session and finalize."""
-    _check_feature_enabled()
-    await _verify_session_ownership(db, session_id, tenant_id, user_id)
-
-    executor = _executors.get(session_id)
-    if executor is None:
-        raise HTTPException(status_code=404, detail="No active session")
-
-    await executor.stop(session_id)
-    return {"status": "stopping"}
-
-
-# ---------------------------------------------------------------------------
-# POST /deep-work/{session_id}/input — respond to ask_user
-# ---------------------------------------------------------------------------
-
-@router.post("/deep-work/{session_id}/input")
-async def send_human_input(
-    session_id: str,
-    body: HumanInputRequest,
-    db: AsyncSession = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-    tenant_id: UUID = Depends(get_current_tenant_id),
-):
-    """Send a human response to an ask_user prompt."""
-    _check_feature_enabled()
-    await _verify_session_ownership(db, session_id, tenant_id, user_id)
-
-    executor = _executors.get(session_id)
-    if executor is None:
-        raise HTTPException(status_code=404, detail="No active session")
-
-    await executor.send_human_input(session_id, body.input)
-    return {"status": "input_received"}
-
-
-# ---------------------------------------------------------------------------
 # GET /deep-work/{session_id}/status
 # ---------------------------------------------------------------------------
 
@@ -771,6 +448,9 @@ async def get_session_status(
 ):
     """Get current status and progress of a Deep Work session."""
     _check_feature_enabled()
+    run = await engine_dw.find_engine_run(engine_dw.reading(db), tenant_id, session_id)
+    if run is not None:
+        return await engine_dw.session_status(db, run, user_id)
 
     from app.services.session_storage import get_session_storage
     storage = get_session_storage()
@@ -848,11 +528,13 @@ async def get_session_status(
 @router.get("/deep-work/{session_id}/workspace")
 async def list_workspace_files(
     session_id: str,
+    db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
     """List files in the session workspace."""
     _check_feature_enabled()
+    await engine_dw.check_workspace_access(engine_dw.reading(db), tenant_id, user_id, session_id)
 
     from app.services.session_storage import get_session_storage
     storage = get_session_storage()
@@ -884,11 +566,13 @@ async def list_workspace_files(
 async def download_workspace_file(
     session_id: str,
     file_path: str,
+    db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
     """Download a file from the session workspace."""
     _check_feature_enabled()
+    await engine_dw.check_workspace_access(engine_dw.reading(db), tenant_id, user_id, session_id)
 
     from fastapi.responses import FileResponse
     from app.services.session_storage import get_session_storage
@@ -940,6 +624,8 @@ async def list_deep_work_sessions(
     sessions = []
     needs_commit = False
     for job in jobs:
+        if isinstance(job.input_data, dict) and job.input_data.get("engine") == engine_dw.ENGINE_JOB_MARK:
+            continue  # engine sessions are listed from deep_work_runs (reconciled), not as orphans
         plan_title = None
         effective_status = job.status
         if job.input_data and isinstance(job.input_data, dict):
@@ -952,10 +638,9 @@ async def list_deep_work_sessions(
 
         # Fix orphaned running/pending jobs inline (no active in-memory task)
         if job.status in ("running", "pending") and job.session_id not in _engine_tasks:
-            if job.session_id not in _executors:
-                job.fail("Server restarted during execution")
-                effective_status = "failed"
-                needs_commit = True
+            job.fail("Server restarted during execution")
+            effective_status = "failed"
+            needs_commit = True
 
         sessions.append(SessionListItem(
             session_id=job.session_id,
@@ -963,12 +648,18 @@ async def list_deep_work_sessions(
             status=effective_status,
             plan_title=plan_title,
             created_at=job.created_at.isoformat() if job.created_at else None,
+            updated_at=(job.completed_at or job.started_at or job.created_at).isoformat()
+            if (job.completed_at or job.started_at or job.created_at) else None,
         ))
 
     if needs_commit:
         await db.commit()
 
-    return {"sessions": [s.model_dump() for s in sessions]}
+    items = [s.model_dump() for s in sessions]
+    if await engine_dw.has_engine_runs(db, tenant_id, user_id):
+        items += await engine_dw.list_sessions(user_id, tenant_id)
+        items.sort(key=lambda i: i.get("updated_at") or i.get("created_at") or "", reverse=True)
+    return {"sessions": items}
 
 
 # ---------------------------------------------------------------------------
@@ -984,15 +675,14 @@ async def delete_deep_work_session(
 ):
     """Delete a Deep Work session: mark job as cancelled and remove filesystem data."""
     _check_feature_enabled()
+    if await engine_dw.find_engine_run(engine_dw.reading(db), tenant_id, session_id) is not None:
+        return await engine_dw.delete_session(session_id, db, user_id, tenant_id)
 
     job = await _verify_session_ownership(db, session_id, tenant_id, user_id)
 
     # Don't allow deleting a truly running session (with active task)
     if job.status == JobStatus.RUNNING.value:
-        has_active_task = (
-            session_id in _engine_tasks or session_id in _executors
-        )
-        if has_active_task:
+        if session_id in _engine_tasks:
             raise HTTPException(
                 status_code=409,
                 detail="Cannot delete a running session. Stop it first.",
@@ -1028,6 +718,7 @@ async def delete_deep_work_session(
 
 @router.post("/deep-work/engine/clarify")
 async def clarify_deep_work_query(
+    request: Request,
     body: ClarifyRequest,
     db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
@@ -1035,6 +726,8 @@ async def clarify_deep_work_query(
 ):
     """Ask the clarifier LLM whether to ask questions or auto-proceed."""
     _check_feature_enabled()
+    if await engine_dw.tenant_uses_engine_deep_work(db, tenant_id, request):
+        return await engine_dw.clarify(body, db, user_id, tenant_id)
 
     from app.services.deep_work.engine import DeepWorkEngine
     from app.services.deep_work.event_sink import NullSink
@@ -1064,6 +757,7 @@ async def clarify_deep_work_query(
 
 @router.post("/deep-work/engine/plan", response_model=EnginePlanResponse)
 async def plan_deep_work_engine(
+    request: Request,
     body: DeepWorkEngineRequest,
     db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
@@ -1071,6 +765,8 @@ async def plan_deep_work_engine(
 ):
     """Run orchestration only and return a plan for user approval."""
     _check_feature_enabled()
+    if await engine_dw.tenant_uses_engine_deep_work(db, tenant_id, request):
+        return await engine_dw.plan(body, db, user_id, tenant_id)
 
     from app.services.deep_work.engine import DeepWorkEngine
     from app.services.deep_work.event_sink import NullSink
@@ -1103,6 +799,7 @@ async def plan_deep_work_engine(
 
 @router.post("/deep-work/engine")
 async def start_deep_work_engine(
+    request: Request,
     body: DeepWorkEngineRequest,
     db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
@@ -1110,6 +807,8 @@ async def start_deep_work_engine(
 ):
     """Start a deep work engine session (v2 orchestrator-worker pipeline)."""
     _check_feature_enabled()
+    if await engine_dw.tenant_uses_engine_deep_work(db, tenant_id, request):
+        return await engine_dw.start(body, db, user_id, tenant_id)
 
     session_id = body.session_id or str(uuid.uuid4())
 
@@ -1257,8 +956,10 @@ async def cancel_deep_work_engine(
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
-    """Cancel a running deep work engine task."""
+    """Cancel a running deep work engine task (an engine-path session cancels through the engine)."""
     _check_feature_enabled()
+    if await engine_dw.find_engine_run(engine_dw.reading(db), tenant_id, session_id) is not None:
+        return await engine_dw.cancel(session_id, db, user_id, tenant_id)
     await _verify_session_ownership(db, session_id, tenant_id, user_id)
 
     task = _engine_tasks.get(session_id)
@@ -1276,3 +977,7 @@ async def cancel_deep_work_engine(
         })
 
     return {"session_id": session_id, "status": "cancelled"}
+
+
+# Engine-only routes (steer, worker drill-down watch); each checks ownership / the tenant gate itself.
+router.include_router(engine_dw.router)

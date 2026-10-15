@@ -8,6 +8,7 @@ New skills should use the SKILL.md format in app/skills/<skill_name>/
 
 from typing import Dict, Any, List
 from app.agents.skills.context import SkillContext
+from app.agents.skills.registry import skill
 
 
 async def kyc_verification(ctx: SkillContext, full_name: str, dob: str, country: str) -> Dict[str, Any]:
@@ -62,6 +63,11 @@ async def sanctions_check(ctx: SkillContext, entity_name: str) -> Dict[str, Any]
         "source": "Mock OFAC List" if is_sanctioned else None
     }
 
+@skill(
+    name="batch_sanctions_check",
+    description="Check multiple entities against OFAC/EU sanctions lists in one call. Preferred over individual sanctions_check for bulk screening.",
+    category="compliance",
+)
 async def batch_sanctions_check(ctx: SkillContext, entity_names: list) -> Dict[str, Any]:
     """
     Check multiple entities against OFAC/EU sanctions lists in a single call.
@@ -87,6 +93,11 @@ async def batch_sanctions_check(ctx: SkillContext, entity_names: list) -> Dict[s
     }
 
 
+@skill(
+    name="batch_kyc_verification",
+    description="Perform KYC verification for multiple entities in one call. Preferred over individual kyc_verification for bulk checks.",
+    category="compliance",
+)
 async def batch_kyc_verification(ctx: SkillContext, entities: list) -> Dict[str, Any]:
     """
     Perform KYC verification for multiple entities in a single call.

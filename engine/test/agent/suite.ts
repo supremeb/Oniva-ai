@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { AgentHooks } from "../../src/agent/hooks.js";
 import type { HostPolicy } from "../../src/agent/policy.js";
-import { toolOutputDoc } from "../../src/agent/progress.js";
+import { liveDoc, toolOutputDoc } from "../../src/agent/progress.js";
 import { usageDoc } from "../../src/agent/usage.js";
 import type { JsonValue } from "../../src/core/json.js";
 import { fakeError, fakeText, fakeToolCall } from "../../src/models/fake.js";
@@ -362,6 +362,42 @@ export function defineAgentSuite(backend: AgentBackend): void {
       expect((settled.result as Any).error.kind).toBe("overloaded");
       expect(kinds(await conv.entries())).toEqual(["user", "system", "run_error"]);
       expect(w.harness.runtime.tasks().every((t) => t.status === "terminal")).toBe(true);
+      await w.crash();
+    });
+
+    it("keeps text streamed before a model error as a partial assistant entry", async () => {
+      const fx = await backend.fixture();
+      fx.provider.enqueue({
+        steps: [
+          { type: "text", text: "The answer starts here", chunkSize: 5 },
+          { type: "error", kind: "overloaded", message: "fake overloaded" },
+        ],
+      });
+      const w = await fx.open({ tools: [readTool()] });
+      const conv = await w.harness.createConversation({
+        tenantId: "t1",
+        projectId: "p1",
+        agent: AGENT,
+      });
+      const settled = await (await conv.submit({ text: "x" })).wait();
+      expect(settled.status).toBe("unanswered");
+      const entries = await conv.entries();
+      expect(kinds(entries)).toEqual(["user", "system", "assistant", "run_error"]);
+      const partial = payload(entries[2] as EntryRecord);
+      expect(partial.partial).toBe(true);
+      expect(partial.message.stopReason).toBe("error");
+      expect(partial.message.blocks).toEqual([{ type: "text", text: "The answer starts here" }]);
+      expect((await w.harness.session.document(liveDoc, conv.id)).message).toBeNull();
+
+      // The next turn sees the partial text as the assistant's earlier reply.
+      fx.provider.enqueue(fakeText("Continuing."));
+      await (await conv.submit({ text: "go on" })).wait();
+      const last = fx.provider.requests.at(-1) as ModelRequest;
+      const assistant = last.messages.filter((m) => m.role === "assistant");
+      expect(assistant).toHaveLength(1);
+      expect((assistant[0] as Any).blocks).toEqual([
+        { type: "text", text: "The answer starts here" },
+      ]);
       await w.crash();
     });
 

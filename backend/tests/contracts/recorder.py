@@ -101,20 +101,20 @@ def parse_sse_text(text: str) -> list[dict]:
     return events
 
 
-def _path(name: str) -> Path:
-    return FIXTURE_DIR / f"{name}.json"
+def _path(name: str, directory: Path | None = None) -> Path:
+    return (directory or FIXTURE_DIR) / f"{name}.json"
 
 
 def dump(obj: Any) -> str:
     return json.dumps(obj, indent=2, sort_keys=False, ensure_ascii=False, default=str) + "\n"
 
 
-def check_or_record(name: str, live: Any) -> None:
-    """Compare normalized `live` with fixtures/<name>.json, or re-record."""
+def check_or_record(name: str, live: Any, directory: Path | None = None) -> None:
+    """Compare normalized `live` with fixtures/<name>.json (or `directory`/<name>.json), or re-record."""
     live = json.loads(json.dumps(normalize(live), default=str))  # force plain JSON types
-    path = _path(name)
+    path = _path(name, directory)
     if os.environ.get(RECORD_ENV) == "1":
-        FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(dump(live), encoding="utf-8")
         return
     assert path.exists(), (

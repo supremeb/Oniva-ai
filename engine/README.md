@@ -30,7 +30,7 @@ Everything is exported from the package root (`src/index.ts`).
 | Area | Main exports |
 | --- | --- |
 | Harness | `Harness.open(storage, options)`, `harness.createConversation`, `harness.conversation(id)`, `harness.submission(id)`, `harness.decideApproval`, `harness.approvals`, `harness.waitForIdle`, `harness.close` |
-| Conversations | `conversation.submit({ text, requestId?, whenBusy?: "followUp" \| "steer" \| "reject", type? })` → `Submission` (`wait()`, `record()`), `conversation.abort(reason?)`, `entries()`, `live()`, `usage()` |
+| Conversations | `conversation.submit({ text, requestId?, whenBusy?: "followUp" \| "steer" \| "reject", type? })` → `Submission` (`wait()`, `record()`), `conversation.abort(reason?)`, `conversation.cancelSubmission(submissionId)` → `"cancelled" \| "not_queued" \| "unknown"`, `entries()`, `live()`, `usage()` |
 | Policy & hooks | `HostPolicy` (`resolveModelRequest`, `authorizeTool` → `allow` / `block` / `requireApproval`), `AgentHooks` |
 | Tools | `defineTool`, `ToolRegistry`, `createGatewayTools`, `createSubagentTool` |
 | Models | `ModelRegistry`, `AnthropicProvider`, `FakeProvider` (`fakeText`, `fakeToolCall`, ...) |
@@ -69,9 +69,29 @@ routes also need `X-Oniva-Tenant` / `X-Oniva-Project` matching the conversation.
 | `GET /v1/health` | `{ status, sessionId, ownerId, owner }` (no auth) |
 | `POST /v1/conversations` | create (`{ id?, agent? }`) → 201 |
 | `POST /v1/conversations/:id/submissions` | submit (`{ text \| content, requestId?, whenBusy?, type? }`; `Idempotency-Key` header works too) → 202 |
+| `PUT /v1/conversations/:id/agent` | partial agent config (`systemPrompt`, `tools`, `model`, `thinking`, `depth`, `metadata`, `compaction`, `maxRounds`, `deadlineMs`); unknown or mistyped fields → 400 and nothing committed; applies from the next model request and arrives at watchers as a patch to `/agent` → 200 `{ conversationId, agent }` |
 | `GET /v1/conversations/:id/watch` | SSE watch stream (`id:` is the cursor; resume with `Last-Event-ID` or `?cursor=`) |
+| `DELETE /v1/conversations/:id/submissions/:submissionId` | cancel a still-queued input; it settles `unanswered(withdrawn)` → 200 `{ conversationId, submissionId, cancelled: true }`; 404 unknown submission, 409 `not_queued` if it already started, was placed into a run or settled |
 | `POST /v1/conversations/:id/abort` | abort queued and running work; answers once the run is idle |
 | `POST /v1/conversations/:id/approvals/:toolTaskId/decision` | `{ decision: "approve" \| "deny", note? }`, principal in `X-Oniva-Principal` |
+
+Each watch-view `inbox.queue` item is `{ submissionId, mode, preview?, requestId? }`: `preview` is the first 200 characters of the queued text and `requestId` the caller's id (both absent on items queued by older engines); `inbox.placed` is unchanged.
+
+A `user` entry's payload carries `requestId` (the caller's id, or the submission id when none was given) next to `submissionId`, so a client can match its optimistic message to the entry.
+
+The watch view's `toolOutput` is keyed by tool task id; each value is `{ text, truncated, attempt, toolCallId, toolName }`, so a client can attach live output to the right call when tools run in parallel (`toolCallId` matches the `tool_call` block id and the `tool_result` entry's `toolCallId`; null only on documents written before these fields existed).
+
+The watch view's `compaction` is `{ running: boolean, cause?, startedAt? }`: `running` is true while a context compaction task is in flight, with `cause` (`background`, `threshold` or `overflow`) and `startedAt` (ISO time) alongside; when idle it is `{ running: false }`. It carries no task id or summary text, and arrives in snapshots and as patches to `/compaction` when a compaction starts and when it lands or fails.
+
+The watch view's `subagents` is keyed by the id of the parent's tool task that spawned each child conversation: `{ conversationId, submissionId, status, startedAt, endedAt?, toolCalls, recent, usage }`. `status` is `running` until the child's input settles, then `done`, `aborted` or `failed`; `toolCalls` counts the child's model tool calls; `recent` holds the child's last five tool calls (oldest first), each `name(arguments)` clipped to 160 characters; `usage` is the child's own tally. It is `{}` for a conversation with no subagents, and arrives in snapshots and as patches to `/subagents/<toolTaskId>`. The child's transcript and tool tasks stay in the child conversation (watch it by id).
+
+Agent config `maxRounds` (model rounds per run) and `deadlineMs` (absolute engine-clock epoch ms) are null by default. A model request past either ends the run with a `run_error` of kind `denied` and code `max_rounds` or `run_deadline`; subagent children inherit both.
+
+A subagent tool's model, tools and system prompt can be set per run in the parent's `agent.metadata.subagents[<toolName>]` (`{ model?, tools?, systemPrompt? }`), which wins over the static `createSubagentTool` options. `maxDepth` is never read from metadata. A malformed entry fails the call with an error result and creates no child.
+
+The watch view's `run` is `{ active: boolean, runId?, startedAt? }`: `active` is true for as long as the conversation has an unfinished run, including while tools execute, approvals are pending and between model rounds (when `live` is already cleared); `runId` and `startedAt` (ISO time) accompany it while active, and when idle it is `{ active: false }`. It arrives in snapshots and as patches to `/run` when a run starts and when it ends.
+
+When a generation fails after streaming text (a model error), that text is kept as an `assistant` entry with `partial: true` and `message.stopReason: "error"`, written just before the `run_error` entry; its blocks are as streamed (a tool call may be incomplete and is never run). On the next turn the model sees only the partial entry's text blocks. A failure before any text (including a policy denial) writes only `run_error`.
 
 A worker that does not hold the session lease answers `409 { error: "not_owner", ownerId }`.
 
@@ -95,11 +115,15 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_LEASE_RETRY_MS` | TTL/3 | standby retry interval |
 | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
 | `ENGINE_APPROVAL_TTL_MS` | `86400000` | approval expiry (`0`: none) |
-| `ANTHROPIC_API_KEY` | none | model key (read per request) |
+| `ANTHROPIC_API_KEY` | none | model key (read per request; unused under `ENGINE_POLICY=backend`) |
+| `ENGINE_POLICY` | `backend` if `ENGINE_POLICY_URL` is set, else `local` | `backend`: the backend resolves each model request (provider, model, tenant key, token budget, quota) and records usage; a policy failure denies the request (`policy_unavailable`), never falling back to a local key |
+| `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` when `ENGINE_POLICY=backend` | backend origin for `/internal/models/policy` and `/internal/models/usage`; uses `ENGINE_GATEWAY_TOKEN` |
+| `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
 | `ENGINE_MODEL` / `ENGINE_SUMMARY_MODEL` | Anthropic defaults | models for replies / compaction |
 | `ENGINE_MAX_TOKENS` | `8192` | reply budget |
 | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle |
 | `ENGINE_SUBAGENT_TOOL` | none | register a subagent tool under this name |
+| `ENGINE_SUBAGENT_TOOLS` | none | comma-separated subagent tool names to register (with `ENGINE_SUBAGENT_TOOL`, deduplicated) |
 
 `ENGINE_TEST_HARNESS` together with `NODE_ENV=production` makes the worker
 refuse to start. `npm run worker:test` runs the scenario-test entry point

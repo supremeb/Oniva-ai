@@ -1,0 +1,202 @@
+{
+  "initial": {
+    "entries": [],
+    "live": {
+      "runId": null,
+      "taskId": null,
+      "message": null
+    },
+    "inbox": {
+      "queue": [],
+      "placed": []
+    },
+    "approvals": {
+      "items": []
+    },
+    "usage": {
+      "requests": 0,
+      "total": {
+        "requests": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "costUsd": null
+      },
+      "byModel": {},
+      "byPurpose": {}
+    },
+    "agent": {
+      "systemPrompt": "hi"
+    },
+    "toolOutput": {}
+  },
+  "frames": [
+    {
+      "cursor": 2,
+      "patch": [
+        {
+          "op": "add",
+          "path": "/entries/0",
+          "value": {
+            "id": "e1",
+            "conversationId": "c1",
+            "taskId": null,
+            "kind": "user",
+            "payload": {
+              "submissionId": "se1",
+              "content": "hello",
+              "requestId": "req-1"
+            },
+            "createdAt": 1
+          }
+        }
+      ]
+    },
+    {
+      "cursor": 4,
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/live/runId",
+          "value": "r1"
+        },
+        {
+          "op": "replace",
+          "path": "/live/taskId",
+          "value": "k1"
+        },
+        {
+          "op": "replace",
+          "path": "/live/message",
+          "value": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Héllo "
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "cursor": 6,
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/live/message/content/0/text",
+          "value": "Héllo wörld 🌍"
+        }
+      ]
+    },
+    {
+      "cursor": 8,
+      "patch": [
+        {
+          "op": "add",
+          "path": "/toolOutput/t~11~0x",
+          "value": {
+            "text": "out",
+            "truncated": false
+          }
+        }
+      ]
+    },
+    {
+      "cursor": 10,
+      "patch": [
+        {
+          "op": "add",
+          "path": "/entries/1",
+          "value": {
+            "id": "e2",
+            "conversationId": "c1",
+            "taskId": "k1",
+            "kind": "assistant",
+            "payload": {
+              "text": "done"
+            },
+            "createdAt": 2
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/live/runId",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/live/taskId",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/live/message",
+          "value": null
+        }
+      ]
+    }
+  ],
+  "final": {
+    "entries": [
+      {
+        "id": "e1",
+        "conversationId": "c1",
+        "taskId": null,
+        "kind": "user",
+        "payload": {
+          "submissionId": "se1",
+          "content": "hello",
+          "requestId": "req-1"
+        },
+        "createdAt": 1
+      },
+      {
+        "id": "e2",
+        "conversationId": "c1",
+        "taskId": "k1",
+        "kind": "assistant",
+        "payload": {
+          "text": "done"
+        },
+        "createdAt": 2
+      }
+    ],
+    "live": {
+      "runId": null,
+      "taskId": null,
+      "message": null
+    },
+    "inbox": {
+      "queue": [],
+      "placed": []
+    },
+    "approvals": {
+      "items": []
+    },
+    "usage": {
+      "requests": 0,
+      "total": {
+        "requests": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "costUsd": null
+      },
+      "byModel": {},
+      "byPurpose": {}
+    },
+    "agent": {
+      "systemPrompt": "hi"
+    },
+    "toolOutput": {
+      "t/1~x": {
+        "text": "out",
+        "truncated": false
+      }
+    }
+  }
+}

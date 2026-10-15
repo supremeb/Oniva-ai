@@ -115,7 +115,9 @@ export type StopReason =
   | "tool_use"
   | "stop_sequence"
   | "refusal"
-  | "pause";
+  | "pause"
+  /** Set by the agent loop on a reply kept after a failed generation (never by a provider). */
+  | "error";
 
 export interface UsageCost {
   /** USD. */

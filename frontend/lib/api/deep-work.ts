@@ -6,78 +6,12 @@
 
 import { apiFetch, API_BASE_URL } from '@/lib/api';
 import type {
-  ExecuteDeepWorkRequest,
-  ExecuteDeepWorkResponse,
-  HumanInputRequest,
-  SessionStatusResponse,
   DeepWorkArtifact,
   StartEngineRequest,
   StartEngineResponse,
   EnginePlanResponse,
   IntakeResult,
 } from '@/lib/types/deep-work';
-
-/** Start a Deep Work session */
-export async function executeDeepWork(
-  body: ExecuteDeepWorkRequest,
-): Promise<ExecuteDeepWorkResponse> {
-  return apiFetch('/api/v1/deep-work/execute', {
-    method: 'POST',
-    body: JSON.stringify(body),
-    timeout: 30000,
-  });
-}
-
-/** Send human input to a waiting session */
-export async function sendHumanInput(
-  sessionId: string,
-  body: HumanInputRequest,
-): Promise<{ status: string }> {
-  return apiFetch(`/api/v1/deep-work/${sessionId}/input`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-    timeout: 10000,
-  });
-}
-
-/** Pause a running session */
-export async function pauseSession(
-  sessionId: string,
-): Promise<{ status: string }> {
-  return apiFetch(`/api/v1/deep-work/${sessionId}/pause`, {
-    method: 'POST',
-    timeout: 10000,
-  });
-}
-
-/** Resume a paused session */
-export async function resumeSession(
-  sessionId: string,
-): Promise<{ status: string }> {
-  return apiFetch(`/api/v1/deep-work/${sessionId}/resume`, {
-    method: 'POST',
-    timeout: 10000,
-  });
-}
-
-/** Stop a session */
-export async function stopSession(
-  sessionId: string,
-): Promise<{ status: string }> {
-  return apiFetch(`/api/v1/deep-work/${sessionId}/stop`, {
-    method: 'POST',
-    timeout: 10000,
-  });
-}
-
-/** Get session status */
-export async function getSessionStatus(
-  sessionId: string,
-): Promise<SessionStatusResponse> {
-  return apiFetch(`/api/v1/deep-work/${sessionId}/status`, {
-    timeout: 10000,
-  });
-}
 
 /** List workspace files */
 export async function listWorkspaceFiles(
@@ -114,11 +48,6 @@ export async function getDeepWorkFullState(
     if (err instanceof Error && err.message.includes('404')) return null;
     throw err;
   }
-}
-
-/** Build an EventSource URL for session events */
-export function buildEventsUrl(sessionId: string): string {
-  return `${API_BASE_URL}/api/v1/deep-work/${sessionId}/events`;
 }
 
 // ── Deep Work Engine (v2) API ────────────────────────────────

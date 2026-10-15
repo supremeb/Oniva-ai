@@ -25,7 +25,7 @@ async def complete_task(
     """
     Signal completion of the autonomous execution.
 
-    The AutonomousExecutor detects this result and exits the loop.
+    The calling agent loop detects this result and exits.
     The summary and key findings are saved as an artifact and streamed
     as a deep_work_complete SSE event.
 

@@ -143,12 +143,58 @@ export function isSubagentTool(tool: ToolDefinition | undefined): tool is Subage
   );
 }
 
-/** The child's configuration: the parent's, with the tool's overrides, one level deeper. */
-export function childAgentConfig(parent: AgentConfig, spec: SubagentSpec): AgentConfig {
+/**
+ * Per-run overrides of one subagent tool, read from the parent's
+ * `agent.metadata.subagents[toolName]`. Only the model, tools and system prompt
+ * can be overridden; `maxDepth` (and any other key) is ignored, so metadata can
+ * never loosen the depth limit.
+ */
+const subagentOverrideSchema = z.object({
+  model: z.string().nullable().optional(),
+  tools: z.array(z.string()).optional(),
+  systemPrompt: z.string().optional(),
+});
+
+export type SubagentOverride = z.infer<typeof subagentOverrideSchema>;
+
+/** The override for `toolName` in the parent's metadata: none, valid, or malformed. */
+export function subagentOverride(
+  parent: AgentConfig,
+  toolName: string,
+): { ok: true; value: SubagentOverride | null } | { ok: false; reason: string } {
+  const all = parent.metadata.subagents;
+  if (all === undefined || all === null) return { ok: true, value: null };
+  if (typeof all !== "object" || Array.isArray(all)) {
+    return { ok: false, reason: "agent.metadata.subagents must be an object" };
+  }
+  if (!Object.hasOwn(all, toolName)) return { ok: true, value: null };
+  const parsed = subagentOverrideSchema.safeParse(all[toolName]);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return {
+      ok: false,
+      reason: `agent.metadata.subagents.${toolName}${issue?.path.length ? `.${issue.path.join(".")}` : ""}: ${issue?.message ?? "invalid"}`,
+    };
+  }
+  return { ok: true, value: parsed.data };
+}
+
+/**
+ * The child's configuration: the parent's, with the tool's overrides, one level
+ * deeper. `override` (from the parent's metadata) wins over the static `spec`.
+ */
+export function childAgentConfig(
+  parent: AgentConfig,
+  spec: SubagentSpec,
+  override: SubagentOverride | null = null,
+): AgentConfig {
+  const model = override?.model !== undefined ? override.model : spec.model;
+  const tools = override?.tools ?? spec.tools;
+  const systemPrompt = override?.systemPrompt ?? spec.systemPrompt;
   return applyAgentConfig(parent, {
-    ...(spec.model === undefined ? {} : { model: spec.model }),
-    ...(spec.tools === undefined ? {} : { tools: spec.tools }),
-    ...(spec.systemPrompt === undefined ? {} : { systemPrompt: spec.systemPrompt }),
+    ...(model === undefined ? {} : { model }),
+    ...(tools === undefined ? {} : { tools }),
+    ...(systemPrompt === undefined ? {} : { systemPrompt }),
     depth: parent.depth + 1,
   });
 }
@@ -222,7 +268,18 @@ function spawnChild(
   return rt.commit(async (tx, ops) => {
     const parent = await tx.getConversation(task.conversationId);
     if (!parent) throw new Error(`unknown conversation ${task.conversationId}`);
-    const agent = childAgentConfig((await tx.doc(agentConfigDoc, task.conversationId)).value, spec);
+    const parentAgent = (await tx.doc(agentConfigDoc, task.conversationId)).value;
+    const override = subagentOverride(parentAgent, task.input.call.name);
+    if (!override.ok) {
+      return writeResult(
+        tx,
+        task,
+        "error",
+        { content: `Invalid subagent configuration: ${override.reason}`, isError: true },
+        0,
+      );
+    }
+    const agent = childAgentConfig(parentAgent, spec, override.value);
     if (agent.depth > maxDepth) {
       return writeResult(
         tx,
@@ -254,7 +311,7 @@ function spawnChild(
       result: null,
       taskId: runId,
     });
-    appendUserEntry(tx, child.id, submissionId, prompt);
+    appendUserEntry(tx, child.id, submissionId, prompt, `subagent:${task.id}`);
     startRun(tx, ops, generation, child.id, submissionId, runId);
     return waiting({
       on: [runId],

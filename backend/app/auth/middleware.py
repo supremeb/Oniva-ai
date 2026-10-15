@@ -76,6 +76,15 @@ _DOCS_ROUTES = [
 ]
 
 
+# Engine service namespace: bypasses USER auth (a user JWT there is ignored, not honored).
+# It is not public: the InternalAuth dependency on the router is the sole gate.
+INTERNAL_PREFIX = "/internal/"
+
+
+def is_internal_path(path: str) -> bool:
+    return path.startswith(INTERNAL_PREFIX)
+
+
 def is_public_route(method: str, path: str) -> bool:
     """True if (method, path) may be served without a user token."""
     method = method.upper()
@@ -104,6 +113,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # CORS preflight carries no credentials by design and returns no data.
         if method == "OPTIONS":
+            return await call_next(request)
+
+        # Service-token namespace: never resolve a user here. No user context is set.
+        if is_internal_path(path):
+            request.state.user = None
+            request.state.tenant_id = None
+            request.state.token_payload = None
             return await call_next(request)
 
         public = is_public_route(method, path)

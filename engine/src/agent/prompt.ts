@@ -58,9 +58,38 @@ const agentConfigSchema = z.object({
   metadata: z.record(z.string(), jsonValue),
   /** Compaction overrides for this conversation (over the harness defaults). */
   compaction: compactionOverridesSchema.nullable().default(null),
+  /**
+   * Most model rounds one run may take (a round is one model request and its
+   * tool calls); the run fails with a `max_rounds` denial at the next request.
+   * Null: no cap. Inherited by subagent children.
+   */
+  maxRounds: z.number().int().positive().nullable().default(null),
+  /**
+   * Absolute run deadline in engine clock epoch ms; a model request made at or
+   * after it fails the run with a `run_deadline` denial. Null: none. Inherited
+   * by subagent children.
+   */
+  deadlineMs: z.number().int().min(0).nullable().default(null),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
+
+/**
+ * Validate a partial agent config from an untrusted caller. Unknown fields
+ * and wrongly typed values fail; the result holds only the given fields.
+ */
+export function parseAgentConfigInput(
+  value: unknown,
+): { ok: true; value: AgentConfigInput } | { ok: false; reason: string } {
+  const parsed = agentConfigSchema.partial().strict().safeParse(value);
+  if (parsed.success) return { ok: true, value: parsed.data as AgentConfigInput };
+  const issue = parsed.error.issues[0];
+  const path = issue?.path.join(".") ?? "";
+  return {
+    ok: false,
+    reason: `${path === "" ? "agent" : `agent.${path}`}: ${issue?.message ?? "invalid"}`,
+  };
+}
 
 /** Fields a caller may give when creating or reconfiguring a conversation. */
 export type AgentConfigInput = Partial<AgentConfig>;
@@ -76,6 +105,8 @@ export const agentConfigDoc = defineDoc<AgentConfig>({
     depth: 0,
     metadata: {},
     compaction: null,
+    maxRounds: null,
+    deadlineMs: null,
   },
   schema: agentConfigSchema,
 });

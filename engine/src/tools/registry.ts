@@ -38,6 +38,27 @@ export interface ToolConversation {
   id: string;
   tenantId: string;
   projectId: string;
+  /**
+   * The top-level conversation this one belongs to when it is a subagent's
+   * child conversation (found by walking the owner chain). Absent for a
+   * top-level conversation.
+   */
+  rootId?: string;
+}
+
+/**
+ * The ids a backend request carries: `conversationId` is the top-level
+ * conversation (the only one the backend knows), `engineConversationId` the
+ * conversation that actually made the call.
+ */
+export function backendConversationIds(conversation: ToolConversation): {
+  conversationId: string;
+  engineConversationId: string;
+} {
+  return {
+    conversationId: conversation.rootId ?? conversation.id,
+    engineConversationId: conversation.id,
+  };
 }
 
 /** What `execute` gets besides its arguments. */
