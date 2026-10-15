@@ -116,6 +116,36 @@ class SkillContext:
         )
 
     @classmethod
+    def for_gateway(
+        cls,
+        tenant_id: Union[str, UUID],
+        user_id: Union[str, UUID],
+        project_id: Optional[Union[str, UUID]] = None,
+        conversation_id: Optional[Union[str, UUID]] = None,
+        run_id: Optional[Union[str, UUID]] = None,
+        tool_call_id: Optional[str] = None,
+        db: Optional[Any] = None,
+        api_keys: Optional[Dict[str, str]] = None,
+        connectors: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> "SkillContext":
+        """Context for an engine tool call: only the resources the tool's spec declared."""
+        return cls(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            session_id=str(run_id) if run_id else None,
+            workflow_run_id=run_id,
+            db=db,
+            api_keys=dict(api_keys or {}),
+            connectors=dict(connectors or {}),
+            metadata={
+                "run_id": str(run_id) if run_id else None,
+                "tool_call_id": tool_call_id,
+                "project_id": str(project_id) if project_id else None,
+                "conversation_id": str(conversation_id) if conversation_id else None,
+            },
+        )
+
+    @classmethod
     def create_minimal(
         cls,
         user_id: Union[str, UUID],
