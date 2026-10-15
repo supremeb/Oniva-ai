@@ -17,7 +17,9 @@
  *   spawns.
  *
  * A model error (including a policy denial) fails the run: a `run_error`
- * entry is written and the submission settles `unanswered(model_error)`.
+ * entry is written and the submission settles `unanswered(model_error)`. Text
+ * streamed before the failure is first kept as an `assistant` entry with
+ * `partial: true` and `stopReason: "error"`.
  *
  * Compaction (`compaction.ts`) hooks into `request`: at its start (a turn
  * boundary) a finished background summary is placed as the new context head;
@@ -188,7 +190,7 @@ export function generationTaskDefinition(
     let compacted = false;
     if (resumed?.compactionTaskId) {
       const outcome = compactionOutcome(rt.task(resumed.compactionTaskId));
-      if (!outcome.ok) return failRun(task, rt, outcome.error, "compaction_failed", null);
+      if (!outcome.ok) return failRun(task, rt, outcome.error, "compaction_failed", null, null);
       compacted = true;
     }
 
@@ -317,7 +319,10 @@ export function generationTaskDefinition(
           );
         });
       }
-      return failRun(task, rt, error, "model_error", spend);
+      return failRun(task, rt, error, "model_error", spend, {
+        message: partial,
+        usage: terminal.usage,
+      });
     }
 
     const message = terminal.message;
@@ -422,19 +427,25 @@ export function generationTaskDefinition(
     });
   }
 
-  /** End the run unanswered: a `run_error` entry, the spend so far, the submission settled. */
+  /** End the run unanswered: the partial reply streamed so far (if it has text), a `run_error` entry, the spend so far, the submission settled. */
   function failRun(
     task: State,
     rt: Scope,
     error: ModelError,
     reason: "model_error" | "compaction_failed",
     spend: Spend,
+    streamed: { message: AssistantMessage; usage: Usage } | null,
   ): Promise<Committed> {
     const { runId, submissionId } = task.input;
     const conversationId = task.conversationId;
     return rt.commit(async (tx, ops) => {
       const sub = await tx.getSubmission(submissionId);
       const inbox = await Inbox.load(tx, conversationId);
+      // Keep the answer streamed so far (before the error entry) so clients can still show it.
+      if (streamed !== null && assistantText(streamed.message).length > 0) {
+        const message: AssistantMessage = { ...streamed.message, stopReason: "error" };
+        appendAssistant(tx, task, message, streamed.usage, true);
+      }
       const payload: RunErrorPayload = { runId, error };
       tx.appendEntry({
         conversationId,
@@ -546,12 +557,14 @@ function appendAssistant(
   task: State,
   message: AssistantMessage,
   usage: Usage,
+  partial = false,
 ): string {
   const payload: AssistantPayload = {
     runId: task.input.runId,
     round: task.input.round,
     message,
     usage,
+    ...(partial ? { partial: true } : {}),
   };
   return tx.appendEntry({
     conversationId: task.conversationId,

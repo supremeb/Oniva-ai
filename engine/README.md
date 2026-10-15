@@ -76,6 +76,10 @@ routes also need `X-Oniva-Tenant` / `X-Oniva-Project` matching the conversation.
 
 A `user` entry's payload carries `requestId` (the caller's id, or the submission id when none was given) next to `submissionId`, so a client can match its optimistic message to the entry.
 
+The watch view's `toolOutput` is keyed by tool task id; each value is `{ text, truncated, attempt, toolCallId, toolName }`, so a client can attach live output to the right call when tools run in parallel (`toolCallId` matches the `tool_call` block id and the `tool_result` entry's `toolCallId`; null only on documents written before these fields existed).
+
+When a generation fails after streaming text (a model error), that text is kept as an `assistant` entry with `partial: true` and `message.stopReason: "error"`, written just before the `run_error` entry; its blocks are as streamed (a tool call may be incomplete and is never run). On the next turn the model sees only the partial entry's text blocks. A failure before any text (including a policy denial) writes only `run_error`.
+
 A worker that does not hold the session lease answers `409 { error: "not_owner", ownerId }`.
 
 ## Running a worker

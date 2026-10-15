@@ -536,7 +536,13 @@ export function toolTaskDefinition(
             return recover(task, rt, ctx, tool, parsed.data, conversation, stored);
           attempt = stored.attempt + 1;
           await rt.write(async (tx) => {
-            (await tx.doc(toolOutputDoc, task.id)).set({ text: "", truncated: false, attempt });
+            (await tx.doc(toolOutputDoc, task.id)).set({
+              text: "",
+              truncated: false,
+              attempt,
+              toolCallId: call.id,
+              toolName: call.name,
+            });
           });
         }
         return run(task, rt, ctx, tool, parsed.data, args, conversation, agent, attempt);
@@ -602,7 +608,13 @@ export function toolTaskDefinition(
     attempt: number,
   ): Promise<Committed> {
     const { call, runId } = task.input;
-    let output: ToolOutputState = { text: "", truncated: false, attempt };
+    let output: ToolOutputState = {
+      text: "",
+      truncated: false,
+      attempt,
+      toolCallId: call.id,
+      toolName: call.name,
+    };
     let touched = false;
     const writer = new ProgressWriter(
       deps.clock,

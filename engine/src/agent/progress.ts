@@ -59,6 +59,13 @@ const toolOutputSchema = z.object({
   truncated: z.boolean(),
   /** The execution attempt the output belongs to (a replay-safe rerun starts a new one). */
   attempt: z.number().int().min(1),
+  /**
+   * The model's tool call this output belongs to, so a client can attach live
+   * output to the right call when tools run in parallel. Null on documents
+   * written before these fields existed.
+   */
+  toolCallId: z.string().nullable().default(null),
+  toolName: z.string().nullable().default(null),
 });
 
 export type ToolOutputState = z.infer<typeof toolOutputSchema>;
@@ -66,7 +73,7 @@ export type ToolOutputState = z.infer<typeof toolOutputSchema>;
 export const toolOutputDoc = defineDoc<ToolOutputState>({
   kind: "agent.tool_output",
   scope: "task",
-  initial: { text: "", truncated: false, attempt: 1 },
+  initial: { text: "", truncated: false, attempt: 1, toolCallId: null, toolName: null },
   schema: toolOutputSchema,
 });
 

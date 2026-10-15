@@ -32,7 +32,7 @@ export interface ConversationView {
   approvals: ApprovalsState;
   usage: UsageTotals;
   agent: AgentConfig;
-  /** Partial output by tool task id. */
+  /** Partial output by tool task id; each carries the `toolCallId` / `toolName` it belongs to. */
   toolOutput: { [toolTaskId: string]: ToolOutputState };
 }
 

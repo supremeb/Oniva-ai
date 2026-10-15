@@ -4,7 +4,9 @@
  * Entry kinds written by the agent loop:
  * - `system`: prompt and tool set ({@link SystemPayload}), appended on change;
  * - `user`: an input ({@link UserPayload});
- * - `assistant`: a completed model reply ({@link AssistantPayload});
+ * - `assistant`: a completed model reply ({@link AssistantPayload}), or with
+ *   `partial: true` the text streamed before a failed generation (written just
+ *   before that run's `run_error`; only its text is sent to the model);
  * - `tool_result`: the outcome of one tool call ({@link ToolResultPayload});
  * - `run_error`: why a run failed ({@link RunErrorPayload}); not sent to the model;
  * - `compaction`: a summary of older context ({@link CompactionPayload}).
@@ -53,6 +55,12 @@ export type AssistantPayload = {
   round: number;
   message: AssistantMessage;
   usage: Usage;
+  /**
+   * True for the text streamed before a generation failed, kept so clients
+   * can show it. Its blocks are as streamed (tool calls may be incomplete);
+   * the model sees only its text ({@link contextMessage}).
+   */
+  partial?: boolean;
 };
 
 export type ToolResultStatus =
@@ -181,7 +189,10 @@ export function buildContext(entries: readonly EntryRecord[]): BuiltContext {
       }
       case ENTRY_KINDS.assistant: {
         closeOpen();
-        const message = payloadOf(e, ENTRY_KINDS.assistant).message;
+        const payload = payloadOf(e, ENTRY_KINDS.assistant);
+        const message =
+          payload.partial === true ? partialContextMessage(payload.message) : payload.message;
+        if (message === null) break;
         messages.push(message);
         for (const b of message.blocks) if (b.type === "tool_call") open.set(b.id, b.name);
         break;
@@ -199,6 +210,17 @@ export function buildContext(entries: readonly EntryRecord[]): BuiltContext {
   }
   closeOpen();
   return { system, messages, headEntryId: head >= 0 ? (entries[head] as EntryRecord).id : null };
+}
+
+/**
+ * A partial assistant reply as the model sees it on the next turn: its
+ * non-empty text blocks only. Incomplete tool calls (no result will ever come)
+ * and thinking blocks (cut off, so unsigned) are dropped. Null when no text remains.
+ */
+function partialContextMessage(message: AssistantMessage): AssistantMessage | null {
+  const blocks = message.blocks.filter((b) => b.type === "text" && b.text.length > 0);
+  if (blocks.length === 0) return null;
+  return { ...message, blocks };
 }
 
 export function toolResultMessage(p: ToolResultPayload): ToolResultMessage {

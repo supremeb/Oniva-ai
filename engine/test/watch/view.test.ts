@@ -30,7 +30,13 @@ async function seed() {
   const tools = [task(conversationId, TOOL_TASK_KIND), task(conversationId, TOOL_TASK_KIND)];
   const silent = task(conversationId, TOOL_TASK_KIND);
   const other = task(conversationId, "agent.run");
-  const output = (text: string) => ({ text, truncated: false, attempt: 1 });
+  const output = (text: string, i = 0) => ({
+    text,
+    truncated: false,
+    attempt: 1,
+    toolCallId: `call-${i}`,
+    toolName: "work",
+  });
   await storage.commit(
     {
       createConversations: [
@@ -41,7 +47,7 @@ async function seed() {
         ...tools.map((t, i) => ({
           kind: toolOutputDoc.kind,
           scopeId: t.id,
-          data: output(`out-${i}`),
+          data: output(`out-${i}`, i),
           updatedAt: 2,
         })),
         // Not a tool task: its document is not part of the view.
@@ -87,8 +93,13 @@ describe("view load", () => {
     const state = await loadViewState(session, conversationId);
     expect(calls).toEqual({ getDocument: 0, getDocuments: 1 });
     expect(state.view.toolOutput).toEqual({
-      [tools[0]?.id as string]: output("out-0"),
-      [tools[1]?.id as string]: output("out-1"),
+      [tools[0]?.id as string]: output("out-0", 0),
+      [tools[1]?.id as string]: output("out-1", 1),
+    });
+    // Each output names the call it belongs to.
+    expect(state.view.toolOutput[tools[1]?.id as string]).toMatchObject({
+      toolCallId: "call-1",
+      toolName: "work",
     });
     expect([...state.toolTasks].sort()).toEqual([...tools.map((t) => t.id), silent.id].sort());
   });
