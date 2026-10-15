@@ -11,3 +11,6 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.e2e)
             if not enabled:
                 item.add_marker(skip)
+
+
+from tests.e2e.harness import world  # noqa: E402,F401  (module-scoped stack fixture)

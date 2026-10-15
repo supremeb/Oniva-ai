@@ -69,3 +69,10 @@ engine were in flight when this was recorded. Re-record
 - `workflow_complete.results` is the unfiltered orchestrator results map. The start node's output includes the full variable bag, including internal `sys.workflow_state` and `sys.session_id`.
 - A node type with no executor is reported as `status: skipped` by the orchestrator but as `workflow_progress.status: "complete"`, message "Done" by the endpoint, and its label falls back to the raw node type (`does_not_exist`).
 - `failed` / `halted` / `node_error` branches and LLM/agent/connector nodes are not driven (they need keys, a sandbox, or approval state, and those executors are being changed in parallel work).
+
+### chat_engine_text / chat_engine_tool_call / chat_engine_error (engine path, U12)
+- Each fixture is `{legacy, view}`: the conversation view the real engine produced for the same scripted conversation as the legacy fixture named in `legacy` (normalized by the recorder). The source is `frontend/lib/engine/__fixtures__/chat_views.json`; `tests/contracts/test_engine_chat_fixtures.py` keeps the copies in sync (re-record with `ONIVA_RECORD_CONTRACTS=1`), checks each view still holds the legacy user message, response and tool names, and fails when a legacy `chat_*` fixture has no `chat_engine_*` counterpart.
+- The adapter output (`viewToMessages`) is compared to the legacy `message_parts` in `frontend/lib/engine/__tests__/viewToMessages.test.ts`. Deliberate differences from legacy (KTD6), each asserted there:
+  - `tool_call` parts carry `toolName` (legacy omitted it) and no `label` or `error: null`; `durationMs` is measured from entry timestamps.
+  - The error path keeps the partial assistant text and a `run_error` entry (legacy persisted nothing).
+  - `source` parts use `description` consistently; the legacy `partIndex` quirks disappear.

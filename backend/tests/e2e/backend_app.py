@@ -121,5 +121,49 @@ app.dependency_overrides[get_session_factory] = lambda: factory
 app.dependency_overrides[get_current_user] = lambda: _user
 app.dependency_overrides[get_current_user_with_query_token] = lambda: _user
 
+# --- test-only additions for the browser run (frontend/e2e) ---------------------------------------
+import app.api.v1.engine_conversations as _conversations  # noqa: E402
+
+_build_agent = _conversations.build_engine_chat_agent
+
+
+async def _build_agent_with_e2e_tools(*args, **kwargs):
+    """The composer offers no way to pick the e2e tools, so the allow-list always carries them."""
+    built = await _build_agent(*args, **kwargs)
+    built.agent["tools"] = sorted({*built.agent["tools"], "e2e_write", "kyc_verification"})
+    return built
+
+
+_conversations.build_engine_chat_agent = _build_agent_with_e2e_tools
+
+if E.get("E2E_CORS_ORIGIN"):  # the Next.js app calls the API cross-origin with cookies
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(CORSMiddleware, allow_origins=[E["E2E_CORS_ORIGIN"]], allow_credentials=True,
+                       allow_methods=["*"], allow_headers=["*"])
+
+
+@app.get("/api/v1/auth/me")
+async def _me():
+    return {"id": str(USER), "email": "e2e@x.io", "name": "e2e", "role": "analyst", "tenant_id": str(TENANT),
+            "tenant_slug": "e2e", "groups": [], "is_platform_operator": False,
+            "features": {"ENABLE_ENGINE_CHAT": True}}
+
+
+@app.post("/api/v1/auth/refresh")
+async def _refresh():
+    return {"user": await _me()}
+
+
+@app.get("/api/v1/projects")
+async def _projects():
+    now = "2026-01-01T00:00:00Z"
+    proj = {"id": str(PROJECT), "tenant_id": str(TENANT), "owner_id": str(USER), "name": "e2e",
+            "description": None, "instructions": None, "default_model": None, "knowledge_base_id": None,
+            "settings": {}, "is_archived": False, "row_version": 1, "member_count": 1, "file_count": 0,
+            "session_count": 0, "user_role": "owner", "created_at": now, "updated_at": now}
+    return {"projects": [proj], "total": 1, "page": 1, "page_size": 100}
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
