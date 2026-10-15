@@ -85,6 +85,16 @@ class EngineClient:
         return await self._json("POST", session_id, "/v1/conversations",
                                 tenant_id=tenant_id, project_id=project_id, json=payload)
 
+    async def update_agent(self, session_id, tenant_id, project_id, conversation_id,
+                           agent: dict) -> dict:
+        """Partial agent config update (engine ``PUT /v1/conversations/:id/agent``).
+
+        Returns ``{conversationId, agent}``; takes effect from the next run.
+        """
+        return await self._json(
+            "PUT", session_id, f"/v1/conversations/{conversation_id}/agent",
+            tenant_id=tenant_id, project_id=project_id, json=agent)
+
     async def submit(self, session_id, tenant_id, project_id, conversation_id, body: dict,
                      idempotency_key: str) -> dict:
         return await self._json(

@@ -13,7 +13,7 @@ from app.models.document import Document
 from app.models.audit_log import AuditLog
 from app.models.audit_event import AuditEvent
 from app.models.skills import Skill, SkillExecution
-from app.models.chat_session import ChatSession
+from app.models.chat_session import ChatSession, ChatSessionMessage
 from app.models.agent_version import AgentVersion
 from app.models.agent_alias import AgentAlias
 from app.models.background_job import BackgroundJob, JobStatus, JobType

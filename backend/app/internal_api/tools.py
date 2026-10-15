@@ -178,6 +178,7 @@ async def _perform(
     fence_token: Optional[int],
     user_id: uuid.UUID,
     timeout_ms: int,
+    bindings: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run the effect under the write fence, store its outcome, release the lock. Runs detached."""
     effect_started = False
@@ -200,6 +201,7 @@ async def _perform(
                 conversation_id=body.conversationId,
                 run_id=body.runId,
                 tool_call_id=body.toolCallId,
+                bindings=bindings,
                 spec=spec,
                 timeout_ms=timeout_ms,
             )
@@ -243,6 +245,13 @@ async def invoke_tool(name: str, request: Request, factory: SessionFactory = Dep
 
     user_id = await invocations.resolve_binding(factory, body.tenantId, body.projectId, body.conversationId)
 
+    bindings: Optional[Dict[str, Any]] = None
+    if name == "search_knowledge":
+        # KB scope comes from the conversation record, never from the model (KTD3).
+        kb_ids = await invocations.conversation_knowledge_bases(factory, body.tenantId, body.conversationId)
+        if kb_ids is not None:
+            bindings = {"knowledge_base_ids": kb_ids}
+
     timeout_ms = effective_timeout_ms(name, spec)
     started = await invocations.begin(
         factory,
@@ -264,7 +273,7 @@ async def invoke_tool(name: str, request: Request, factory: SessionFactory = Dep
     task = _detach(
         _perform(
             factory, name=name, spec=spec, body=body, key=key, session_id=session_id,
-            fence_token=token, user_id=user_id, timeout_ms=timeout_ms,
+            fence_token=token, user_id=user_id, timeout_ms=timeout_ms, bindings=bindings,
         )
     )
     return _no_store(await asyncio.shield(task))

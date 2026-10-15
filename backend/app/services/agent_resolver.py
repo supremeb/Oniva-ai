@@ -19,6 +19,41 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def build_project_context(
+    project_name: Optional[str],
+    project_instructions: Optional[str],
+    project_file_names: Optional[List[str]] = None,
+) -> Optional[str]:
+    """The project block added to a chat prompt (shared by legacy chat and engine chat)."""
+    if project_name:
+        lines = [
+            f"You are chatting within the project \"{project_name}\".",
+            "All your responses should be relevant to this project.",
+        ]
+        if project_instructions and project_instructions.strip():
+            lines.append(f"\nProject Instructions:\n{project_instructions}")
+        if project_file_names:
+            file_list = "\n".join(f"  - {fn}" for fn in project_file_names)
+            lines.append(
+                f"\nProject Files ({len(project_file_names)}):\n{file_list}\n"
+                "When the user asks about files, reference these by name. "
+                "Relevant content from these files will be provided below when available."
+            )
+        return "<project-context>\n" + "\n".join(lines) + "\n</project-context>"
+    if project_instructions and project_instructions.strip():
+        return "<project-instructions>\n" f"{project_instructions}\n" "</project-instructions>"
+    return None
+
+
+def build_web_search_instruction(now, specific_sites: Optional[List[str]] = None) -> str:
+    """The instruction legacy chat adds when web search is toggled on (``now`` is a UTC datetime)."""
+    current_date = now.strftime("%B %d, %Y")
+    text = f"Today's date is {current_date}. Web search is enabled. You MUST use the web_search tool to find current information before answering. Do not rely on your training data alone — call web_search with a relevant query first, then synthesize the results into your answer. Always include specific facts, numbers, and data from the search results in your response. When searching, include the current year ({now.year}) in your search queries to get recent results."
+    if specific_sites:
+        text += f" Restrict searches to these domains: {', '.join(specific_sites)}."
+    return text
+
+
 async def _resolve_production_version_id(
     agent_id: uuid.UUID,
     db: Optional[AsyncSession] = None,
@@ -142,29 +177,16 @@ def _extract_text(msg: dict) -> str:
     return ""
 
 
-async def resolve_custom_agent(
+async def resolve_agent_settings(
     custom_agent,
     version_id: Optional[uuid.UUID] = None,
     db: Optional[AsyncSession] = None,
     use_production_alias: bool = False,
-):
+) -> dict:
+    """Effective settings of a CustomAgent (current config, or an AgentVersion's override).
+
+    Shared by legacy chat (``resolve_custom_agent``) and engine chat so both read one source.
     """
-    Resolve a CustomAgent ORM object into a BaseAgent with tools and config.
-
-    Accepts the ORM object directly (already loaded by verify_agent_access).
-
-    Args:
-        custom_agent: CustomAgent ORM object
-        version_id: Optional version to load config from AgentVersion.config JSONB
-        db: Optional database session
-        use_production_alias: If True and no version_id, resolve from PRODUCTION alias
-
-    Returns:
-        tuple: (agent, tools, connector_ids, knowledge_base_ids, model, workflow_ids)
-    """
-    from app.agents.base import BaseAgent
-    from app.agents.skills.registry import SkillRegistry
-
     # If no explicit version_id and use_production_alias, look up PRODUCTION alias
     if not version_id and use_production_alias:
         version_id = await _resolve_production_version_id(custom_agent.id, db)
@@ -219,6 +241,50 @@ async def resolve_custom_agent(
                     workflow_ids = config.workflow_ids
             except Exception as e:
                 logger.warning(f"Invalid version config for {version_id}: {e}")
+    return {
+        "system_prompt": system_prompt,
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "skill_names": skill_names,
+        "connector_ids": connector_ids,
+        "knowledge_base_ids": knowledge_base_ids,
+        "workflow_ids": workflow_ids,
+    }
+
+
+async def resolve_custom_agent(
+    custom_agent,
+    version_id: Optional[uuid.UUID] = None,
+    db: Optional[AsyncSession] = None,
+    use_production_alias: bool = False,
+):
+    """
+    Resolve a CustomAgent ORM object into a BaseAgent with tools and config.
+
+    Accepts the ORM object directly (already loaded by verify_agent_access).
+
+    Args:
+        custom_agent: CustomAgent ORM object
+        version_id: Optional version to load config from AgentVersion.config JSONB
+        db: Optional database session
+        use_production_alias: If True and no version_id, resolve from PRODUCTION alias
+
+    Returns:
+        tuple: (agent, tools, connector_ids, knowledge_base_ids, model, workflow_ids)
+    """
+    from app.agents.base import BaseAgent
+    from app.agents.skills.registry import SkillRegistry
+
+    cfg = await resolve_agent_settings(custom_agent, version_id, db, use_production_alias)
+    system_prompt = cfg["system_prompt"]
+    model = cfg["model"]
+    temperature = cfg["temperature"]
+    max_tokens = cfg["max_tokens"]
+    skill_names = cfg["skill_names"]
+    connector_ids = cfg["connector_ids"]
+    knowledge_base_ids = cfg["knowledge_base_ids"]
+    workflow_ids = cfg["workflow_ids"]
 
     # Build BaseAgent
     agent_kwargs = {}

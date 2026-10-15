@@ -21,6 +21,7 @@ from app.config import Settings
 from app.core.database import get_db
 from app.models.engine import EngineConversation
 from app.models.tenant import Tenant
+from app.services.engine_chat_agent import AgentUnavailable, Selections, build_engine_chat_agent
 from app.services.feature_flags import engine_chat_enabled
 from app.services.engine_client import EngineClient, EngineError, get_engine_client
 from app.services.project_service import ProjectService
@@ -47,8 +48,10 @@ router = APIRouter(dependencies=[Depends(require_engine_chat)])
 
 
 class CreateConversationBody(BaseModel):
+    # Only selections are accepted: a client-supplied prompt or tool list is ignored (KTD2).
+    model_config = ConfigDict(extra="ignore")
     project_id: UUID
-    agent: Optional[dict[str, Any]] = None
+    selections: Optional[Selections] = None
 
 
 class SubmissionBody(BaseModel):
@@ -108,18 +111,57 @@ async def create_conversation(
     role = await ProjectService(db).get_user_role(body.project_id, UUID(str(user.id)), tenant_id)
     if role is None:
         raise HTTPException(404, "Project not found")
+    try:
+        built = await build_engine_chat_agent(
+            db, tenant_id=tenant_id, user=user, project_id=body.project_id,
+            selections=body.selections or Selections())
+    except AgentUnavailable as e:
+        raise HTTPException(404, "Agent not found" if str(e) == "agent_not_found" else "Agent not accessible") from None
     session_id = engine.directory.default_session_id
     conversation_id = uuid.uuid4()
     try:
         await engine.create_conversation(
-            session_id, tenant_id, body.project_id, conversation_id, body.agent)
+            session_id, tenant_id, body.project_id, conversation_id, built.agent)
     except EngineError as e:
         raise _engine_http_error(e) from None
     db.add(EngineConversation(
         conversation_id=conversation_id, tenant_id=tenant_id, project_id=body.project_id,
-        user_id=UUID(str(user.id)), session_id=session_id))
+        user_id=UUID(str(user.id)), session_id=session_id, selections=built.selections))
     await db.flush()
-    return {"conversationId": str(conversation_id), "projectId": str(body.project_id)}
+    return {"conversationId": str(conversation_id), "projectId": str(body.project_id),
+            "selections": built.selections, "dropped": built.dropped}
+
+
+@router.patch("/{conversation_id}/selections")
+async def update_selections(
+    conversation_id: UUID,
+    body: Selections,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    engine: EngineClient = Depends(get_engine_client),
+):
+    """Change the selections mid-conversation: omitted fields keep their stored value.
+
+    The engine applies the new config from the next run; the record is updated after the engine
+    accepts it, so a failed update leaves both unchanged.
+    """
+    conv = await _binding(db, conversation_id, user)
+    merged = {**(conv.selections or {}), **body.model_dump(include=body.model_fields_set)}
+    try:
+        built = await build_engine_chat_agent(
+            db, tenant_id=conv.tenant_id, user=user, project_id=conv.project_id,
+            selections=Selections.model_validate(merged))
+    except AgentUnavailable as e:
+        raise HTTPException(404, "Agent not found" if str(e) == "agent_not_found" else "Agent not accessible") from None
+    try:
+        await engine.update_agent(conv.session_id, conv.tenant_id, conv.project_id,
+                                  conv.conversation_id, built.agent)
+    except EngineError as e:
+        raise _engine_http_error(e) from None
+    conv.selections = built.selections
+    await db.flush()
+    return {"conversationId": str(conv.conversation_id), "selections": built.selections,
+            "dropped": built.dropped}
 
 
 @router.post("/{conversation_id}/submissions", status_code=202)

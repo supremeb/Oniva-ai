@@ -43,11 +43,20 @@ async def search_knowledge(
 
         tenant_id = UUID(str(ctx.tenant_id)) if not isinstance(ctx.tenant_id, UUID) else ctx.tenant_id
 
+        # Engine chat binds the conversation's selected KBs server-side (an empty set means none).
+        kb_ids = None
+        if "knowledge_base_ids" in (ctx.metadata or {}):
+            bound = [UUID(str(k)) for k in ctx.metadata["knowledge_base_ids"] or []]
+            if not bound:
+                return {"success": False, "error": "No knowledge base is selected", "results": []}
+            kb_ids = bound
+
         rag_service = RAGService(ctx.db)
         results = await rag_service.hybrid_search_v2(
             query=query,
             tenant_id=tenant_id,
             limit=limit,
+            knowledge_base_ids=kb_ids,
         )
 
         # Filter by threshold and format

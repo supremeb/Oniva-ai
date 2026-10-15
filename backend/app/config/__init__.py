@@ -350,6 +350,10 @@ class Settings(BaseSettings):
     ENABLE_ENGINE_API: bool = False
     ENABLE_ENGINE_CHAT: bool = False  # global gate for engine-backed chat; tenants opt in via settings.features
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
+    # Legacy POST /api/v1/chat: when a stored session is supplied, rebuild model history from the
+    # stored messages and ignore client-supplied assistant/tool parts (anti-forgery). Set to
+    # false (CHAT_SERVER_HISTORY=false) to restore the old client-trusted history.
+    CHAT_SERVER_HISTORY: bool = True
     INTERNAL_ALLOW_PLAINTEXT: bool = False  # allow a non-https ENGINE_URL in production
 
     # Redis Circuit Breaker Settings

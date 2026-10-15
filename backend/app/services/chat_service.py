@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.chat_session import ChatSession
+from app.services.chat_backfill import append_message_row, ensure_backfilled
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +205,11 @@ async def persist_session(
             db.add(session)
             await db.flush()
 
-        await session.add_message(role="user", content=message_content, db=db)
+        # Dual-write (U10): bring any pre-existing history into the read model first, then project
+        # each appended message in this same transaction (failure rolls back both stores).
+        await ensure_backfilled(db, session)
+        user_msg = await session.add_message(role="user", content=message_content, db=db)
+        await append_message_row(db, session.tenant_id, session.id, user_msg)
 
         metadata = None
         if reasoning or message_parts or duration_ms:
@@ -221,7 +226,9 @@ async def persist_session(
             if model != "unknown":
                 metadata["model"] = model
 
-        await session.add_message(role="assistant", content=response_text, metadata=metadata, db=db)
+        assistant_msg = await session.add_message(
+            role="assistant", content=response_text, metadata=metadata, db=db)
+        await append_message_row(db, session.tenant_id, session.id, assistant_msg)
         await db.commit()
 
         # Log messages to filesystem session history
@@ -231,6 +238,130 @@ async def persist_session(
         )
 
         return session.id
+
+
+async def stored_history_messages(
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    session_id: uuid.UUID,
+    client_messages: List[dict],
+) -> Optional[List[dict]]:
+    """Server-side history guard for legacy ``POST /api/v1/chat`` (U10, ``CHAT_SERVER_HISTORY``).
+
+    When ``session_id`` names a stored session owned by ``user_id``, returns the message list to
+    build model history from: the stored messages (including tool-call parts) followed by the
+    client's latest user message with only its text. Client-supplied assistant/tool messages and
+    parts, and any client metadata, are discarded. Returns ``None`` (caller keeps the client
+    messages) when the setting is off or the session does not exist.
+    """
+    from app.config import get_settings
+    if not get_settings().CHAT_SERVER_HISTORY:
+        return None
+
+    async with AsyncSessionLocal() as db:
+        if tenant_id:
+            await set_tenant_context(db, str(tenant_id))
+        result = await db.execute(
+            select(ChatSession.messages).where(
+                ChatSession.id == session_id,
+                ChatSession.user_id == user_id,
+            )
+        )
+        row = result.first()
+    if row is None:
+        return None
+
+    latest_user = next((m for m in reversed(client_messages) if m.get("role") == "user"), None)
+    forwarded = [dict(m) for m in (row[0] or []) if isinstance(m, dict)]
+    if latest_user is not None:
+        forwarded.append({k: v for k, v in latest_user.items() if k != "metadata"})
+    return forwarded
+
+
+RECAP_TURNS = 6
+_RECAP_CHARS = 600
+_SUMMARY_INPUT_CHARS = 12000
+
+
+def _transcript_text(transcript: List[dict]) -> List[tuple]:
+    """(role, text) pairs from read-model-shaped messages, using text parts or ``content``."""
+    out = []
+    for m in transcript:
+        if m.get("role") not in ("user", "assistant"):
+            continue
+        texts = [p.get("text", "") for p in (m.get("parts") or [])
+                 if isinstance(p, dict) and p.get("type") == "text" and isinstance(p.get("text"), str)]
+        text = "\n".join(t for t in texts if t) or (m.get("content") or "")
+        if text.strip():
+            out.append((m["role"], text.strip()))
+    return out
+
+
+def deterministic_recap(transcript: List[dict], turns: int = RECAP_TURNS) -> str:
+    """Last-N-turns text recap, used when the summary model call fails."""
+    pairs = _transcript_text(transcript)[-turns * 2:]
+    lines = [f"{'User' if r == 'user' else 'Assistant'}: {t[:_RECAP_CHARS]}" for r, t in pairs]
+    return "Recap of the earlier conversation (most recent turns):\n\n" + "\n\n".join(lines)
+
+
+async def build_continue_summary(
+    db: Any, *, tenant_id: uuid.UUID, user_id: uuid.UUID, transcript: List[dict]
+) -> tuple:
+    """Summary that seeds a continued conversation (KTD8): ``(text, "model" | "recap")``.
+
+    One call through the model policy's low tier; any failure (no provider, quota, timeout,
+    empty answer) falls back to the deterministic last-N-turns recap.
+    """
+    pairs = _transcript_text(transcript)
+    if not pairs:
+        return deterministic_recap(transcript), "recap"
+    convo = "\n\n".join(f"{r}: {t}" for r, t in pairs)[-_SUMMARY_INPUT_CHARS:]
+    try:
+        from app.services.llm_gateway import LLMGateway, LLMRequest, resolve_model_for_tier
+        model = await resolve_model_for_tier(db, tenant_id, "low")
+        resp = await LLMGateway(db).complete(
+            LLMRequest(
+                model=model, temperature=0.2, max_tokens=600,
+                messages=[
+                    {"role": "system", "content": (
+                        "Summarize this earlier conversation so the assistant can continue it. "
+                        "Keep goals, decisions, key facts, open questions and next steps. "
+                        "Plain text, under 300 words.")},
+                    {"role": "user", "content": convo},
+                ]),
+            tenant_id, user_id)
+        text = (resp.content or "").strip()
+        if text:
+            return f"Summary of the earlier conversation:\n\n{text}", "model"
+    except Exception as e:  # noqa: BLE001 - any failure degrades to the recap
+        logger.warning("Continue summary failed, using recap: %s", e)
+    return deterministic_recap(transcript), "recap"
+
+
+async def set_engine_conversation_title(db: Any, conversation_id: uuid.UUID, first_user_text: str) -> None:
+    """Set the list title from the first user entry (truncated); keeps an existing title."""
+    from sqlalchemy import update
+    from app.models.engine import EngineConversation
+    text = " ".join((first_user_text or "").split())
+    if not text:
+        return
+    title = text[:50] + ("..." if len(text) > 50 else "")
+    await db.execute(
+        update(EngineConversation)
+        .where(EngineConversation.conversation_id == conversation_id, EngineConversation.title.is_(None))
+        .values(title=title)
+    )
+
+
+async def touch_engine_conversation(db: Any, conversation_id: uuid.UUID) -> None:
+    """Bump ``updated_at`` so the union list orders the conversation by activity."""
+    from sqlalchemy import func, update
+    from app.models.engine import EngineConversation
+    await db.execute(
+        update(EngineConversation)
+        .where(EngineConversation.conversation_id == conversation_id)
+        .values(updated_at=func.now())
+    )
 
 
 def _log_to_session_history(

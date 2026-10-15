@@ -114,6 +114,7 @@ async def build_skill_context(
     *,
     run_id: Any = None,
     tool_call_id: Optional[str] = None,
+    bindings: Optional[Dict[str, Any]] = None,
     key_resolver=resolve_tool_keys,
     connector_resolver=resolve_tool_connectors,
 ) -> AsyncIterator[SkillContext]:
@@ -135,7 +136,7 @@ async def build_skill_context(
             if not spec.needs_db:
                 await session.close()
                 session = None
-        yield SkillContext.for_gateway(
+        ctx = SkillContext.for_gateway(
             tenant_id=tenant_id,
             user_id=user_id,
             project_id=project_id,
@@ -146,6 +147,9 @@ async def build_skill_context(
             api_keys=api_keys,
             connectors=connectors,
         )
+        if bindings:
+            ctx.metadata.update(bindings)  # server-side scope the model cannot override
+        yield ctx
         if session is not None:
             await session.commit()
     except BaseException:
@@ -296,6 +300,7 @@ async def execute_tool(
     conversation_id: Any,
     run_id: Any = None,
     tool_call_id: Optional[str] = None,
+    bindings: Optional[Dict[str, Any]] = None,
     spec: Optional[ToolSpec] = None,
     timeout_ms: Optional[int] = None,
     rate_limit: Any = None,
@@ -313,7 +318,7 @@ async def execute_tool(
     try:
         async with build_skill_context(
             spec, tenant_id, project_id, user_id, conversation_id,
-            run_id=run_id, tool_call_id=tool_call_id,
+            run_id=run_id, tool_call_id=tool_call_id, bindings=bindings,
             key_resolver=key_resolver, connector_resolver=connector_resolver,
         ) as ctx:
             held = dict(ctx.api_keys)

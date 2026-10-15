@@ -67,10 +67,48 @@ class ChatSessionListResponse(BaseModel):
     page_size: int = 20
 
 
+class TranscriptMessage(BaseModel):
+    """One read-model row: a renderable message with its parts (chat-on-engine U10)."""
+    seq: int
+    role: str
+    content: str = ""
+    parts: List[Dict[str, Any]] = Field(default_factory=list)
+    parts_valid: bool = True
+    created_at: Optional[datetime] = None
+
+
 class ChatSessionDetailResponse(ChatSessionResponse):
     """Schema for detailed chat session with agent/workflow info."""
     agent_name: Optional[str] = None
     workflow_name: Optional[str] = None
+    # Served from the read model (backfilled lazily); ``messages`` stays the legacy JSONB shape.
+    transcript: List[TranscriptMessage] = Field(default_factory=list)
+
+
+class ConversationListItem(BaseModel):
+    """A legacy session or an engine conversation in the sidebar list."""
+    id: UUID
+    source: Literal["legacy", "engine"]
+    title: str
+    updated_at: datetime
+    project_id: Optional[UUID] = None
+    # Engine conversations started from a legacy session link back to it (read-only original).
+    legacy_session_id: Optional[UUID] = None
+
+
+class ConversationListResponse(BaseModel):
+    items: List[ConversationListItem]
+    total: int
+    page: int = 1
+    page_size: int = 20
+
+
+class ContinueResponse(BaseModel):
+    conversation_id: UUID
+    project_id: UUID
+    legacy_session_id: UUID
+    summary_source: Optional[Literal["model", "recap"]] = None  # None when an existing continuation is returned
+    existing: bool = False
 
 
 class AddMessageRequest(BaseModel):

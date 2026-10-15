@@ -71,4 +71,14 @@ class EngineConversation(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     session_id = Column(String(255), nullable=False)
+    # Chat selections (skills, connectors, knowledge bases, web search) recorded at creation (plan 004, U3).
+    selections = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # Listing metadata (chat-on-engine U10): title is set by the backend at the first completed
+    # turn; updated_at orders the union list; legacy_session_id links a continued legacy session.
+    title = Column(String(255), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    legacy_session_id = Column(
+        UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )

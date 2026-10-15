@@ -111,6 +111,25 @@ async def resolve_binding(
         return row
 
 
+async def conversation_knowledge_bases(factory: SessionFactory, tenant_id: str, conversation_id: Optional[str]) -> Optional[list]:
+    """The KB ids recorded on an engine conversation's selections; ``None`` when it has no record."""
+    conv = _uuid(conversation_id, "conversationId")
+    if conv is None:
+        return None
+    async with factory() as db:
+        row = (
+            await db.execute(
+                select(EngineConversation.selections).where(
+                    EngineConversation.conversation_id == conv,
+                    EngineConversation.tenant_id == _uuid(tenant_id, "tenantId"),
+                )
+            )
+        ).first()
+    if row is None or row[0] is None:
+        return None  # no recorded selections (conversation predates chat selections): unbound
+    return list(row[0].get("knowledge_base_ids") or [])
+
+
 # --- claim / store ------------------------------------------------------------
 
 

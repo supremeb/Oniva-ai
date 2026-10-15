@@ -1068,7 +1068,7 @@ async def _resolve_custom_agent(agent_id: str, tenant_id: uuid.UUID, chat_reques
 
 
 # _wire_skills_and_connectors imported from shared module
-from app.services.agent_resolver import wire_skills_and_connectors as _wire_skills_and_connectors
+from app.services.agent_resolver import build_web_search_instruction, wire_skills_and_connectors as _wire_skills_and_connectors
 
 
 @router.post("")
@@ -1184,12 +1184,16 @@ async def chat(
 
     web_search_instruction = None
     if chat_request.web_search_enabled:
-        web_search_instruction = f"Today's date is {current_date}. Web search is enabled. You MUST use the web_search tool to find current information before answering. Do not rely on your training data alone — call web_search with a relevant query first, then synthesize the results into your answer. Always include specific facts, numbers, and data from the search results in your response. When searching, include the current year ({datetime.now(timezone.utc).year}) in your search queries to get recent results."
-        if chat_request.specific_sites:
-            sites_str = ", ".join(chat_request.specific_sites)
-            web_search_instruction += f" Restrict searches to these domains: {sites_str}."
+        web_search_instruction = build_web_search_instruction(
+            datetime.now(timezone.utc), chat_request.specific_sites)
 
-    history = build_message_history(messages_as_dicts)
+    # U10: for a stored session, model history comes from the server, not the client transcript.
+    history_source = messages_as_dicts
+    if chat_request.sessionId:
+        from app.services.chat_service import stored_history_messages
+        history_source = await stored_history_messages(
+            tenant_id, user_id, chat_request.sessionId, messages_as_dicts) or messages_as_dicts
+    history = build_message_history(history_source)
 
     # Resolve effective model: explicit request > tenant default provider > agent default
     effective_model = chat_request.model

@@ -15,6 +15,7 @@ from app.config import Settings
 from app.core.database import get_db
 from app.models.engine import EngineConversation
 from app.models.tenant import Tenant
+from app.services.engine_chat_agent import BuiltAgent
 from app.services.engine_client import EngineClient, get_engine_client
 
 SECRET = "Zk3vN8qLw1RtYb6HdPx9CfUe2MaS5JoG7iVn4TlKq0A"
@@ -112,6 +113,11 @@ def env(monkeypatch):
 
     monkeypatch.setattr(ec.ProjectService, "__init__", lambda self, db: None)
     monkeypatch.setattr(ec.ProjectService, "get_user_role", role)
+
+    async def built(db, **kw):  # agent building has its own tests (test_engine_chat_agent.py)
+        return BuiltAgent(agent={"systemPrompt": "p", "tools": []}, selections={}, dropped={})
+
+    monkeypatch.setattr(ec, "build_engine_chat_agent", built)
     return Env()
 
 
