@@ -33,6 +33,8 @@ LLM_PRICING: Dict[str, ModelPricing] = {
     "anthropic/claude-3.5-sonnet": {"input": 3.0, "output": 15.0},
     "anthropic/claude-3-opus": {"input": 15.0, "output": 75.0},
     "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
+    "claude-sonnet-4-5": {"input": 3.0, "output": 15.0},
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
 
     # DeepSeek Models (via OpenRouter)
     "nex-agi/deepseek-v3.1-nex-n1:free": {"input": 0.0, "output": 0.0},
@@ -88,3 +90,34 @@ def calculate_cost(
     input_cost = (input_tokens / 1_000_000) * pricing["input"]
     output_cost = (output_tokens / 1_000_000) * pricing["output"]
     return input_cost + output_cost
+
+
+# Cache rates as multiples of the input rate (Anthropic: read 0.1x, 5-minute write 1.25x).
+CACHE_READ_MULTIPLIER = 0.1
+CACHE_WRITE_MULTIPLIER = 1.25
+
+
+def find_model_pricing(model: str) -> ModelPricing | None:
+    """Pricing for a model, or None when the model is not in the table (no default fallback)."""
+    if model in LLM_PRICING:
+        return LLM_PRICING[model]
+    if "/" in model:
+        return LLM_PRICING.get(model.split("/", 1)[1])
+    return None
+
+
+def calculate_cost_with_cache(
+    pricing: ModelPricing,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+) -> float:
+    """Cost in USD where input_tokens excludes cache tokens, which bill at the cache rates."""
+    per_m = 1_000_000
+    return (
+        input_tokens * pricing["input"]
+        + output_tokens * pricing["output"]
+        + cache_read_tokens * pricing["input"] * CACHE_READ_MULTIPLIER
+        + cache_write_tokens * pricing["input"] * CACHE_WRITE_MULTIPLIER
+    ) / per_m

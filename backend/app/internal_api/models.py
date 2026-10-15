@@ -5,13 +5,20 @@ import uuid
 from typing import Any, Dict, List, Literal, Optional
 
 from cachetools import TTLCache
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.llm_pricing import calculate_cost_with_cache, find_model_pricing
 from app.core.database import get_system_db
+from app.models.engine import EngineConversation
+from app.models.llm_provider import LLMProvider
+from app.models.llm_usage import LLMUsageRecord
+from app.models.project import Project
 from app.models.tenant import Tenant
 from app.models.usage_quota import QuotaType
 from app.services.llm_gateway import (
@@ -169,3 +176,114 @@ async def model_policy(req: PolicyRequest, db: AsyncSession = Depends(get_system
         if body.get("ok"):
             _decisions[cache_key] = body
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------------------
+# Usage ledger (U7)
+# ---------------------------------------------------------------------------
+
+class UsageTokens(_Camel):
+    input_tokens: int = Field(0, alias="inputTokens", ge=0)
+    output_tokens: int = Field(0, alias="outputTokens", ge=0)
+    cache_read_tokens: int = Field(0, alias="cacheReadTokens", ge=0)
+    cache_write_tokens: int = Field(0, alias="cacheWriteTokens", ge=0)
+
+
+class UsageRequest(_Camel):
+    # Any caller-supplied cost field is ignored (extra="ignore"): cost comes from Oniva pricing.
+    tenant_id: uuid.UUID = Field(alias="tenantId")
+    project_id: Optional[uuid.UUID] = Field(None, alias="projectId")
+    conversation_id: Optional[uuid.UUID] = Field(None, alias="conversationId")
+    run_id: str = Field(alias="runId", min_length=1, max_length=128)
+    request_id: str = Field(alias="requestId", min_length=1, max_length=255)
+    provider: str = Field(min_length=1, max_length=100)
+    model: str = Field(min_length=1, max_length=100)
+    usage: UsageTokens = Field(default_factory=UsageTokens)
+    latency_ms: Optional[int] = Field(None, alias="latencyMs", ge=0)
+    status: Literal["success", "failed", "cached"] = "success"
+
+
+async def record_usage(db: AsyncSession, req: UsageRequest) -> bool:
+    """Insert the ledger row once per (tenant, requestId). Returns whether a new row was written."""
+    user_id: uuid.UUID = _NO_USER
+    if req.project_id is not None:
+        found = (await db.execute(
+            select(Project.id).where(Project.id == req.project_id, Project.tenant_id == req.tenant_id)
+        )).scalar_one_or_none()
+        if found is None:
+            raise HTTPException(status_code=404, detail="project_not_found")
+    if req.conversation_id is not None:
+        conv = (await db.execute(
+            select(EngineConversation).where(
+                EngineConversation.conversation_id == req.conversation_id,
+                EngineConversation.tenant_id == req.tenant_id,
+            )
+        )).scalar_one_or_none()
+        if conv is None:
+            raise HTTPException(status_code=404, detail="conversation_not_found")
+        user_id = conv.user_id
+
+    u = req.usage
+    pricing = find_model_pricing(req.model)
+    status = req.status
+    if pricing is None:
+        cost = 0.0
+        if status == "success":
+            status = "unpriced"
+        logger.warning("usage for unpriced model tenant=%s model=%s request=%s", req.tenant_id, req.model, req.request_id)
+    else:
+        cost = calculate_cost_with_cache(
+            pricing, u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens
+        )
+
+    provider_id = (await db.execute(
+        select(LLMProvider.id)
+        .where(LLMProvider.tenant_id == req.tenant_id, LLMProvider.provider_type == req.provider)
+        .order_by(LLMProvider.priority)
+        .limit(1)
+    )).scalar_one_or_none()
+
+    values = dict(
+        id=uuid.uuid4(),
+        tenant_id=req.tenant_id,
+        user_id=user_id if user_id != _NO_USER else None,
+        provider_id=provider_id,
+        provider_name=req.provider,
+        model=req.model,
+        input_tokens=u.input_tokens,
+        output_tokens=u.output_tokens,
+        cost_usd=cost,
+        latency_ms=req.latency_ms or 0,
+        cache_creation_tokens=u.cache_write_tokens,
+        cache_read_tokens=u.cache_read_tokens,
+        request_id=req.request_id,
+        run_id=req.run_id,
+        conversation_id=req.conversation_id,
+        status=status,
+    )
+    if db.get_bind().dialect.name == "postgresql":
+        stmt = pg_insert(LLMUsageRecord).values(**values).on_conflict_do_nothing(
+            index_elements=["tenant_id", "request_id"], index_where=text("request_id IS NOT NULL")
+        )
+    else:
+        stmt = sqlite_insert(LLMUsageRecord).values(**values).on_conflict_do_nothing()
+    result = await db.execute(stmt)
+    if not result.rowcount:
+        await db.commit()
+        return False
+
+    # Only a newly inserted row counts against the quota; the row and the counter commit together.
+    total = u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens
+    if total:
+        await QuotaService(db).increment_usage(
+            req.tenant_id, user_id, QuotaType.LLM_TOKENS, total
+        )
+    else:
+        await db.commit()
+    return True
+
+
+@router.post("/usage")
+async def model_usage(req: UsageRequest, db: AsyncSession = Depends(get_system_db)) -> JSONResponse:
+    recorded = await record_usage(db, req)
+    return JSONResponse({"recorded": recorded}, headers={"Cache-Control": "no-store"})
