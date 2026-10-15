@@ -5,7 +5,7 @@ import { defineConfig } from '@playwright/test';
  * (backend/tests/e2e/stack.py, needs Postgres binaries, uv and the engine's node_modules) and a Next.js
  * server pointed at it. See e2e/global-setup.ts.
  *
- *   ONIVA_E2E_BROWSER=1 npx playwright test chat-engine-recovery
+ *   ONIVA_E2E_BROWSER=1 npx playwright test chat-engine-recovery deep-work-engine-recovery
  */
 export const FRONTEND_PORT = Number(process.env.E2E_FRONTEND_PORT || 3100);
 

@@ -1,7 +1,7 @@
 name: e2e
 
 # Required check, but only runs when the engine seams change: the gateway/policy/ledger router,
-# the browser-facing engine routes, the engine itself, or the smoke test.
+# the browser-facing engine routes (chat and Deep Work), the engine itself, or the e2e tests.
 on:
   push:
     paths:
@@ -9,10 +9,14 @@ on:
       - "backend/app/api/v1/engine_conversations.py"
       - "backend/app/services/engine_client.py"
       - "backend/app/services/engine_chat_agent.py"
+      - "backend/app/api/v1/deep_work*.py"
+      - "backend/app/services/deep_work/**"
+      - "backend/app/services/engine_deep_work_agent.py"
       - "backend/tests/contracts/**"
       - "frontend/e2e/**"
       - "frontend/playwright.config.ts"
       - "frontend/components/chat/**"
+      - "frontend/components/deep-work/**"
       - "frontend/lib/engine/**"
       - "backend/tests/e2e/**"
       - "engine/**"
@@ -23,10 +27,14 @@ on:
       - "backend/app/api/v1/engine_conversations.py"
       - "backend/app/services/engine_client.py"
       - "backend/app/services/engine_chat_agent.py"
+      - "backend/app/api/v1/deep_work*.py"
+      - "backend/app/services/deep_work/**"
+      - "backend/app/services/engine_deep_work_agent.py"
       - "backend/tests/contracts/**"
       - "frontend/e2e/**"
       - "frontend/playwright.config.ts"
       - "frontend/components/chat/**"
+      - "frontend/components/deep-work/**"
       - "frontend/lib/engine/**"
       - "backend/tests/e2e/**"
       - "engine/**"
@@ -69,13 +77,14 @@ jobs:
       - run: uv python install 3.12
       - run: uv sync --frozen
         working-directory: backend
-      - run: uv run pytest -q -m e2e tests/e2e/test_engine_smoke.py tests/e2e/test_chat_engine_recovery.py
+      - run: uv run pytest -q -m e2e tests/e2e/test_engine_smoke.py tests/e2e/test_chat_engine_recovery.py tests/e2e/test_deep_work_engine_recovery.py
         working-directory: backend
       - run: uv run pytest -q tests/contracts
         working-directory: backend
 
   chat-browser:
-    # Playwright @recovery: the real Next.js app against the e2e backend and a scripted engine worker.
+    # Playwright @recovery (chat and Deep Work): the real Next.js app against the e2e backend and a scripted
+    # engine worker.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -114,7 +123,7 @@ jobs:
         working-directory: backend
       - run: npx playwright install --with-deps chromium
         working-directory: frontend
-      - run: npx playwright test chat-engine-recovery
+      - run: npx playwright test chat-engine-recovery deep-work-engine-recovery
         working-directory: frontend
       - uses: actions/upload-artifact@v4
         if: failure()

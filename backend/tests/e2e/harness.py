@@ -16,6 +16,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+from tests.e2e.dw_fakes import Files
+
 BACKEND = Path(__file__).resolve().parents[2]
 ENGINE = BACKEND.parent / "engine"
 GATEWAY_TOKEN = "g" * 12 + "Gateway-Token-0123456789-abcdefXYZ"
@@ -54,6 +56,12 @@ SCRIPT = {
                      "usage": {"inputTokens": 13, "outputTokens": 7}}},
     ]
 }
+
+
+def _with_deep_work_rules(script: dict) -> dict:
+    from tests.e2e import dw_script
+
+    return {**script, "rules": [*script["rules"], *dw_script.build()["rules"]]}
 
 
 def free_port() -> int:
@@ -159,7 +167,10 @@ def stack():
         w.tenant, w.user, w.project = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         w.db = tmp / "backend.db"
         w.effects, w.gate, w.script = tmp / "effects.txt", tmp / "gate", tmp / "script.json"
-        w.script.write_text(json.dumps(SCRIPT))
+        w.script.write_text(json.dumps(_with_deep_work_rules(SCRIPT)))
+        w.dw_dir = tmp / "dw"
+        (w.dw_dir / "sessions").mkdir(parents=True)
+        w.dw = Files(w.dw_dir)
         w.pg_url = pg_url
         w.engine_url = f"http://127.0.0.1:{w.engine_port}"
         w.backend_url = f"http://127.0.0.1:{w.backend_port}"
@@ -169,7 +180,11 @@ def stack():
         env = {**base, "PYTHONPATH": str(BACKEND), "E2E_PORT": str(w.backend_port), "E2E_DB": str(w.db),
                "E2E_INFO": str(info), "E2E_EFFECTS": str(w.effects), "E2E_GATE": str(w.gate),
                "E2E_TENANT_ID": str(w.tenant), "E2E_USER_ID": str(w.user), "E2E_PROJECT_ID": str(w.project),
-               "E2E_SECRET_KEY": SECRET_KEY, "ENGINE_GATEWAY_TOKEN": GATEWAY_TOKEN,
+               "E2E_SECRET_KEY": SECRET_KEY, "E2E_DW_DIR": str(w.dw_dir),
+               # Deep Work on the engine: tenant opt-in is seeded; these are the global conditions.
+               "ENABLE_ENGINE_API": "true", "ENABLE_ENGINE_DEEP_WORK": "true", "ENABLE_DEEP_WORK": "true",
+               "ENABLE_SANDBOX": "true", "E2B_API_KEY": "e2b-FAKE-e2e", "SANDBOX_PROXY_URL": "http://proxy.invalid",
+               "TAVILY_API_KEY": "tvly-FAKE-e2e", "SESSION_BASE_PATH": str(w.dw_dir / "sessions"), "ENGINE_GATEWAY_TOKEN": GATEWAY_TOKEN,
                "ENGINE_SERVICE_TOKEN": SERVICE_TOKEN, "ENGINE_URL": w.engine_url, "ENGINE_SESSION_ID": SESSION}
         backend = Proc([sys.executable, "-m", "tests.e2e.backend_app"], env, BACKEND, tmp / "backend.log")
         procs.append(backend)
@@ -181,13 +196,33 @@ def stack():
                 "Authorization": f"Bearer {GATEWAY_TOKEN}"}).status_code == 200
         wait_for(backend_ready, "the backend", 90)
 
+        w.backend_env = env
+
+        def start_second_backend() -> Proc:
+            """A second backend process on the same database and engine: no state shared except the stores."""
+            port, info2 = free_port(), tmp / "info2.json"
+            second = Proc([sys.executable, "-m", "tests.e2e.backend_app"],
+                          {**env, "E2E_PORT": str(port), "E2E_INFO": str(info2), "E2E_SEED": "0"},
+                          BACKEND, tmp / "backend2.log")
+            procs.append(second)
+            second.url = f"http://127.0.0.1:{port}"
+
+            def ready():
+                assert second.p.poll() is None, second.tail()
+                return info2.exists() and httpx.get(f"{second.url}/internal/ping", headers={
+                    "Authorization": f"Bearer {GATEWAY_TOKEN}"}).status_code == 200
+            wait_for(ready, "the second backend", 90)
+            return second
+
+        w.start_second_backend = start_second_backend
         w.worker_env = {**base, "ENGINE_PORT": str(w.engine_port), "ENGINE_HOST": "127.0.0.1",
                         "DATABASE_URL": w.pg_url, "ENGINE_SESSION_ID": SESSION,
                         "ENGINE_SERVICE_TOKEN": SERVICE_TOKEN, "ENGINE_GATEWAY_URL": w.backend_url,
                         "ENGINE_GATEWAY_TOKEN": GATEWAY_TOKEN, "ENGINE_POLICY": "backend",
                         "ENGINE_POLICY_URL": w.backend_url, "ENGINE_TEST_MODEL_SCRIPT": str(w.script),
                         "ENGINE_TEST_MODEL_PROVIDER": "anthropic", "ENGINE_LEASE_TTL_MS": "3000",
-                        "ENGINE_PROGRESS_INTERVAL_MS": "50"}
+                        "ENGINE_PROGRESS_INTERVAL_MS": "50",
+                        "ENGINE_SUBAGENT_TOOLS": "research_worker,reflector,output_agent"}
         w.procs = procs
         w.start_worker = lambda n: _start_worker(w, n)
         yield w

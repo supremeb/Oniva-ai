@@ -33,7 +33,8 @@ import { useProjectsStore } from '@/lib/stores/projects';
 import { useDeepWorkIntake } from '@/hooks/useDeepWorkIntake';
 import { useDeepWorkStore } from '@/lib/stores/deep-work';
 import { DeepWorkCard } from '@/components/deep-work/DeepWorkCard';
-import { useEngineSessionStore } from '@/components/deep-work/engineSession';
+import { isEngineRuntimeSession, useEngineSessionStore } from '@/components/deep-work/engineSession';
+import { getEngineFullState } from '@/lib/engine/deepWorkApi';
 import { DeepWorkToggle } from './inputs/WelcomeInput';
 import { useChatSessionsStore } from '@/lib/stores/chat-sessions';
 import { useEngineChatPrefs, NEW_DRAFT_KEY } from '@/lib/stores/engine-chat-prefs';
@@ -126,6 +127,28 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
     const dwIntakeActive = useDeepWorkStore((s) => s.status !== 'idle');
     const dwEngineSession = useEngineSessionStore((s) => s.session);
     const deepWorkVisible = deepWorkRuntime === 'engine' && (dwIntakeActive || dwEngineSession !== null);
+    // Rejoin: a refresh or a second tab on `?c=` finds the run this chat started (by chat id) and shows its
+    // card from the watch view. Nothing is started or submitted; a chat without a run answers 404.
+    useEffect(() => {
+        if (deepWorkRuntime !== 'engine' || !initialConversationId) return;
+        let cancelled = false;
+        void getEngineFullState(initialConversationId)
+            .then((fs) => {
+                if (cancelled || !isEngineRuntimeSession(fs) || useEngineSessionStore.getState().session) return;
+                useEngineSessionStore.getState().setSession({
+                    sessionId: fs.session_id,
+                    conversationId: fs.conversation_id,
+                    chatId: initialConversationId,
+                    status: fs.status,
+                    error: fs.error ?? null,
+                    planTitle: fs.plan?.title ?? null,
+                });
+            })
+            .catch(() => {});
+        return () => {
+            cancelled = true;
+        };
+    }, [deepWorkRuntime, initialConversationId]);
     // Leaving the chat drops the card so it never shows up in another conversation.
     useEffect(
         () => () => {

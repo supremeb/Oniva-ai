@@ -5,11 +5,14 @@
 Starts Postgres (engine), the backend (backend_app.py) and one worker, writes the connection details to
 ``E2E_STACK_INFO`` (json), then serves ``http://127.0.0.1:<control_port>``:
 ``POST /kill-worker`` (SIGKILL), ``POST /start-worker``, ``POST /open-gate`` / ``/close-gate`` (the blocked
-write), ``GET /effects`` (lines the write has appended), ``GET /state``. Exits on SIGTERM/SIGINT or stdin EOF.
+write), ``GET /effects`` (lines the write has appended), ``GET /state``. For Deep Work: ``POST /dw-open-gate`` /
+``/dw-close-gate`` (a ``web_search`` of a query containing GATED), ``GET /dw-state`` (fake search log, the
+tools currently in flight on the backend, sandbox events). Exits on SIGTERM/SIGINT or stdin EOF.
 """
 import json
 import os
 import signal
+import sqlite3
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,6 +55,19 @@ def main() -> int:
                         w.gate.write_text("open")
                     elif path == "/close-gate":
                         w.gate.unlink(missing_ok=True)
+                    elif path == "/dw-open-gate":
+                        w.dw.gate.write_text("open")
+                    elif path == "/dw-close-gate":
+                        w.dw.gate.unlink(missing_ok=True)
+                    elif path == "/dw-state":
+                        con = sqlite3.connect(w.db, timeout=10)
+                        try:
+                            in_flight = [r[0] for r in con.execute(
+                                "SELECT tool FROM tool_invocations WHERE status = 'in_flight'")]
+                        finally:
+                            con.close()
+                        return self._send(200, {"searches": w.dw.lines(w.dw.search_log),
+                                                "sandbox": w.dw.lines(w.dw.sandbox_log), "inFlight": in_flight})
                     elif path == "/effects":
                         lines = w.effects.read_text().splitlines() if w.effects.exists() else []
                         return self._send(200, {"effects": lines})
