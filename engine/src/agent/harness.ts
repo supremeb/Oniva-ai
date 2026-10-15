@@ -29,7 +29,7 @@ import {
   type TaskRecord,
 } from "../storage/types.js";
 import { RuntimeStopped, type TaskDefinition } from "../tasks/define.js";
-import { TaskRuntime } from "../tasks/runtime.js";
+import { type RecoveryContext, TaskRuntime } from "../tasks/runtime.js";
 import { type ToolDefinition, ToolRegistry } from "../tools/registry.js";
 import {
   type ApprovalItem,
@@ -38,6 +38,7 @@ import {
   type DecideApprovalInput,
 } from "./approvals.js";
 import { compactionTaskDefinition } from "./compaction.js";
+import { ENTRY_KINDS, toEntryPayload } from "./context-builder.js";
 import {
   type AgentCore,
   Conversation,
@@ -115,6 +116,50 @@ interface Waiter {
 }
 
 const SETTLED = new Set(["done", "unanswered"]);
+
+/**
+ * Recovery hook: for each root conversation whose run had a task in flight
+ * (the run's own generation or any descendant subagent's), append one
+ * display-only `run_resumed` entry to the root conversation, in the recovery
+ * commit itself, so a restart adds exactly one per run and a replay of the
+ * recovery commit cannot add another.
+ */
+async function markResumedRuns({
+  tx,
+  interrupted,
+  live,
+  conversationOwner,
+}: RecoveryContext): Promise<void> {
+  const byId = new Map(live.map((t) => [t.id, t]));
+  const roots = new Set<string>();
+  for (const t of interrupted) {
+    let conversationId = t.conversationId;
+    for (let hops = 0; hops < 64; hops++) {
+      const ownerId = conversationOwner(conversationId);
+      const owner = ownerId === null ? undefined : byId.get(ownerId);
+      if (!owner) {
+        roots.add(conversationId);
+        break;
+      }
+      conversationId = owner.conversationId;
+    }
+  }
+  for (const conversationId of roots) {
+    const run = live.find(
+      (t) =>
+        t.conversationId === conversationId &&
+        t.kind === GENERATION_TASK_KIND &&
+        t.parentTaskId === null,
+    );
+    if (!run) continue;
+    tx.appendEntry({
+      conversationId,
+      taskId: run.id,
+      kind: ENTRY_KINDS.runResumed,
+      payload: toEntryPayload(ENTRY_KINDS.runResumed, { runId: run.id, at: tx.now }),
+    });
+  }
+}
 
 export class Harness implements AgentCore {
   readonly session: Session;
@@ -215,6 +260,7 @@ export class Harness implements AgentCore {
         ...(options.signal ? { signal: options.signal } : {}),
         onError: (err, info) =>
           report(err, { during: info.during, ...(info.taskId ? { taskId: info.taskId } : {}) }),
+        onRecover: markResumedRuns,
       });
     } catch (err) {
       unsubscribe();

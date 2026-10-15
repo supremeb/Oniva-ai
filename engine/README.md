@@ -91,6 +91,8 @@ A subagent tool's model, tools and system prompt can be set per run in the paren
 
 The watch view's `run` is `{ active: boolean, runId?, startedAt? }`: `active` is true for as long as the conversation has an unfinished run, including while tools execute, approvals are pending and between model rounds (when `live` is already cleared); `runId` and `startedAt` (ISO time) accompany it while active, and when idle it is `{ active: false }`. It arrives in snapshots and as patches to `/run` when a run starts and when it ends.
 
+When the worker restarts with a task of a run in flight (the run's own generation, or a tool call or subagent task below it, however deep), the recovery commit appends one display-only `run_resumed` entry `{ runId, at }` to the run's ROOT conversation, atomically with the recovery, so each restart adds exactly one per run and clean runs add none. The context builder ignores it, so the model never sees it; it reaches clients through the watch view's `entries` like any entry. Clients use it as the "resumed after restart" cue, which a subagent's replayed read would otherwise never produce.
+
 When a generation fails after streaming text (a model error), that text is kept as an `assistant` entry with `partial: true` and `message.stopReason: "error"`, written just before the `run_error` entry; its blocks are as streamed (a tool call may be incomplete and is never run). On the next turn the model sees only the partial entry's text blocks. A failure before any text (including a policy denial) writes only `run_error`.
 
 A worker that does not hold the session lease answers `409 { error: "not_owner", ownerId }`.

@@ -3,6 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { buildContext } from "../../src/agent/context-builder.js";
 import type { Harness } from "../../src/agent/harness.js";
 import type { HostPolicy } from "../../src/agent/policy.js";
 import { agentConfigDoc } from "../../src/agent/prompt.js";
@@ -262,7 +263,69 @@ export function defineSubagentSuite(backend: AgentBackend): void {
           .tasks({ conversationId: conv.id })
           .filter((t) => t.kind === "agent.tool"),
       ).toHaveLength(1);
+      // The restart cut a child tool call off: the root (not the child) gets
+      // exactly one display-only marker, which the model never sees.
+      const rootEntries = await w2.harness.conversation(conv.id).entries();
+      const markers = rootEntries.filter((e) => e.kind === "run_resumed");
+      expect(markers).toHaveLength(1);
+      const runId = w2.harness.runtime
+        .tasks({ conversationId: conv.id })
+        .find((t) => t.kind === "agent.generation" && t.parentTaskId === null)?.id;
+      expect(markers[0]?.payload).toMatchObject({ runId });
+      expect(
+        (await w2.harness.conversation(childId).entries()).some((e) => e.kind === "run_resumed"),
+      ).toBe(false);
+      const ctx = buildContext(rootEntries);
+      expect(JSON.stringify(ctx.messages)).not.toContain("run_resumed");
+      expect(ctx.messages).toEqual(
+        buildContext(rootEntries.filter((e) => e.kind !== "run_resumed")).messages,
+      );
       await w2.crash();
+    });
+
+    it("a second crash and reopen mid-run adds one more marker; a clean run adds none", async () => {
+      const fx = await backend.fixture();
+      const research = createSubagentTool({ name: "research", tools: ["wait"] });
+      fx.provider.enqueue(
+        fakeToolCall("research", { prompt: "dig" }, { id: "c1" }),
+        fakeToolCall("wait", {}, { id: "k1" }),
+      );
+      const w1 = await fx.open({ tools: [research, blockTool()] });
+      const conv = await w1.harness.createConversation({
+        tenantId: "t1",
+        projectId: "p1",
+        agent: AGENT,
+      });
+      const sub = await conv.submit({ text: "go" });
+      const inWait = (w: typeof w1) =>
+        w.harness.runtime
+          .tasks()
+          .some((t) => (t.input as Any)?.call?.name === "wait" && t.phase === "execute");
+      await waitFor(() => inWait(w1));
+      await w1.crash();
+      const w2 = await fx.open({ tools: [research, blockTool()] });
+      await waitFor(() => inWait(w2));
+      await w2.crash();
+      fx.provider.enqueue(fakeText("dug"), fakeText("parent done"));
+      const w3 = await fx.open({ tools: [research, quickWait()] });
+      expect((await w3.harness.submission(sub.id).wait()).status).toBe("done");
+      const entries = await w3.harness.conversation(conv.id).entries();
+      expect(entries.filter((e) => e.kind === "run_resumed")).toHaveLength(2);
+      await w3.crash();
+
+      const fx2 = await backend.fixture();
+      fx2.provider.enqueue(fakeText("hi"));
+      const c = await fx2.open({ tools: [research, quickWait()] });
+      const conv2 = await c.harness.createConversation({
+        tenantId: "t1",
+        projectId: "p1",
+        agent: AGENT,
+      });
+      await (await conv2.submit({ text: "hello" })).wait();
+      expect(
+        (await c.harness.conversation(conv2.id).entries()).some((e) => e.kind === "run_resumed"),
+      ).toBe(false);
+      await c.crash();
     });
 
     it("a child waiting on an approval leaves zero running tasks in the session", async () => {

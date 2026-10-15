@@ -9,7 +9,10 @@
  *   before that run's `run_error`; only its text is sent to the model);
  * - `tool_result`: the outcome of one tool call ({@link ToolResultPayload});
  * - `run_error`: why a run failed ({@link RunErrorPayload}); not sent to the model;
- * - `compaction`: a summary of older context ({@link CompactionPayload}).
+ * - `compaction`: a summary of older context ({@link CompactionPayload});
+ * - `run_resumed`: display only ({@link RunResumedPayload}); a run (or one of its
+ *   subagents) was in flight when the worker restarted. Written to the root
+ *   conversation, once per restart, and not sent to the model.
  * Unknown kinds (display-only writes, host annotations) are ignored here.
  *
  * The context starts at the newest `compaction` entry (its summary, then the
@@ -37,6 +40,8 @@ export const ENTRY_KINDS = Object.freeze({
   toolResult: "tool_result",
   runError: "run_error",
   compaction: "compaction",
+  /** Display-only: the run was resumed after a restart. Never in model context. */
+  runResumed: "run_resumed",
 } as const);
 
 export type UserPayload = {
@@ -107,6 +112,12 @@ export type CompactionPayload = {
   firstKeptEntryId: string | null;
 };
 
+export type RunResumedPayload = {
+  runId: string;
+  /** Epoch ms of the recovery commit. */
+  at: number;
+};
+
 export type EntryKind = (typeof ENTRY_KINDS)[keyof typeof ENTRY_KINDS];
 
 /** The payload type of each entry kind the agent loop writes. */
@@ -117,6 +128,7 @@ export interface EntryPayloads {
   tool_result: ToolResultPayload;
   run_error: RunErrorPayload;
   compaction: CompactionPayload;
+  run_resumed: RunResumedPayload;
 }
 
 /**
