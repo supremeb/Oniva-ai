@@ -92,6 +92,9 @@ class FakeDB:
     async def flush(self):
         pass
 
+    async def execute(self, *a, **k):  # touch / title updates after a submit
+        return None
+
 
 class Env:
     def __init__(self, tenants, current, **kw):

@@ -252,6 +252,10 @@ async def invoke_tool(name: str, request: Request, factory: SessionFactory = Dep
         if kb_ids is not None:
             bindings = {"knowledge_base_ids": kb_ids}
 
+    denied = await invocations.connector_denial(factory, body.tenantId, body.conversationId, name, body.args)
+    if denied is not None:
+        return _no_store(denied)  # a tool error result, not an HTTP error; nothing is claimed
+
     timeout_ms = effective_timeout_ms(name, spec)
     started = await invocations.begin(
         factory,

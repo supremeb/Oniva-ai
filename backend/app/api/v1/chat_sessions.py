@@ -517,14 +517,6 @@ async def continue_chat_session(
     if await ProjectService(db).get_user_role(body.project_id, user_id, tenant_id) is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    try:
-        built = await build_engine_chat_agent(
-            db, tenant_id=tenant_id, user=user, project_id=body.project_id,
-            selections=body.selections or Selections())
-    except AgentUnavailable as e:
-        raise HTTPException(
-            404, "Agent not found" if str(e) == "agent_not_found" else "Agent not accessible") from None
-
     await ensure_backfilled(db, session)
     rows = (await db.execute(
         select(ChatSessionMessage).where(ChatSessionMessage.session_id == session_id)
@@ -534,6 +526,15 @@ async def continue_chat_session(
         db, tenant_id=tenant_id, user_id=user_id,
         transcript=[{"role": r.role, "content": r.content, "parts": r.parts} for r in rows],
     )
+
+    try:
+        built = await build_engine_chat_agent(
+            db, tenant_id=tenant_id, user=user, project_id=body.project_id,
+            selections=body.selections or Selections(),
+            continuation_summary=summary)
+    except AgentUnavailable as e:
+        raise HTTPException(
+            404, "Agent not found" if str(e) == "agent_not_found" else "Agent not accessible") from None
 
     engine_session_id = engine.directory.default_session_id
     conversation_id = uuid.uuid4()
@@ -549,7 +550,7 @@ async def continue_chat_session(
     db.add(EngineConversation(
         conversation_id=conversation_id, tenant_id=tenant_id, project_id=body.project_id,
         user_id=user_id, session_id=engine_session_id, selections=built.selections,
-        title=session.title, legacy_session_id=session_id))
+        title=session.title, legacy_session_id=session_id, continuation_summary=summary))
     await db.flush()
     return ContinueResponse(
         conversation_id=conversation_id, project_id=body.project_id,

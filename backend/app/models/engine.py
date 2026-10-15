@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -78,6 +79,8 @@ class EngineConversation(Base):
     # turn; updated_at orders the union list; legacy_session_id links a continued legacy session.
     title = Column(String(255), nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # Summary of the continued legacy session, kept so selection rebuilds re-include it in the prompt.
+    continuation_summary = Column(Text, nullable=True)
     legacy_session_id = Column(
         UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="SET NULL"),
         nullable=True, index=True,

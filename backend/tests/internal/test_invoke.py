@@ -579,3 +579,64 @@ async def test_missing_conversation_is_accepted_for_a_tenant_without_bindings(gw
     r = await invoke(gw, conversation=False)
     assert r.status_code == 200
     assert str(invocations.NIL_USER) in r.json()["content"]
+
+
+# ---- connector target enforcement (conversation selections) ---------------------
+
+
+async def _select_connectors(gw, connector_ids, providers=()):
+    from app.models.connector import Connector
+
+    async with gw.maker() as db:
+        for cid, prov in providers:
+            db.add(Connector(id=uuid.UUID(cid), user_id=gw.user_a, tenant_id=gw.tenant_a, connector_type="rest_api",
+                             provider=prov, name=prov, config={}))
+        await db.execute(update(EngineConversation).where(EngineConversation.conversation_id == gw.conv_a)
+                         .values(selections={"connector_ids": connector_ids}))
+        await db.commit()
+
+
+@pytest.mark.parametrize("name", ["invoke_connector_tool", "get_connector_schema"])
+async def test_connector_id_outside_selections_is_a_tool_error_not_http(gw, name):
+    allowed, other = str(uuid.uuid4()), str(uuid.uuid4())
+    await _select_connectors(gw, [allowed])
+    r = await invoke(gw, name, args={"connector_id": other, "tool_name": "t"})
+    assert r.status_code == 200
+    out = r.json()
+    assert out["isError"] is True and out["details"]["error"] == "connector_not_allowed"
+    assert await rows(gw) == []  # nothing claimed
+
+
+async def test_selected_connector_id_passes_the_gate(gw):
+    allowed = str(uuid.uuid4())
+    await _select_connectors(gw, [allowed])
+    denial = await invocations.connector_denial(
+        gw.factory, str(gw.tenant_a), str(gw.conv_a), "invoke_connector_tool", {"connector_id": allowed})
+    assert denial is None
+
+
+async def test_empty_selection_denies_all_and_missing_selections_are_unbound(gw):
+    await _select_connectors(gw, [])
+    r = await invoke(gw, "invoke_connector_tool", args={"connector_id": "x", "tool_name": "t"})
+    assert r.json()["details"]["error"] == "connector_not_allowed"
+    async with gw.maker() as db:
+        await db.execute(update(EngineConversation).where(EngineConversation.conversation_id == gw.conv_a)
+                         .values(selections=None))
+        await db.commit()
+    assert await invocations.connector_denial(
+        gw.factory, str(gw.tenant_a), str(gw.conv_a), "invoke_connector_tool", {"connector_id": "x"}) is None
+
+
+async def test_provider_wrappers_require_a_selected_connector_of_that_provider(gw):
+    lin, snow = str(uuid.uuid4()), str(uuid.uuid4())
+    await _select_connectors(gw, [lin], providers=[(lin, "linear"), (snow, "servicenow")])
+    for name, provider_ok in (("linear_search_issues", True), ("linear_create_issue", True),
+                              ("servicenow_search_incidents", False), ("servicenow_create_incident", False)):
+        args = {"linear_search_issues": {"query": "q"}, "linear_create_issue": {"title": "t"},
+                "servicenow_search_incidents": {"query": "q"},
+                "servicenow_create_incident": {"short_description": "t"}}[name]
+        denial = await invocations.connector_denial(gw.factory, str(gw.tenant_a), str(gw.conv_a), name, args)
+        assert (denial is None) is provider_ok, name
+        if not provider_ok:
+            r = await invoke(gw, name, args=args, run=f"r-{name}")
+            assert r.status_code == 200 and r.json()["details"]["error"] == "connector_not_allowed"

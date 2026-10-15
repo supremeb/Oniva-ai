@@ -392,3 +392,25 @@ async def test_search_knowledge_scopes_to_bound_kbs(monkeypatch):
     captured.clear()
     await search_knowledge(unbound, query="q")
     assert captured["knowledge_base_ids"] is None  # legacy behavior unchanged
+
+
+# --- legacy continuation summary reaches the model (system prompt) -----------------
+
+
+def test_continuation_summary_is_a_delimited_prompt_section():
+    built = compose_agent_config(inputs(), Selections(), MANIFEST, NOW, continuation_summary="  User wants Q3 churn.  ")
+    prompt = built.agent["systemPrompt"]
+    assert "## Earlier conversation summary" in prompt
+    assert "<earlier_conversation_summary>\nUser wants Q3 churn.\n</earlier_conversation_summary>" in prompt
+    assert "Earlier conversation summary" not in compose(Selections()).agent["systemPrompt"]
+    blank = compose_agent_config(inputs(), Selections(), MANIFEST, NOW, continuation_summary="  ")
+    assert "Earlier conversation summary" not in blank.agent["systemPrompt"]
+
+
+def test_patch_selections_keeps_the_continuation_summary(renv):
+    cid = seed(renv, {"web_search": False})
+    renv.db.rows[uuid.UUID(cid)].continuation_summary = "SUMMARY-XYZ"
+    r = renv.http.patch(f"/api/v1/engine/conversations/{cid}/selections", json={"web_search": True})
+    assert r.status_code == 200
+    sent = json.loads(renv.calls[0].content)
+    assert "SUMMARY-XYZ" in sent["systemPrompt"] and "web_search" in sent["tools"]

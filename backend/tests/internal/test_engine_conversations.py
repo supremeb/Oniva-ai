@@ -69,6 +69,8 @@ class Stream(httpx.AsyncByteStream):
 class Env:
     def __init__(self, enabled=True):
         self.calls = []
+        self.touched = []
+        self.titled = []
         self.state = {"sent": 0, "closed": False}
         self.respond = None  # optional override(request) -> Response
         self.db = FakeDB()
@@ -118,7 +120,17 @@ def env(monkeypatch):
         return BuiltAgent(agent={"systemPrompt": "p", "tools": []}, selections={}, dropped={})
 
     monkeypatch.setattr(ec, "build_engine_chat_agent", built)
-    return Env()
+    e = Env()
+
+    async def touch(db, conversation_id):
+        e.touched.append(conversation_id)
+
+    async def title(db, conversation_id, text):
+        e.titled.append((conversation_id, text))
+
+    monkeypatch.setattr(ec, "touch_engine_conversation", touch)
+    monkeypatch.setattr(ec, "set_engine_conversation_title", title)
+    return e
 
 
 def test_disabled_flag_means_no_routes():
@@ -175,6 +187,28 @@ def test_submit_forwards_idempotency_and_binding_headers(env):
     assert req.headers["idempotency-key"] == "k-1"
     assert json.loads(req.content) == {"text": "hi", "requestId": "k-1"}
     assert req.headers["x-oniva-tenant"] == TENANT_A
+
+
+def test_submit_touches_and_titles_from_first_message_only_when_untitled(env):
+    cid = env.seed()
+    assert env.http.post(f"/api/v1/engine/conversations/{cid}/submissions", json={"text": "hello there"}).status_code == 202
+    assert env.touched == [uuid.UUID(cid)] and env.titled == [(uuid.UUID(cid), "hello there")]
+    env.db.rows[uuid.UUID(cid)].title = "Existing"
+    env.http.post(f"/api/v1/engine/conversations/{cid}/submissions", json={"text": "second"})
+    assert len(env.touched) == 2 and len(env.titled) == 1
+
+
+def test_failed_submit_neither_touches_nor_titles(env):
+    cid = env.seed()
+    env.respond = lambda req: httpx.Response(502)
+    assert env.http.post(f"/api/v1/engine/conversations/{cid}/submissions", json={"text": "x"}).status_code == 502
+    assert env.touched == [] and env.titled == []
+
+
+def test_write_submission_does_not_set_a_title(env):
+    cid = env.seed()
+    env.http.post(f"/api/v1/engine/conversations/{cid}/submissions", json={"text": "note", "type": "write"})
+    assert env.touched and env.titled == []
 
 
 def test_watch_streams_through_and_forwards_resume(env):

@@ -130,6 +130,63 @@ async def conversation_knowledge_bases(factory: SessionFactory, tenant_id: str, 
     return list(row[0].get("knowledge_base_ids") or [])
 
 
+CONNECTOR_ID_TOOLS = {"invoke_connector_tool", "get_connector_schema"}
+CONNECTOR_PROVIDER_TOOLS = {
+    "linear_create_issue": "linear", "linear_search_issues": "linear",
+    "servicenow_create_incident": "servicenow", "servicenow_search_incidents": "servicenow",
+}
+
+
+async def connector_denial(
+    factory: SessionFactory, tenant_id: str, conversation_id: Optional[str], name: str, args: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """A ``connector_not_allowed`` tool outcome when the call targets a connector outside the conversation's selections.
+
+    Applies to ``invoke_connector_tool`` / ``get_connector_schema`` (by ``connector_id``) and to the
+    linear / servicenow wrappers (by provider of the selected connectors). A conversation with no
+    recorded selections is unbound (predates chat selections), like ``search_knowledge``.
+    """
+    if name not in CONNECTOR_ID_TOOLS and name not in CONNECTOR_PROVIDER_TOOLS:
+        return None
+    conv = _uuid(conversation_id, "conversationId")
+    if conv is None:
+        return None
+    tenant = _uuid(tenant_id, "tenantId")
+    async with factory() as db:
+        row = (await db.execute(
+            select(EngineConversation.selections).where(
+                EngineConversation.conversation_id == conv, EngineConversation.tenant_id == tenant)
+        )).first()
+        if row is None or row[0] is None:
+            return None
+        allowed = [str(c) for c in (row[0].get("connector_ids") or [])]
+        if name in CONNECTOR_ID_TOOLS:
+            target = str((args or {}).get("connector_id", ""))
+            ok = target in allowed
+        else:
+            ids = [u for u in (_try_uuid(c) for c in allowed) if u is not None]
+            providers = set()
+            if ids:
+                from app.models.connector import Connector
+                providers = {p for (p,) in (await db.execute(
+                    select(Connector.provider).where(Connector.tenant_id == tenant, Connector.id.in_(ids)))).all()}
+            ok = CONNECTOR_PROVIDER_TOOLS[name] in providers
+    if ok:
+        return None
+    return {
+        "content": "This connector is not enabled for this conversation.",
+        "isError": True,
+        "details": {"error": "connector_not_allowed", "tool": name},
+    }
+
+
+def _try_uuid(value: str) -> Optional[uuid.UUID]:
+    try:
+        return uuid.UUID(str(value))
+    except ValueError:
+        return None
+
+
 # --- claim / store ------------------------------------------------------------
 
 

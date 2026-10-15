@@ -345,7 +345,7 @@ async def set_engine_conversation_title(db: Any, conversation_id: uuid.UUID, fir
     text = " ".join((first_user_text or "").split())
     if not text:
         return
-    title = text[:50] + ("..." if len(text) > 50 else "")
+    title = text[:60] + ("..." if len(text) > 60 else "")
     await db.execute(
         update(EngineConversation)
         .where(EngineConversation.conversation_id == conversation_id, EngineConversation.title.is_(None))

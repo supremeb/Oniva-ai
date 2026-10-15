@@ -364,7 +364,10 @@ def test_continue_creates_engine_conversation_with_summary_and_link(db, monkeypa
         selections = {"skills": ["a"]}
         dropped = []
 
+    seen = {}
+
     async def fake_build(*a, **k):
+        seen.update(k)
         return Built()
 
     async def fake_role(self, *a, **k):
@@ -389,6 +392,9 @@ def test_continue_creates_engine_conversation_with_summary_and_link(db, monkeypa
     row = owner_exec(db, "SELECT legacy_session_id::text, title, user_id::text FROM engine_conversations "
                          "WHERE conversation_id = :c", {"c": body["conversation_id"]})[0]
     assert row == (sid, "Quarterly", UA)
+    assert seen["continuation_summary"] == "SUMMARY TEXT"      # reaches the agent config (system prompt)
+    assert owner_exec(db, "SELECT continuation_summary FROM engine_conversations WHERE conversation_id = :c",
+                      {"c": body["conversation_id"]})[0][0] == "SUMMARY TEXT"
     assert messages_of(db, sid) == before                       # legacy rows not mutated
     again = http.post(f"/api/v1/chat-sessions/{sid}/continue", json={"project_id": PROJECT}).json()
     assert again["existing"] and again["conversation_id"] == body["conversation_id"]

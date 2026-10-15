@@ -22,9 +22,11 @@ from app.core.database import get_db
 from app.models.engine import EngineConversation
 from app.models.tenant import Tenant
 from app.services.engine_chat_agent import AgentUnavailable, Selections, build_engine_chat_agent
+from app.services.chat_service import set_engine_conversation_title, touch_engine_conversation
 from app.services.feature_flags import engine_chat_enabled
 from app.services.engine_client import EngineClient, EngineError, get_engine_client
 from app.services.project_service import ProjectService
+from app.services.usage_summary import conversation_cost
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +152,8 @@ async def update_selections(
     try:
         built = await build_engine_chat_agent(
             db, tenant_id=conv.tenant_id, user=user, project_id=conv.project_id,
-            selections=Selections.model_validate(merged))
+            selections=Selections.model_validate(merged),
+            continuation_summary=conv.continuation_summary)
     except AgentUnavailable as e:
         raise HTTPException(404, "Agent not found" if str(e) == "agent_not_found" else "Agent not accessible") from None
     try:
@@ -178,10 +181,15 @@ async def submit(
     key = idempotency_key or body.requestId or str(uuid.uuid4())
     payload["requestId"] = body.requestId or key
     try:
-        return await engine.submit(conv.session_id, conv.tenant_id, conv.project_id,
-                                   conv.conversation_id, payload, key)
+        result = await engine.submit(conv.session_id, conv.tenant_id, conv.project_id,
+                                     conv.conversation_id, payload, key)
     except EngineError as e:
         raise _engine_http_error(e) from None
+    # Listing metadata: order by activity, and title from the first user message (kept if set).
+    await touch_engine_conversation(db, conv.conversation_id)
+    if conv.title is None and payload.get("type") != "write" and isinstance(body.text, str):
+        await set_engine_conversation_title(db, conv.conversation_id, body.text)
+    return result
 
 
 @router.get("/{conversation_id}/watch")
@@ -257,3 +265,14 @@ def mount_engine_conversations(app: FastAPI, settings: Settings) -> bool:
     app.state.engine_chat_settings = settings
     app.include_router(router, prefix="/api/v1/engine/conversations", tags=["engine"])
     return True
+
+
+@router.get("/{conversation_id}/cost")
+async def conversation_cost_summary(
+    conversation_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+):
+    """Ledger-priced cost and tokens for the conversation, grouped by run (the client never prices)."""
+    conv = await _binding(db, conversation_id, user)
+    return await conversation_cost(db, conv.tenant_id, conv.conversation_id)

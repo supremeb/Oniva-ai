@@ -36,6 +36,9 @@ KNOWLEDGE_INSTRUCTION = (
 )
 
 
+CONTINUATION_HEADING = "Earlier conversation summary"
+
+
 class AgentUnavailable(Exception):
     """The requested chat agent is missing, inactive or not visible to the user."""
 
@@ -93,6 +96,7 @@ def compose_agent_config(
     selections: Selections,
     manifest_names: Iterable[str],
     now: Optional[datetime] = None,
+    continuation_summary: Optional[str] = None,
 ) -> BuiltAgent:
     now = now or datetime.now(timezone.utc)
     manifest = set(manifest_names)
@@ -130,6 +134,15 @@ def compose_agent_config(
         parts.append(KNOWLEDGE_INSTRUCTION)
     if selections.web_search:
         parts.append(build_web_search_instruction(now, selections.specific_sites or None))
+
+    if continuation_summary and continuation_summary.strip():
+        parts.append(
+            f"## {CONTINUATION_HEADING}\n"
+            "This conversation continues an earlier one. Use this summary as background; "
+            "do not repeat it back unless asked.\n"
+            "<earlier_conversation_summary>\n"
+            f"{continuation_summary.strip()}\n"
+            "</earlier_conversation_summary>")
 
     stored = {
         "agent_id": inputs.agent_id,
@@ -256,6 +269,7 @@ async def build_engine_chat_agent(
     loader: Callable[..., Any] = load_chat_inputs,
     manifest: Optional[Iterable[str]] = None,
     now: Optional[datetime] = None,
+    continuation_summary: Optional[str] = None,
 ) -> BuiltAgent:
     """Agent config for a chat conversation: raises ``AgentUnavailable`` for an unusable agent."""
     inputs = await loader(
@@ -263,4 +277,4 @@ async def build_engine_chat_agent(
         is_admin=getattr(user, "role", None) == "admin",
         project_id=uuid.UUID(str(project_id)), selections=selections)
     names = set(manifest) if manifest is not None else await manifest_tool_names()
-    return compose_agent_config(inputs, selections, names, now)
+    return compose_agent_config(inputs, selections, names, now, continuation_summary)
