@@ -7,6 +7,7 @@
  *
  * @see docs/solutions/ui-bugs/react-hooks-order-DeepWorkInlineCard-20260216.md
  */
+import { useState } from 'react';
 import { useAuthStore } from '@/lib/stores/auth';
 
 /**
@@ -34,4 +35,17 @@ export function useIsPlatformOperator(): boolean {
 export function useFeatures(): Record<string, boolean> {
   const user = useAuthStore((state) => state.user);
   return user?.features ?? {};
+}
+
+/** Feature flag that selects chat on the engine (resolved server-side per tenant). */
+export const ENGINE_CHAT_FLAG = 'ENABLE_ENGINE_CHAT';
+
+/**
+ * Chat mode for this mount. The server decides; the value is captured once per mount so a
+ * flag flip while the page is open never switches mode mid-conversation (reload picks it up).
+ */
+export function useEngineChatMode(): 'engine' | 'legacy' {
+  const enabled = useFeature(ENGINE_CHAT_FLAG);
+  const [mode] = useState<'engine' | 'legacy'>(enabled ? 'engine' : 'legacy');
+  return mode;
 }

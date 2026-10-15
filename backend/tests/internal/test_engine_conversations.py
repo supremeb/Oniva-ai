@@ -14,6 +14,7 @@ from app.auth.providers.base import AuthUser
 from app.config import Settings
 from app.core.database import get_db
 from app.models.engine import EngineConversation
+from app.models.tenant import Tenant
 from app.services.engine_client import EngineClient, get_engine_client
 
 SECRET = "Zk3vN8qLw1RtYb6HdPx9CfUe2MaS5JoG7iVn4TlKq0A"
@@ -24,7 +25,7 @@ PROJECT = str(uuid.uuid4())
 
 def settings(**kw) -> Settings:
     base = dict(SECRET_KEY=SECRET, ENGINE_SERVICE_TOKEN=SVC, ENGINE_URL="http://engine.test",
-                ENGINE_SESSION_ID="sess-1", ENABLE_ENGINE_API=True)
+                ENGINE_SESSION_ID="sess-1", ENABLE_ENGINE_API=True, ENABLE_ENGINE_CHAT=True)
     base.update(kw)
     return Settings(_env_file=None, **base)
 
@@ -39,6 +40,8 @@ class FakeDB:
         self.rows = {}
 
     async def get(self, model, key):
+        if model is Tenant:  # engine chat is on for every tenant in these route tests
+            return Tenant(id=key, name="t", slug="t", settings={"features": {"ENABLE_ENGINE_CHAT": True}})
         return self.rows.get(key)
 
     def add(self, obj):

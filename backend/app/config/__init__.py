@@ -348,6 +348,7 @@ class Settings(BaseSettings):
     ENGINE_GATEWAY_TOKEN: Optional[str] = None
     ENGINE_GATEWAY_TOKEN_PREVIOUS: Optional[str] = None  # accepted during rotation
     ENABLE_ENGINE_API: bool = False
+    ENABLE_ENGINE_CHAT: bool = False  # global gate for engine-backed chat; tenants opt in via settings.features
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
     INTERNAL_ALLOW_PLAINTEXT: bool = False  # allow a non-https ENGINE_URL in production
 

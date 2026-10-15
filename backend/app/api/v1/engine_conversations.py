@@ -20,12 +20,30 @@ from app.auth.providers.base import AuthUser
 from app.config import Settings
 from app.core.database import get_db
 from app.models.engine import EngineConversation
+from app.models.tenant import Tenant
+from app.services.feature_flags import engine_chat_enabled
 from app.services.engine_client import EngineClient, EngineError, get_engine_client
 from app.services.project_service import ProjectService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+
+async def require_engine_chat(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+) -> None:
+    """Per-tenant gate (R3, defense in depth): 404 unless engine chat is on for the caller's tenant.
+
+    Evaluated per request so a global-on deploy still honors a tenant being switched off.
+    """
+    tenant = await db.get(Tenant, UUID(str(user.tenant_id)))
+    settings = getattr(request.app.state, "engine_chat_settings", None)
+    if tenant is None or not engine_chat_enabled(tenant, settings):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+router = APIRouter(dependencies=[Depends(require_engine_chat)])
 
 
 class CreateConversationBody(BaseModel):
@@ -194,5 +212,6 @@ def mount_engine_conversations(app: FastAPI, settings: Settings) -> bool:
     """Mount only when ENABLE_ENGINE_API and the engine is configured (fail closed)."""
     if not (settings.ENABLE_ENGINE_API and settings.ENGINE_URL and settings.ENGINE_SERVICE_TOKEN):
         return False
+    app.state.engine_chat_settings = settings
     app.include_router(router, prefix="/api/v1/engine/conversations", tags=["engine"])
     return True
