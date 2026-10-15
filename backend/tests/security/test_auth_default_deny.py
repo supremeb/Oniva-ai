@@ -77,7 +77,12 @@ def _all_routes():
 
 
 ROUTES = _all_routes()
-PROTECTED = [(m, p) for m, p in ROUTES if (m, p) not in PINNED_PUBLIC]
+# /internal is a distinct class: it bypasses user JWT auth but is guarded by the
+# engine service token (InternalAuth dependency). It is never in PINNED_PUBLIC; the
+# router is only mounted when ENGINE_GATEWAY_TOKEN is set, so the default app has none.
+INTERNAL_PREFIX = "/internal/"
+PROTECTED = [(m, p) for m, p in ROUTES
+             if (m, p) not in PINNED_PUBLIC and not p.startswith(INTERNAL_PREFIX)]
 
 
 def _concrete(path: str) -> str:
@@ -217,3 +222,47 @@ def test_docs_denied_in_production(monkeypatch):
     assert not middleware.is_public_route("GET", "/openapi.json")
     monkeypatch.setattr(middleware, "_is_production", lambda: False)
     assert middleware.is_public_route("GET", "/docs")
+
+
+# ---- /internal: token-guarded, not public, not user-JWT-authenticated -------
+
+def _internal_app():
+    from fastapi import FastAPI
+
+    from app.auth.middleware import AuthMiddleware
+    from app.config import Settings
+    from app.internal_api.router import mount_internal_router
+    from app.middleware.csrf import CSRFMiddleware
+    from app.middleware.tenant import TenantMiddleware
+
+    gw = "g" * 40
+    s = Settings(_env_file=None, ENGINE_GATEWAY_TOKEN=gw, ENGINE_SERVICE_TOKEN="e" * 40, SECRET_KEY="k" * 40)
+    a = FastAPI()
+    a.add_middleware(TenantMiddleware, fail_open=True)
+    a.add_middleware(CSRFMiddleware)
+    a.add_middleware(AuthMiddleware)
+    mount_internal_router(a, s)
+    return a, gw
+
+
+def test_default_app_mounts_no_internal_routes():
+    assert not [p for _, p in ROUTES if p.startswith("/internal")]
+    assert not [(m, p) for m, p in PINNED_PUBLIC if p.startswith("/internal")]
+
+
+def test_internal_routes_are_not_public_by_the_user_auth_allow_list():
+    from app.auth.middleware import is_public_route
+
+    assert not is_public_route("GET", "/internal/ping")
+    assert not is_public_route("POST", "/internal/tools/invoke")
+
+
+def test_every_internal_route_401_without_token_and_with_wrong_token():
+    a, gw = _internal_app()
+    internal = [(m, p) for r in _walk(a.routes) for m in sorted(getattr(r, "methods", None) or ())
+                for p in [getattr(r, "path", "")] if p.startswith("/internal") and m not in ("HEAD", "OPTIONS")]
+    assert internal, "no /internal routes enumerated"
+    c = TestClient(a, raise_server_exceptions=False)
+    for m, p in internal:
+        assert c.request(m, _concrete(p)).status_code == 401, (m, p)
+        assert c.request(m, _concrete(p), headers={"Authorization": "Bearer wrong"}).status_code == 401, (m, p)

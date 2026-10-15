@@ -370,6 +370,10 @@ app.include_router(projects.router, prefix="/api/v1/projects", tags=["projects"]
 # Sandbox Control Plane: zero-secrets LLM proxy
 app.include_router(sandbox_proxy.router, prefix="/api/v1", tags=["sandbox-proxy"])
 
+# Engine-facing /internal namespace: mounted only when ENGINE_GATEWAY_TOKEN is set.
+from app.internal_api.router import mount_internal_router
+mount_internal_router(app, app_settings)
+
 @app.get("/")
 async def root():
     return {

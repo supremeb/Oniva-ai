@@ -15,7 +15,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
-from app.auth.middleware import is_public_route
+from app.auth.middleware import is_internal_path, is_public_route
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         settings = get_settings()
+
+        # /internal carries no ambient cookie authority (service token only; see InternalAuth).
+        if is_internal_path(request.url.path):
+            return await call_next(request)
 
         # Skip CSRF in non-cookie auth flows (API key auth)
         if request.headers.get("x-api-key"):
