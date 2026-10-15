@@ -22,6 +22,7 @@ jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn() }) }))
 jest.mock('@/components/chat/ChatSelections', () => ({
     buildSelectionPopovers: () => ({ webSearchPopover: null, knowledgePopover: null }),
 }));
+jest.mock('@/components/chat/EngineSkillConnectorPickers', () => ({ EngineSkillConnectorPickers: () => null }));
 jest.mock('@/lib/api', () => {
     class APIError extends Error {
         constructor(message: string, public status?: number) {
@@ -112,7 +113,7 @@ describe('idle composer and conversation creation', () => {
             fireEvent.keyDown(box(), { key: 'Enter' });
         });
         await waitFor(() => expect(f.raw.submit).toHaveBeenCalledTimes(1));
-        expect(f.raw.create).toHaveBeenCalledWith('p1', { web_search: false, specific_sites: [], knowledge_base_ids: [] });
+        expect(f.raw.create).toHaveBeenCalledWith('p1', { web_search: false, specific_sites: [], knowledge_base_ids: [], skill_ids: [], connector_ids: [] });
         expect(window.location.search).toBe('?c=conv-new');
         const [id, input] = f.raw.submit.mock.calls[0] as [string, Record<string, unknown>];
         expect(id).toBe('conv-new');

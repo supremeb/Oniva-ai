@@ -13,6 +13,9 @@ import { EngineMessageList } from './EngineMessageList';
 import { QueuedChips, type SendingChip } from './QueuedChips';
 import { ConnectionBanner } from './ConnectionBanner';
 import { buildSelectionPopovers } from './ChatSelections';
+import { EngineSkillConnectorPickers } from './EngineSkillConnectorPickers';
+import { SkillTagRow } from './inputs/shared';
+import type { Skill } from '@/lib/api/skills';
 import { CostBadge, runForTurn } from './CostBadge';
 import { isRunActive } from '@/lib/engine/run';
 import { useConversationCost, type ConversationCost } from '@/lib/engine/cost';
@@ -44,13 +47,17 @@ interface Sources {
     webSearchEnabled: boolean;
     specificSites: string[];
     activeKnowledgeBaseIds: string[];
+    skills: Skill[];
+    connectorIds: string[];
 }
-const NO_SOURCES: Sources = { webSearchEnabled: false, specificSites: [], activeKnowledgeBaseIds: [] };
+const NO_SOURCES: Sources = { webSearchEnabled: false, specificSites: [], activeKnowledgeBaseIds: [], skills: [], connectorIds: [] };
 
 const toSelections = (s: Sources) => ({
     web_search: s.webSearchEnabled,
     specific_sites: s.specificSites,
     knowledge_base_ids: s.activeKnowledgeBaseIds,
+    skill_ids: s.skills.map((k) => k.id),
+    connector_ids: s.connectorIds,
 });
 
 /** Put the conversation id in the URL so a refresh rejoins it (R11). */
@@ -268,7 +275,28 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                 <>
                     {webSearchPopover}
                     {knowledgePopover}
+                    <EngineSkillConnectorPickers
+                        conversationId={conversationId}
+                        skills={sources.skills}
+                        connectorIds={sources.connectorIds}
+                        onSelectSkill={(skill) =>
+                            updateSources({ ...sources, skills: sources.skills.some((k) => k.id === skill.id) ? sources.skills : [...sources.skills, skill] })
+                        }
+                        onToggleConnector={(id) =>
+                            updateSources({
+                                ...sources,
+                                connectorIds: sources.connectorIds.includes(id) ? sources.connectorIds.filter((c) => c !== id) : [...sources.connectorIds, id],
+                            })
+                        }
+                    />
                 </>
+            }
+            header={
+                sources.skills.length > 0 ? (
+                    <div className="pt-2.5">
+                        <SkillTagRow skills={sources.skills} onRemove={(id) => updateSources({ ...sources, skills: sources.skills.filter((k) => k.id !== id) })} />
+                    </div>
+                ) : null
             }
             chips={<QueuedChips inbox={view?.inbox ?? null} sending={sending} />}
         />

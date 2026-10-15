@@ -20,6 +20,7 @@ jest.mock('@/components/ui/GenerativeO', () => ({
     GenerativeOText: () => <span />,
 }));
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn() }) }));
+jest.mock('@/components/chat/EngineSkillConnectorPickers', () => ({ EngineSkillConnectorPickers: () => null }));
 jest.mock('@/components/chat/ChatSelections', () => ({
     buildSelectionPopovers: () => ({ webSearchPopover: null, knowledgePopover: null }),
 }));

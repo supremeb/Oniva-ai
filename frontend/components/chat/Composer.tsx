@@ -153,6 +153,8 @@ export interface EngineComposerProps {
     toolbar?: ReactNode;
     /** Queued-message chips rendered above the input. */
     chips?: ReactNode;
+    /** Selected-skill tags rendered inside the box above the text. */
+    header?: ReactNode;
     inputRef?: RefObject<HTMLTextAreaElement | null>;
     autoFocus?: boolean;
 }
@@ -198,6 +200,7 @@ export function EngineComposer(props: EngineComposerProps) {
         <div className="w-full max-w-[680px] mx-auto">
             {props.chips}
             <div className="relative rounded-xl border border-neutral-200/60 bg-white shadow-[0_1px_8px_rgba(0,0,0,0.06)] focus-within:border-neutral-300">
+                {props.header}
                 <textarea
                     ref={ref}
                     value={value}
