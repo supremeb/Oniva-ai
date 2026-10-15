@@ -30,6 +30,7 @@ import {
     type WatcherOptions,
 } from '@/lib/engine';
 import { useProjectsStore } from '@/lib/stores/projects';
+import { useChatSessionsStore } from '@/lib/stores/chat-sessions';
 import { useEngineChatPrefs, NEW_DRAFT_KEY } from '@/lib/stores/engine-chat-prefs';
 
 export interface EngineChatProps {
@@ -185,29 +186,48 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         }
     }, [conversationId, doSubmit]);
 
+    // Create the conversation; the first-send effect above submits `text` once the watcher exists.
+    const startConversation = useCallback(
+        async (text: string) => {
+            if (!resolvedProjectId) {
+                setCreateError('Create a project first to start a conversation.');
+                return;
+            }
+            setCreating(true);
+            setCreateError(null);
+            try {
+                const created = await client.create(resolvedProjectId, toSelections(sources));
+                useEngineChatPrefs.getState().clearDraft(NEW_DRAFT_KEY);
+                setInputState('');
+                firstText.current = text;
+                writeConversationToUrl(created.conversationId);
+                setConversationId(created.conversationId);
+            } catch (e) {
+                setCreateError(e instanceof Error ? e.message : 'Could not start the conversation.');
+            } finally {
+                setCreating(false);
+            }
+        },
+        [resolvedProjectId, client, sources]
+    );
+
+    // Text typed in ProjectView before starting the chat: send it as the first message, once.
+    // The ref survives the strict-mode effect replay and the store read clears the value.
+    const consumePendingInput = useChatSessionsStore((s) => s.consumePendingInput);
+    const pendingHandled = useRef(false);
+    useEffect(() => {
+        if (pendingHandled.current || !projectId || initialConversationId) return;
+        pendingHandled.current = true;
+        const pendingText = consumePendingInput()?.trim();
+        if (pendingText) void startConversation(pendingText);
+    }, [projectId, initialConversationId, consumePendingInput, startConversation]);
+
     const send = useCallback(
         async (mode: EngineSendMode) => {
             const text = input.trim();
             if (!text || creating) return;
             if (!conversationId) {
-                if (!resolvedProjectId) {
-                    setCreateError('Create a project first to start a conversation.');
-                    return;
-                }
-                setCreating(true);
-                setCreateError(null);
-                try {
-                    const created = await client.create(resolvedProjectId, toSelections(sources));
-                    useEngineChatPrefs.getState().clearDraft(NEW_DRAFT_KEY);
-                    setInputState('');
-                    firstText.current = text;
-                    writeConversationToUrl(created.conversationId);
-                    setConversationId(created.conversationId);
-                } catch (e) {
-                    setCreateError(e instanceof Error ? e.message : 'Could not start the conversation.');
-                } finally {
-                    setCreating(false);
-                }
+                await startConversation(text);
                 return;
             }
             useEngineChatPrefs.getState().clearDraft(draftKey);
@@ -215,7 +235,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
             const whenBusy = running ? (mode === 'steer' ? 'steer' : 'followUp') : undefined;
             await doSubmit(text, whenBusy);
         },
-        [input, creating, conversationId, resolvedProjectId, client, sources, draftKey, running, doSubmit]
+        [input, creating, conversationId, startConversation, draftKey, running, doSubmit]
     );
 
     const handleStop = useCallback(() => {

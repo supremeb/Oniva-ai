@@ -34,6 +34,7 @@ jest.mock('@/lib/api', () => {
 
 import { EngineChat } from '../EngineChat';
 import { useEngineChatPrefs } from '@/lib/stores/engine-chat-prefs';
+import { useChatSessionsStore } from '@/lib/stores/chat-sessions';
 
 type Body = ReturnType<typeof makeBody>;
 type Fake = ReturnType<typeof fakeClient>;
@@ -101,6 +102,7 @@ beforeEach(() => {
     cursor = 0;
     localStorage.clear();
     useEngineChatPrefs.setState({ drafts: {} });
+    useChatSessionsStore.setState({ pendingInput: null });
     window.history.replaceState(null, '', '/chat');
 });
 
@@ -131,6 +133,40 @@ describe('idle composer and conversation creation', () => {
             fireEvent.keyDown(box(), { key: 'Enter' });
         });
         expect(await screen.findByText('nope')).toBeTruthy();
+    });
+});
+
+describe('pending text from ProjectView', () => {
+    it('creates the conversation and submits the pending text once, even under strict mode', async () => {
+        const f = fakeClient();
+        useChatSessionsStore.setState({ pendingInput: '  from project  ' });
+        render(
+            <React.StrictMode>
+                <EngineChat projectId="p1" client={f.client} />
+            </React.StrictMode>
+        );
+        await waitFor(() => expect(f.raw.submit).toHaveBeenCalledTimes(1));
+        await act(async () => {});
+        expect(f.raw.create).toHaveBeenCalledTimes(1);
+        expect(f.raw.create).toHaveBeenCalledWith('p1', expect.any(Object));
+        expect(f.raw.submit.mock.calls[0]).toEqual(['conv-new', expect.objectContaining({ text: 'from project' })]);
+        expect(useChatSessionsStore.getState().pendingInput).toBeNull();
+    });
+
+    it('does nothing without pending text or when rejoining a conversation', async () => {
+        const f = fakeClient();
+        render(<EngineChat projectId="p1" client={f.client} />);
+        await act(async () => {});
+        expect(f.raw.create).not.toHaveBeenCalled();
+
+        useChatSessionsStore.setState({ pendingInput: 'keep me' });
+        const g = fakeClient();
+        render(<EngineChat projectId="p1" initialConversationId="c1" client={g.client} />);
+        await waitFor(() => expect(g.bodies.length).toBeGreaterThan(0));
+        expect(g.raw.create).not.toHaveBeenCalled();
+        expect(g.raw.submit).not.toHaveBeenCalled();
+        expect(useChatSessionsStore.getState().pendingInput).toBe('keep me');
+        useChatSessionsStore.setState({ pendingInput: null });
     });
 });
 

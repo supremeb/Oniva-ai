@@ -94,6 +94,7 @@ class ConversationListItem(BaseModel):
     project_id: Optional[UUID] = None
     # Engine conversations started from a legacy session link back to it (read-only original).
     legacy_session_id: Optional[UUID] = None
+    pinned: bool = False
 
 
 class ConversationListResponse(BaseModel):

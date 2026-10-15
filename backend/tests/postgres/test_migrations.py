@@ -12,7 +12,7 @@ def test_single_alembic_head():
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "migrations"))
     heads = ScriptDirectory.from_config(cfg).get_heads()
-    assert heads == ["105_llm_usage_purpose"], heads
+    assert heads == ["106_engine_conversation_pin_archive"], heads
 
 
 def _scalar(url, sql):
@@ -29,7 +29,7 @@ def test_upgrade_head_on_empty_db(pg_migrated_url):
     assert res.returncode == 0, res.stderr[-2000:]
     assert _scalar(pg_migrated_url, "SELECT to_regclass('public.sandbox_executions')")
     assert _scalar(pg_migrated_url, "SELECT 1 FROM pg_extension WHERE extname='vector'")
-    assert _scalar(pg_migrated_url, "SELECT version_num FROM alembic_version") == "105_llm_usage_purpose"
+    assert _scalar(pg_migrated_url, "SELECT version_num FROM alembic_version") == "106_engine_conversation_pin_archive"
     assert _scalar(
         pg_migrated_url,
         "SELECT character_maximum_length FROM information_schema.columns "

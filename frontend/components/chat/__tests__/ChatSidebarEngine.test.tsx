@@ -16,6 +16,10 @@ jest.mock('@/hooks/useChatSessions', () => ({
     useUpdateChatSession: () => ({ mutate: jest.fn() }),
     useDeleteChatSession: () => ({ mutate: jest.fn() }),
 }));
+jest.mock('@/hooks/useEngineConversationActions', () => ({
+    useUpdateEngineConversation: () => ({ mutate: jest.fn() }),
+    useArchiveEngineConversation: () => ({ mutate: jest.fn() }),
+}));
 const mockUnion = jest.fn();
 jest.mock('@/hooks/useConversationUnion', () => ({ useConversationUnion: (enabled: boolean) => mockUnion(enabled) }));
 

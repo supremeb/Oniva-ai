@@ -355,6 +355,24 @@ def test_union_list_orders_by_updated_at_with_stable_pages(db):
     assert "sessions" in legacy_only and legacy_only["total"] == 3
 
 
+def test_union_list_hides_archived_engine_conversations_and_exposes_pinned(db):
+    owner_exec(db, "DELETE FROM engine_conversations")
+    owner_exec(db, "DELETE FROM chat_sessions")
+    ids = {}
+    for name, extra in (("keep", ""), ("pinned", ", pinned"), ("gone", ", archived_at")):
+        cid = str(uuid.uuid4())
+        ids[name] = cid
+        val = {"": "", ", pinned": ", true", ", archived_at": ", now()"}[extra]
+        owner_exec(db, "INSERT INTO engine_conversations (conversation_id, tenant_id, project_id, user_id, "
+                       f"session_id, title{extra}) VALUES (:c, :t, :p, :u, 's', :ti{val})",
+                   {"c": cid, "t": TA, "p": PROJECT, "u": UA, "ti": name})
+    http, _ = make_app(db, au())
+    body = http.get("/api/v1/chat-sessions", params={"include": "engine"}).json()
+    by_title = {i["title"]: i for i in body["items"]}
+    assert set(by_title) == {"keep", "pinned"} and body["total"] == 2
+    assert by_title["pinned"]["pinned"] is True and by_title["keep"]["pinned"] is False
+
+
 def test_continue_creates_engine_conversation_with_summary_and_link(db, monkeypatch):
     sid = seed_session(db, title="Quarterly")
     before = messages_of(db, sid)

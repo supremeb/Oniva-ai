@@ -9,6 +9,7 @@ import uuid
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -85,3 +86,6 @@ class EngineConversation(Base):
         UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="SET NULL"),
         nullable=True, index=True,
     )
+    # Sidebar pin, and archive ("delete" hides the row from listings; engine data is kept).
+    pinned = Column(Boolean, nullable=False, server_default="false", default=False)
+    archived_at = Column(DateTime(timezone=True), nullable=True)

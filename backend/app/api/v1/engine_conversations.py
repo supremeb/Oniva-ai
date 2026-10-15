@@ -12,7 +12,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from datetime import datetime, timezone
+
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, get_current_user_with_query_token
@@ -63,6 +65,22 @@ class SubmissionBody(BaseModel):
     whenBusy: Optional[Literal["followUp", "steer", "reject"]] = None
     type: Optional[str] = None
     requestId: Optional[str] = None
+
+
+class UpdateConversationBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    title: Optional[str] = None
+    pinned: Optional[bool] = None
+
+    @field_validator("title")
+    @classmethod
+    def _title(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = " ".join(v.split())
+        if not v or len(v) > 255:
+            raise ValueError("title must be 1-255 characters")
+        return v
 
 
 class AbortBody(BaseModel):
@@ -132,6 +150,38 @@ async def create_conversation(
     await db.flush()
     return {"conversationId": str(conversation_id), "projectId": str(body.project_id),
             "selections": built.selections, "dropped": built.dropped}
+
+
+@router.patch("/{conversation_id}")
+async def update_conversation(
+    conversation_id: UUID,
+    body: UpdateConversationBody,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+):
+    """Rename and/or pin. Listing metadata only: it does not touch the engine or ``updated_at``."""
+    conv = await _binding(db, conversation_id, user)
+    if conv.archived_at is not None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if body.title is not None:
+        conv.title = body.title
+    if body.pinned is not None:
+        conv.pinned = body.pinned
+    await db.flush()
+    return {"conversationId": str(conv.conversation_id), "title": conv.title, "pinned": bool(conv.pinned)}
+
+
+@router.delete("/{conversation_id}", status_code=204)
+async def archive_conversation(
+    conversation_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+):
+    """Sidebar delete: archive (hide from listings). Engine data is kept. Idempotent."""
+    conv = await _binding(db, conversation_id, user)
+    if conv.archived_at is None:
+        conv.archived_at = datetime.now(timezone.utc)
+        await db.flush()
 
 
 @router.patch("/{conversation_id}/selections")

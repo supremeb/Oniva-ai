@@ -150,6 +150,7 @@ async def _list_union(db: AsyncSession, user_id: UUID, page: int, page_size: int
         ChatSession.updated_at.label("updated_at"),
         ChatSession.project_id.label("project_id"),
         cast(null(), PGUUID(as_uuid=True)).label("legacy_session_id"),
+        ChatSession.is_pinned.label("pinned"),
     ).where(ChatSession.user_id == user_id, ChatSession.is_draft == False)  # noqa: E712
     engine = select(
         EngineConversation.conversation_id.label("id"),
@@ -158,7 +159,8 @@ async def _list_union(db: AsyncSession, user_id: UUID, page: int, page_size: int
         EngineConversation.updated_at.label("updated_at"),
         EngineConversation.project_id.label("project_id"),
         EngineConversation.legacy_session_id.label("legacy_session_id"),
-    ).where(EngineConversation.user_id == user_id)
+        EngineConversation.pinned.label("pinned"),
+    ).where(EngineConversation.user_id == user_id, EngineConversation.archived_at.is_(None))
     u = union_all(legacy, engine).subquery()
 
     total = (await db.execute(select(func.count()).select_from(u))).scalar() or 0
@@ -172,7 +174,7 @@ async def _list_union(db: AsyncSession, user_id: UUID, page: int, page_size: int
                 id=r.id, source=r.source,
                 title=r.title or ("New conversation" if r.source == "engine" else "Untitled"),
                 updated_at=r.updated_at, project_id=r.project_id,
-                legacy_session_id=r.legacy_session_id,
+                legacy_session_id=r.legacy_session_id, pinned=bool(r.pinned),
             )
             for r in rows
         ],
