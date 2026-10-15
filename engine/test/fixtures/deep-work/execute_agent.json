@@ -1,0 +1,34 @@
+{
+  "systemPrompt": "<prompt:orchestrator>",
+  "tools": [
+    "dw_finalize",
+    "dw_get_learnings",
+    "dw_get_report",
+    "dw_start_round",
+    "dw_write_section",
+    "reflector",
+    "research_worker"
+  ],
+  "model": "m/high",
+  "metadata": {
+    "purpose": "deep_work.orchestrator",
+    "phase": "execute",
+    "allowedConnectorIds": [],
+    "knowledgeBaseIds": [],
+    "subagents": {
+      "research_worker": {
+        "model": "m/worker",
+        "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+        "systemPrompt": "<prompt:research_worker>"
+      },
+      "reflector": {
+        "model": "m/mid",
+        "tools": ["dw_get_learnings", "dw_record_reflection"],
+        "systemPrompt": "<prompt:reflector>"
+      }
+    },
+    "deepWorkRunId": "run-1"
+  },
+  "maxRounds": 40,
+  "deadlineMs": 1000600000
+}

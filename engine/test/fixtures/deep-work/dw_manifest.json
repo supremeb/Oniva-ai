@@ -1,0 +1,222 @@
+{
+  "tools": [
+    {
+      "name": "dw_finalize",
+      "description": "Finish the report: appends the Sources block built from every saved learning (deduplicated), writes report.md and marks the run completed. Needs at least one section and no open workers. Calling it again returns the stored result.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "failed_workers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Worker ids of the latest round that failed without saving learnings, if any."
+          }
+        },
+        "type": "object"
+      },
+      "sideEffect": "write",
+      "idempotent": true,
+      "timeoutMs": 30000,
+      "requiresApproval": false
+    },
+    {
+      "name": "dw_get_learnings",
+      "description": "Read the saved learnings, best-supported first, de-duplicated and limited to a token budget. Optionally only those of the given workers.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "worker_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Only these workers' learnings; all workers when omitted."
+          },
+          "max_tokens": {
+            "default": 15000,
+            "description": "Approximate token budget for the returned learnings.",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "sideEffect": "none",
+      "idempotent": true,
+      "timeoutMs": 30000,
+      "requiresApproval": false
+    },
+    {
+      "name": "dw_get_report",
+      "description": "Read the report as written so far (all sections, plus the Sources block once finalized).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "sideEffect": "none",
+      "idempotent": true,
+      "timeoutMs": 30000,
+      "requiresApproval": false
+    },
+    {
+      "name": "dw_record_reflection",
+      "description": "Record the reflection on a finished research round: score, gaps and whether to run another round. Optionally list workers of the round that failed and will never save learnings. Replaces an earlier reflection for the same round.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "round": {
+            "description": "The research round being reflected on.",
+            "type": "integer"
+          },
+          "score": {
+            "description": "Completeness 0-100.",
+            "type": "integer"
+          },
+          "gaps": {
+            "description": "What is still missing.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "should_continue": {
+            "description": "True to run a gap-filling round.",
+            "type": "boolean"
+          },
+          "gap_tasks": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Proposed workers for that round, each {\"worker_id\", \"sub_query\"}."
+          },
+          "failed_workers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Worker ids of this round that failed without saving learnings."
+          }
+        },
+        "required": ["round", "score", "gaps", "should_continue"],
+        "type": "object"
+      },
+      "sideEffect": "write",
+      "idempotent": true,
+      "timeoutMs": 30000,
+      "requiresApproval": false
+    },
+    {
+      "name": "dw_save_learnings",
+      "description": "Save a research worker's learnings (facts with source URLs). Replaces anything that worker saved before, so saving twice is safe. Call once, when the worker is done.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "worker_id": {
+            "description": "The id this worker was registered with in dw_start_round.",
+            "type": "string"
+          },
+          "learnings": {
+            "description": "Findings, each {\"fact\", \"source_url\", \"confidence\" (0-1), \"source_title\", \"source_type\", \"quote\"}.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": ["worker_id", "learnings"],
+        "type": "object"
+      },
+      "sideEffect": "write",
+      "idempotent": true,
+      "timeoutMs": 30000,
+      "requiresApproval": false
+    },
+    {
+      "name": "dw_start_round",
+      "description": "Register a research round before launching its workers. Rounds are numbered consecutively from 1; each has at most the configured number of workers. Writes plan.md and todo.md. Repeating a round that is already registered changes nothing.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "round": {
+            "description": "Round number, 1 for the first round, then consecutive (gap-filling rounds follow reflection).",
+            "type": "integer"
+          },
+          "workers": {
+            "description": "Workers of this round, each {\"worker_id\": short id, \"sub_query\": the question, \"task_type\": optional}.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": ["round", "workers"],
+        "type": "object"
+      },
+      "sideEffect": "write",
+      "idempotent": true,
+      "timeoutMs": 30000,
+      "requiresApproval": false
+    },
+    {
+      "name": "dw_write_section",
+      "description": "Write one section of the report. Replaces the section with the same heading, otherwise appends it, so repeating a call is safe. Allowed once every worker of the latest round has saved learnings or been marked failed. Do not write a Sources section; it is built from the saved learnings.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "heading": {
+            "description": "Section heading text (rendered as a level-2 heading).",
+            "type": "string"
+          },
+          "markdown": {
+            "description": "Section body; use level-3 or deeper headings inside it.",
+            "type": "string"
+          }
+        },
+        "required": ["heading", "markdown"],
+        "type": "object"
+      },
+      "sideEffect": "write",
+      "idempotent": true,
+      "timeoutMs": 30000,
+      "requiresApproval": false
+    }
+  ]
+}

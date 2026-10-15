@@ -1,0 +1,6237 @@
+{
+  "success": {
+    "legacy": "deep_work_success",
+    "points": [
+      {
+        "at": "worker-running",
+        "view": {
+          "entries": [
+            {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run this approved research plan.\n\n{\"title\":\"Contract run\",\"sub_queries\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "requestId": "dw-1"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-w1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 34,
+                  "outputTokens": 19,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-w1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 68,
+                  "outputTokens": 11,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          ],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "usage": {
+            "requests": 2,
+            "total": {
+              "requests": 2,
+              "inputTokens": 102,
+              "outputTokens": 30,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {
+              "fake/fake-1": {
+                "requests": 2,
+                "inputTokens": 102,
+                "outputTokens": 30,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "byPurpose": {
+              "generation": {
+                "requests": 2,
+                "inputTokens": 102,
+                "outputTokens": 30,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": true,
+            "runId": "task_<id-10>",
+            "startedAt": "1970-01-01T00:16:40.000Z"
+          },
+          "subagents": {
+            "task_<id-11>": {
+              "conversationId": "conv_<id-12>",
+              "submissionId": "subm_<id-13>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 1,
+              "recent": ["web_search({\"query\":\"q-w1\"})"],
+              "usage": {
+                "requests": 1,
+                "inputTokens": 10,
+                "outputTokens": 7,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        }
+      },
+      {
+        "at": "reflecting",
+        "view": {
+          "entries": [
+            {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run this approved research plan.\n\n{\"title\":\"Contract run\",\"sub_queries\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "requestId": "dw-1"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-w1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 34,
+                  "outputTokens": 19,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-w1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 68,
+                  "outputTokens": 11,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-14>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-11>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_4_0",
+                "toolName": "research_worker",
+                "status": "ok",
+                "content": "{\"summary\":\"saved w1\",\"learning_count\":2,\"source_count\":2,\"top_findings\":[\"Finding 1 for w1\"],\"sources\":[{\"title\":\"Source w1\",\"url\":\"https://example.com/w1/1\",\"type\":\"web\"},{\"title\":\"Source w1\",\"url\":\"https://example.com/w1/2\",\"type\":\"web\"}]}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-12>",
+                  "submissionId": "subm_<id-13>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-15>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-16>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 2,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_6_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT round 1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 139,
+                  "outputTokens": 10,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          ],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "usage": {
+            "requests": 3,
+            "total": {
+              "requests": 3,
+              "inputTokens": 241,
+              "outputTokens": 40,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {
+              "fake/fake-1": {
+                "requests": 3,
+                "inputTokens": 241,
+                "outputTokens": 40,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "byPurpose": {
+              "generation": {
+                "requests": 3,
+                "inputTokens": 241,
+                "outputTokens": 40,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": true,
+            "runId": "task_<id-16>",
+            "startedAt": "1970-01-01T00:16:40.000Z"
+          },
+          "subagents": {
+            "task_<id-11>": {
+              "conversationId": "conv_<id-12>",
+              "submissionId": "subm_<id-13>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "web_search({\"query\":\"q-w1\"})",
+                "dw_save_learnings({\"worker_id\":\"w1\",\"learnings\":[{\"fact\":\"Finding 1 for w1\",\"source_url\":\"https://example.com/w1/1\",\"confidence\":0.8,\"source_title\":\"Source w1\"…"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 163,
+                "outputTokens": 159,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-17>": {
+              "conversationId": "conv_<id-18>",
+              "submissionId": "subm_<id-19>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "dw_get_learnings()",
+                "dw_record_reflection({\"round\":1,\"score\":55,\"gaps\":[\"gap-1: the second angle\"],\"should_continue\":true,\"gap_tasks\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]})"
+              ],
+              "usage": {
+                "requests": 2,
+                "inputTokens": 119,
+                "outputTokens": 45,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        }
+      },
+      {
+        "at": "done",
+        "view": {
+          "entries": [
+            {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run this approved research plan.\n\n{\"title\":\"Contract run\",\"sub_queries\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "requestId": "dw-1"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-w1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 34,
+                  "outputTokens": 19,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-w1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 68,
+                  "outputTokens": 11,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-14>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-11>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_4_0",
+                "toolName": "research_worker",
+                "status": "ok",
+                "content": "{\"summary\":\"saved w1\",\"learning_count\":2,\"source_count\":2,\"top_findings\":[\"Finding 1 for w1\"],\"sources\":[{\"title\":\"Source w1\",\"url\":\"https://example.com/w1/1\",\"type\":\"web\"},{\"title\":\"Source w1\",\"url\":\"https://example.com/w1/2\",\"type\":\"web\"}]}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-12>",
+                  "submissionId": "subm_<id-13>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-15>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-16>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 2,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_6_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT round 1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 139,
+                  "outputTokens": 10,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-20>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-17>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_6_0",
+                "toolName": "reflector",
+                "status": "ok",
+                "content": "{\"score\":55,\"gaps\":[\"gap-1: the second angle\"],\"round\":1,\"continuing\":true,\"note\":\"reflected 1\"}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-18>",
+                  "submissionId": "subm_<id-19>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-21>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-22>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 3,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_8_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 2,
+                        "workers": [
+                          {
+                            "worker_id": "gap-1",
+                            "sub_query": "q-gap-1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 172,
+                  "outputTokens": 21,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-23>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-24>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_8_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":2,\"workers\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-25>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-26>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 4,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_10_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER gap-1: q-gap-1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 209,
+                  "outputTokens": 13,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-27>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-28>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_10_0",
+                "toolName": "research_worker",
+                "status": "ok",
+                "content": "{\"summary\":\"saved gap-1\",\"learning_count\":2,\"source_count\":2,\"top_findings\":[\"Finding 1 for gap-1\"],\"sources\":[{\"title\":\"Source gap-1\",\"url\":\"https://example.com/gap-1/1\",\"type\":\"web\"},{\"title\":\"Source gap-1\",\"url\":\"https://example.com/gap-1/2\",\"type\":\"web\"}]}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-29>",
+                  "submissionId": "subm_<id-30>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-31>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-32>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 5,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_12_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT round 2"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 286,
+                  "outputTokens": 10,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-33>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-34>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_12_0",
+                "toolName": "reflector",
+                "status": "ok",
+                "content": "{\"score\":88,\"gaps\":[],\"round\":2,\"continuing\":false,\"note\":\"reflected 2\"}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-35>",
+                  "submissionId": "subm_<id-36>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-37>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-38>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 6,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_14_0",
+                      "name": "dw_write_section",
+                      "arguments": {
+                        "heading": "Findings",
+                        "markdown": "Findings from w1 and gap-1."
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 314,
+                  "outputTokens": 20,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-39>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-40>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_14_0",
+                "toolName": "dw_write_section",
+                "status": "ok",
+                "content": "{\"heading\":\"Findings\",\"replaced\":false,\"sections\":[\"Findings\"]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["report.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-41>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-42>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 7,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_16_0",
+                      "name": "dw_write_section",
+                      "arguments": {
+                        "heading": "Gaps closed",
+                        "markdown": "gap-1 closed."
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 349,
+                  "outputTokens": 17,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-43>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-44>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_16_0",
+                "toolName": "dw_write_section",
+                "status": "ok",
+                "content": "{\"heading\":\"Gaps closed\",\"replaced\":false,\"sections\":[\"Findings\",\"Gaps closed\"]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["report.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-45>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-46>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 8,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_18_0",
+                      "name": "dw_finalize",
+                      "arguments": {}
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 386,
+                  "outputTokens": 4,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-47>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-48>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_18_0",
+                "toolName": "dw_finalize",
+                "status": "ok",
+                "content": "{\"report_length\":71,\"artifacts\":[]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["report.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-49>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-50>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 9,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "text",
+                      "text": "Deep Work complete."
+                    }
+                  ],
+                  "stopReason": "end_turn"
+                },
+                "usage": {
+                  "inputTokens": 398,
+                  "outputTokens": 5,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          ],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "usage": {
+            "requests": 10,
+            "total": {
+              "requests": 10,
+              "inputTokens": 2355,
+              "outputTokens": 130,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {
+              "fake/fake-1": {
+                "requests": 10,
+                "inputTokens": 2355,
+                "outputTokens": 130,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "byPurpose": {
+              "generation": {
+                "requests": 10,
+                "inputTokens": 2355,
+                "outputTokens": 130,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": false
+          },
+          "subagents": {
+            "task_<id-11>": {
+              "conversationId": "conv_<id-12>",
+              "submissionId": "subm_<id-13>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "web_search({\"query\":\"q-w1\"})",
+                "dw_save_learnings({\"worker_id\":\"w1\",\"learnings\":[{\"fact\":\"Finding 1 for w1\",\"source_url\":\"https://example.com/w1/1\",\"confidence\":0.8,\"source_title\":\"Source w1\"…"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 163,
+                "outputTokens": 159,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-17>": {
+              "conversationId": "conv_<id-18>",
+              "submissionId": "subm_<id-19>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "dw_get_learnings()",
+                "dw_record_reflection({\"round\":1,\"score\":55,\"gaps\":[\"gap-1: the second angle\"],\"should_continue\":true,\"gap_tasks\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]})"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 287,
+                "outputTokens": 69,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-28>": {
+              "conversationId": "conv_<id-29>",
+              "submissionId": "subm_<id-30>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "web_search({\"query\":\"q-gap-1\"})",
+                "dw_save_learnings({\"worker_id\":\"gap-1\",\"learnings\":[{\"fact\":\"Finding 1 for gap-1\",\"source_url\":\"https://example.com/gap-1/1\",\"confidence\":0.8,\"source_title\":\"S…"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 178,
+                "outputTokens": 171,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-34>": {
+              "conversationId": "conv_<id-35>",
+              "submissionId": "subm_<id-36>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "dw_get_learnings()",
+                "dw_record_reflection({\"round\":2,\"score\":88,\"gaps\":[],\"should_continue\":false})"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 454,
+                "outputTokens": 42,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        }
+      }
+    ],
+    "frames": [
+      {
+        "cursor": 1,
+        "snapshot": {
+          "entries": [],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "usage": {
+            "requests": 0,
+            "total": {
+              "requests": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {},
+            "byPurpose": {}
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": false
+          },
+          "subagents": {}
+        }
+      },
+      {
+        "cursor": 2,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/active",
+            "value": true
+          },
+          {
+            "op": "add",
+            "path": "/run/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "add",
+            "path": "/run/startedAt",
+            "value": "1970-01-01T00:16:40.000Z"
+          },
+          {
+            "op": "add",
+            "path": "/entries/0",
+            "value": {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run this approved research plan.\n\n{\"title\":\"Contract run\",\"sub_queries\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "requestId": "dw-1"
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 4,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/1",
+            "value": {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 5,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 6,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/2",
+            "value": {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-w1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 34,
+                  "outputTokens": 19,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 34
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 19
+          },
+          {
+            "op": "add",
+            "path": "/usage/byModel/fake~1fake-1",
+            "value": {
+              "requests": 1,
+              "inputTokens": 34,
+              "outputTokens": 19,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            }
+          },
+          {
+            "op": "add",
+            "path": "/usage/byPurpose/generation",
+            "value": {
+              "requests": 1,
+              "inputTokens": 34,
+              "outputTokens": 19,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 9,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/3",
+            "value": {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 11,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-10>"
+          }
+        ]
+      },
+      {
+        "cursor": 13,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-10>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 14,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/4",
+            "value": {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-w1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 68,
+                  "outputTokens": 11,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 102
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 30
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 102
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 30
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 102
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 30
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 17,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-11>",
+            "value": {
+              "conversationId": "conv_<id-12>",
+              "submissionId": "subm_<id-13>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 0,
+              "recent": [],
+              "usage": {
+                "requests": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 21,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/toolCalls",
+            "value": 1
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-11>/recent/0",
+            "value": "web_search({\"query\":\"q-w1\"})"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/inputTokens",
+            "value": 10
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/outputTokens",
+            "value": 7
+          }
+        ]
+      },
+      {
+        "cursor": 30,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/toolCalls",
+            "value": 2
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-11>/recent/1",
+            "value": "dw_save_learnings({\"worker_id\":\"w1\",\"learnings\":[{\"fact\":\"Finding 1 for w1\",\"source_url\":\"https://example.com/w1/1\",\"confidence\":0.8,\"source_title\":\"Source w1\"…"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/inputTokens",
+            "value": 30
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/outputTokens",
+            "value": 98
+          }
+        ]
+      },
+      {
+        "cursor": 39,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/status",
+            "value": "done"
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-11>/endedAt",
+            "value": "1970-01-01T00:16:40.000Z"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/inputTokens",
+            "value": 163
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/outputTokens",
+            "value": 159
+          }
+        ]
+      },
+      {
+        "cursor": 41,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/5",
+            "value": {
+              "id": "ent_<id-14>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-11>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_4_0",
+                "toolName": "research_worker",
+                "status": "ok",
+                "content": "{\"summary\":\"saved w1\",\"learning_count\":2,\"source_count\":2,\"top_findings\":[\"Finding 1 for w1\"],\"sources\":[{\"title\":\"Source w1\",\"url\":\"https://example.com/w1/1\",\"type\":\"web\"},{\"title\":\"Source w1\",\"url\":\"https://example.com/w1/2\",\"type\":\"web\"}]}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-12>",
+                  "submissionId": "subm_<id-13>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 43,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-16>"
+          }
+        ]
+      },
+      {
+        "cursor": 45,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-16>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 46,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/6",
+            "value": {
+              "id": "ent_<id-15>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-16>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 2,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_6_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT round 1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 139,
+                  "outputTokens": 10,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 241
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 40
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 241
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 40
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 241
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 40
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 49,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-17>",
+            "value": {
+              "conversationId": "conv_<id-18>",
+              "submissionId": "subm_<id-19>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 0,
+              "recent": [],
+              "usage": {
+                "requests": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 53,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/toolCalls",
+            "value": 1
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-17>/recent/0",
+            "value": "dw_get_learnings()"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/inputTokens",
+            "value": 9
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/outputTokens",
+            "value": 5
+          }
+        ]
+      },
+      {
+        "cursor": 62,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/toolCalls",
+            "value": 2
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-17>/recent/1",
+            "value": "dw_record_reflection({\"round\":1,\"score\":55,\"gaps\":[\"gap-1: the second angle\"],\"should_continue\":true,\"gap_tasks\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]})"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/inputTokens",
+            "value": 119
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/outputTokens",
+            "value": 45
+          }
+        ]
+      },
+      {
+        "cursor": 71,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/status",
+            "value": "done"
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-17>/endedAt",
+            "value": "1970-01-01T00:16:40.000Z"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/inputTokens",
+            "value": 287
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/outputTokens",
+            "value": 69
+          }
+        ]
+      },
+      {
+        "cursor": 73,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/7",
+            "value": {
+              "id": "ent_<id-20>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-17>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_6_0",
+                "toolName": "reflector",
+                "status": "ok",
+                "content": "{\"score\":55,\"gaps\":[\"gap-1: the second angle\"],\"round\":1,\"continuing\":true,\"note\":\"reflected 1\"}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-18>",
+                  "submissionId": "subm_<id-19>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 75,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-22>"
+          }
+        ]
+      },
+      {
+        "cursor": 77,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-22>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 78,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/8",
+            "value": {
+              "id": "ent_<id-21>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-22>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 3,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_8_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 2,
+                        "workers": [
+                          {
+                            "worker_id": "gap-1",
+                            "sub_query": "q-gap-1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 172,
+                  "outputTokens": 21,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 4
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 4
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 413
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 61
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 4
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 413
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 61
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 4
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 413
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 61
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 81,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/9",
+            "value": {
+              "id": "ent_<id-23>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-24>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_8_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":2,\"workers\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 83,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-26>"
+          }
+        ]
+      },
+      {
+        "cursor": 85,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-26>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 86,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/10",
+            "value": {
+              "id": "ent_<id-25>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-26>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 4,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_10_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER gap-1: q-gap-1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 209,
+                  "outputTokens": 13,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 5
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 5
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 622
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 74
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 5
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 622
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 74
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 5
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 622
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 74
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 89,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-28>",
+            "value": {
+              "conversationId": "conv_<id-29>",
+              "submissionId": "subm_<id-30>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 0,
+              "recent": [],
+              "usage": {
+                "requests": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 93,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/toolCalls",
+            "value": 1
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-28>/recent/0",
+            "value": "web_search({\"query\":\"q-gap-1\"})"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/usage/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/usage/inputTokens",
+            "value": 12
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/usage/outputTokens",
+            "value": 8
+          }
+        ]
+      },
+      {
+        "cursor": 102,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/toolCalls",
+            "value": 2
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-28>/recent/1",
+            "value": "dw_save_learnings({\"worker_id\":\"gap-1\",\"learnings\":[{\"fact\":\"Finding 1 for gap-1\",\"source_url\":\"https://example.com/gap-1/1\",\"confidence\":0.8,\"source_title\":\"S…"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/usage/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/usage/inputTokens",
+            "value": 35
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/usage/outputTokens",
+            "value": 106
+          }
+        ]
+      },
+      {
+        "cursor": 111,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/status",
+            "value": "done"
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-28>/endedAt",
+            "value": "1970-01-01T00:16:40.000Z"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/usage/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/usage/inputTokens",
+            "value": 178
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-28>/usage/outputTokens",
+            "value": 171
+          }
+        ]
+      },
+      {
+        "cursor": 113,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/11",
+            "value": {
+              "id": "ent_<id-27>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-28>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_10_0",
+                "toolName": "research_worker",
+                "status": "ok",
+                "content": "{\"summary\":\"saved gap-1\",\"learning_count\":2,\"source_count\":2,\"top_findings\":[\"Finding 1 for gap-1\"],\"sources\":[{\"title\":\"Source gap-1\",\"url\":\"https://example.com/gap-1/1\",\"type\":\"web\"},{\"title\":\"Source gap-1\",\"url\":\"https://example.com/gap-1/2\",\"type\":\"web\"}]}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-29>",
+                  "submissionId": "subm_<id-30>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 115,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-32>"
+          }
+        ]
+      },
+      {
+        "cursor": 117,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-32>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 118,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/12",
+            "value": {
+              "id": "ent_<id-31>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-32>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 5,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_12_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT round 2"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 286,
+                  "outputTokens": 10,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 6
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 6
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 908
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 84
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 6
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 908
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 84
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 6
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 908
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 84
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 121,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-34>",
+            "value": {
+              "conversationId": "conv_<id-35>",
+              "submissionId": "subm_<id-36>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 0,
+              "recent": [],
+              "usage": {
+                "requests": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 125,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/toolCalls",
+            "value": 1
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-34>/recent/0",
+            "value": "dw_get_learnings()"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/usage/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/usage/inputTokens",
+            "value": 9
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/usage/outputTokens",
+            "value": 5
+          }
+        ]
+      },
+      {
+        "cursor": 134,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/toolCalls",
+            "value": 2
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-34>/recent/1",
+            "value": "dw_record_reflection({\"round\":2,\"score\":88,\"gaps\":[],\"should_continue\":false})"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/usage/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/usage/inputTokens",
+            "value": 213
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/usage/outputTokens",
+            "value": 24
+          }
+        ]
+      },
+      {
+        "cursor": 143,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/status",
+            "value": "done"
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-34>/endedAt",
+            "value": "1970-01-01T00:16:40.000Z"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/usage/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/usage/inputTokens",
+            "value": 454
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-34>/usage/outputTokens",
+            "value": 42
+          }
+        ]
+      },
+      {
+        "cursor": 145,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/13",
+            "value": {
+              "id": "ent_<id-33>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-34>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_12_0",
+                "toolName": "reflector",
+                "status": "ok",
+                "content": "{\"score\":88,\"gaps\":[],\"round\":2,\"continuing\":false,\"note\":\"reflected 2\"}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-35>",
+                  "submissionId": "subm_<id-36>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 147,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-38>"
+          }
+        ]
+      },
+      {
+        "cursor": 149,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-38>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 150,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/14",
+            "value": {
+              "id": "ent_<id-37>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-38>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 6,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_14_0",
+                      "name": "dw_write_section",
+                      "arguments": {
+                        "heading": "Findings",
+                        "markdown": "Findings from w1 and gap-1."
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 314,
+                  "outputTokens": 20,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 7
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 7
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 1222
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 104
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 7
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 1222
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 104
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 7
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 1222
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 104
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 153,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/15",
+            "value": {
+              "id": "ent_<id-39>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-40>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_14_0",
+                "toolName": "dw_write_section",
+                "status": "ok",
+                "content": "{\"heading\":\"Findings\",\"replaced\":false,\"sections\":[\"Findings\"]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["report.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 155,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-42>"
+          }
+        ]
+      },
+      {
+        "cursor": 157,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-42>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 158,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/16",
+            "value": {
+              "id": "ent_<id-41>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-42>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 7,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_16_0",
+                      "name": "dw_write_section",
+                      "arguments": {
+                        "heading": "Gaps closed",
+                        "markdown": "gap-1 closed."
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 349,
+                  "outputTokens": 17,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 8
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 8
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 1571
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 121
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 8
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 1571
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 121
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 8
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 1571
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 121
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 161,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/17",
+            "value": {
+              "id": "ent_<id-43>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-44>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_16_0",
+                "toolName": "dw_write_section",
+                "status": "ok",
+                "content": "{\"heading\":\"Gaps closed\",\"replaced\":false,\"sections\":[\"Findings\",\"Gaps closed\"]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["report.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 163,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-46>"
+          }
+        ]
+      },
+      {
+        "cursor": 165,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-46>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 166,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/18",
+            "value": {
+              "id": "ent_<id-45>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-46>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 8,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_18_0",
+                      "name": "dw_finalize",
+                      "arguments": {}
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 386,
+                  "outputTokens": 4,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 9
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 9
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 1957
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 125
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 9
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 1957
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 125
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 9
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 1957
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 125
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 169,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/19",
+            "value": {
+              "id": "ent_<id-47>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-48>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_18_0",
+                "toolName": "dw_finalize",
+                "status": "ok",
+                "content": "{\"report_length\":71,\"artifacts\":[]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["report.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 171,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-50>"
+          }
+        ]
+      },
+      {
+        "cursor": 173,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-50>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 174,
+        "patch": [
+          {
+            "op": "remove",
+            "path": "/run/runId"
+          },
+          {
+            "op": "remove",
+            "path": "/run/startedAt"
+          },
+          {
+            "op": "replace",
+            "path": "/run/active",
+            "value": false
+          },
+          {
+            "op": "add",
+            "path": "/entries/20",
+            "value": {
+              "id": "ent_<id-49>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-50>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 9,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "text",
+                      "text": "Deep Work complete."
+                    }
+                  ],
+                  "stopReason": "end_turn"
+                },
+                "usage": {
+                  "inputTokens": 398,
+                  "outputTokens": 5,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 10
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 10
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 2355
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 130
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 10
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 2355
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 130
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 10
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 2355
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 130
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      }
+    ]
+  },
+  "failure": {
+    "legacy": "deep_work_failure",
+    "points": [
+      {
+        "at": "worker-faulted",
+        "view": {
+          "entries": [
+            {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run the failing plan",
+                "requestId": "dw-f"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-FAULT"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 11,
+                  "outputTokens": 20,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-FAULT\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-FAULT"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 46,
+                  "outputTokens": 12,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-11>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-12>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_4_0",
+                "toolName": "research_worker",
+                "status": "error",
+                "content": "The subagent did not answer (model_error): worker failed",
+                "isError": true,
+                "details": {
+                  "conversationId": "conv_<id-13>",
+                  "submissionId": "subm_<id-14>",
+                  "depth": 1,
+                  "status": "unanswered",
+                  "reason": "model_error"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-15>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-16>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 2,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_6_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT faulted round 1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 72,
+                  "outputTokens": 12,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          ],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "usage": {
+            "requests": 3,
+            "total": {
+              "requests": 3,
+              "inputTokens": 129,
+              "outputTokens": 44,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {
+              "fake/fake-1": {
+                "requests": 3,
+                "inputTokens": 129,
+                "outputTokens": 44,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "byPurpose": {
+              "generation": {
+                "requests": 3,
+                "inputTokens": 129,
+                "outputTokens": 44,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": true,
+            "runId": "task_<id-16>",
+            "startedAt": "1970-01-01T00:16:40.000Z"
+          },
+          "subagents": {
+            "task_<id-12>": {
+              "conversationId": "conv_<id-13>",
+              "submissionId": "subm_<id-14>",
+              "status": "failed",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 1,
+              "recent": ["web_search({\"query\":\"q-FAULT\"})"],
+              "usage": {
+                "requests": 2,
+                "inputTokens": 11,
+                "outputTokens": 8,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-17>": {
+              "conversationId": "conv_<id-18>",
+              "submissionId": "subm_<id-19>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "dw_get_learnings()",
+                "dw_record_reflection({\"round\":1,\"score\":0,\"gaps\":[\"w1 failed\"],\"should_continue\":false,\"failed_workers\":[\"w1\"]})"
+              ],
+              "usage": {
+                "requests": 2,
+                "inputTokens": 36,
+                "outputTokens": 33,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        }
+      },
+      {
+        "at": "run-failed",
+        "view": {
+          "entries": [
+            {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run the failing plan",
+                "requestId": "dw-f"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-FAULT"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 11,
+                  "outputTokens": 20,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-FAULT\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-FAULT"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 46,
+                  "outputTokens": 12,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-11>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-12>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_4_0",
+                "toolName": "research_worker",
+                "status": "error",
+                "content": "The subagent did not answer (model_error): worker failed",
+                "isError": true,
+                "details": {
+                  "conversationId": "conv_<id-13>",
+                  "submissionId": "subm_<id-14>",
+                  "depth": 1,
+                  "status": "unanswered",
+                  "reason": "model_error"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-15>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-16>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 2,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_6_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT faulted round 1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 72,
+                  "outputTokens": 12,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-20>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-17>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_6_0",
+                "toolName": "reflector",
+                "status": "ok",
+                "content": "{\"score\":0,\"gaps\":[\"w1 failed\"],\"round\":1,\"continuing\":false,\"note\":\"reflected faulted\"}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-18>",
+                  "submissionId": "subm_<id-19>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-21>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-22>",
+              "kind": "run_error",
+              "payload": {
+                "runId": "task_<id-5>",
+                "error": {
+                  "kind": "invalid_request",
+                  "message": "orchestrator failed",
+                  "retryable": false
+                }
+              },
+              "createdAt": 1000000
+            }
+          ],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "usage": {
+            "requests": 4,
+            "total": {
+              "requests": 4,
+              "inputTokens": 129,
+              "outputTokens": 44,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {
+              "fake/fake-1": {
+                "requests": 4,
+                "inputTokens": 129,
+                "outputTokens": 44,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "byPurpose": {
+              "generation": {
+                "requests": 4,
+                "inputTokens": 129,
+                "outputTokens": 44,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": false
+          },
+          "subagents": {
+            "task_<id-12>": {
+              "conversationId": "conv_<id-13>",
+              "submissionId": "subm_<id-14>",
+              "status": "failed",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 1,
+              "recent": ["web_search({\"query\":\"q-FAULT\"})"],
+              "usage": {
+                "requests": 2,
+                "inputTokens": 11,
+                "outputTokens": 8,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-17>": {
+              "conversationId": "conv_<id-18>",
+              "submissionId": "subm_<id-19>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "dw_get_learnings()",
+                "dw_record_reflection({\"round\":1,\"score\":0,\"gaps\":[\"w1 failed\"],\"should_continue\":false,\"failed_workers\":[\"w1\"]})"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 112,
+                "outputTokens": 55,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        }
+      }
+    ],
+    "frames": [
+      {
+        "cursor": 1,
+        "snapshot": {
+          "entries": [],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "usage": {
+            "requests": 0,
+            "total": {
+              "requests": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {},
+            "byPurpose": {}
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": false
+          },
+          "subagents": {}
+        }
+      },
+      {
+        "cursor": 2,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/active",
+            "value": true
+          },
+          {
+            "op": "add",
+            "path": "/run/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "add",
+            "path": "/run/startedAt",
+            "value": "1970-01-01T00:16:40.000Z"
+          },
+          {
+            "op": "add",
+            "path": "/entries/0",
+            "value": {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run the failing plan",
+                "requestId": "dw-f"
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 4,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/1",
+            "value": {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 5,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 6,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/2",
+            "value": {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-FAULT"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 11,
+                  "outputTokens": 20,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 11
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 20
+          },
+          {
+            "op": "add",
+            "path": "/usage/byModel/fake~1fake-1",
+            "value": {
+              "requests": 1,
+              "inputTokens": 11,
+              "outputTokens": 20,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            }
+          },
+          {
+            "op": "add",
+            "path": "/usage/byPurpose/generation",
+            "value": {
+              "requests": 1,
+              "inputTokens": 11,
+              "outputTokens": 20,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 9,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/3",
+            "value": {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-FAULT\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 11,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-10>"
+          }
+        ]
+      },
+      {
+        "cursor": 13,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-10>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 14,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/4",
+            "value": {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-FAULT"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 46,
+                  "outputTokens": 12,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 57
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 32
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 57
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 32
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 57
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 32
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 17,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-12>",
+            "value": {
+              "conversationId": "conv_<id-13>",
+              "submissionId": "subm_<id-14>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 0,
+              "recent": [],
+              "usage": {
+                "requests": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 21,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-12>/toolCalls",
+            "value": 1
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-12>/recent/0",
+            "value": "web_search({\"query\":\"q-FAULT\"})"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-12>/usage/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-12>/usage/inputTokens",
+            "value": 11
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-12>/usage/outputTokens",
+            "value": 8
+          }
+        ]
+      },
+      {
+        "cursor": 30,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-12>/status",
+            "value": "failed"
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-12>/endedAt",
+            "value": "1970-01-01T00:16:40.000Z"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-12>/usage/requests",
+            "value": 2
+          }
+        ]
+      },
+      {
+        "cursor": 32,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/5",
+            "value": {
+              "id": "ent_<id-11>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-12>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_4_0",
+                "toolName": "research_worker",
+                "status": "error",
+                "content": "The subagent did not answer (model_error): worker failed",
+                "isError": true,
+                "details": {
+                  "conversationId": "conv_<id-13>",
+                  "submissionId": "subm_<id-14>",
+                  "depth": 1,
+                  "status": "unanswered",
+                  "reason": "model_error"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 34,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-16>"
+          }
+        ]
+      },
+      {
+        "cursor": 36,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-16>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 37,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/6",
+            "value": {
+              "id": "ent_<id-15>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-16>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 2,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_6_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT faulted round 1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 72,
+                  "outputTokens": 12,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 129
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 44
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 129
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 44
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 129
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 44
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 40,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-17>",
+            "value": {
+              "conversationId": "conv_<id-18>",
+              "submissionId": "subm_<id-19>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 0,
+              "recent": [],
+              "usage": {
+                "requests": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 44,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/toolCalls",
+            "value": 1
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-17>/recent/0",
+            "value": "dw_get_learnings()"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/inputTokens",
+            "value": 11
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/outputTokens",
+            "value": 5
+          }
+        ]
+      },
+      {
+        "cursor": 53,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/toolCalls",
+            "value": 2
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-17>/recent/1",
+            "value": "dw_record_reflection({\"round\":1,\"score\":0,\"gaps\":[\"w1 failed\"],\"should_continue\":false,\"failed_workers\":[\"w1\"]})"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/inputTokens",
+            "value": 36
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/outputTokens",
+            "value": 33
+          }
+        ]
+      },
+      {
+        "cursor": 62,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/status",
+            "value": "done"
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-17>/endedAt",
+            "value": "1970-01-01T00:16:40.000Z"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/requests",
+            "value": 3
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/inputTokens",
+            "value": 112
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-17>/usage/outputTokens",
+            "value": 55
+          }
+        ]
+      },
+      {
+        "cursor": 64,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/7",
+            "value": {
+              "id": "ent_<id-20>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-17>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_6_0",
+                "toolName": "reflector",
+                "status": "ok",
+                "content": "{\"score\":0,\"gaps\":[\"w1 failed\"],\"round\":1,\"continuing\":false,\"note\":\"reflected faulted\"}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-18>",
+                  "submissionId": "subm_<id-19>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 66,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-22>"
+          }
+        ]
+      },
+      {
+        "cursor": 68,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-22>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 69,
+        "patch": [
+          {
+            "op": "remove",
+            "path": "/run/runId"
+          },
+          {
+            "op": "remove",
+            "path": "/run/startedAt"
+          },
+          {
+            "op": "replace",
+            "path": "/run/active",
+            "value": false
+          },
+          {
+            "op": "add",
+            "path": "/entries/8",
+            "value": {
+              "id": "ent_<id-21>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-22>",
+              "kind": "run_error",
+              "payload": {
+                "runId": "task_<id-5>",
+                "error": {
+                  "kind": "invalid_request",
+                  "message": "orchestrator failed",
+                  "retryable": false
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 4
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 4
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 4
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 4
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      }
+    ]
+  },
+  "cancel": {
+    "legacy": null,
+    "points": [
+      {
+        "at": "worker-running",
+        "view": {
+          "entries": [
+            {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run this approved research plan.\n\n{\"title\":\"Contract run\",\"sub_queries\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "requestId": "dw-c"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-w1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 34,
+                  "outputTokens": 19,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-w1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 68,
+                  "outputTokens": 11,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          ],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "usage": {
+            "requests": 2,
+            "total": {
+              "requests": 2,
+              "inputTokens": 102,
+              "outputTokens": 30,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {
+              "fake/fake-1": {
+                "requests": 2,
+                "inputTokens": 102,
+                "outputTokens": 30,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "byPurpose": {
+              "generation": {
+                "requests": 2,
+                "inputTokens": 102,
+                "outputTokens": 30,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": true,
+            "runId": "task_<id-10>",
+            "startedAt": "1970-01-01T00:16:40.000Z"
+          },
+          "subagents": {
+            "task_<id-11>": {
+              "conversationId": "conv_<id-12>",
+              "submissionId": "subm_<id-13>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 1,
+              "recent": ["web_search({\"query\":\"q-w1\"})"],
+              "usage": {
+                "requests": 1,
+                "inputTokens": 10,
+                "outputTokens": 7,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        }
+      },
+      {
+        "at": "cancelled",
+        "view": {
+          "entries": [
+            {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run this approved research plan.\n\n{\"title\":\"Contract run\",\"sub_queries\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "requestId": "dw-c"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-w1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 34,
+                  "outputTokens": 19,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-w1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 68,
+                  "outputTokens": 11,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          ],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "usage": {
+            "requests": 2,
+            "total": {
+              "requests": 2,
+              "inputTokens": 102,
+              "outputTokens": 30,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {
+              "fake/fake-1": {
+                "requests": 2,
+                "inputTokens": 102,
+                "outputTokens": 30,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "byPurpose": {
+              "generation": {
+                "requests": 2,
+                "inputTokens": 102,
+                "outputTokens": 30,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": false
+          },
+          "subagents": {
+            "task_<id-11>": {
+              "conversationId": "conv_<id-12>",
+              "submissionId": "subm_<id-13>",
+              "status": "aborted",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 1,
+              "recent": ["web_search({\"query\":\"q-w1\"})"],
+              "usage": {
+                "requests": 1,
+                "inputTokens": 10,
+                "outputTokens": 7,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        }
+      }
+    ],
+    "frames": [
+      {
+        "cursor": 1,
+        "snapshot": {
+          "entries": [],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "usage": {
+            "requests": 0,
+            "total": {
+              "requests": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {},
+            "byPurpose": {}
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": false
+          },
+          "subagents": {}
+        }
+      },
+      {
+        "cursor": 2,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/active",
+            "value": true
+          },
+          {
+            "op": "add",
+            "path": "/run/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "add",
+            "path": "/run/startedAt",
+            "value": "1970-01-01T00:16:40.000Z"
+          },
+          {
+            "op": "add",
+            "path": "/entries/0",
+            "value": {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run this approved research plan.\n\n{\"title\":\"Contract run\",\"sub_queries\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "requestId": "dw-c"
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 4,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/1",
+            "value": {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 5,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 6,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/2",
+            "value": {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-w1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 34,
+                  "outputTokens": 19,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 34
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 19
+          },
+          {
+            "op": "add",
+            "path": "/usage/byModel/fake~1fake-1",
+            "value": {
+              "requests": 1,
+              "inputTokens": 34,
+              "outputTokens": 19,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            }
+          },
+          {
+            "op": "add",
+            "path": "/usage/byPurpose/generation",
+            "value": {
+              "requests": 1,
+              "inputTokens": 34,
+              "outputTokens": 19,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 9,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/3",
+            "value": {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": ["plan.md", "todo.md"]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 11,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/run/runId",
+            "value": "task_<id-10>"
+          }
+        ]
+      },
+      {
+        "cursor": 13,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": "task_<id-5>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": "task_<id-10>"
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": []
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 14,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/entries/4",
+            "value": {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-w1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 68,
+                  "outputTokens": 11,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          },
+          {
+            "op": "replace",
+            "path": "/usage/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/inputTokens",
+            "value": 102
+          },
+          {
+            "op": "replace",
+            "path": "/usage/total/outputTokens",
+            "value": 30
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/inputTokens",
+            "value": 102
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byModel/fake~1fake-1/outputTokens",
+            "value": 30
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/requests",
+            "value": 2
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/inputTokens",
+            "value": 102
+          },
+          {
+            "op": "replace",
+            "path": "/usage/byPurpose/generation/outputTokens",
+            "value": 30
+          },
+          {
+            "op": "replace",
+            "path": "/live/runId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/taskId",
+            "value": null
+          },
+          {
+            "op": "replace",
+            "path": "/live/message",
+            "value": null
+          }
+        ]
+      },
+      {
+        "cursor": 17,
+        "patch": [
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-11>",
+            "value": {
+              "conversationId": "conv_<id-12>",
+              "submissionId": "subm_<id-13>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 0,
+              "recent": [],
+              "usage": {
+                "requests": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          }
+        ]
+      },
+      {
+        "cursor": 21,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/toolCalls",
+            "value": 1
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-11>/recent/0",
+            "value": "web_search({\"query\":\"q-w1\"})"
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/requests",
+            "value": 1
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/inputTokens",
+            "value": 10
+          },
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/usage/outputTokens",
+            "value": 7
+          }
+        ]
+      },
+      {
+        "cursor": 27,
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/subagents/task_<id-11>/status",
+            "value": "aborted"
+          },
+          {
+            "op": "add",
+            "path": "/subagents/task_<id-11>/endedAt",
+            "value": "1970-01-01T00:16:40.000Z"
+          }
+        ]
+      },
+      {
+        "cursor": 29,
+        "patch": [
+          {
+            "op": "remove",
+            "path": "/run/runId"
+          },
+          {
+            "op": "remove",
+            "path": "/run/startedAt"
+          },
+          {
+            "op": "replace",
+            "path": "/run/active",
+            "value": false
+          }
+        ]
+      }
+    ]
+  }
+}
