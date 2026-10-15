@@ -1,0 +1,205 @@
+import { describe, expect, it } from "vitest";
+import { ManualClock } from "../../src/core/clock.js";
+import {
+  assertNotTestHarnessInProduction,
+  createWorkerPool,
+  DEFAULT_APPROVAL_TTL_MS,
+  DEFAULT_LEASE_TTL_MS,
+  DEFAULT_SHUTDOWN_TIMEOUT_MS,
+  defaultDbTimeouts,
+  WorkerConfigError,
+  workerConfigFromEnv,
+  workerPoolOptions,
+} from "../../src/worker/config.js";
+import { workerHostPolicy } from "../../src/worker/worker.js";
+
+const BASE = {
+  DATABASE_URL: "postgres://localhost/db",
+  ENGINE_SESSION_ID: "s1",
+  ENGINE_SERVICE_TOKEN: "tok",
+};
+
+describe("workerConfigFromEnv", () => {
+  it("applies defaults", () => {
+    const c = workerConfigFromEnv(BASE);
+    expect(c).toMatchObject({
+      sessionId: "s1",
+      port: 8080,
+      host: "0.0.0.0",
+      leaseTtlMs: DEFAULT_LEASE_TTL_MS,
+      leaseRetryMs: null,
+      gatewayUrl: null,
+      approvalTtlMs: DEFAULT_APPROVAL_TTL_MS,
+      progressIntervalMs: 100,
+      dbSchema: null,
+      subagentTool: null,
+      shutdownTimeoutMs: DEFAULT_SHUTDOWN_TIMEOUT_MS,
+      db: {
+        connectTimeoutMs: 5_000,
+        statementTimeoutMs: 10_000,
+        idleInTransactionTimeoutMs: 10_000,
+        queryTimeoutMs: 11_000,
+      },
+    });
+  });
+
+  it("derives database timeouts below a short lease TTL", () => {
+    expect(defaultDbTimeouts(2_000)).toEqual({
+      connectTimeoutMs: 666,
+      statementTimeoutMs: 1_333,
+      idleInTransactionTimeoutMs: 1_333,
+      queryTimeoutMs: 1_999,
+    });
+    const c = workerConfigFromEnv({ ...BASE, ENGINE_LEASE_TTL_MS: "2000" });
+    for (const v of Object.values(c.db)) expect(v).toBeLessThan(2_000);
+    // A degenerate TTL still yields usable defaults.
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_LEASE_TTL_MS: "1" })).not.toThrow();
+  });
+
+  it("reads database and shutdown timeouts and keeps them below the lease TTL", () => {
+    const c = workerConfigFromEnv({
+      ...BASE,
+      ENGINE_DB_CONNECT_TIMEOUT_MS: "1000",
+      ENGINE_DB_STATEMENT_TIMEOUT_MS: "4000",
+      ENGINE_DB_QUERY_TIMEOUT_MS: "5000",
+      ENGINE_SHUTDOWN_TIMEOUT_MS: "2500",
+    });
+    expect(c.db).toEqual({
+      connectTimeoutMs: 1_000,
+      statementTimeoutMs: 4_000,
+      idleInTransactionTimeoutMs: 4_000,
+      queryTimeoutMs: 5_000,
+    });
+    expect(c.shutdownTimeoutMs).toBe(2_500);
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_DB_STATEMENT_TIMEOUT_MS: "15000" })).toThrow(
+      /below ENGINE_LEASE_TTL_MS/,
+    );
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_DB_IDLE_TX_TIMEOUT_MS: "0" })).toThrow(
+      WorkerConfigError,
+    );
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_SHUTDOWN_TIMEOUT_MS: "x" })).toThrow(
+      WorkerConfigError,
+    );
+  });
+
+  it("requires the database, session and token", () => {
+    for (const key of Object.keys(BASE)) {
+      const env: Record<string, string> = { ...BASE };
+      delete env[key];
+      expect(() => workerConfigFromEnv(env)).toThrow(WorkerConfigError);
+    }
+  });
+
+  it("validates numbers and the schema name", () => {
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_LEASE_TTL_MS: "0" })).toThrow(/>= 1/);
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_PORT: "abc" })).toThrow(WorkerConfigError);
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_DB_SCHEMA: "a;drop" })).toThrow(
+      /identifier/,
+    );
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_APPROVAL_TTL_MS: "0" }).approvalTtlMs).toBeNull();
+  });
+
+  it("refuses the test harness flag in production only", () => {
+    expect(() =>
+      assertNotTestHarnessInProduction({ NODE_ENV: "production", ENGINE_TEST_HARNESS: "1" }),
+    ).toThrow(WorkerConfigError);
+    expect(() => assertNotTestHarnessInProduction({ NODE_ENV: "production" })).not.toThrow();
+    expect(() => assertNotTestHarnessInProduction({ ENGINE_TEST_HARNESS: "1" })).not.toThrow();
+  });
+});
+
+describe("createWorkerPool", () => {
+  const db = {
+    connectTimeoutMs: 1_000,
+    statementTimeoutMs: 4_000,
+    idleInTransactionTimeoutMs: 3_000,
+    queryTimeoutMs: 5_000,
+  };
+
+  it("merges the schema with the server-side timeouts", () => {
+    expect(workerPoolOptions({ dbSchema: "eng", db })).toBe(
+      "-c search_path=eng -c statement_timeout=4000 -c idle_in_transaction_session_timeout=3000",
+    );
+    expect(workerPoolOptions({ dbSchema: null, db })).toBe(
+      "-c statement_timeout=4000 -c idle_in_transaction_session_timeout=3000",
+    );
+    expect(workerPoolOptions({ dbSchema: "eng" })).toBe("-c search_path=eng");
+    expect(workerPoolOptions({ dbSchema: null })).toBeUndefined();
+  });
+
+  it("configures client timeouts and keepalive, and logs pool errors", async () => {
+    const events: Array<[string, Record<string, unknown> | undefined]> = [];
+    const pool = createWorkerPool(
+      { databaseUrl: "postgres://localhost:1/db", dbSchema: "eng", db },
+      (event, fields) => events.push([event, fields]),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: pg keeps the resolved config on `options`
+    const opts = (pool as any).options;
+    expect(opts).toMatchObject({
+      connectionTimeoutMillis: 1_000,
+      query_timeout: 5_000,
+      keepAlive: true,
+      options:
+        "-c search_path=eng -c statement_timeout=4000 -c idle_in_transaction_session_timeout=3000",
+    });
+    pool.emit("error", new Error("terminating connection"), undefined);
+    expect(events).toEqual([["pool_error", { error: "Error: terminating connection" }]]);
+    await pool.end();
+  });
+});
+
+describe("workerHostPolicy", () => {
+  const defaults = {
+    provider: "p",
+    model: "m",
+    summaryModel: "s",
+    maxTokens: 10,
+    apiKey: () => "k" as string | undefined,
+  };
+
+  it("requires approval for gateway tools that ask for it, with expiry", () => {
+    const clock = new ManualClock(1000);
+    const policy = workerHostPolicy({
+      modelDefaults: defaults,
+      gateway: { requiresApproval: (name) => name === "danger" },
+      approvalTtlMs: 500,
+      clock,
+    });
+    const req = {
+      conversation: { id: "c", tenantId: "t", projectId: "p" },
+      runId: "r",
+      toolCallId: "x",
+      arguments: {},
+      replay: "unsafe" as const,
+      // biome-ignore lint/suspicious/noExplicitAny: agent config is not consulted
+      agent: {} as any,
+    };
+    expect(policy.authorizeTool({ ...req, toolName: "danger" })).toEqual({
+      decision: "requireApproval",
+      reason: "danger requires approval",
+      expiresAt: 1500,
+    });
+    expect(policy.authorizeTool({ ...req, toolName: "safe" })).toEqual({ decision: "allow" });
+  });
+
+  it("routes models by purpose and denies without a key", () => {
+    const policy = workerHostPolicy({
+      modelDefaults: defaults,
+      gateway: null,
+      approvalTtlMs: null,
+      clock: new ManualClock(),
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: only purpose and agent.model are read
+    const info = (purpose: string, model: string | null) => ({ purpose, agent: { model } }) as any;
+    expect(policy.resolveModelRequest(info("generation", null))).toMatchObject({ model: "m" });
+    expect(policy.resolveModelRequest(info("generation", "hint"))).toMatchObject({ model: "hint" });
+    expect(policy.resolveModelRequest(info("compaction", "hint"))).toMatchObject({ model: "s" });
+    const keyless = workerHostPolicy({
+      modelDefaults: { ...defaults, apiKey: () => undefined },
+      gateway: null,
+      approvalTtlMs: null,
+      clock: new ManualClock(),
+    });
+    expect(keyless.resolveModelRequest(info("generation", null))).toMatchObject({ ok: false });
+  });
+});
