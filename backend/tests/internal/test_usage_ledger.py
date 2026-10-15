@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from sqlalchemy import func, select
 
 from app.config import Settings
-from app.config.llm_pricing import LLM_PRICING
+from app.config.llm_pricing import LLM_PRICING, find_model_pricing
 from app.core.database import get_system_db
 from app.internal_api.router import mount_internal_router
 from app.models.llm_provider import LLMProvider
@@ -171,3 +171,13 @@ async def test_requires_service_token(client, test_db):
     assert (await post(client, body(t), headers={})).status_code == 401
     assert (await post(client, body(t), headers={"Authorization": "Bearer nope"})).status_code == 401
     assert await rows(test_db, t) == []
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"],
+)
+def test_engine_default_models_are_priced(model_id):
+    pricing = find_model_pricing(model_id)
+    assert pricing is not None
+    assert pricing["input"] > 0 and pricing["output"] > pricing["input"]

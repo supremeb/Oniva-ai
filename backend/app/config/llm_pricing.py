@@ -35,6 +35,11 @@ LLM_PRICING: Dict[str, ModelPricing] = {
     "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
     "claude-sonnet-4-5": {"input": 3.0, "output": 15.0},
     "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
+    # Claude 5.x (claude-api skill model table, cached 2026-10-06; haiku-5-5 rate is for prompts <=100K)
+    "claude-opus-5-5": {"input": 4.0, "output": 20.0},
+    "claude-sonnet-5-5": {"input": 2.0, "output": 10.0},
+    "claude-haiku-5-5": {"input": 0.10, "output": 0.50},
+    "claude-fable-5-1": {"input": 10.0, "output": 50.0},
 
     # DeepSeek Models (via OpenRouter)
     "nex-agi/deepseek-v3.1-nex-n1:free": {"input": 0.0, "output": 0.0},
