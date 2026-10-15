@@ -182,7 +182,7 @@ class Settings(BaseSettings):
     # Deep Work Mode (unified autonomous execution)
     # Replaces separate Deep Research toggle with unified plan-first UX
     # Deep Work Engine (orchestrator-worker) configuration
-    DEEP_WORK_MAX_WORKERS: int = 7                # Max parallel workers per deep work session
+    DEEP_WORK_MAX_WORKERS: int = 10               # Max research workers per round (matches the legacy plan limit)
     DEEP_WORK_MAX_REFLECTION_ROUNDS: int = 3      # Max reflection rounds (0 = no reflection)
     DEEP_WORK_COMPLETENESS_THRESHOLD: int = 80    # Reflection score threshold for completion
     # ========================================
@@ -349,6 +349,7 @@ class Settings(BaseSettings):
     ENGINE_GATEWAY_TOKEN_PREVIOUS: Optional[str] = None  # accepted during rotation
     ENABLE_ENGINE_API: bool = False
     ENABLE_ENGINE_CHAT: bool = False  # global gate for engine-backed chat; tenants opt in via settings.features
+    ENABLE_ENGINE_DEEP_WORK: bool = False  # global gate for engine-backed Deep Work; tenants opt in via settings.features
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
     # Legacy POST /api/v1/chat: when a stored session is supplied, rebuild model history from the
     # stored messages and ignore client-supplied assistant/tool parts (anti-forgery). Set to

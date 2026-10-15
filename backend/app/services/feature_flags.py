@@ -101,6 +101,12 @@ FLAG_METADATA: dict[str, FlagMeta] = {
         operator_only=True,
     ),
 
+    "ENABLE_ENGINE_DEEP_WORK": FlagMeta(
+        group="Core",
+        description="Run Deep Work on the new engine (needs global ENABLE_ENGINE_DEEP_WORK + ENABLE_ENGINE_API)",
+        operator_only=True,
+    ),
+
     # Infrastructure (operator-only — cost/security implications)
     "ENABLE_SANDBOX": FlagMeta(
         group="Infrastructure",
@@ -147,6 +153,8 @@ def get_feature(tenant: Tenant, flag_name: str) -> bool:
     """
     if flag_name == ENGINE_CHAT_FLAG:
         return engine_chat_enabled(tenant)
+    if flag_name == ENGINE_DEEP_WORK_FLAG:
+        return engine_deep_work_enabled(tenant)
 
     tenant_features = (tenant.settings or {}).get("features", {})
     tenant_val = tenant_features.get(flag_name)
@@ -161,6 +169,15 @@ def get_feature(tenant: Tenant, flag_name: str) -> bool:
 
 
 ENGINE_CHAT_FLAG = "ENABLE_ENGINE_CHAT"
+ENGINE_DEEP_WORK_FLAG = "ENABLE_ENGINE_DEEP_WORK"
+
+
+def _engine_tenant_flag(tenant: Tenant, flag: str, global_on: bool, settings) -> bool:
+    """Every global condition AND an explicit tenant opt-in (global is a ceiling, not a default)."""
+    s = settings if settings is not None else get_settings()
+    if not (global_on and s.ENABLE_ENGINE_API and s.ENGINE_URL and s.ENGINE_SERVICE_TOKEN):
+        return False
+    return (((tenant.settings or {}).get("features") or {}).get(flag)) is True
 
 
 def engine_chat_enabled(tenant: Tenant, settings=None) -> bool:
@@ -170,9 +187,13 @@ def engine_chat_enabled(tenant: Tenant, settings=None) -> bool:
     never enables engine chat while the global flag, ENABLE_ENGINE_API or the engine config is off.
     """
     s = settings if settings is not None else get_settings()
-    if not (s.ENABLE_ENGINE_CHAT and s.ENABLE_ENGINE_API and s.ENGINE_URL and s.ENGINE_SERVICE_TOKEN):
-        return False
-    return (((tenant.settings or {}).get("features") or {}).get(ENGINE_CHAT_FLAG)) is True
+    return _engine_tenant_flag(tenant, ENGINE_CHAT_FLAG, s.ENABLE_ENGINE_CHAT, s)
+
+
+def engine_deep_work_enabled(tenant: Tenant, settings=None) -> bool:
+    """Engine Deep Work for a tenant; same ceiling semantics as engine_chat_enabled."""
+    s = settings if settings is not None else get_settings()
+    return _engine_tenant_flag(tenant, ENGINE_DEEP_WORK_FLAG, s.ENABLE_ENGINE_DEEP_WORK, s)
 
 
 def get_tenant_features(tenant: Tenant) -> dict[str, bool]:
@@ -214,6 +235,7 @@ def _resolve_all_features(tenant: Tenant) -> dict[str, bool]:
             all_flags[flag_name] = flag_val
 
     all_flags[ENGINE_CHAT_FLAG] = engine_chat_enabled(tenant, global_settings)
+    all_flags[ENGINE_DEEP_WORK_FLAG] = engine_deep_work_enabled(tenant, global_settings)
     return all_flags
 
 

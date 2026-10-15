@@ -24,6 +24,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.auth.dependencies import get_current_user_id, get_current_tenant_id
 from app.config import get_settings
 from app.core.database import get_db, AsyncSessionLocal, set_tenant_context
+from app.api.v1 import deep_work_engine as engine_dw
 from app.models.background_job import BackgroundJob, JobStatus, JobType, JobTrigger
 
 logger = logging.getLogger(__name__)
@@ -1028,6 +1029,7 @@ async def delete_deep_work_session(
 
 @router.post("/deep-work/engine/clarify")
 async def clarify_deep_work_query(
+    request: Request,
     body: ClarifyRequest,
     db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
@@ -1035,6 +1037,8 @@ async def clarify_deep_work_query(
 ):
     """Ask the clarifier LLM whether to ask questions or auto-proceed."""
     _check_feature_enabled()
+    if await engine_dw.tenant_uses_engine_deep_work(db, tenant_id, request):
+        return await engine_dw.clarify(body, db, user_id, tenant_id)
 
     from app.services.deep_work.engine import DeepWorkEngine
     from app.services.deep_work.event_sink import NullSink
@@ -1064,6 +1068,7 @@ async def clarify_deep_work_query(
 
 @router.post("/deep-work/engine/plan", response_model=EnginePlanResponse)
 async def plan_deep_work_engine(
+    request: Request,
     body: DeepWorkEngineRequest,
     db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
@@ -1071,6 +1076,8 @@ async def plan_deep_work_engine(
 ):
     """Run orchestration only and return a plan for user approval."""
     _check_feature_enabled()
+    if await engine_dw.tenant_uses_engine_deep_work(db, tenant_id, request):
+        return await engine_dw.plan(body, db, user_id, tenant_id)
 
     from app.services.deep_work.engine import DeepWorkEngine
     from app.services.deep_work.event_sink import NullSink
@@ -1103,6 +1110,7 @@ async def plan_deep_work_engine(
 
 @router.post("/deep-work/engine")
 async def start_deep_work_engine(
+    request: Request,
     body: DeepWorkEngineRequest,
     db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
@@ -1110,6 +1118,8 @@ async def start_deep_work_engine(
 ):
     """Start a deep work engine session (v2 orchestrator-worker pipeline)."""
     _check_feature_enabled()
+    if await engine_dw.tenant_uses_engine_deep_work(db, tenant_id, request):
+        return await engine_dw.start(body, db, user_id, tenant_id)
 
     session_id = body.session_id or str(uuid.uuid4())
 

@@ -49,3 +49,16 @@ export function useEngineChatMode(): 'engine' | 'legacy' {
   const [mode] = useState<'engine' | 'legacy'>(enabled ? 'engine' : 'legacy');
   return mode;
 }
+
+/** Feature flag that selects Deep Work on the engine (resolved server-side per tenant). */
+export const ENGINE_DEEP_WORK_FLAG = 'ENABLE_ENGINE_DEEP_WORK';
+
+/**
+ * Deep Work mode for this mount. Captured once so a flag flip never switches an open card;
+ * a session created in one mode stays in it (reload picks up the change).
+ */
+export function useEngineDeepWorkMode(): 'engine' | 'legacy' {
+  const enabled = useFeature(ENGINE_DEEP_WORK_FLAG);
+  const [mode] = useState<'engine' | 'legacy'>(enabled ? 'engine' : 'legacy');
+  return mode;
+}

@@ -1,6 +1,12 @@
 import { act, renderHook } from '@testing-library/react';
 import { useAuthStore } from '@/lib/stores/auth';
-import { ENGINE_CHAT_FLAG, useEngineChatMode, useFeature } from '../useFeature';
+import {
+  ENGINE_CHAT_FLAG,
+  ENGINE_DEEP_WORK_FLAG,
+  useEngineChatMode,
+  useEngineDeepWorkMode,
+  useFeature,
+} from '../useFeature';
 
 const setFeatures = (features?: Record<string, boolean>) =>
   act(() => {
@@ -40,5 +46,24 @@ describe('useEngineChatMode', () => {
     first.rerender();
     expect(first.result.current).toBe('legacy');
     expect(renderHook(() => useEngineChatMode()).result.current).toBe('engine');
+  });
+});
+
+describe('useEngineDeepWorkMode', () => {
+  it('is legacy when absent or off, independent of the chat flag', () => {
+    setFeatures({ [ENGINE_CHAT_FLAG]: true });
+    expect(renderHook(() => useEngineDeepWorkMode()).result.current).toBe('legacy');
+    setFeatures({ [ENGINE_DEEP_WORK_FLAG]: false });
+    expect(renderHook(() => useEngineDeepWorkMode()).result.current).toBe('legacy');
+  });
+
+  it('is engine when on, and keeps its mode for the mount', () => {
+    setFeatures({ [ENGINE_DEEP_WORK_FLAG]: true });
+    const first = renderHook(() => useEngineDeepWorkMode());
+    expect(first.result.current).toBe('engine');
+    setFeatures({ [ENGINE_DEEP_WORK_FLAG]: false });
+    first.rerender();
+    expect(first.result.current).toBe('engine');
+    expect(renderHook(() => useEngineDeepWorkMode()).result.current).toBe('legacy');
   });
 });
