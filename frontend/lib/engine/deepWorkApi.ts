@@ -17,6 +17,8 @@ export interface ClarifyEngineInput {
   availableKbs?: string[];
   availableConnectors?: string[];
   sessionId?: string;
+  /** The chat the run starts from, so a refreshed chat finds it. */
+  chatId?: string;
 }
 
 export interface ClarifyEngineResult {
@@ -33,6 +35,7 @@ export interface PlanEngineInput {
   sessionId?: string;
   conversationId?: string;
   projectId?: string;
+  chatId?: string;
 }
 
 export interface PlanEngineResult {
@@ -50,6 +53,7 @@ export interface StartEngineRunInput {
   enrichedQuery?: string;
   knowledgeBaseIds?: string[];
   connectorIds?: string[];
+  chatId?: string;
 }
 
 export interface StartEngineRunResult {
@@ -68,6 +72,7 @@ export const clarifyEngine = (i: ClarifyEngineInput): Promise<ClarifyEngineResul
       available_kbs: i.availableKbs ?? [],
       available_connectors: i.availableConnectors ?? [],
       ...(i.sessionId ? { session_id: i.sessionId } : {}),
+      ...(i.chatId ? { chat_id: i.chatId } : {}),
     }),
   });
 
@@ -82,6 +87,7 @@ export const planEngine = (i: PlanEngineInput): Promise<PlanEngineResult> =>
       ...(i.sessionId ? { session_id: i.sessionId } : {}),
       ...(i.conversationId ? { conversation_id: i.conversationId } : {}),
       ...(i.projectId ? { project_id: i.projectId } : {}),
+      ...(i.chatId ? { chat_id: i.chatId } : {}),
     }),
   });
 
@@ -97,6 +103,7 @@ export const startEngineRun = (i: StartEngineRunInput): Promise<StartEngineRunRe
       ...(i.enrichedQuery ? { enriched_query: i.enrichedQuery } : {}),
       ...(i.knowledgeBaseIds ? { knowledge_base_ids: i.knowledgeBaseIds } : {}),
       ...(i.connectorIds ? { connector_ids: i.connectorIds } : {}),
+      ...(i.chatId ? { chat_id: i.chatId } : {}),
     }),
   });
 

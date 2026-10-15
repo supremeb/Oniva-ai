@@ -60,6 +60,24 @@ describe('useDeepWorkChat engine rejoin', () => {
     expect(ES).not.toHaveBeenCalled();
   });
 
+  it('remount on a reopened chat asks full-state by the CHAT id and shows the engine card with no submit', async () => {
+    (getDeepWorkFullState as jest.Mock).mockResolvedValue(ENGINE_FS);
+    const ES = jest.fn();
+    (globalThis as unknown as { EventSource: unknown }).EventSource = ES;
+    const first = renderHook(() => useDeepWorkChat('chat_9'), { wrapper });
+    await waitFor(() => expect(first.result.current.engineSession).not.toBeNull());
+    first.unmount();
+    expect(useEngineSessionStore.getState().session).toBeNull(); // a refresh starts empty
+    const startEngineRun = jest.spyOn(useDeepWorkStore.getState(), 'approveEnginePlan');
+
+    const again = renderHook(() => useDeepWorkChat('chat_9'), { wrapper });
+    await waitFor(() => expect(again.result.current.isDeepWorkForThisChat).toBe(true));
+    expect(getDeepWorkFullState).toHaveBeenLastCalledWith('chat_9');
+    expect(again.result.current.engineSession).toMatchObject({ sessionId: 'dw_1', conversationId: 'conv_1', chatId: 'chat_9' });
+    expect(startEngineRun).not.toHaveBeenCalled();
+    expect(ES).not.toHaveBeenCalled();
+  });
+
   it('legacy v2 sessions (is_engine with engine_report) still hydrate the legacy store', async () => {
     (getDeepWorkFullState as jest.Mock).mockResolvedValue({ ...LEGACY_V2_FS, status: 'completed' });
     const hydrate = jest.spyOn(useDeepWorkStore.getState(), 'hydrateFromBackend');

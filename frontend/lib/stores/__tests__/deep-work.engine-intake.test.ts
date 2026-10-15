@@ -65,7 +65,7 @@ describe('engine intake', () => {
     mockStartEngineRun.mockResolvedValue({ session_id: 'dw_1', conversation_id: 'conv_1', status: 'started' });
 
     await useDeepWorkStore.getState().clarify('battery market', 'chat_1', ['kb1'], ['c1'], ENGINE);
-    expect(mockClarifyEngine).toHaveBeenCalledWith({ query: 'battery market', projectId: 'proj-1', availableKbs: ['kb1'], availableConnectors: ['c1'] });
+    expect(mockClarifyEngine).toHaveBeenCalledWith({ query: 'battery market', projectId: 'proj-1', availableKbs: ['kb1'], availableConnectors: ['c1'], chatId: 'chat_1' });
     expect(mockClarifyQuery).not.toHaveBeenCalled();
     expect(useDeepWorkStore.getState().status).toBe('clarifying');
     expect(useDeepWorkStore.getState().intakeResult?.questions?.[0].text).toBe('Region?');
@@ -78,6 +78,7 @@ describe('engine intake', () => {
       sessionId: 'dw_1',
       conversationId: 'conv_1',
       projectId: 'proj-1',
+      chatId: 'chat_1',
     });
     expect(useDeepWorkStore.getState().plan?.title).toBe('Battery market');
 
@@ -89,6 +90,7 @@ describe('engine intake', () => {
       enrichedQuery: 'battery market\n\nUser clarifications:\nRegion? → EU',
       knowledgeBaseIds: ['kb1'],
       connectorIds: ['c1'],
+      chatId: 'chat_1',
     });
     expect(mockStartEngine).not.toHaveBeenCalled();
     expect(useEngineSessionStore.getState().session).toEqual({

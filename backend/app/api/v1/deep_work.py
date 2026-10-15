@@ -151,6 +151,7 @@ class DeepWorkEngineRequest(BaseModel):
     project_id: str | None = None
     knowledge_base_ids: list[str] = Field(default_factory=list)
     connector_ids: list[str] = Field(default_factory=list)
+    chat_id: str | None = None  # originating chat; lets a refreshed chat find the run
 
 
 class ClarifyRequest(BaseModel):
@@ -159,6 +160,7 @@ class ClarifyRequest(BaseModel):
     available_connectors: list[str] = Field(default_factory=list)
     project_id: str | None = None  # Engine path only
     session_id: str | None = None  # Engine path only: reuse the session
+    chat_id: str | None = None  # Engine path only: originating chat
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +441,8 @@ async def get_full_state_by_conversation(
         raise HTTPException(status_code=404, detail="No Deep Work session for this conversation")
 
     run = await dws.load_run(engine_dw.reading(db), tenant_id, conv_uuid)
+    if run is None:  # the id may be the chat the run was started from (refresh / reopen)
+        run = await dws.load_run_by_chat(engine_dw.reading(db), tenant_id, conv_uuid)
     if run is not None:
         return await engine_dw.full_state(db, run, user_id)
 

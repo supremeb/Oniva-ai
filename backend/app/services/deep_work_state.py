@@ -69,6 +69,7 @@ class RunSnapshot:
     is_engine: bool
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    chat_id: Optional[uuid.UUID] = None
 
     @classmethod
     def of(cls, r: DeepWorkRun) -> "RunSnapshot":
@@ -78,7 +79,7 @@ class RunSnapshot:
             status=r.status, phase=r.phase, round=r.round or 0, plan=copy.deepcopy(r.plan),
             rounds=copy.deepcopy(r.rounds or []), reflections=copy.deepcopy(r.reflections or []),
             artifacts=copy.deepcopy(r.artifacts or []), job_id=r.job_id, is_engine=bool(r.is_engine),
-            created_at=r.created_at, updated_at=r.updated_at,
+            created_at=r.created_at, updated_at=r.updated_at, chat_id=r.chat_id,
         )
 
 
@@ -132,7 +133,7 @@ def _advance(
 
 async def create_run(
     factory: SessionFactory, *, tenant_id: Any, project_id: Any, user_id: Any, conversation_id: Any,
-    query: str, enriched_query: Optional[str] = None, job_id: Any = None,
+    query: str, enriched_query: Optional[str] = None, job_id: Any = None, chat_id: Any = None,
 ) -> RunSnapshot:
     """Create the run for a root conversation; a second call returns the existing row unchanged."""
     async with factory() as db:
@@ -144,6 +145,7 @@ async def create_run(
             conversation_id=_uuid(conversation_id), query=query, enriched_query=enriched_query,
             status="running", phase="clarify", round=0, rounds=[], reflections=[], artifacts=[],
             job_id=_uuid(job_id) if job_id else None, is_engine=True, created_at=_now(), updated_at=_now(),
+            chat_id=_uuid(chat_id) if chat_id else None,
         )
         db.add(row)
         await db.flush()
@@ -160,6 +162,34 @@ async def load_run(factory: SessionFactory, tenant_id: Any, conversation_id: Any
             )
         ).scalar_one_or_none()
         return RunSnapshot.of(row) if row else None
+
+
+async def record_chat_id(factory: SessionFactory, tenant_id: Any, conversation_id: Any, chat_id: Any) -> Optional[RunSnapshot]:
+    """Remember the originating chat on the run (no phase/status guard: a terminal run keeps its chat link)."""
+    async with factory() as db:
+        row = await _locked(db, tenant_id, conversation_id)
+        if row is None:
+            return None
+        if row.chat_id != _uuid(chat_id):
+            row.chat_id = _uuid(chat_id)
+            await db.flush()
+        return RunSnapshot.of(row)
+
+
+async def load_run_by_chat(factory: SessionFactory, tenant_id: Any, chat_id: Any) -> Optional[RunSnapshot]:
+    """The run to show for a chat: an active one if any, else the most recent. Tenant-scoped; callers check the owner."""
+    async with factory() as db:
+        rows = (
+            await db.execute(
+                select(DeepWorkRun)
+                .where(DeepWorkRun.tenant_id == _uuid(tenant_id), DeepWorkRun.chat_id == _uuid(chat_id))
+                .order_by(DeepWorkRun.created_at.desc())
+            )
+        ).scalars().all()
+        if not rows:
+            return None
+        row = next((r for r in rows if r.status == "running"), rows[0])
+        return RunSnapshot.of(row)
 
 
 async def update_run(

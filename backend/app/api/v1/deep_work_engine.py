@@ -34,6 +34,7 @@ from app.auth.providers.base import AuthUser
 from app.config import get_settings
 from app.core.database import get_db, get_db_for_tenant
 from app.models.background_job import BackgroundJob, JobStatus, JobType, JobTrigger
+from app.models.chat_session import ChatSession
 from app.models.deep_work_run import DeepWorkRun
 from app.models.engine import EngineConversation
 from app.models.tenant import Tenant
@@ -219,12 +220,40 @@ def _project_id_of(body: Any) -> Optional[UUID]:
         raise HTTPException(status_code=422, detail="project_id must be a UUID") from None
 
 
+async def _checked_chat_id(db: AsyncSession, tenant_id: Any, user_id: Any, body: Any) -> Optional[UUID]:
+    """``body.chat_id`` once it is a chat (legacy session or engine conversation) of this user and tenant."""
+    raw = getattr(body, "chat_id", None)
+    if not raw:
+        return None
+    try:
+        chat_id = UUID(str(raw))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="chat_id must be a UUID") from None
+    tenant, user = _uuid(tenant_id), _uuid(user_id)
+    legacy = (await db.execute(select(ChatSession.id).where(
+        ChatSession.id == chat_id, ChatSession.tenant_id == tenant, ChatSession.user_id == user))).first()
+    if legacy is None:
+        engine_chat = (await db.execute(select(EngineConversation.conversation_id).where(
+            EngineConversation.conversation_id == chat_id, EngineConversation.tenant_id == tenant,
+            EngineConversation.user_id == user))).first()
+        if engine_chat is None:
+            raise HTTPException(status_code=404, detail="Chat not found")
+    return chat_id
+
+
+async def _remember_chat(factory, run: dws.RunSnapshot, chat_id: Optional[UUID]) -> dws.RunSnapshot:
+    if chat_id is None or run.chat_id == chat_id:
+        return run
+    return await dws.record_chat_id(factory, run.tenant_id, run.conversation_id, chat_id) or run
+
+
 async def _open_session(
     engine: EngineClient, db: AsyncSession, user_id: Any, tenant_id: Any, body: Any, query: str,
     phase_config,
 ) -> dws.RunSnapshot:
     """The run for this request: an existing one (``session_id`` / ``conversation_id``) or a new one."""
     factory = tenant_factory(tenant_id)
+    chat_id = await _checked_chat_id(db, tenant_id, user_id, body)
     existing = None
     if getattr(body, "session_id", None):
         existing = await owned_run(factory, tenant_id, user_id, body.session_id)
@@ -241,7 +270,7 @@ async def _open_session(
     if existing is not None:
         if existing.status != "running":
             raise HTTPException(status_code=409, detail="Session already ended")
-        return existing
+        return await _remember_chat(factory, existing, chat_id)
 
     project_id = _project_id_of(body)
     if project_id is None:
@@ -265,7 +294,7 @@ async def _open_session(
         await fdb.flush()
     return await dws.create_run(
         factory, tenant_id=tenant_id, project_id=project_id, user_id=user_id,
-        conversation_id=conversation_id, query=query)
+        conversation_id=conversation_id, query=query, chat_id=chat_id)
 
 
 # --- clarify / plan --------------------------------------------------------------------------------
@@ -374,6 +403,7 @@ async def start(body, db: AsyncSession, user_id, tenant_id) -> dict:
     if not body.session_id:
         raise HTTPException(status_code=422, detail="session_id is required (run clarify and plan first)")
     run = await owned_run(factory, tenant_id, user_id, body.session_id)
+    run = await _remember_chat(factory, run, await _checked_chat_id(db, tenant_id, user_id, body))
     engine_session = await _session_id_of(factory, run)
     ids = _ids(engine_session, run)
 

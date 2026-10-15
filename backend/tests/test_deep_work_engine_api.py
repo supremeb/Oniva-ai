@@ -21,6 +21,7 @@ from app.auth.providers.base import AuthUser
 from app.config import Settings
 from app.core.database import get_db
 from app.models.background_job import BackgroundJob
+from app.models.chat_session import ChatSession
 from app.models.deep_work_run import DeepWorkRun
 from app.models.engine import EngineConversation
 from app.models.project import Project
@@ -254,6 +255,91 @@ async def started(w):
 
 async def run_of(w, sid):
     return await dws.load_run_by_id(w.factory, w.ta, sid)
+
+
+async def make_chat(w, tenant, user, engine=False):
+    cid = uuid.uuid4()
+    async with w.factory() as db:
+        if engine:
+            db.add(EngineConversation(conversation_id=cid, tenant_id=tenant, project_id=w.pa if tenant == w.ta else w.pb,
+                                      user_id=user, session_id="sess-1", title="c", selections={}))
+        else:
+            db.add(ChatSession(id=cid, tenant_id=tenant, user_id=user, context_type="general"))
+        await db.commit()
+    return cid
+
+
+async def started_from_chat(w, chat_id):
+    w.engine.answers += [json.dumps({"action": "proceed", "enriched_query": "vendor study"}), json.dumps(PLAN)]
+    body = {"query": "compare vendor pricing", "project_id": str(w.pa), "chat_id": str(chat_id)}
+    r = await w.http.post("/api/v1/deep-work/engine/clarify", json=body)
+    assert r.status_code == 200, r.text
+    sid = r.json()["session_id"]
+    r = await w.http.post("/api/v1/deep-work/engine/plan", json={
+        "query": "compare vendor pricing", "enriched_query": "vendor study", "session_id": sid, "chat_id": str(chat_id)})
+    assert r.status_code == 200, r.text
+    r = await w.http.post("/api/v1/deep-work/engine", json={
+        "query": "compare vendor pricing", "session_id": sid, "plan": PLAN, "chat_id": str(chat_id)})
+    assert r.status_code == 200, r.text
+    return sid, r.json()["conversation_id"]
+
+
+# --- rejoin by chat id (AE4) -------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("engine_chat", [False, True])
+async def test_full_state_resolves_by_the_originating_chat_id(w, engine_chat):
+    chat = await make_chat(w, w.ta, w.ua, engine=engine_chat)
+    sid, cid = await started_from_chat(w, chat)
+    assert (await run_of(w, sid)).chat_id == chat
+    r = await w.http.get(f"/api/v1/deep-work/by-conversation/{chat}/full-state")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["runtime"] == "engine" and body["session_id"] == sid and body["conversation_id"] == cid
+    # the run's own conversation id still resolves
+    assert (await w.http.get(f"/api/v1/deep-work/by-conversation/{cid}/full-state")).json()["session_id"] == sid
+
+
+async def test_chat_lookup_prefers_the_active_run_else_the_latest(w):
+    chat = await make_chat(w, w.ta, w.ua)
+    old_sid, _ = await started_from_chat(w, chat)
+    await dws.update_run(w.factory, w.ta, (await run_of(w, old_sid)).conversation_id, status="completed")
+    new_sid, _ = await started_from_chat(w, chat)
+    got = await w.http.get(f"/api/v1/deep-work/by-conversation/{chat}/full-state")
+    assert got.json()["session_id"] == new_sid
+    await dws.update_run(w.factory, w.ta, (await run_of(w, new_sid)).conversation_id, status="completed")
+    got = await w.http.get(f"/api/v1/deep-work/by-conversation/{chat}/full-state")
+    assert got.json()["session_id"] in (old_sid, new_sid) and got.json()["status"] == "completed"
+
+
+async def test_chat_lookup_other_tenant_404_other_owner_403(w):
+    chat = await make_chat(w, w.ta, w.ua)
+    await started_from_chat(w, chat)
+    url = f"/api/v1/deep-work/by-conversation/{chat}/full-state"
+    as_user(w, w.ta, w.ua2)
+    assert (await w.http.get(url)).status_code == 403
+    as_user(w, w.tb, w.ub)
+    assert (await w.http.get(url)).status_code == 404
+
+
+async def test_chat_id_must_be_the_callers_chat(w):
+    theirs = await make_chat(w, w.ta, w.ua2)
+    r = await w.http.post("/api/v1/deep-work/engine/clarify", json={
+        "query": "compare vendor pricing", "project_id": str(w.pa), "chat_id": str(theirs)})
+    assert r.status_code == 404 and w.engine.count("create") == 0
+    r = await w.http.post("/api/v1/deep-work/engine/clarify", json={
+        "query": "compare vendor pricing", "project_id": str(w.pa), "chat_id": str(uuid.uuid4())})
+    assert r.status_code == 404
+    r = await w.http.post("/api/v1/deep-work/engine/clarify", json={
+        "query": "compare vendor pricing", "project_id": str(w.pa), "chat_id": "nope"})
+    assert r.status_code == 422
+
+
+async def test_legacy_and_chatless_runs_are_unaffected(w):
+    sid, cid = await started(w)
+    assert (await run_of(w, sid)).chat_id is None
+    assert (await w.http.get(f"/api/v1/deep-work/by-conversation/{uuid.uuid4()}/full-state")).status_code in (200, 404)
+    assert (await w.http.get(f"/api/v1/deep-work/by-conversation/{cid}/full-state")).json()["session_id"] == sid
 
 
 # --- AE1: flag --------------------------------------------------------------------------------------------

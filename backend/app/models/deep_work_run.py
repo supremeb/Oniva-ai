@@ -30,6 +30,9 @@ class DeepWorkRun(Base):
         nullable=False,
         unique=True,
     )
+    # The originating chat (legacy chat session id, or the engine chat conversation id). No FK: it can be
+    # either table. Lets a refreshed chat find its run (by-conversation full-state).
+    chat_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     query = Column(Text, nullable=False)
     enriched_query = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, server_default="running")  # running | completed | failed | cancelled

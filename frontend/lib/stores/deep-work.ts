@@ -661,6 +661,7 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
           projectId: engine.projectId,
           availableKbs: availableKbs || [],
           availableConnectors: availableConnectors || [],
+          chatId: conversationId,
         });
         set((s) => ({
           engineIntake: s.engineIntake && {
@@ -760,6 +761,7 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
           sessionId: intake.sessionId ?? undefined,
           conversationId: intake.conversationId ?? undefined,
           projectId: intake.projectId,
+          chatId: get().conversationId ?? undefined,
         });
         set((s) => ({
           status: 'awaiting_approval',
@@ -832,6 +834,7 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
           enrichedQuery: engineIntake.enrichedQuery ?? undefined,
           knowledgeBaseIds: engineIntake.kbIds.length ? engineIntake.kbIds : undefined,
           connectorIds: engineIntake.connectorIds.length ? engineIntake.connectorIds : undefined,
+          chatId: conversationId ?? undefined,
         });
         // Hand over to the engine card (it reads the run from its own watch stream), then
         // clear the intake state so the legacy card and progress bar stay out of the way.
