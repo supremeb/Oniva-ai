@@ -331,5 +331,8 @@ async def execute_tool(
         logger.warning("Tool %s failed: %s", name, type(exc).__name__)
         return _error(name, type(exc).__name__, f"Tool '{name}' failed: {type(exc).__name__}")
 
+    if isinstance(result, ToolOutcome):  # a tool that reports its own error flag and details (Deep Work tools)
+        content, guard_details = guard_result(result.content, name, held.values())
+        return ToolOutcome(content=content, is_error=result.is_error, details={**result.details, **guard_details})
     content, details = guard_result(result, name, held.values())
     return ToolOutcome(content=content, is_error=False, details=details)

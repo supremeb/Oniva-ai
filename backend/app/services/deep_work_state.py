@@ -14,9 +14,10 @@ so replays and concurrent worker saves cannot lose or regress state:
 import copy
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy import select
 
@@ -66,6 +67,7 @@ class RunSnapshot:
     artifacts: List[Any]
     job_id: Optional[uuid.UUID]
     is_engine: bool
+    created_at: Optional[datetime] = None
 
     @classmethod
     def of(cls, r: DeepWorkRun) -> "RunSnapshot":
@@ -75,6 +77,7 @@ class RunSnapshot:
             status=r.status, phase=r.phase, round=r.round or 0, plan=copy.deepcopy(r.plan),
             rounds=copy.deepcopy(r.rounds or []), reflections=copy.deepcopy(r.reflections or []),
             artifacts=copy.deepcopy(r.artifacts or []), job_id=r.job_id, is_engine=bool(r.is_engine),
+            created_at=r.created_at,
         )
 
 
@@ -101,6 +104,29 @@ async def _locked(db: Any, tenant_id: Any, conversation_id: Any) -> Optional[Dee
             .with_for_update()
         )
     ).scalar_one_or_none()
+
+
+def _advance(
+    row: DeepWorkRun, *, phase: Optional[str] = None, round: Optional[int] = None, status: Optional[str] = None,
+    plan: Optional[Any] = None, enriched_query: Optional[str] = None,
+    reflection: Optional[Any] = None, artifact: Optional[Any] = None,
+) -> None:
+    """The guarded field updates of ``update_run``, applied to an already locked, non-terminal row."""
+    if phase is not None and _phase_rank(phase) > _phase_rank(row.phase):
+        row.phase = phase
+    if round is not None and round > (row.round or 0):
+        row.round = round
+    if plan is not None:
+        row.plan = plan
+    if enriched_query is not None:
+        row.enriched_query = enriched_query
+    if reflection is not None and reflection not in (row.reflections or []):
+        row.reflections = [*(row.reflections or []), reflection]
+    if artifact is not None and artifact not in (row.artifacts or []):
+        row.artifacts = [*(row.artifacts or []), artifact]
+    if status is not None:
+        row.status = status
+    row.updated_at = _now()
 
 
 async def create_run(
@@ -156,21 +182,8 @@ async def update_run(
             return None
         if row.status in TERMINAL_STATUSES:
             return RunSnapshot.of(row)
-        if phase is not None and _phase_rank(phase) > _phase_rank(row.phase):
-            row.phase = phase
-        if round is not None and round > (row.round or 0):
-            row.round = round
-        if plan is not None:
-            row.plan = plan
-        if enriched_query is not None:
-            row.enriched_query = enriched_query
-        if reflection is not None and reflection not in (row.reflections or []):
-            row.reflections = [*(row.reflections or []), reflection]
-        if artifact is not None and artifact not in (row.artifacts or []):
-            row.artifacts = [*(row.artifacts or []), artifact]
-        if status is not None:
-            row.status = status
-        row.updated_at = _now()
+        _advance(row, phase=phase, round=round, status=status, plan=plan, enriched_query=enriched_query,
+                 reflection=reflection, artifact=artifact)
         await db.flush()
         return RunSnapshot.of(row)
 
@@ -202,6 +215,107 @@ async def save_worker_learnings(
         row.updated_at = _now()
         await db.flush()
         return RunSnapshot.of(row)
+
+
+class LockedRun:
+    """The run row held under ``FOR UPDATE`` for a read-modify-write that spans file IO.
+
+    ``run`` is the snapshot taken under the lock; ``advance`` applies the guarded field updates in the
+    same transaction (a terminal run ignores them), so a tool can write a workspace file and settle
+    the run atomically with respect to other writers.
+    """
+
+    def __init__(self, row: DeepWorkRun):
+        self._row = row
+        self.run = RunSnapshot.of(row)
+
+    def advance(self, **fields: Any) -> RunSnapshot:
+        if "phase" in fields and fields["phase"] is not None:
+            _phase_rank(fields["phase"])
+        if fields.get("status") is not None and fields["status"] not in STATUSES:
+            raise ValueError(f"unknown status {fields['status']!r}")
+        if self._row.status not in TERMINAL_STATUSES:
+            _advance(self._row, **fields)
+            self.run = RunSnapshot.of(self._row)
+        return self.run
+
+
+@asynccontextmanager
+async def run_lock(factory: SessionFactory, tenant_id: Any, conversation_id: Any) -> AsyncIterator[Optional[LockedRun]]:
+    """Hold the run row locked for the body; yields ``None`` when the run does not exist."""
+    async with factory() as db:
+        row = await _locked(db, tenant_id, conversation_id)
+        if row is None:
+            yield None
+            return
+        locked = LockedRun(row)
+        yield locked
+        await db.flush()
+
+
+async def _mutate(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any, fn: Callable[[DeepWorkRun], None],
+) -> Optional[RunSnapshot]:
+    async with run_lock(factory, tenant_id, conversation_id) as locked:
+        if locked is None:
+            return None
+        if locked.run.status not in TERMINAL_STATUSES:
+            fn(locked._row)
+            locked._row.updated_at = _now()
+            locked.run = RunSnapshot.of(locked._row)
+        return locked.run
+
+
+async def register_round(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any, *, round: int, workers: List[Dict[str, Any]],
+) -> Optional[RunSnapshot]:
+    """Register ``round``'s workers once; an already registered round keeps its first registration."""
+
+    def fn(row: DeepWorkRun) -> None:
+        rounds = copy.deepcopy(row.rounds or [])
+        entry = next((r for r in rounds if r.get("round") == round), None)
+        if entry is None:
+            entry = {"round": round, "workers": {}}
+            rounds.append(entry)
+            rounds.sort(key=lambda r: r["round"])
+        if "registered" not in entry:
+            entry["registered"] = workers
+            entry["started_at"] = _now().isoformat()
+        row.rounds = rounds
+        _advance(row, phase="research", round=round)
+
+    return await _mutate(factory, tenant_id, conversation_id, fn)
+
+
+async def mark_workers_failed(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any, *, round: int, worker_ids: List[str],
+) -> Optional[RunSnapshot]:
+    """Record workers of ``round`` that ended without saving learnings (set union, so a replay is a no-op)."""
+
+    def fn(row: DeepWorkRun) -> None:
+        rounds = copy.deepcopy(row.rounds or [])
+        entry = next((r for r in rounds if r.get("round") == round), None)
+        if entry is None:
+            return
+        entry["failed"] = sorted({*entry.get("failed", []), *worker_ids})
+        row.rounds = rounds
+
+    return await _mutate(factory, tenant_id, conversation_id, fn)
+
+
+async def record_reflection(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any, *, round: int, reflection: Dict[str, Any],
+) -> Optional[RunSnapshot]:
+    """Persist the reflection for ``round``, replacing an earlier one for the same round."""
+
+    def fn(row: DeepWorkRun) -> None:
+        kept = [r for r in (row.reflections or []) if not (isinstance(r, dict) and r.get("round") == round)]
+        kept.append(reflection)
+        kept.sort(key=lambda r: r.get("round", 0) if isinstance(r, dict) else 0)
+        row.reflections = kept
+        _advance(row, phase="reflect")
+
+    return await _mutate(factory, tenant_id, conversation_id, fn)
 
 
 _ENDED_TO_STATUS = {"run_error": "failed", "aborted": "cancelled", "finished": "failed"}

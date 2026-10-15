@@ -105,6 +105,15 @@ TOOL_SPECS: Dict[str, ToolSpec] = {
     "linear_search_issues": _read(needs_connectors=True),
     "servicenow_create_incident": _write(requires_approval=True, needs_connectors=True),
     "servicenow_search_incidents": _read(needs_connectors=True),
+    # Deep Work (engine path, U4). Every write replaces by key (round, worker id, heading, path) or
+    # is a no-op when repeated, so all are idempotent; they open their own tenant-scoped sessions.
+    "dw_start_round": _write(idempotent=True),
+    "dw_save_learnings": _write(idempotent=True),
+    "dw_record_reflection": _write(idempotent=True),
+    "dw_write_section": _write(idempotent=True),
+    "dw_finalize": _write(idempotent=True),
+    "dw_get_learnings": _read(),
+    "dw_get_report": _read(),
     # Interactive or loop-internal: declared, but not served to the engine.
     "ask_user": _INTERACTIVE,
     "present_plan": _INTERACTIVE,
