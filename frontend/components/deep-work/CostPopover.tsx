@@ -12,6 +12,10 @@ const PURPOSE_LABEL: Record<string, string> = {
   'deep_work.output': 'Output',
   generation: 'Generation',
   compaction: 'Compaction',
+  orchestrator: 'Orchestrator',
+  worker: 'Workers',
+  reflection: 'Reflection',
+  output: 'Output',
 };
 
 const label = (purpose: string) =>
@@ -29,14 +33,18 @@ function price(usd: number, unpriced: boolean): string {
 }
 
 /**
- * Per-purpose cost breakdown for the card header. Renders nothing without a
+ * Per-stage (or per-purpose) cost breakdown for the card header. Renders nothing without a
  * breakdown (older backends, or while the ledger has not answered yet).
  */
 export function CostPopover({ cost }: { cost: ConversationCost | null }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const rows = cost?.byPurpose;
-  if (!cost || !rows || rows.length === 0) return null;
+  // Per-stage rows when the backend sends them; older backends fall back to per-purpose.
+  const stageRows = cost?.byStage && cost.byStage.length > 0 ? cost.byStage : null;
+  const rows = stageRows
+    ? stageRows.map((r) => ({ key: r.stage, ...r }))
+    : (cost?.byPurpose ?? []).map((r) => ({ key: r.purpose, ...r }));
+  if (!cost || rows.length === 0) return null;
   return (
     <span className="relative inline-block">
       <button
@@ -70,8 +78,8 @@ export function CostPopover({ cost }: { cost: ConversationCost | null }) {
           </div>
           <ul className="space-y-1">
             {rows.map((r) => (
-              <li key={r.purpose} className="flex justify-between gap-2 tabular-nums text-neutral-600" data-purpose={r.purpose}>
-                <span>{label(r.purpose)}</span>
+              <li key={r.key} className="flex justify-between gap-2 tabular-nums text-neutral-600" data-purpose={r.key}>
+                <span>{label(r.key)}</span>
                 <span className="text-neutral-400">
                   {tokens(r.inputTokens)} in / {tokens(r.outputTokens)} out
                 </span>

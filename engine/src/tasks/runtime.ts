@@ -50,6 +50,22 @@ export interface TaskRuntimeOptions {
   signal?: AbortSignal;
   /** Receives errors that do not fail a task: late handler throws, `onAbort` throws, scheduler failures. */
   onError?: TaskErrorReporter;
+  /**
+   * Called once per open, inside the recovery commit (so what it writes is
+   * atomic with the recovery), with the tasks that were `running` when the
+   * previous process stopped and every live task after recovery.
+   */
+  onRecover?: (ctx: RecoveryContext) => void | Promise<void>;
+}
+
+export interface RecoveryContext {
+  tx: Transaction;
+  /** Tasks that were `running` (cut off mid-handler) before recovery reset them. */
+  interrupted: TaskRecord[];
+  /** Live tasks after recovery. */
+  live: TaskRecord[];
+  /** The task that owns a conversation (a subagent's parent tool task), or null for a root. */
+  conversationOwner(conversationId: string): string | null;
 }
 
 export class TaskRuntime implements TaskRuntimeApi {
@@ -59,6 +75,7 @@ export class TaskRuntime implements TaskRuntimeApi {
   readonly closed: Promise<unknown>;
   readonly #index: TaskIndex;
   readonly #scheduler: Scheduler;
+  readonly #onRecover: TaskRuntimeOptions["onRecover"];
   readonly #detach: () => void;
 
   private constructor(session: Session, options: TaskRuntimeOptions) {
@@ -70,6 +87,7 @@ export class TaskRuntime implements TaskRuntimeApi {
     this.registry =
       options.tasks instanceof TaskRegistry ? options.tasks : new TaskRegistry(options.tasks);
     this.#index = new TaskIndex();
+    this.#onRecover = options.onRecover;
     this.#scheduler = new Scheduler({
       session,
       index: this.#index,
@@ -199,11 +217,20 @@ export class TaskRuntime implements TaskRuntimeApi {
         if (cursor === null) break;
       }
       this.#scheduler.follow();
+      const interrupted = this.#index.live().filter((t) => t.status === "running");
       for (const t of this.#index.live()) {
         if (t.status === "running") w.put({ ...t, status: "pending" });
       }
       for (const t of this.#index.live()) {
         if (t.abandonOnRestart && abortReason(t) === null) w.abort(t.id, ABORT_REASONS.restart);
+      }
+      if (interrupted.length > 0 && this.#onRecover) {
+        await this.#onRecover({
+          tx,
+          interrupted,
+          live: this.#index.live(),
+          conversationOwner: (id) => this.#index.conversationOwner(id),
+        });
       }
     });
   }

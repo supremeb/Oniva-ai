@@ -352,7 +352,7 @@ async def test_policy_allow_shape(client, test_db):
     j = r.json()
     assert r.status_code == 200 and j["ok"] is True
     assert set(j) >= {"ok", "provider", "model", "apiKey", "maxTokens", "expiresAt", "requestId"}
-    assert j["provider"] == "anthropic" and j["model"] == "claude-sonnet-4-5"
+    assert j["provider"] == "anthropic" and j["model"] == "claude-sonnet-5-5"
     assert j["apiKey"] == tp.ANTHROPIC_KEY and isinstance(j["maxTokens"], int) and j["maxTokens"] > 0
     assert isinstance(j["expiresAt"], int) and j["expiresAt"] > 1_000_000_000_000  # epoch ms
     assert j["requestId"] == payload["requestId"]
@@ -404,3 +404,32 @@ async def test_usage_invalid_422(client, test_db):
         del payload[missing]
         r = await client.post("/internal/models/usage", json=payload, headers=tp.AUTH)
         assert r.status_code == 422, missing
+
+
+async def _rows(db, tenant):
+    from sqlalchemy import select
+
+    from app.models.llm_usage import LLMUsageRecord
+
+    db.expire_all()
+    return (await db.execute(select(LLMUsageRecord).where(LLMUsageRecord.tenant_id == tenant))).scalars().all()
+
+
+@clause("usage-agent-role")
+async def test_usage_agent_role_optional_and_stored(client, test_db):
+    t = await tp.make_tenant(test_db)
+    child = _usage(t, agentRole="research_worker")
+    root = _usage(t)
+    for p in (child, root):
+        r = await client.post("/internal/models/usage", json=p, headers=tp.AUTH)
+        assert r.status_code == 200 and r.json() == {"recorded": True}
+    by_req = {r.request_id: r.agent_role for r in await _rows(test_db, t)}
+    assert by_req == {child["requestId"]: "research_worker", root["requestId"]: None}
+
+
+@clause("usage-agent-role-422")
+async def test_usage_agent_role_malformed_422(client, test_db):
+    t = await tp.make_tenant(test_db)
+    for bad in ("Bad Role", "x" * 65, "has-dash", ""):
+        r = await client.post("/internal/models/usage", json=_usage(t, agentRole=bad), headers=tp.AUTH)
+        assert r.status_code == 422, bad

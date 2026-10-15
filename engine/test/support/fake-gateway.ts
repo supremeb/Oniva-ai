@@ -88,6 +88,10 @@
  * `200 { recorded }` [clause:usage-recorded]; a repeated `(tenantId,
  * requestId)` is `recorded: false` and counts once [clause:usage-repeat-false].
  * A body missing a required field is `422`. [clause:usage-invalid-422]
+ * An optional `agentRole` (the subagent tool name, `[a-z0-9_]{1,64}`) is
+ * present on usage from a subagent's child conversation and absent for the
+ * root conversation [clause:usage-agent-role]; a malformed one is `422`
+ * [clause:usage-agent-role-422]. `conversationId` is always the root's.
  *
  * Test controls: per-tool effect counters ({@link FakeGateway.effects}),
  * scripted failures and delays, stored outcomes by key, the per-session fence
@@ -386,6 +390,13 @@ export class FakeGateway {
       typeof b.runId !== "string" ||
       typeof b.provider !== "string" ||
       typeof b.model !== "string"
+    ) {
+      send(res, 422, { error: "invalid_request" });
+      return;
+    }
+    if (
+      b.agentRole !== undefined &&
+      (typeof b.agentRole !== "string" || !/^[a-z0-9_]{1,64}$/.test(b.agentRole))
     ) {
       send(res, 422, { error: "invalid_request" });
       return;

@@ -192,6 +192,22 @@ async def test_purpose_is_stored_and_defaults_to_generation(client, test_db):
     assert sorted(by_req.values()) == ["compaction", "generation"]
 
 
+async def test_agent_role_is_stored_and_optional(client, test_db):
+    t = await make_tenant(test_db)
+    assert (await post(client, body(t, agentRole="research_worker", requestId="w1"))).status_code == 200
+    assert (await post(client, body(t, requestId="root1"))).status_code == 200
+    by_req = {r.request_id: r.agent_role for r in await rows(test_db, t)}
+    assert by_req == {"w1": "research_worker", "root1": None}
+
+
+@pytest.mark.parametrize("role", ["Bad Role", "has-dash", "UPPER", "", "x" * 65])
+async def test_invalid_agent_role_is_rejected(client, test_db, role):
+    t = await make_tenant(test_db)
+    r = await post(client, body(t, agentRole=role))
+    assert r.status_code == 422
+    assert await rows(test_db, t) == []
+
+
 async def test_unknown_purpose_is_rejected(client, test_db):
     t = await make_tenant(test_db)
     r = await post(client, body(t, purpose="embedding"))

@@ -377,14 +377,15 @@ export function defineInboxSuite(backend: AgentBackend): void {
         "user",
         "system",
         "assistant",
+        "run_resumed",
         "tool_result",
         "user",
         "assistant",
         "user",
         "assistant",
       ]);
-      expect(payload(entries[4] as EntryRecord).submissionId).toBe(steer.id);
-      expect(payload(entries[6] as EntryRecord).submissionId).toBe(follow.id);
+      expect(payload(entries[5] as EntryRecord).submissionId).toBe(steer.id);
+      expect(payload(entries[7] as EntryRecord).submissionId).toBe(follow.id);
       await waitFor(() => !h.conversation(conv.id).busy());
       await w2.crash();
     });

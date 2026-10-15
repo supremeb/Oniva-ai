@@ -44,6 +44,12 @@ export interface ToolConversation {
    * top-level conversation.
    */
   rootId?: string;
+  /**
+   * For a subagent's child conversation, the name of the subagent tool that
+   * created it (e.g. `research_worker`); absent for a top-level conversation.
+   * Reported to the usage ledger so spend can be split by role.
+   */
+  agentRole?: string;
 }
 
 /**
