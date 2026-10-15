@@ -200,19 +200,21 @@ def test_deep_work_survives_engine_kill_mid_research(world):
         w, "SELECT conversation_id, input_tokens, output_tokens, cost_usd, purpose FROM llm_usage_records")),
         "ledger rows", 30)
     assert {c for c, *_ in ledger} == {conv.replace("-", "")}, "child usage must be stored under the root conversation"
-    # The orchestrator tier resolves to a model the pricing table lacks: those rows are `unpriced` (tokens, no
-    # dollars) and the summary says so; every other row is priced.
+    # Every tier resolves to a priced model, so every row carries dollars.
     statuses = sql(w, "SELECT status, cost_usd FROM llm_usage_records")
-    assert {s for s, _ in statuses} == {"success", "unpriced"}, statuses
-    assert all((float(c) > 0) == (s == "success") for s, c in statuses), statuses
+    assert {s for s, _ in statuses} == {"success"}, statuses
+    assert all(float(c) > 0 for _, c in statuses), statuses
     purposes = {p for *_, p in ledger}
     cost = api(w, "GET", f"/{conv}/cost")
     assert cost.status_code == 200, cost.text
     body = cost.json()
     assert body["inputTokens"] == sum(r[1] for r in ledger) and body["outputTokens"] == sum(r[2] for r in ledger)
-    assert body["totalUsd"] == pytest.approx(sum(float(r[3]) for r in ledger)) and body["unpriced"] is True
+    assert body["totalUsd"] == pytest.approx(sum(float(r[3]) for r in ledger)) and body["unpriced"] is False
     assert [r["runId"] for r in body["runs"]] and sum(r["inputTokens"] for r in body["runs"]) == body["inputTokens"]
     assert {p["purpose"] for p in body["byPurpose"]} == purposes
+    stages = {st["stage"] for st in body["byStage"]}
+    assert {"orchestrator", "worker", "reflection"} <= stages, body["byStage"]
+    assert sum(st["inputTokens"] for st in body["byStage"]) == body["inputTokens"]
 
     # --- AE4: a fresh load (refresh, second tab) rebuilds the same view ----------------------------------------------
     again = snapshot_of(w, conv)
