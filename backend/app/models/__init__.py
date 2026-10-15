@@ -59,6 +59,7 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.routing_policy import RoutingPolicy
 from app.models.run_event import RunEvent
+from app.models.engine import ToolInvocation, EngineFence, EngineConversation
 
 __all__ = [
     'Base',
@@ -162,4 +163,7 @@ __all__ = [
     'RoutingPolicy',
     # Run Observability (Platform Architecture Hardening E-1)
     'RunEvent',
+    'ToolInvocation',
+    'EngineFence',
+    'EngineConversation',
 ]

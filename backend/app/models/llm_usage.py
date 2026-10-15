@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, Numeric, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -63,8 +63,13 @@ class LLMUsageRecord(Base):
     cache_creation_tokens = Column(Integer, nullable=True, doc="Tokens written to provider cache")
     cache_read_tokens = Column(Integer, nullable=True, doc="Tokens read from provider cache")
 
+    # Engine ledger keys (plan 003): request_id makes usage posts idempotent per tenant
+    request_id = Column(String(255), nullable=True)
+    run_id = Column(String(128), nullable=True)
+    conversation_id = Column(UUID(as_uuid=True), nullable=True)
+
     # Status
-    status = Column(String(20), default="success")  # success, failed, cached
+    status = Column(String(20), default="success")  # success, failed, cached, unpriced
 
     # Timestamp
     created_at = Column(
@@ -72,6 +77,16 @@ class LLMUsageRecord(Base):
         server_default=func.now(),
         default=datetime.utcnow,
         index=True,
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_llm_usage_tenant_request",
+            "tenant_id",
+            "request_id",
+            unique=True,
+            postgresql_where=text("request_id IS NOT NULL"),
+        ),
     )
 
     # Relationships
