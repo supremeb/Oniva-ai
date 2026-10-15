@@ -72,12 +72,23 @@ describe("BackendPolicyClient", () => {
       tenantId: "t1",
       projectId: "p1",
       conversationId: "conv-1",
+      engineConversationId: "conv-1",
       runId: "run-1",
       round: 2,
       purpose: "generation",
       requestId: "run-1:2:generation",
       agent: { model: "hint-model" },
       supportedProviders: ["fake"],
+    });
+  });
+
+  it("sends the root conversation id for a subagent's child conversation", async () => {
+    const gw = await start();
+    const child = { ...CONVERSATION, id: "conv_child", rootId: "conv-1" };
+    await client(gw).resolveModelRequest({ ...info(), conversation: child });
+    expect(gw.policyRequests()[0]?.body).toMatchObject({
+      conversationId: "conv-1",
+      engineConversationId: "conv_child",
     });
   });
 

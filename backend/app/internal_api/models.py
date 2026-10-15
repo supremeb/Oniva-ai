@@ -64,6 +64,7 @@ class PolicyRequest(_Camel):
     tenant_id: uuid.UUID = Field(alias="tenantId")
     project_id: Optional[str] = Field(None, alias="projectId")
     conversation_id: Optional[str] = Field(None, alias="conversationId")
+    engine_conversation_id: Optional[str] = Field(None, alias="engineConversationId")  # informational
     run_id: str = Field(alias="runId")
     round: int = 0
     purpose: Literal["generation", "compaction"] = "generation"
@@ -194,6 +195,7 @@ class UsageRequest(_Camel):
     tenant_id: uuid.UUID = Field(alias="tenantId")
     project_id: Optional[uuid.UUID] = Field(None, alias="projectId")
     conversation_id: Optional[uuid.UUID] = Field(None, alias="conversationId")
+    engine_conversation_id: Optional[str] = Field(None, alias="engineConversationId")  # informational
     run_id: str = Field(alias="runId", min_length=1, max_length=128)
     request_id: str = Field(alias="requestId", min_length=1, max_length=255)
     provider: str = Field(min_length=1, max_length=100)

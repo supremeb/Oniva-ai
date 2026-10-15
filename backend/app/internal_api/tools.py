@@ -146,6 +146,8 @@ class InvokeBody(BaseModel):
     tenantId: str
     projectId: str
     conversationId: Optional[str] = None
+    # The engine conversation that made the call (a subagent's child); informational only.
+    engineConversationId: Optional[str] = None
 
 
 # Strong references: a detached effect must outlive the request that started it (KTD6).

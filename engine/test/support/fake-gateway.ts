@@ -1,72 +1,93 @@
 /**
  * A fake of Oniva's tool gateway, and the specification of its contract (R18).
  *
+ * Each `[clause:<id>]` tag marks a behavior the Python backend must reproduce;
+ * `backend/tests/internal/test_contract_conformance.py` reads these tags and
+ * fails when one has no conformance test, so adding a clause here without a
+ * matching Python test breaks the backend suite.
+ *
  * The engine talks to the gateway over HTTP with three routes. Every request
  * carries `Authorization: Bearer <service token>`; a wrong or missing token is
- * answered `401 { error: "unauthorized" }`.
+ * answered `401 { error: "unauthorized" }`. [clause:auth-401]
  *
  * Fencing. Any request may carry `X-Engine-Fence: <token>` with
  * `X-Engine-Session: <session id>` (the engine sends both on every request
  * while it holds a lease: manifest loads, invokes and reconciles). The
  * gateway keeps a per-session high-water mark: a token lower than the mark is
- * answered `409 { error: "fence_rejected", highWater }` and has no effect; any
- * other token raises the mark. Raising it on reads too matters: a successor
- * that only reconciles (and so never invokes) must still lock out the
- * previous owner's invokes that are delayed on the wire. An invoke carrying no
- * `X-Engine-Session` is keyed by `tenantId/projectId`; on the other routes a
- * fence without a session is not checked. The gateway checks an invoke's
- * token again, atomically, when the effect commits, so an invoke accepted
- * just before a successor raised the mark still causes no effect (and stores
- * no outcome); that is what makes a successor's `404` from the reconcile
- * route final.
+ * answered `409 { error: "fence_rejected", highWater }` and has no effect
+ * [clause:fence-409]; any other token raises the mark. Raising it on reads
+ * too matters: a successor that only reconciles (and so never invokes) must
+ * still lock out the previous owner's invokes that are delayed on the wire
+ * [clause:fence-raise-on-read]. A token that is not an integer is answered
+ * `400 { error: "invalid_fence" }` [clause:fence-invalid-400]. An invoke
+ * carrying no `X-Engine-Session` is keyed by `tenantId/projectId`
+ * [clause:fence-invoke-session-default]; on the other routes a fence without
+ * a session is not checked [clause:fence-sessionless-unchecked]. The gateway
+ * checks an invoke's token again, atomically, when the effect commits, so an
+ * invoke accepted just before a successor raised the mark still causes no
+ * effect (and stores no outcome); that is what makes a successor's `404` from
+ * the reconcile route final. [clause:fence-commit-recheck]
  *
  * `GET /internal/tools/manifest` → `200 { tools: ManifestTool[] }`, where a
  * tool is `{ name, description, parameters, sideEffect, idempotent?,
  * timeoutMs, requiresApproval? }`: `parameters` is a JSON Schema for the
  * argument object, `sideEffect` is `"none"` (a read) or `"write"`, and
  * `idempotent` (default false) says a write may safely run again under the
- * same idempotency key.
+ * same idempotency key. [clause:manifest-shape]
  *
  * `POST /internal/tools/{name}/invoke` with body
  * `{ args, runId, toolCallId, tenantId, projectId }` and headers
  * `Idempotency-Key: runId:toolCallId` and, when the engine holds a lease,
  * `X-Engine-Fence: <token>` and `X-Engine-Session: <session id>`:
  * - `200 Outcome` where `Outcome = { content: string | {type:"text",text}[],
- *   isError?: boolean, details?: JSON }`;
+ *   isError?: boolean, details?: JSON }`; [clause:invoke-outcome-shape]
  * - a key that already has a completed outcome is answered with that stored
- *   outcome and the tool does not run again;
+ *   outcome and the tool does not run again; [clause:invoke-replay-stored]
  * - `409 { error: "fence_rejected", highWater }` (see Fencing);
- * - `404 { error: "unknown_tool" }`, `400 { error: "invalid_request" }`, `429`
- *   or `503` (optionally with `Retry-After`), and any `5xx` for gateway
+ * - `404 { error: "unknown_tool" }` [clause:invoke-unknown-tool-404], `400 {
+ *   error: "invalid_request" }` for a malformed body or a key that is not
+ *   `runId:toolCallId` [clause:invoke-invalid-400], `429` or `503` (optionally
+ *   with `Retry-After`) [clause:invoke-retry-after], and any `5xx` for gateway
  *   failures.
  * A started effect runs to completion even if the client disconnects (the
  * client timed out, or its process died); its outcome is stored under the
  * key, which is how the engine learns what a timed-out write did.
+ * [clause:invoke-survives-disconnect] An outcome is never larger than the
+ * engine's 1 MiB response cap. [clause:outcome-size-cap]
  *
  * `GET /internal/tools/invocations/{key}` → `200 Outcome` when the call with
- * that idempotency key completed, `404 { error: "not_found" }` otherwise
- * (including a call still in flight). This is what reconciliation after a
- * restart, or after a write timed out, reads. Fenced like the other routes.
+ * that idempotency key completed [clause:reconcile-found], `404 { error:
+ * "not_found" }` otherwise (including a call still in flight)
+ * [clause:reconcile-not-found]. This is what reconciliation after a restart,
+ * or after a write timed out, reads. Fenced like the other routes.
+ * [clause:reconcile-fenced]
  *
  * An invoke body also carries `conversationId` (the engine conversation the
  * call belongs to); the fake accepts it and records it, and an older client
- * without it still works.
+ * without it still works. [clause:invoke-conversation-id] For a subagent's
+ * child conversation the engine sends the top-level conversation's id as
+ * `conversationId` and the child's own id as `engineConversationId`
+ * (informational; the backend ignores it). [clause:engine-conversation-id]
  *
  * Model policy and usage (the backend's `/internal/models/*`; the real
  * contract lives in `backend/app/internal_api/models.py`). Same bearer token;
- * neither route is fenced.
+ * neither route is fenced. [clause:models-unfenced]
  *
  * `POST /internal/models/policy` with `{ tenantId, projectId?, conversationId?,
  * runId, round, purpose, requestId, agent: { model?, tier? },
- * supportedProviders }` → always `200` with `Cache-Control: no-store`:
- * `{ ok: true, provider, model, apiKey, maxTokens, expiresAt (epoch ms),
- * requestId }`, or a denial `{ ok: false, code, reason, retryable }`.
+ * supportedProviders }` → always `200` with `Cache-Control: no-store`
+ * [clause:policy-no-store]: `{ ok: true, provider, model, apiKey, maxTokens,
+ * expiresAt (epoch ms), requestId }` [clause:policy-allow-shape], or a denial
+ * `{ ok: false, code, reason, retryable }` [clause:policy-denial-shape]. A
+ * body without `requestId` or `tenantId` is `422 { error: "invalid_request"
+ * }`. [clause:policy-invalid-422]
  *
  * `POST /internal/models/usage` with `{ tenantId, projectId?, conversationId?,
  * runId, requestId, provider, model, usage: { inputTokens, outputTokens,
  * cacheReadTokens, cacheWriteTokens }, latencyMs?, status }` →
- * `200 { recorded }`; a repeated `(tenantId, requestId)` is `recorded: false`
- * and counts once.
+ * `200 { recorded }` [clause:usage-recorded]; a repeated `(tenantId,
+ * requestId)` is `recorded: false` and counts once [clause:usage-repeat-false].
+ * A body missing a required field is `422`. [clause:usage-invalid-422]
  *
  * Test controls: per-tool effect counters ({@link FakeGateway.effects}),
  * scripted failures and delays, stored outcomes by key, the per-session fence

@@ -24,6 +24,7 @@
 import type { AfterResponseEvent, AgentHooks } from "../agent/hooks.js";
 import type { ModelRequestInfo } from "../agent/policy.js";
 import type { ModelResolution } from "../models/types.js";
+import { backendConversationIds } from "../tools/registry.js";
 
 export type BackendLog = (event: string, fields?: Record<string, unknown>) => void;
 
@@ -83,7 +84,7 @@ export class BackendPolicyClient {
     const body = JSON.stringify({
       tenantId: info.conversation.tenantId,
       projectId: info.conversation.projectId,
-      conversationId: info.conversation.id,
+      ...backendConversationIds(info.conversation),
       runId: info.runId,
       round: info.round,
       purpose: info.purpose,
@@ -203,7 +204,7 @@ export class UsageReporter {
     const body = JSON.stringify({
       tenantId: event.conversation.tenantId,
       projectId: event.conversation.projectId,
-      conversationId: event.conversation.id,
+      ...backendConversationIds(event.conversation),
       runId: event.runId,
       requestId,
       provider: event.message.provider,

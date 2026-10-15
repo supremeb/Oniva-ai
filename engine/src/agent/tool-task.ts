@@ -169,10 +169,39 @@ export async function loadConversation(
   const rec = await deps.session.reader.getConversation(conversationId);
   if (!rec) throw new Error(`unknown conversation ${conversationId}`);
   const agent = await deps.session.document(agentConfigDoc, conversationId);
+  const rootId = await rootConversationId(deps.session, rec);
   return {
-    conversation: { id: rec.id, tenantId: rec.tenantId, projectId: rec.projectId },
+    conversation: {
+      id: rec.id,
+      tenantId: rec.tenantId,
+      projectId: rec.projectId,
+      ...(rootId !== rec.id ? { rootId } : {}),
+    },
     agent,
   };
+}
+
+/**
+ * The top-level conversation above `rec`: follow each owning task to its
+ * conversation until a conversation has no owner. A broken or cyclic chain
+ * stops at the last conversation reached.
+ */
+async function rootConversationId(
+  session: AgentDeps["session"],
+  rec: { id: string; ownerTaskId: string | null },
+): Promise<string> {
+  let id = rec.id;
+  let owner = rec.ownerTaskId;
+  const seen = new Set([id]);
+  while (owner !== null) {
+    const task = await session.reader.getTask(owner);
+    if (!task || seen.has(task.conversationId)) break;
+    id = task.conversationId;
+    seen.add(id);
+    const parent = await session.reader.getConversation(id);
+    owner = parent ? parent.ownerTaskId : null;
+  }
+  return id;
 }
 
 export async function listAllEntries(
