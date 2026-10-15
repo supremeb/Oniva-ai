@@ -1,5 +1,6 @@
 'use client';
 
+import { activeRunId } from './run';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import type { ConversationView } from './types';
@@ -67,7 +68,7 @@ export function useConversationCost(
   }, []);
 
   const hasView = view !== null;
-  const runId = view?.live.runId ?? null;
+  const runId = activeRunId(view);
   const active = runId !== null;
 
   // Rejoin / conversation switch: one fetch once the view is first available.

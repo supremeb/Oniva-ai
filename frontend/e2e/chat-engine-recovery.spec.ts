@@ -89,10 +89,7 @@ test('@recovery refresh mid-run rejoins without a new submit', async ({ page }) 
   expect((await effects()).length - before).toBe(1);
 });
 
-// Known product defect found by this suite (reported with U12): EngineChat derives `running` from
-// `view.live.runId`, and the engine clears `live` once a model round ends, so while a tool executes the
-// composer is idle (no Stop, no "Steer now"). Remove `.fixme` when `running` also covers the tool round.
-test.fixme('@recovery steer during the run shows one chip that is consumed after the tool round', async ({ page }) => {
+test('@recovery steer during the run shows one chip that is consumed after the tool round', async ({ page }) => {
   await openChat(page);
   await send(page, 'RUN_CHAT_WRITE steer');
   await expect(log(page).getByText(PRE_TEXT)).toBeVisible();

@@ -14,6 +14,7 @@
 
 import { type ApprovalsState, approvalsDoc } from "../agent/approvals.js";
 import { COMPACTION_TASK_KIND, type CompactionState, compactionDoc } from "../agent/compaction.js";
+import { GENERATION_TASK_KIND } from "../agent/generation.js";
 import { type InboxState, inboxDoc } from "../agent/inbox.js";
 import { type LiveState, liveDoc, type ToolOutputState, toolOutputDoc } from "../agent/progress.js";
 import { type AgentConfig, agentConfigDoc } from "../agent/prompt.js";
@@ -37,6 +38,36 @@ export interface ConversationView {
   toolOutput: { [toolTaskId: string]: ToolOutputState };
   /** Whether a context compaction is in flight (derived from the `agent.compaction` document). */
   compaction: CompactionView;
+  /** Whether the conversation has an active run (derived from its root generation task). */
+  run: RunView;
+}
+
+/** A conversation's run as a client sees it; true across model rounds, tool execution and approval waits. */
+export interface RunView {
+  active: boolean;
+  /** The active run's id. Only while active. */
+  runId?: string;
+  /** ISO time the active run started. Only while active. */
+  startedAt?: string;
+}
+
+/** A root generation task (one per run) as far as the view needs it. */
+interface RunTaskInfo {
+  startedAt: number;
+  terminal: boolean;
+}
+
+function runView(tasks: ReadonlyMap<string, RunTaskInfo>): RunView {
+  // Mirrors the harness's busy check: a non-terminal root generation task.
+  for (const [id, t] of tasks) {
+    if (!t.terminal)
+      return { active: true, runId: id, startedAt: new Date(t.startedAt).toISOString() };
+  }
+  return { active: false };
+}
+
+function isRootGeneration(t: { kind: string; parentTaskId: string | null }): boolean {
+  return t.kind === GENERATION_TASK_KIND && t.parentTaskId === null;
 }
 
 /** A conversation's compaction as a client sees it; no task ids or summary text. */
@@ -104,6 +135,8 @@ export interface ViewState {
   toolTasks: Set<string>;
   /** Compaction tasks of the conversation (their cause and start time). */
   compactionTasks: Map<string, CompactionTaskInfo>;
+  /** Root generation tasks of the conversation (the runs). */
+  runTasks: Map<string, RunTaskInfo>;
 }
 
 function entryOf(e: EntryRecord): EntryRecord {
@@ -132,12 +165,16 @@ export async function loadViewState(session: Session, conversationId: string): P
   }
   const toolTasks = new Set<string>();
   const compactionTasks = new Map<string, CompactionTaskInfo>();
+  const runTasks = new Map<string, RunTaskInfo>();
   const toolOutput: ConversationView["toolOutput"] = {};
   for (let cursor: string | null = null; ; ) {
     const page = await reader.listTasks({ conversationId, limit: MAX_PAGE_LIMIT, cursor });
     const ids = page.items.filter((t) => t.kind === TOOL_TASK_KIND).map((t) => t.id);
     // One batched read per page of tasks (a page holds at most MAX_PAGE_LIMIT).
     for (const t of page.items) {
+      if (isRootGeneration(t)) {
+        runTasks.set(t.id, { startedAt: t.createdAt, terminal: t.status === "terminal" });
+      }
       if (t.kind === COMPACTION_TASK_KIND) compactionTasks.set(t.id, compactionInfo(t));
     }
     const docs = ids.length === 0 ? [] : await reader.getDocuments(toolOutputDoc.kind, ids);
@@ -161,8 +198,9 @@ export async function loadViewState(session: Session, conversationId: string): P
       await session.document(compactionDoc, conversationId),
       compactionTasks,
     ),
+    run: runView(runTasks),
   };
-  return { view, toolTasks, compactionTasks };
+  return { view, toolTasks, compactionTasks, runTasks };
 }
 
 /** Read a conversation's view from committed state. Throws `UnknownConversation`. */
@@ -183,7 +221,7 @@ export function applyCommitToView(
   conversationId: string,
   event: CommitEvent,
 ): JsonPatchOp[] {
-  const { view, toolTasks, compactionTasks } = state;
+  const { view, toolTasks, compactionTasks, runTasks } = state;
   const ops: JsonPatchOp[] = [];
   for (const task of event.batch.createTasks ?? []) {
     if (task.conversationId === conversationId && task.kind === TOOL_TASK_KIND) {
@@ -191,6 +229,25 @@ export function applyCommitToView(
     } else if (task.conversationId === conversationId && task.kind === COMPACTION_TASK_KIND) {
       compactionTasks.set(task.id, compactionInfo(task));
     }
+  }
+  let runChanged = false;
+  for (const task of event.batch.createTasks ?? []) {
+    if (task.conversationId === conversationId && isRootGeneration(task)) {
+      runTasks.set(task.id, { startedAt: task.createdAt, terminal: task.status === "terminal" });
+      runChanged = true;
+    }
+  }
+  for (const task of event.batch.replaceTasks ?? []) {
+    const known = runTasks.get(task.id);
+    if (known && task.conversationId === conversationId) {
+      known.terminal = task.status === "terminal";
+      runChanged = true;
+    }
+  }
+  if (runChanged) {
+    const next = runView(runTasks);
+    ops.push(...diffJson(view.run as unknown as JsonValue, next as unknown as JsonValue, "/run"));
+    view.run = next;
   }
   for (const entry of event.batch.appendEntries ?? []) {
     if (entry.conversationId !== conversationId) continue;

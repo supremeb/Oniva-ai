@@ -7,3 +7,4 @@ export { useEngineConversation, type UseEngineConversation } from './useEngineCo
 export { viewToMessages, createViewAdapter, type EngineMessage } from './viewToMessages';
 export { DecisionError, toDecisionError, summarizeArguments } from './approval';
 export { isCompactionRunning } from './compaction';
+export { isRunActive, activeRunId } from './run';

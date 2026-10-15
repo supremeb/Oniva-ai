@@ -14,6 +14,7 @@ import { QueuedChips, type SendingChip } from './QueuedChips';
 import { ConnectionBanner } from './ConnectionBanner';
 import { buildSelectionPopovers } from './ChatSelections';
 import { CostBadge, runForTurn } from './CostBadge';
+import { isRunActive } from '@/lib/engine/run';
 import { useConversationCost, type ConversationCost } from '@/lib/engine/cost';
 import {
     createViewAdapter,
@@ -141,7 +142,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         [lastOfRun, liveRunId, cost]
     );
 
-    const running = view?.live.runId != null;
+    const running = isRunActive(view);
     const awaitingApproval = running && (view?.approvals.items.some((a) => a.status === 'pending') ?? false);
     const runState: EngineRunState = awaitingApproval ? 'awaiting_approval' : running ? 'running' : 'idle';
     useEffect(() => {

@@ -61,6 +61,8 @@ export class ConversationWatcher {
   private abort: AbortController | null = null;
   private closed = false;
   private started = false;
+  /** Bumped per start so a loop from before a close/restart stops instead of doubling up. */
+  private generation = 0;
   private stallTimer: ReturnType<typeof setTimeout> | null = null;
   private wake: (() => void) | null = null;
   private readonly stalledAfterMs: number;
@@ -88,11 +90,21 @@ export class ConversationWatcher {
 
   /** Begin watching. Deferred a microtask so a strict-mode mount/unmount opens nothing. */
   start(): void {
-    if (this.started) return;
+    if (this.started && !this.closed) return;
+    // Restart after close (strict-mode mount/unmount/mount): reconnect from the last cursor.
+    if (this.closed) {
+      this.closed = false;
+      this.set({ connection: 'connecting' });
+    }
     this.started = true;
+    const gen = ++this.generation;
     queueMicrotask(() => {
-      if (!this.closed) void this.loop();
+      if (this.live(gen)) void this.loop(gen);
     });
+  }
+
+  private live(gen: number): boolean {
+    return !this.closed && gen === this.generation;
   }
 
   close(): void {
@@ -182,9 +194,9 @@ export class ConversationWatcher {
     this.set({ view, cursor, pending: stillPending, connection: 'live', error: null });
   }
 
-  private async loop(): Promise<void> {
+  private async loop(gen: number): Promise<void> {
     let failures = 0;
-    while (!this.closed) {
+    while (this.live(gen)) {
       const ac = new AbortController();
       this.abort = ac;
       let resync = false;
@@ -196,7 +208,7 @@ export class ConversationWatcher {
         await readSse(
           res.body,
           (ev) => {
-            if (this.closed || resync) return;
+            if (!this.live(gen) || resync) return;
             if (ev.event !== 'snapshot' && ev.event !== 'patch') return;
             let frame: WatchFrame;
             try {
@@ -215,7 +227,7 @@ export class ConversationWatcher {
           () => this.touch()
         );
       } catch (e) {
-        if (this.closed) return;
+        if (!this.live(gen)) return;
         if (e instanceof WatchHttpError) {
           if (e.status === 404 || e.status === 403 || e.status === 401) {
             this.clearStall();
@@ -225,7 +237,7 @@ export class ConversationWatcher {
           retryAfter = e.retryAfterMs;
         }
       }
-      if (this.closed) return;
+      if (!this.live(gen)) return;
       this.clearStall();
       if (resync) {
         // Reconnect without a cursor to receive a snapshot.

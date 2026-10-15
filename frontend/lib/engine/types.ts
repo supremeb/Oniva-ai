@@ -91,6 +91,14 @@ export interface ConversationView {
   usage: UsageTotals;
   agent: { [key: string]: JsonValue };
   toolOutput: { [toolTaskId: string]: ToolOutputState };
+  /** Whether a run is active, across tool rounds and approval waits. Absent on older engines. */
+  run?: RunView;
+}
+
+export interface RunView {
+  active: boolean;
+  runId?: string;
+  startedAt?: string;
 }
 
 export interface PatchFrame {

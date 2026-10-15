@@ -80,6 +80,8 @@ The watch view's `toolOutput` is keyed by tool task id; each value is `{ text, t
 
 The watch view's `compaction` is `{ running: boolean, cause?, startedAt? }`: `running` is true while a context compaction task is in flight, with `cause` (`background`, `threshold` or `overflow`) and `startedAt` (ISO time) alongside; when idle it is `{ running: false }`. It carries no task id or summary text, and arrives in snapshots and as patches to `/compaction` when a compaction starts and when it lands or fails.
 
+The watch view's `run` is `{ active: boolean, runId?, startedAt? }`: `active` is true for as long as the conversation has an unfinished run, including while tools execute, approvals are pending and between model rounds (when `live` is already cleared); `runId` and `startedAt` (ISO time) accompany it while active, and when idle it is `{ active: false }`. It arrives in snapshots and as patches to `/run` when a run starts and when it ends.
+
 When a generation fails after streaming text (a model error), that text is kept as an `assistant` entry with `partial: true` and `message.stopReason: "error"`, written just before the `run_error` entry; its blocks are as streamed (a tool call may be incomplete and is never run). On the next turn the model sees only the partial entry's text blocks. A failure before any text (including a policy denial) writes only `run_error`.
 
 A worker that does not hold the session lease answers `409 { error: "not_owner", ownerId }`.

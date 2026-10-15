@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { COMPACTION_TASK_KIND, compactionDoc } from "../../src/agent/compaction.js";
+import { GENERATION_TASK_KIND } from "../../src/agent/generation.js";
 import { toolOutputDoc } from "../../src/agent/progress.js";
 import { TOOL_TASK_KIND } from "../../src/agent/tool-task.js";
 import { newId } from "../../src/core/ids.js";
@@ -219,5 +220,73 @@ describe("view compaction", () => {
     const ops = applyCommitToView(state, conversationId, event("other", "task-x"));
     expect(ops).toEqual([]);
     expect(state.view.compaction).toEqual({ running: false });
+  });
+});
+
+describe("view run", () => {
+  async function conversation() {
+    const storage = await new MemoryStorageProvider().open("sess-run");
+    const conversationId = newId("conversation");
+    await storage.commit(
+      {
+        createConversations: [
+          { id: conversationId, tenantId: "t", projectId: "p", ownerTaskId: null, createdAt: 1 },
+        ],
+      },
+      null,
+    );
+    return { storage, conversationId };
+  }
+  const ev = (batch: CommitEvent["batch"]): CommitEvent => ({
+    sessionId: "sess-run",
+    seq: 1,
+    batch,
+    documents: [],
+  });
+
+  it("is idle without a run and ignores child generations", async () => {
+    const { storage, conversationId } = await conversation();
+    const state = await loadViewState(sessionOver(storage, true).session, conversationId);
+    expect(state.view.run).toEqual({ active: false });
+    const child = { ...task(conversationId, GENERATION_TASK_KIND), parentTaskId: "x" };
+    expect(applyCommitToView(state, conversationId, ev({ createTasks: [child] }))).toEqual([]);
+    expect(state.view.run).toEqual({ active: false });
+  });
+
+  it("loads an active run from committed tasks", async () => {
+    const { storage, conversationId } = await conversation();
+    const g = { ...task(conversationId, GENERATION_TASK_KIND), createdAt: 1_700_000_000_000 };
+    await storage.commit({ createTasks: [g] }, null);
+    const state = await loadViewState(sessionOver(storage, true).session, conversationId);
+    expect(state.view.run).toEqual({
+      active: true,
+      runId: g.id,
+      startedAt: new Date(1_700_000_000_000).toISOString(),
+    });
+  });
+
+  it("patches when a run starts and stays active until the root task is terminal", async () => {
+    const { storage, conversationId } = await conversation();
+    const state = await loadViewState(sessionOver(storage, true).session, conversationId);
+    const g = { ...task(conversationId, GENERATION_TASK_KIND), createdAt: 1_700_000_000_000 };
+    const start = applyCommitToView(state, conversationId, ev({ createTasks: [g] }));
+    expect(state.view.run.active).toBe(true);
+    expect(start.length).toBeGreaterThan(0);
+    expect(start.every((op) => op.path.startsWith("/run"))).toBe(true);
+    // A waiting root (tools running, approval pending) is still active.
+    const waiting = { ...g, status: "waiting" as const, updatedAt: 2 };
+    expect(applyCommitToView(state, conversationId, ev({ replaceTasks: [waiting] }))).toEqual([]);
+    const done = { ...g, status: "terminal" as const, updatedAt: 3 };
+    const end = applyCommitToView(state, conversationId, ev({ replaceTasks: [done] }));
+    expect(state.view.run).toEqual({ active: false });
+    expect(end.every((op) => op.path.startsWith("/run"))).toBe(true);
+  });
+
+  it("ignores another conversation's run", async () => {
+    const { storage, conversationId } = await conversation();
+    const state = await loadViewState(sessionOver(storage, true).session, conversationId);
+    const g = task("other", GENERATION_TASK_KIND);
+    expect(applyCommitToView(state, conversationId, ev({ createTasks: [g] }))).toEqual([]);
+    expect(state.view.run).toEqual({ active: false });
   });
 });

@@ -211,6 +211,20 @@ describe('running composer (AE5)', () => {
     });
 });
 
+describe('run active with live cleared (tool round)', () => {
+    it('shows Stop and Steer while a tool executes, then returns to Send', async () => {
+        const f = fakeClient();
+        await mount(f);
+        await snapshot(f, viewOf({ run: { active: true, runId: 'run1', startedAt: '2026-01-01T00:00:00.000Z' } }));
+        expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+        type('redirect');
+        expect(screen.getByRole('button', { name: 'Steer now' })).toBeTruthy();
+        await snapshot(f, viewOf({ run: { active: false } }));
+        expect(screen.queryByRole('button', { name: /Stop/ })).toBeNull();
+        expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy();
+    });
+});
+
 describe('stop', () => {
     it('aborts once, disables Stop, and returns to idle on the terminal view', async () => {
         const f = fakeClient();
