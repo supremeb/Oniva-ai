@@ -17,6 +17,7 @@ import { CostBadge, runForTurn } from './CostBadge';
 import { useConversationCost, type ConversationCost } from '@/lib/engine/cost';
 import {
     createViewAdapter,
+    isCompactionRunning,
     toDecisionError,
     EngineConversationClient,
     type EngineMessage,
@@ -296,6 +297,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                     messages={messages}
                     pending={bubbles}
                     running={running}
+                    compacting={isCompactionRunning(view)}
                     onRetry={handleRetry}
                     approvalHandlers={approvalHandlers}
                     renderMessageFooter={renderMessageFooter}

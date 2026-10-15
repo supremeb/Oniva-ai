@@ -6,3 +6,4 @@ export { ConversationWatcher, type Connection, type PendingEntry, type WatcherOp
 export { useEngineConversation, type UseEngineConversation } from './useEngineConversation';
 export { viewToMessages, createViewAdapter, type EngineMessage } from './viewToMessages';
 export { DecisionError, toDecisionError, summarizeArguments } from './approval';
+export { isCompactionRunning } from './compaction';
