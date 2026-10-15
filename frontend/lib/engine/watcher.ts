@@ -108,6 +108,11 @@ export class ConversationWatcher {
     const { requestId, ...rest } = entry;
     if (!this.state.pending.some((p) => p.requestId === requestId)) {
       this.set({ pending: [...this.state.pending, { requestId, ...rest, status: 'sending' }] });
+    } else {
+      // A retry of a failed submit reuses the same requestId (idempotent on the server).
+      this.set({
+        pending: this.state.pending.map((p) => (p.requestId === requestId ? { ...p, status: 'sending' } : p)),
+      });
     }
     try {
       const input: SubmitInput = { requestId, ...rest };

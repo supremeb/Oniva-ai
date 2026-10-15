@@ -31,8 +31,9 @@ export interface ChatShellProps {
     agentInfo: AgentDisplayInfo | null;
     hasMessages: boolean;
     onBackToProject: () => void;
-    onRename: () => void;
-    onDelete: () => void;
+    /** Omit both to hide the overflow menu (engine chat has no rename/delete route yet). */
+    onRename?: () => void;
+    onDelete?: () => void;
     /** Empty-state hero + welcome input (shown when there are no messages). */
     welcome: ReactNode;
     /** Scrollable transcript (shown when there are messages). */
@@ -126,7 +127,7 @@ export function ChatShell({
                                 >
                                     <SidebarSimple className="h-5 w-5" weight={rightPanelOpen ? 'fill' : 'regular'} />
                                 </button>
-                                <DropdownMenu>
+                                {(onRename || onDelete) && (<DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                         <button className={cn(
                                             'h-8 w-8 flex items-center justify-center rounded-lg',
@@ -137,20 +138,21 @@ export function ChatShell({
                                         </button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end" className="w-40">
-                                        <DropdownMenuItem onClick={onRename}>
+                                        <DropdownMenuItem onClick={onRename} disabled={!onRename}>
                                             <PencilSimple className="h-3.5 w-3.5 mr-2" />
                                             Rename
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem
                                             onClick={onDelete}
+                                            disabled={!onDelete}
                                             className="text-destructive focus:text-destructive"
                                         >
                                             <Trash className="h-3.5 w-3.5 mr-2" />
                                             Delete
                                         </DropdownMenuItem>
                                     </DropdownMenuContent>
-                                </DropdownMenu>
+                                </DropdownMenu>)}
                             </>
                         )}
                     </div>

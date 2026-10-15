@@ -10,6 +10,8 @@ const noop = () => () => {};
 export interface UseEngineConversation extends WatcherState {
   /** Submit with a fresh requestId; returns it. Rejects when retries are exhausted. */
   submit(input: { text?: string; content?: unknown; whenBusy?: 'followUp' | 'steer' | 'reject' }): Promise<string>;
+  /** Resend a failed pending submission with its original requestId. */
+  retry(requestId: string): Promise<void>;
   abort(reason?: string): Promise<void>;
   decide(toolTaskId: string, decision: 'approve' | 'deny', note?: string): Promise<void>;
 }
@@ -47,6 +49,15 @@ export function useEngineConversation(
     },
     [watcher]
   );
+  const retry = useCallback<UseEngineConversation['retry']>(
+    async (requestId) => {
+      const entry = watcher?.getState().pending.find((p) => p.requestId === requestId);
+      if (!watcher || !entry) return;
+      const { status: _status, ...rest } = entry;
+      await watcher.submit(rest);
+    },
+    [watcher]
+  );
   const abort = useCallback(
     async (reason?: string) => {
       if (conversationId) await client.abort(conversationId, reason);
@@ -60,5 +71,5 @@ export function useEngineConversation(
     [client, conversationId]
   );
 
-  return { ...state, submit, abort, decide };
+  return { ...state, submit, retry, abort, decide };
 }

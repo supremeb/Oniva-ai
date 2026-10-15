@@ -14,6 +14,16 @@ export interface SubmitInput {
   whenBusy?: 'followUp' | 'steer' | 'reject';
 }
 
+/** What the composer lets a user pick; snake_case matches the backend `Selections` model. */
+export interface ChatSelectionsInput {
+  agent_id?: string;
+  skill_ids?: string[];
+  connector_ids?: string[];
+  knowledge_base_ids?: string[];
+  web_search?: boolean;
+  specific_sites?: string[];
+}
+
 export interface CreateResult {
   conversationId: string;
   projectId: string;
@@ -56,11 +66,20 @@ export class EngineConversationClient {
     this.sleep = opts.sleep ?? defaultSleep;
   }
 
-  create(projectId: string, agent?: Record<string, unknown>): Promise<CreateResult> {
+  /** Create a conversation. The server builds the agent config from the selections (KTD2). */
+  create(projectId: string, selections?: ChatSelectionsInput): Promise<CreateResult> {
     return apiFetch<CreateResult>(BASE, {
       method: 'POST',
-      body: JSON.stringify({ project_id: projectId, ...(agent ? { agent } : {}) }),
+      body: JSON.stringify({ project_id: projectId, ...(selections ? { selections } : {}) }),
       timeout: 15000,
+    });
+  }
+
+  /** Change the conversation's skill/connector/KB/web selections mid-conversation. */
+  updateSelections(conversationId: string, selections: ChatSelectionsInput): Promise<unknown> {
+    return apiFetch<unknown>(`${BASE}/${encodeURIComponent(conversationId)}/selections`, {
+      method: 'PATCH',
+      body: JSON.stringify(selections),
     });
   }
 

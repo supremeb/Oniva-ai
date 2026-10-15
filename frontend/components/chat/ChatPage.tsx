@@ -1,12 +1,23 @@
 'use client';
 
+import { useState } from 'react';
+import { useEngineChatMode } from '@/lib/hooks/useFeature';
+import { EngineChat } from './EngineChat';
 import { LegacyChat } from './LegacyChat';
 
 interface ChatPageProps {
     projectId?: string;
 }
 
-/** Chat entry point. Picks the chat mode; only the legacy path exists until the engine branch lands (U7). */
+/** Chat entry point. The tenant flag picks the mode once per mount (KTD1); `?c=` rejoins an engine conversation. */
 export function ChatPage({ projectId }: ChatPageProps = {}) {
+    const mode = useEngineChatMode();
+    // Read once: the URL is written by EngineChat itself. (useSearchParams would force a Suspense boundary on the page.)
+    const [conversationId] = useState<string | null>(() =>
+        typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('c')
+    );
+    if (mode === 'engine') {
+        return <EngineChat projectId={projectId} initialConversationId={conversationId} />;
+    }
     return <LegacyChat projectId={projectId} />;
 }
