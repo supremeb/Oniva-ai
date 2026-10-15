@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, FastAPI
 from app.config import Settings
 from app.internal_api.auth import InternalAuth, InternalUnauthorized, internal_unauthorized_handler
 from app.internal_api.logging import install_redaction
+from app.internal_api.models import router as models_router
+from app.internal_api.tools import router as tools_router
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,8 @@ def build_internal_router(settings: Settings) -> APIRouter:
     async def ping():
         return {"ok": True}
 
+    router.include_router(tools_router)
+    router.include_router(models_router)
     return router
 
 

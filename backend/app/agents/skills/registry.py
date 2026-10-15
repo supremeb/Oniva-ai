@@ -213,6 +213,7 @@ BUILTIN_SKILLS = [
         description="Check multiple entities against OFAC/EU sanctions lists in one call. Preferred over individual sanctions_check for bulk screening.",
         category="compliance",
         module_path="app.agents.skills.compliance",
+        mock=True,
         required_feature="ENABLE_COMPLIANCE",
     ),
     SkillManifest(
@@ -220,6 +221,7 @@ BUILTIN_SKILLS = [
         description="Perform KYC verification for multiple entities in one call. Preferred over individual kyc_verification for bulk checks.",
         category="compliance",
         module_path="app.agents.skills.compliance",
+        mock=True,
         required_feature="ENABLE_COMPLIANCE",
     ),
     SkillManifest(
