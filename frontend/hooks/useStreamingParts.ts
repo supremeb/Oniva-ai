@@ -25,48 +25,16 @@
 import { useCallback, useRef, useState } from 'react';
 import type { MessagePart, SourceItem, WorkflowPreview, WorkflowProgressEvent, WorkflowCompleteEvent } from '@/lib/models';
 import type { SSEEventHandlers } from '@/lib/sse/parseChatSSE';
-
-/**
- * Strip raw LLM function/tool call markup that leaks into text content.
- * Handles multiple formats:
- *   - XML: <function_calls>...<invoke>...</invoke>...</function_calls>
- *   - DSML: < | DSML | function_calls>...< | DSML | invoke>...</ DSML...>
- *   - Broken: andfunction_calls>, invfunction_calls>, partial tags
- *   - JSON tool calls: {"function_call": ...} blocks after function_calls
- */
-function stripFunctionCallMarkup(text: string): string {
-  if (!text) return text;
-  let cleaned = text;
-
-  // 1. Complete XML blocks: <function_calls>...</function_calls> and variants
-  cleaned = cleaned.replace(/<\s*\|?\s*(?:DSML\s*\|?\s*)?function_calls\s*>[\s\S]*?<\s*\/?\s*\|?\s*(?:DSML\s*\|?\s*)?(?:inv)?function_calls\s*>/gi, '');
-
-  // 2. Partial/unclosed function_calls block at end of string
-  cleaned = cleaned.replace(/<\s*\|?\s*(?:DSML\s*\|?\s*)?function_calls\s*>[\s\S]*$/gi, '');
-
-  // 3. Any tag containing "function_calls" (catches all variants)
-  cleaned = cleaned.replace(/<\/?[^>]*function_calls[^>]*>/gi, '');
-
-  // 4. DSML invoke/parameter tags
-  cleaned = cleaned.replace(/<\s*\|?\s*(?:DSML\s*\|?\s*)?\/?\s*(?:invoke|parameter)[^>]*>/gi, '');
-
-  // 5. Standard invoke tags (including <functioninvoke> merged variant from DeepSeek)
-  cleaned = cleaned.replace(/<\/?(?:function)?(?:invoke|antml:invoke|antml:parameter)[^>]*>/gi, '');
-
-  // 6. Broken fragments: "andfunction_calls>", "invfunction_calls>", "function_cinvoke..."
-  cleaned = cleaned.replace(/(?:and|inv)function_calls\s*>/gi, '');
-  cleaned = cleaned.replace(/function_c\w*invoke[^>]*>/gi, '');
-
-  // 7. Stray </parameter or "</parameter patterns (with or without closing >)
-  cleaned = cleaned.replace(/"?\s*<\/?\s*parameter\b[^>]*>?/gi, '');
-
-  // 8. JSON tool call blocks that follow function_calls pattern
-  //    e.g., { "query": "...", "num_results": 5 } appearing as leaked text
-  //    Only strip if preceded by function_calls context (within same line fragment)
-  cleaned = cleaned.replace(/function_calls>\s*\{[^}]*\}/gi, '');
-
-  return cleaned.trim();
-}
+import {
+  stripFunctionCallMarkup,
+  buildTextPart,
+  buildThinkingPart,
+  buildToolCallPart,
+  buildRunningToolCallPart,
+  buildSourcePart,
+  buildFilePart,
+  type ToolCallMeta,
+} from '@/lib/chat/parts';
 
 /** Internal source with computed citation number */
 interface IndexedSource extends SourceItem {
@@ -74,20 +42,7 @@ interface IndexedSource extends SourceItem {
   toolCallId?: string;
 }
 
-/** Enriched tool call metadata exposed to components */
-export interface ToolCallMeta {
-  id: string;
-  toolName: string;
-  label?: string;
-  description?: string;
-  status: 'pending' | 'running' | 'success' | 'error';
-  args?: Record<string, unknown>;
-  result?: unknown;
-  error?: string;
-  durationMs?: number;
-  sources: SourceItem[];
-  producesFile?: boolean;
-}
+export type { ToolCallMeta };
 
 interface StreamingPartsState {
   /** Accumulated rich parts for the current streaming message */
@@ -180,11 +135,7 @@ export function useStreamingParts() {
       // 1. Pre-tool text (initial response before any tool was called)
       const cleanedPreToolText = stripFunctionCallMarkup(preToolText);
       if (cleanedPreToolText) {
-        parts.push({
-          type: 'text',
-          content: cleanedPreToolText,
-          isStreaming: false, // Pre-tool text is always complete
-        });
+        parts.push(buildTextPart(cleanedPreToolText, false)); // Pre-tool text is always complete
       }
 
       // 2. Chain parts in temporal order (interleaved thinking + tool calls)
@@ -198,19 +149,7 @@ export function useStreamingParts() {
       //    between finalize() and a concurrent reset() call).
       for (const [, meta] of toolCallMetaRef.current) {
         if (!chainToolIds.has(meta.id)) {
-          parts.push({
-            type: 'tool_call',
-            id: meta.id,
-            toolName: meta.toolName,
-            status: meta.status,
-            args: meta.args,
-            result: meta.result,
-            error: meta.error,
-            durationMs: meta.durationMs,
-            label: meta.label,
-            description: meta.description,
-            sources: meta.sources,
-          } as MessagePart);
+          parts.push(buildToolCallPart({ id: meta.id, toolName: meta.toolName, status: meta.status, args: meta.args, result: meta.result, error: meta.error, durationMs: meta.durationMs, label: meta.label, description: meta.description, sources: meta.sources }));
         }
       }
 
@@ -222,11 +161,7 @@ export function useStreamingParts() {
       // 5. Post-tool text (response after tools completed)
       const cleanedPostToolText = stripFunctionCallMarkup(postToolText);
       if (cleanedPostToolText) {
-        parts.push({
-          type: 'text',
-          content: cleanedPostToolText,
-          isStreaming: streaming && runningToolCountRef.current === 0,
-        });
+        parts.push(buildTextPart(cleanedPostToolText, streaming && runningToolCountRef.current === 0));
       }
     } else if (toolCallMetaRef.current.size > 0 && chainPartsRef.current.length === 0) {
       // ── Tool calls exist in metadata but chainPartsRef is empty ──
@@ -235,19 +170,7 @@ export function useStreamingParts() {
       // map. Reconstruct tool_call MessageParts so they appear in the output.
 
       for (const [, meta] of toolCallMetaRef.current) {
-        parts.push({
-          type: 'tool_call',
-          id: meta.id,
-          toolName: meta.toolName,
-          status: meta.status,
-          args: meta.args,
-          result: meta.result,
-          error: meta.error,
-          durationMs: meta.durationMs,
-          label: meta.label,
-          description: meta.description,
-          sources: meta.sources,
-        } as MessagePart);
+        parts.push(buildToolCallPart({ id: meta.id, toolName: meta.toolName, status: meta.status, args: meta.args, result: meta.result, error: meta.error, durationMs: meta.durationMs, label: meta.label, description: meta.description, sources: meta.sources }));
       }
 
       // Info messages
@@ -258,11 +181,7 @@ export function useStreamingParts() {
       // Response text
       const cleanedText = stripFunctionCallMarkup(textRef.current);
       if (cleanedText) {
-        parts.push({
-          type: 'text',
-          content: cleanedText,
-          isStreaming: streaming,
-        });
+        parts.push(buildTextPart(cleanedText, streaming));
       }
     } else {
       // ── No tools: original order (chain parts → info → text) ──
@@ -280,24 +199,13 @@ export function useStreamingParts() {
       // 3. Text content
       const cleanedText = stripFunctionCallMarkup(textRef.current);
       if (cleanedText) {
-        parts.push({
-          type: 'text',
-          content: cleanedText,
-          isStreaming: streaming && chainPartsRef.current.length === 0,
-        });
+        parts.push(buildTextPart(cleanedText, streaming && chainPartsRef.current.length === 0));
       }
     }
 
     // Sources (always last)
     for (const source of sourcesRef.current) {
-      parts.push({
-        type: 'source',
-        sourceType: source.sourceType || (source.url?.startsWith('http') ? 'url' : 'document'),
-        title: source.title,
-        url: source.url,
-        description: source.snippet,
-        citationNumber: source.citationNumber,
-      } as MessagePart);
+      parts.push(buildSourcePart(source));
     }
 
     // File parts (always last)
@@ -348,13 +256,7 @@ export function useStreamingParts() {
     } else {
       // Push a new thinking segment
       const newIdx = chainPartsRef.current.length;
-      chainPartsRef.current.push({
-        type: 'thinking',
-        variant: 'accordion',
-        thinkingContent: content,
-        isThinking: true,
-        showElapsed: true,
-      } as MessagePart);
+      chainPartsRef.current.push(buildThinkingPart({ content, isThinking: true, showElapsed: true }));
       activeThinkingIdxRef.current = newIdx;
     }
     scheduleUpdate();
@@ -441,14 +343,7 @@ export function useStreamingParts() {
     activeThinkingIdxRef.current = -1;
 
     // Push tool call into the ordered chain and record its index
-    const toolPart: MessagePart = {
-      type: 'tool_call',
-      id,
-      toolName,
-      status: 'running',
-      args,
-      steps: label ? [{ id: `step-${id}`, label, status: 'active' }] : undefined,
-    } as MessagePart;
+    const toolPart: MessagePart = buildRunningToolCallPart({ id, toolName, args, label });
     toolCallIndexRef.current.set(id, chainPartsRef.current.length);
     chainPartsRef.current.push(toolPart);
 
@@ -580,15 +475,14 @@ export function useStreamingParts() {
     const toolCallId = partData.toolCallId as string | undefined;
 
     if (partType === 'file') {
-      filesRef.current = [...filesRef.current, {
-        type: 'file',
-        filename: (partData.filename as string) || 'untitled',
+      filesRef.current = [...filesRef.current, buildFilePart({
+        filename: partData.filename as string | undefined,
         size: partData.size as number | undefined,
         fileType: partData.fileType as string | undefined,
         downloadUrl: partData.downloadUrl as string | undefined,
         content: partData.content as string | undefined,
         toolCallId,
-      } as MessagePart];
+      })];
     } else if (partType === 'table') {
       infoPartsRef.current = [...infoPartsRef.current, {
         type: 'table',
