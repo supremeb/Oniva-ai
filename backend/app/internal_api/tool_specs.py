@@ -114,6 +114,15 @@ TOOL_SPECS: Dict[str, ToolSpec] = {
     "dw_finalize": _write(idempotent=True),
     "dw_get_learnings": _read(),
     "dw_get_report": _read(),
+    # Deep Work sandbox and output tools (engine path, U5). Sandboxes are isolated and the worker cannot
+    # ask for approval, so none requires it. Only inspect is a pure read; a repeated publish replaces by
+    # filename but stays non-idempotent so the engine reconciles instead of re-running. The E2B key is
+    # resolved by the tool itself (env, then the user's stored key), so no needs_keys.
+    "shell_exec": _write(timeout_ms=SANDBOX_MS),
+    "dw_browser_navigate": _write(timeout_ms=BROWSER_MS),
+    "dw_browser_screenshot": _write(timeout_ms=BROWSER_MS),
+    "inspect_artifact": _read(SANDBOX_MS),
+    "publish_artifact": _write(timeout_ms=SANDBOX_MS),
     # Interactive or loop-internal: declared, but not served to the engine.
     "ask_user": _INTERACTIVE,
     "present_plan": _INTERACTIVE,

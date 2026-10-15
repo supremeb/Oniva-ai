@@ -10,6 +10,7 @@ The root conversation id arrives as ``ctx.metadata["conversation_id"]`` (U3), wh
 conversation (worker, reflector) made the call.
 """
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -25,6 +26,8 @@ from app.services import deep_work_state as dws
 from app.services import session_storage as _session_storage
 from app.services.deep_work.models import Learning
 from app.services.deep_work.synthesis import build_sources_section, select_learnings
+
+logger = logging.getLogger(__name__)
 
 WORKER_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_SUB_QUERY_CHARS = 2000
@@ -85,6 +88,16 @@ def _aware(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)  # SQLite drops tzinfo
+
+
+async def _teardown_sandbox(run_id: Any, worker_id: str) -> None:
+    """Best-effort end of a worker's sandbox (U5, KTD10); never fails the tool call."""
+    try:
+        from app.services.deep_work import engine_sandbox
+
+        await engine_sandbox.teardown_worker(run_id, worker_id)
+    except Exception:
+        logger.warning("Sandbox teardown hook failed for %s:%s", run_id, worker_id, exc_info=True)
 
 
 # --- run-state views ----------------------------------------------------------
@@ -339,6 +352,7 @@ async def dw_save_learnings(ctx: SkillContext, worker_id: str, learnings: List[D
     if (refusal := _refusal(run)) is not None:
         return refusal
     files = [path, await _write(run, "todo.md", _render_todo(run))]
+    await _teardown_sandbox(run.id, worker_id)  # U5: the worker's sandbox and proxy token end with its learnings
     remaining = _open_workers(_round_entry(run, entry["round"]) or {})
     payload = {
         "worker_id": worker_id, "round": entry["round"], "learning_count": len(stored),
@@ -532,6 +546,7 @@ async def dw_finalize(ctx: SkillContext, failed_workers: Optional[List[str]] = N
         path = await _write(run, "report.md", report)
         locked.advance(phase="done", status="completed")
         artifacts = locked.run.artifacts
+    await _teardown_sandbox(run.id, "output_agent")  # U5: nothing outlives the run
     return _ok({"report_length": len(report), "artifacts": artifacts}, [path])
 
 

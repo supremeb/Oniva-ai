@@ -89,7 +89,7 @@ def test_kb_and_connectors_add_tools_and_sandbox_without_deliverable_has_no_outp
     cfg = compose_execute_config(inputs(
         has_search=True, knowledge_base_ids=["k"], connector_ids=["c"], sandbox_enabled=True), NOW)
     w = cfg["metadata"]["subagents"]["research_worker"]["tools"]
-    assert "search_knowledge" in w and "invoke_connector_tool" in w and "browser_navigate" in w
+    assert "search_knowledge" in w and "invoke_connector_tool" in w and "dw_browser_navigate" in w
     assert "output_agent" not in cfg["tools"]
 
 

@@ -36,7 +36,7 @@ WEB_TOOLS = ("web_search", "browse_url")
 KNOWLEDGE_TOOL = "search_knowledge"
 FILE_TOOL = "read_file"
 CONNECTOR_TOOLS = ("list_available_connectors", "get_connector_schema", "invoke_connector_tool")
-SANDBOX_WORKER_TOOLS = ("shell_exec", "browser_navigate", "browser_screenshot")
+SANDBOX_WORKER_TOOLS = ("shell_exec", "dw_browser_navigate", "dw_browser_screenshot")
 SANDBOX_OUTPUT_TOOLS = ("shell_exec", "inspect_artifact", "publish_artifact")
 
 ORCHESTRATOR_TOOLS = (

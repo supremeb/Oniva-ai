@@ -396,6 +396,37 @@ BUILTIN_SKILLS = [
         category="deep_work",
         module_path="app.services.deep_work.engine_tools"
     ),
+    # Deep Work sandbox and output tools (engine path, U5)
+    SkillManifest(
+        name="shell_exec",
+        description="Run a shell command in the Deep Work sandbox",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_sandbox"
+    ),
+    SkillManifest(
+        name="dw_browser_navigate",
+        description="Browse a URL with a headless browser in the Deep Work sandbox",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_sandbox"
+    ),
+    SkillManifest(
+        name="dw_browser_screenshot",
+        description="Screenshot a URL in the Deep Work sandbox",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_sandbox"
+    ),
+    SkillManifest(
+        name="inspect_artifact",
+        description="Inspect a generated file in the Deep Work output sandbox",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_sandbox"
+    ),
+    SkillManifest(
+        name="publish_artifact",
+        description="Publish a Deep Work deliverable from the output sandbox",
+        category="deep_work",
+        module_path="app.services.deep_work.engine_sandbox"
+    ),
 ]
 
 # Initialize manifests

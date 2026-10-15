@@ -266,6 +266,16 @@ async def _mutate(
         return locked.run
 
 
+async def replace_artifact(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any, artifact: Dict[str, Any],
+) -> Optional[RunSnapshot]:
+    """Record a published deliverable, replacing an earlier one with the same ``filename`` (U5)."""
+    def fn(row: DeepWorkRun) -> None:
+        kept = [a for a in (row.artifacts or []) if not (isinstance(a, dict) and a.get("filename") == artifact.get("filename"))]
+        row.artifacts = [*kept, artifact]
+    return await _mutate(factory, tenant_id, conversation_id, fn)
+
+
 async def register_round(
     factory: SessionFactory, tenant_id: Any, conversation_id: Any, *, round: int, workers: List[Dict[str, Any]],
 ) -> Optional[RunSnapshot]:
