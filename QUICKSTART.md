@@ -255,8 +255,15 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Run database migrations
-alembic upgrade head
+# Point the backend at the three DB roles (passwords from your root .env; see below).
+# DATABASE_URL = oniva_app (request path), SYSTEM_DATABASE_URL = oniva_system (BYPASSRLS),
+# MIGRATION_DATABASE_URL = schema owner (POSTGRES_USER). Put these in backend/.env or export them.
+export DATABASE_URL=postgresql+asyncpg://oniva_app:$APP_DATABASE_PASSWORD@localhost:5432/oniva
+export SYSTEM_DATABASE_URL=postgresql+asyncpg://oniva_system:$SYSTEM_DATABASE_PASSWORD@localhost:5432/oniva
+export MIGRATION_DATABASE_URL=postgresql+asyncpg://oniva:$POSTGRES_PASSWORD@localhost:5432/oniva
+
+# Migrations run automatically at startup in development (AUTO_MIGRATE defaults to true).
+# To run them by hand: alembic upgrade head
 
 # Start the server
 uvicorn app.main:app --reload --port 8000
@@ -344,7 +351,7 @@ docker compose up --build
 
 ```bash
 # Connect to PostgreSQL
-docker compose exec postgres psql -U postgres -d oniva
+docker compose exec postgres psql -U oniva -d oniva
 
 # Run migrations
 docker compose exec backend alembic upgrade head
@@ -458,8 +465,13 @@ docker compose up --build
 ### Required
 
 ```bash
-# Database (auto-configured in Docker)
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/oniva
+# Database: three roles (docker compose builds these URLs for you from the passwords in .env)
+POSTGRES_PASSWORD=...            # schema owner "oniva" (migrations)
+APP_DATABASE_PASSWORD=...        # oniva_app    -> DATABASE_URL        (NOSUPERUSER NOBYPASSRLS)
+SYSTEM_DATABASE_PASSWORD=...     # oniva_system -> SYSTEM_DATABASE_URL (BYPASSRLS)
+# The role passwords are applied on the FIRST boot of an empty postgres volume. If you already
+# have a volume from before this change, either `docker compose down -v` (destroys data) or run
+# ALTER ROLE oniva_app PASSWORD '...' / ALTER ROLE oniva_system PASSWORD '...' (see DEPLOYMENT.md).
 
 # Redis (auto-configured in Docker)
 REDIS_URL=redis://redis:6379

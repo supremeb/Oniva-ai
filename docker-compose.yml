@@ -2,20 +2,23 @@ version: '3.8'
 
 services:
   postgres:
-    build:
-      context: ./postgres
-      dockerfile: Dockerfile
+    image: pgvector/pgvector:pg16
     environment:
-      # SECURITY: Use environment variables for credentials
+      # POSTGRES_USER is the schema OWNER (bootstrap superuser of this dev container).
+      # The app never connects as it: DATABASE_URL uses oniva_app, SYSTEM_DATABASE_URL oniva_system.
       POSTGRES_DB: ${POSTGRES_DB:-oniva}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-oniva}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD:?APP_DATABASE_PASSWORD is required}
+      SYSTEM_DATABASE_PASSWORD: ${SYSTEM_DATABASE_PASSWORD:?SYSTEM_DATABASE_PASSWORD is required}
     ports:
       - "127.0.0.1:5432:5432"  # Bind to localhost only
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # First-boot only: creates oniva_app / oniva_system with passwords + extensions
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oniva} -d ${POSTGRES_DB:-oniva}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -43,7 +46,13 @@ services:
       - "8000:8000"
     environment:
       # SECURITY: All secrets from environment variables
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      # Three roles (see DEPLOYMENT.md). URLs are assembled here from the role passwords so
+      # they cannot drift from what the postgres init script created. Use URL-safe passwords.
+      DATABASE_URL: postgresql+asyncpg://oniva_app:${APP_DATABASE_PASSWORD}@postgres:5432/${POSTGRES_DB:-oniva}
+      SYSTEM_DATABASE_URL: postgresql+asyncpg://oniva_system:${SYSTEM_DATABASE_PASSWORD}@postgres:5432/${POSTGRES_DB:-oniva}
+      MIGRATION_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-oniva}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oniva}
+      APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       ENCRYPTION_SALT: ${ENCRYPTION_SALT:-}

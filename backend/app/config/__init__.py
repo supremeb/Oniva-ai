@@ -13,6 +13,15 @@ from pathlib import Path
 # Get absolute path to .env file (relative to this config package)
 _ENV_FILE = Path(__file__).parent.parent.parent / ".env"
 
+# Exact-match weak passwords (lower-cased). Placeholder prefixes are checked separately.
+_WEAK_DB_PASSWORDS = frozenset({
+    "", "postgres", "password", "passw0rd", "changeme", "change_me", "change-me",
+    "default", "test", "example", "admin", "root", "secret", "oniva", "oniva_app",
+    "oniva_system", "123456", "12345678", "qwerty", "letmein", "pass", "user",
+})
+_PLACEHOLDER_PREFIXES = ("change_me", "change-me", "changeme", "replace_with", "replace-with")
+_SUPERUSER_NAMES = frozenset({"postgres", "root", "admin", "superuser"})
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -351,6 +360,66 @@ class Settings(BaseSettings):
             return self.AUTO_MIGRATE
         return self.ENVIRONMENT not in ("production", "prod")
 
+    @staticmethod
+    def _is_weak_db_password(password: Optional[str]) -> bool:
+        if password is None:
+            return True
+        lowered = password.strip().lower()
+        return lowered in _WEAK_DB_PASSWORDS or lowered.startswith(_PLACEHOLDER_PREFIXES)
+
+    def _validate_database_credentials(self) -> list[str]:
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.exc import ArgumentError
+
+        errors: list[str] = []
+        parsed = {}
+        for name, raw in (
+            ("DATABASE_URL", self.DATABASE_URL),
+            ("SYSTEM_DATABASE_URL", self.SYSTEM_DATABASE_URL),
+            ("MIGRATION_DATABASE_URL", self.MIGRATION_DATABASE_URL),
+        ):
+            if not raw:
+                if name == "SYSTEM_DATABASE_URL":
+                    errors.append(
+                        "SYSTEM_DATABASE_URL must be set in production "
+                        "(BYPASSRLS oniva_system role for scheduler/webhooks/startup recovery)."
+                    )
+                continue
+            try:
+                url = make_url(raw)
+            except (ArgumentError, ValueError):
+                # Never echo the raw value: it may contain a password.
+                errors.append(f"{name} is not a valid SQLAlchemy database URL.")
+                continue
+            parsed[name] = url
+            if self._is_weak_db_password(url.password):
+                errors.append(
+                    f"{name} has a missing or weak/default password. "
+                    "Generate secure credentials using: python scripts/generate_secrets.py"
+                )
+
+        if self.APP_DATABASE_PASSWORD and self._is_weak_db_password(self.APP_DATABASE_PASSWORD):
+            errors.append(
+                "APP_DATABASE_PASSWORD is a weak/default value. "
+                "Generate a secure password using: python scripts/generate_secrets.py"
+            )
+
+        app_url = parsed.get("DATABASE_URL")
+        if app_url is not None:
+            app_user = (app_url.username or "").lower()
+            if app_user in _SUPERUSER_NAMES:
+                errors.append(
+                    f"DATABASE_URL must connect as the non-superuser '{self.APP_DATABASE_USER}' role, "
+                    f"not '{app_url.username}'."
+                )
+            owner = parsed.get("MIGRATION_DATABASE_URL")
+            if owner is not None and owner.username and app_user == owner.username.lower():
+                errors.append("DATABASE_URL user must differ from the schema owner (MIGRATION_DATABASE_URL user).")
+            system = parsed.get("SYSTEM_DATABASE_URL")
+            if system is not None and system.username and app_user == system.username.lower():
+                errors.append("DATABASE_URL user must differ from the SYSTEM_DATABASE_URL user (RLS separation).")
+        return errors
+
     def validate_production_security(self) -> None:
         """Validate that production deployments use secure credentials.
 
@@ -405,29 +474,9 @@ class Settings(BaseSettings):
                 "Generate a secure salt using: python scripts/generate_secrets.py"
             )
 
-        # 3. Validate database passwords
-        insecure_db_patterns = [
-            "postgres",
-            "password",
-            "changeme",
-            "change",
-            "default",
-            "test",
-            "example",
-        ]
-        if "DATABASE_URL" in str(self.DATABASE_URL):
-            db_url_lower = self.DATABASE_URL.lower()
-            if any(pattern in db_url_lower for pattern in insecure_db_patterns):
-                errors.append(
-                    "DATABASE_URL contains insecure password. "
-                    "Generate secure credentials using: python scripts/generate_secrets.py"
-                )
-
-        if self.APP_DATABASE_PASSWORD and any(pattern in self.APP_DATABASE_PASSWORD.lower() for pattern in insecure_db_patterns):
-            errors.append(
-                "APP_DATABASE_PASSWORD contains insecure default value. "
-                "Generate a secure password using: python scripts/generate_secrets.py"
-            )
+        # 3. Validate database credentials (parse URLs; never substring-match the whole URL,
+        #    a valid URL legitimately contains "postgres" in its scheme/user/host).
+        errors.extend(self._validate_database_credentials())
 
         # 4. Validate CORS configuration
         if not self.CORS_ORIGINS or self.CORS_ORIGINS == "*":

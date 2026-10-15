@@ -9,6 +9,38 @@
 - Domain name with DNS configured
 - TLS certificates (or Let's Encrypt)
 
+### Database roles (read this first)
+
+Oniva enforces row-level security, so it runs with three Postgres roles. The app refuses to
+start if `DATABASE_URL` is a superuser or BYPASSRLS role.
+
+| Role | Used by | Attributes | Env var |
+|------|---------|------------|---------|
+| schema owner (`oniva` / `POSTGRES_USER`) | Alembic migrations only | owns the tables | `MIGRATION_DATABASE_URL` |
+| `oniva_app` | the request path | `NOSUPERUSER NOBYPASSRLS` | `DATABASE_URL` |
+| `oniva_system` | scheduler, webhooks, startup recovery, pre-tenant auth | `BYPASSRLS` | `SYSTEM_DATABASE_URL` |
+
+Migrations `100_baseline` / `101_system_role` create `oniva_app` and `oniva_system` only if they
+do not exist and never set passwords. Passwords are provisioned out-of-band:
+
+- Fresh database via the bundled compose files / k8s manifests: `postgres/init/01-roles.sh`
+  creates both roles with passwords on first boot (from `APP_DATABASE_PASSWORD` and
+  `SYSTEM_DATABASE_PASSWORD`).
+- Existing database or managed Postgres (RDS, Cloud SQL...), as a superuser/owner:
+  ```sql
+  -- run AFTER the first `alembic upgrade head` (or create the roles yourself beforehand)
+  ALTER ROLE oniva_app    WITH LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '<APP_DATABASE_PASSWORD>';
+  ALTER ROLE oniva_system WITH LOGIN NOSUPERUSER BYPASSRLS   PASSWORD '<SYSTEM_DATABASE_PASSWORD>';
+  ```
+  On managed Postgres where you cannot grant BYPASSRLS, create `oniva_system` as the
+  provider's closest equivalent and verify `SELECT rolbypassrls FROM pg_roles WHERE rolname='oniva_system'`.
+
+Use URL-safe passwords (hex or `secrets.token_urlsafe`): they are embedded in connection URLs.
+With `ENVIRONMENT=production` the app validates these at boot: weak/default passwords
+(`postgres`, `password`, `changeme`, `CHANGE_ME...`, ...), a missing `SYSTEM_DATABASE_URL`, or
+`DATABASE_URL` using a superuser/owner/system user all abort startup. Production runs with
+`AUTO_MIGRATE=false`; the schema is migrated by a separate step as the owner.
+
 ### Option 1: Docker Compose (Simplest)
 
 1. **Clone and configure**
@@ -18,69 +50,103 @@
    cp .env.example .env
    ```
 
-2. **Edit `.env`**
+2. **Edit `.env`** (generate secrets with `python backend/scripts/generate_secrets.py`)
    ```bash
-   # Required
-   SECRET_KEY=<generate-32-char-key>
-   DB_PASSWORD=<strong-password>
-   DB_USER=postgres
-   DB_NAME=oniva
-
-   # Optional: LLM API keys (or configure in app)
-   OPENROUTER_API_KEY=sk-or-...
+   VERSION=1.0.0                      # image tag, required (no :latest)
+   POSTGRES_USER=oniva                # schema owner
+   POSTGRES_DB=oniva
+   POSTGRES_PASSWORD=<owner-password>
+   APP_DATABASE_PASSWORD=<oniva_app-password>
+   SYSTEM_DATABASE_PASSWORD=<oniva_system-password>
+   REDIS_PASSWORD=<redis-password>
+   SECRET_KEY=<min-32-char-key>
+   ENCRYPTION_SALT=<64-hex-chars>
+   CORS_ORIGINS=https://app.example.com
+   OPENROUTER_API_KEY=sk-or-...       # optional
    ```
+   The compose file assembles `DATABASE_URL`, `SYSTEM_DATABASE_URL` and
+   `MIGRATION_DATABASE_URL` from these; do not set them in `.env` for compose.
 
 3. **Start services**
    ```bash
-   docker-compose -f docker-compose.prod.yml up -d
+   docker compose -f docker-compose.prod.yml up -d
    ```
+   Startup order is enforced: postgres (creates roles on first boot) -> `migrate` (one-shot
+   `alembic upgrade head` as the owner) -> `app` (`AUTO_MIGRATE=false`). `volume-init` makes the
+   `/data` volume writable for uid 1000 because the app container has a read-only root
+   filesystem; sessions, volumes and artifacts live under `/data` (`SESSION_BASE_PATH`,
+   `VOLUMES_BASE_PATH`, `ARTIFACTS_BASE_PATH`).
 
-4. **Run migrations**
-   ```bash
-   docker-compose exec app alembic upgrade head
-   ```
+4. **Access**: the `app` and `frontend` services publish no host ports (so `deploy.replicas`
+   works); traffic enters through the `nginx` service on 80/443 (configure `nginx/nginx.conf`
+   and put certs in `nginx/certs`). To debug a single container use
+   `docker compose -f docker-compose.prod.yml exec app curl -s localhost:8000/health/ready`.
 
-5. **Access application**
-   - Frontend: http://localhost:3000
-   - API: http://localhost:8000/docs
+5. **Upgrades**: bump `VERSION`, `docker compose -f docker-compose.prod.yml up -d --build`;
+   `migrate` re-runs automatically and is a no-op when already at head.
+
+#### Existing databases (created before the Alembic baseline)
+
+Databases that were built by the old `create_all` / ad-hoc DDL already have the schema, so
+do not run the baseline against them. Stamp, then upgrade:
+
+```bash
+# one-off, as the schema owner (MIGRATION_DATABASE_URL must point at the owner)
+docker compose -f docker-compose.prod.yml run --rm migrate alembic stamp 100_baseline
+docker compose -f docker-compose.prod.yml run --rm migrate alembic upgrade head   # applies 101_system_role
+```
+
+Then set the role passwords with the `ALTER ROLE` statements above (the init script does not
+re-run on an existing volume) and make sure the tables are owned by the owner role (not
+`postgres` or `oniva_app`) so grants and RLS policies apply. Take a backup first. Only stamp a
+database whose schema matches the baseline; if unsure, restore into a fresh database instead.
 
 ### Option 2: Kubernetes
 
-1. **Create namespace and secrets**
-   ```bash
-   kubectl apply -f k8s/namespace.yaml
-   # Edit secrets.yaml first with your values!
-   kubectl apply -f k8s/secrets.yaml
-   ```
+Manifests are a kustomize bundle (`kubectl apply -k k8s/`).
 
-2. **Create persistent volumes**
-   ```bash
-   kubectl apply -f k8s/pvc.yaml
-   ```
+1. **Fill in secrets** in `k8s/secrets.yaml` (or provide a `oniva-secrets` Secret through your
+   secret manager with the same keys): `SECRET_KEY`, `ENCRYPTION_SALT`, `DB_PASSWORD` (owner),
+   `APP_DATABASE_PASSWORD`, `SYSTEM_DATABASE_PASSWORD`, `REDIS_PASSWORD`, optional LLM keys.
+   Set `CORS_ORIGINS` in `k8s/configmap.yaml`, the host in `k8s/ingress.yaml`, and the
+   `storageClassName` of `oniva-data-pvc` in `k8s/pvc.yaml` (it must support ReadWriteMany
+   because all API replicas share sessions on `/data`).
 
-3. **Deploy configuration and services**
-   ```bash
-   kubectl apply -f k8s/configmap.yaml
-   kubectl apply -f k8s/deployment.yaml
-   kubectl apply -f k8s/service.yaml
-   ```
+2. **Pin images**: edit `images:` in `k8s/kustomization.yaml` (or
+   `cd k8s && kustomize edit set image oniva=registry/oniva:1.0.0 oniva-frontend=registry/oniva-frontend:1.0.0`).
+   Tags are never `latest`.
 
-4. **Configure ingress**
+3. **Apply**
    ```bash
-   # Edit ingress.yaml to set your domain
-   kubectl apply -f k8s/ingress.yaml
+   kubectl -n oniva delete job oniva-migrate --ignore-not-found   # Jobs are immutable
+   kubectl apply -k k8s/
    ```
+   The `oniva-migrate` Job runs `alembic upgrade head` as the owner; API pods have an init
+   container that waits until the database is at head, and run with `AUTO_MIGRATE=false`.
+   The postgres pod creates `oniva_app` / `oniva_system` with their passwords on first boot
+   (init script from the `postgres-init` ConfigMap, a copy of `postgres/init/01-roles.sh`).
+   `$(VAR)` expansion in env values only sees variables declared earlier in `env` (not
+   `envFrom`), which is why secrets are listed explicitly before the URLs that use them.
 
-5. **Run migrations**
+4. **Probes**: liveness `/health/live`, readiness `/health/ready` (checks the database).
+
+5. **Existing database**: stamp before the Job runs
    ```bash
-   kubectl exec -n oniva deploy/oniva-api -- alembic upgrade head
+   kubectl -n oniva run alembic-stamp --rm -it --restart=Never --image=<your oniva image> \
+     --env="MIGRATION_DATABASE_URL=postgresql+asyncpg://oniva:<owner-pw>@postgres:5432/oniva" \
+     -- alembic stamp 100_baseline
    ```
+   then `kubectl apply -k k8s/`, and set the role passwords with `ALTER ROLE` (see above).
 
-6. **Verify deployment**
+6. **Verify**
    ```bash
-   kubectl get pods -n oniva
+   kubectl get pods,jobs -n oniva
+   kubectl logs -n oniva job/oniva-migrate
    kubectl logs -n oniva -l app=oniva-api
    ```
+
+Redis is a single instance with `--requirepass`. For HA see `k8s/redis-sentinel.yaml` (not part of
+the kustomization; it needs its own password wiring).
 
 ### Option 3: AWS with Terraform
 
@@ -147,7 +213,7 @@ curl -X POST https://your-domain.com/api/v1/auth/login \
 
 ```bash
 # Docker
-docker-compose -f docker-compose.prod.yml logs -f app
+docker compose -f docker-compose.prod.yml logs -f app
 
 # Kubernetes
 kubectl logs -n oniva -l app=oniva-api -f
@@ -159,11 +225,11 @@ aws logs tail /ecs/oniva-production --follow
 ### Run Database Migrations
 
 ```bash
-# Docker
-docker-compose exec app alembic upgrade head
+# Docker (re-run the one-shot migrate service as the schema owner)
+docker compose -f docker-compose.prod.yml run --rm migrate
 
-# Kubernetes
-kubectl exec -n oniva deploy/oniva-api -- alembic upgrade head
+# Kubernetes (re-create the Job)
+kubectl -n oniva delete job oniva-migrate --ignore-not-found && kubectl apply -k k8s/
 ```
 
 ## Configuration
@@ -172,7 +238,14 @@ kubectl exec -n oniva deploy/oniva-api -- alembic upgrade head
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `DATABASE_URL` | Yes | `oniva_app` URL (non-superuser, RLS enforced) |
+| `SYSTEM_DATABASE_URL` | Yes (prod) | `oniva_system` URL (BYPASSRLS) |
+| `MIGRATION_DATABASE_URL` | For migrations | Schema-owner URL used by Alembic |
+| `AUTO_MIGRATE` | No | `true` in dev, `false` in prod (migrate out-of-band) |
+| `APP_DATABASE_PASSWORD` | Yes (prod) | `oniva_app` password (weak values rejected) |
+| `ENCRYPTION_SALT` | Yes (prod) | 64 hex chars |
+| `CORS_ORIGINS` | Yes (prod) | Explicit origins, never `*` |
+| `SESSION_BASE_PATH` | No | Writable session dir (`/data/sessions` with read-only rootfs) |
 | `REDIS_URL` | Yes | Redis connection string |
 | `SECRET_KEY` | Yes | JWT signing key (min 32 chars) |
 | `DEBUG` | No | Enable debug mode (default: false) |
@@ -194,7 +267,7 @@ kubectl exec -n oniva deploy/oniva-api -- alembic upgrade head
 
 ```bash
 # Docker Compose (replicas)
-docker-compose -f docker-compose.prod.yml up -d --scale app=4
+docker compose -f docker-compose.prod.yml up -d --scale app=4
 
 # Kubernetes
 kubectl scale -n oniva deployment/oniva-api --replicas=4
@@ -216,17 +289,17 @@ kubectl scale -n oniva deployment/oniva-api --replicas=4
 
 ```bash
 # Create backup
-docker-compose exec postgres pg_dump -U postgres oniva > backup.sql
+docker compose exec postgres pg_dump -U oniva oniva > backup.sql
 
 # Kubernetes
-kubectl exec -n oniva deploy/postgres -- pg_dump -U postgres oniva > backup.sql
+kubectl exec -n oniva deploy/postgres -- pg_dump -U oniva oniva > backup.sql
 ```
 
 ### PostgreSQL Restore
 
 ```bash
 # Restore from backup
-docker-compose exec -T postgres psql -U postgres oniva < backup.sql
+docker compose exec -T postgres psql -U oniva oniva < backup.sql
 ```
 
 ## Troubleshooting
@@ -244,16 +317,16 @@ docker-compose exec -T postgres psql -U postgres oniva < backup.sql
 
 ```bash
 # Check service status
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 
 # Restart a service
-docker-compose -f docker-compose.prod.yml restart app
+docker compose -f docker-compose.prod.yml restart app
 
 # View database connections
-docker-compose exec postgres psql -U postgres -c "SELECT * FROM pg_stat_activity;"
+docker compose exec postgres psql -U oniva -c "SELECT * FROM pg_stat_activity;"
 
 # Clear Redis cache
-docker-compose exec redis redis-cli FLUSHALL
+docker compose exec redis redis-cli FLUSHALL
 ```
 
 ## Monitoring
@@ -268,8 +341,8 @@ The API exposes metrics at `/metrics` (when enabled):
 
 ### Health Endpoints
 
-- `/health` - Overall health status
-- `/health/ready` - Readiness probe
+- `/health` - Basic status
+- `/health/ready` - Readiness probe (checks the database)
 - `/health/live` - Liveness probe
 
 ## Support

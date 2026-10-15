@@ -1,0 +1,48 @@
+# Runs `alembic upgrade head` as the schema OWNER. The API runs with AUTO_MIGRATE=false and its
+# pods wait (init container) until the database is at head. Jobs are immutable: delete the old one
+# before re-applying a new release:  kubectl -n oniva delete job oniva-migrate --ignore-not-found
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: oniva-migrate
+  namespace: oniva
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: oniva-migrate
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+      - name: migrate
+        image: oniva
+        command: ["alembic", "upgrade", "head"]
+        envFrom:
+        - configMapRef:
+            name: oniva-config
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: DB_PASSWORD
+        - name: MIGRATION_DATABASE_URL
+          value: "postgresql+asyncpg://oniva:$(DB_PASSWORD)@postgres:5432/oniva"
+        - name: DATABASE_URL
+          value: "postgresql+asyncpg://oniva:$(DB_PASSWORD)@postgres:5432/oniva"
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      imagePullSecrets:
+      - name: regcred
