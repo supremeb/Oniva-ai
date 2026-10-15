@@ -1,0 +1,207 @@
+{
+  "events": [
+    {
+      "event": "reasoning",
+      "id": "1",
+      "data": {
+        "content": "Need to search the web. "
+      }
+    },
+    {
+      "event": "reasoning",
+      "id": "2",
+      "data": {
+        "content": "Then write a report."
+      }
+    },
+    {
+      "event": "tool_call_start",
+      "id": "3",
+      "data": {
+        "toolCallId": "call_search_1",
+        "toolName": "web_search",
+        "args": {
+          "query": "oniva contract"
+        },
+        "label": "Searching for 'oniva contract'"
+      }
+    },
+    {
+      "event": "tool_call_complete",
+      "id": "4",
+      "data": {
+        "toolCallId": "call_search_1",
+        "status": "success",
+        "result": {
+          "results": [
+            {
+              "title": "Oniva",
+              "url": "https://example.com/oniva",
+              "snippet": "a snippet"
+            }
+          ]
+        },
+        "durationMs": "<duration>"
+      }
+    },
+    {
+      "event": "source",
+      "id": "5",
+      "data": {
+        "type": "source",
+        "title": "Oniva",
+        "url": "https://example.com/oniva",
+        "snippet": "a snippet",
+        "sourceType": "url"
+      }
+    },
+    {
+      "event": "tool_call_start",
+      "id": "6",
+      "data": {
+        "toolCallId": "call_report_1",
+        "toolName": "save_report",
+        "args": {
+          "filename": "report.md",
+          "report_content": "# Report"
+        },
+        "label": "Save Report"
+      }
+    },
+    {
+      "event": "tool_call_complete",
+      "id": "7",
+      "data": {
+        "toolCallId": "call_report_1",
+        "status": "success",
+        "result": {
+          "success": true,
+          "filename": "report.md",
+          "size": 8,
+          "download_url": "/files/report.md"
+        },
+        "durationMs": "<duration>"
+      }
+    },
+    {
+      "event": "part",
+      "id": "8",
+      "data": {
+        "part": {
+          "type": "file",
+          "filename": "report.md",
+          "toolCallId": "call_report_1",
+          "size": 8,
+          "fileType": "text/markdown",
+          "downloadUrl": "/files/report.md"
+        }
+      }
+    },
+    {
+      "event": "text_delta",
+      "id": "9",
+      "data": {
+        "delta": "Done: ",
+        "partIndex": 0
+      }
+    },
+    {
+      "event": "text_delta",
+      "id": "10",
+      "data": {
+        "delta": "see the report.",
+        "partIndex": 0
+      }
+    },
+    {
+      "event": "done",
+      "id": "11",
+      "data": {
+        "messageId": "<id-1>",
+        "sessionId": "<id-2>",
+        "model": "contract-test-model",
+        "usage": {
+          "input_tokens": 150,
+          "output_tokens": 30
+        }
+      }
+    }
+  ],
+  "persisted_messages": [
+    {
+      "message": "What is the contract?",
+      "response": "Done: see the report.",
+      "reasoning": "Need to search the web. Then write a report.",
+      "message_parts": [
+        {
+          "type": "thinking",
+          "variant": "accordion",
+          "thinkingContent": "Need to search the web. Then write a report.",
+          "isThinking": false,
+          "showElapsed": true
+        },
+        {
+          "type": "tool_call",
+          "id": "call_search_1",
+          "toolName": "web_search",
+          "status": "success",
+          "args": {
+            "query": "oniva contract"
+          },
+          "label": "Searching for 'oniva contract'",
+          "result": {
+            "results": [
+              {
+                "title": "Oniva",
+                "url": "https://example.com/oniva",
+                "snippet": "a snippet"
+              }
+            ]
+          },
+          "error": null,
+          "durationMs": "<duration>"
+        },
+        {
+          "type": "source",
+          "sourceType": "url",
+          "title": "Oniva",
+          "url": "https://example.com/oniva",
+          "description": "a snippet"
+        },
+        {
+          "type": "tool_call",
+          "id": "call_report_1",
+          "toolName": "save_report",
+          "status": "success",
+          "args": {
+            "filename": "report.md",
+            "report_content": "# Report"
+          },
+          "label": "Save Report",
+          "result": {
+            "success": true,
+            "filename": "report.md",
+            "size": 8,
+            "download_url": "/files/report.md"
+          },
+          "error": null,
+          "durationMs": "<duration>"
+        },
+        {
+          "type": "file",
+          "filename": "report.md",
+          "toolCallId": "call_report_1",
+          "size": 8,
+          "fileType": "text/markdown",
+          "downloadUrl": "/files/report.md"
+        },
+        {
+          "type": "text",
+          "content": "Done: see the report.",
+          "isStreaming": false
+        }
+      ],
+      "model": "contract-test-model"
+    }
+  ]
+}

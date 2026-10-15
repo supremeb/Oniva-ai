@@ -14,6 +14,8 @@ const customJestConfig = {
     '^@/pages/(.*)$': '<rootDir>/pages/$1',
     '^@/lib/(.*)$': '<rootDir>/lib/$1',
     '^@/hooks/(.*)$': '<rootDir>/hooks/$1',
+    // Catch-all so @/types, @/app and any other root-level alias resolve (mirrors tsconfig paths)
+    '^@/(.*)$': '<rootDir>/$1',
   }
 }
 
