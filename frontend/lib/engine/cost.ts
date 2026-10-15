@@ -23,6 +23,15 @@ export interface PurposeCost {
   unpriced: boolean;
 }
 
+export interface StageCost {
+  /** orchestrator | worker | reflection | output | compaction, or a subagent role we do not know. */
+  stage: string;
+  usd: number;
+  inputTokens: number;
+  outputTokens: number;
+  unpriced: boolean;
+}
+
 export interface ConversationCost {
   totalUsd: number;
   inputTokens: number;
@@ -31,6 +40,8 @@ export interface ConversationCost {
   runs: RunCost[];
   /** Same rows as `runs`, partitioned by purpose (root plus subagent usage). Absent on older backends. */
   byPurpose?: PurposeCost[];
+  /** Same rows partitioned by Deep Work stage (subagent role, compaction apart). Absent on older backends. */
+  byStage?: StageCost[];
 }
 
 export function fetchConversationCost(conversationId: string): Promise<ConversationCost> {

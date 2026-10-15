@@ -15,11 +15,11 @@ async def _tenant(db) -> uuid.UUID:
     return t.id
 
 
-def _row(tenant, conv, run, rid, cost, tin, tout, at, status="success", purpose=None):
+def _row(tenant, conv, run, rid, cost, tin, tout, at, status="success", purpose=None, role=None):
     return LLMUsageRecord(
         tenant_id=tenant, provider_name="anthropic", model="m", input_tokens=tin, output_tokens=tout,
         cost_usd=cost, latency_ms=1, request_id=rid, run_id=run, conversation_id=conv, status=status,
-        purpose=purpose, created_at=at)
+        purpose=purpose, agent_role=role, created_at=at)
 
 
 async def test_two_runs_sum_and_total_equals_rows(test_db):
@@ -83,6 +83,47 @@ async def test_by_purpose_sums_to_total_and_flags_unpriced(test_db):
     assert by["generation"]["inputTokens"] == 226 and by["generation"]["outputTokens"] == 46
     assert round(sum(p["usd"] for p in out["byPurpose"]), 6) == out["totalUsd"]
     assert sum(p["inputTokens"] for p in out["byPurpose"]) == out["inputTokens"]
+
+
+async def test_by_stage_partitions_totals_and_maps_roles(test_db):
+    tenant, root = await _tenant(test_db), uuid.uuid4()
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    test_db.add_all([
+        _row(tenant, root, "r1", "o1", "0.010", 100, 20, t0, purpose="generation"),                      # legacy null role
+        _row(tenant, root, "r1", "o2", "0.001", 10, 2, t0, purpose="generation", role="root"),
+        _row(tenant, root, "r1", "w1", "0.004", 40, 8, t0, purpose="generation", role="research_worker"),
+        _row(tenant, root, "r1", "w2", "0.004", 40, 8, t0, purpose="generation", role="research_worker"),
+        _row(tenant, root, "r1", "w3", "0", 5, 1, t0, status="unpriced", purpose="generation",
+             role="research_worker"),
+        _row(tenant, root, "r1", "f1", "0.003", 30, 6, t0, purpose="generation", role="reflector"),
+        _row(tenant, root, "r1", "x1", "0.006", 60, 12, t0, purpose="generation", role="output_agent"),
+        _row(tenant, root, "r1", "c1", "0.002", 20, 4, t0, purpose="compaction", role="research_worker"),
+        _row(tenant, root, "r1", "z1", "0.001", 1, 1, t0, purpose="generation", role="custom_tool"),
+    ])
+    await test_db.commit()
+    out = await conversation_cost(test_db, tenant, root)
+    by = {s["stage"]: s for s in out["byStage"]}
+    assert [s["stage"] for s in out["byStage"]] == [
+        "orchestrator", "worker", "reflection", "output", "compaction", "custom_tool"]
+    assert by["orchestrator"]["usd"] == 0.011 and by["orchestrator"]["inputTokens"] == 110
+    assert by["worker"]["usd"] == 0.008 and by["worker"]["unpriced"] is True
+    assert by["worker"]["inputTokens"] == 85 and by["worker"]["outputTokens"] == 17
+    assert by["reflection"]["usd"] == 0.003 and by["output"]["usd"] == 0.006
+    assert by["compaction"]["usd"] == 0.002 and by["orchestrator"]["unpriced"] is False
+    assert round(sum(s["usd"] for s in out["byStage"]), 6) == out["totalUsd"]
+    assert sum(s["inputTokens"] for s in out["byStage"]) == out["inputTokens"]
+    assert sum(s["outputTokens"] for s in out["byStage"]) == out["outputTokens"]
+    assert {p["purpose"] for p in out["byPurpose"]} == {"generation", "compaction"}  # unchanged
+
+
+async def test_legacy_null_role_rows_are_orchestrator_and_empty_has_no_stages(test_db):
+    tenant, conv = await _tenant(test_db), uuid.uuid4()
+    test_db.add(_row(tenant, conv, "r1", "a", "0.01", 1, 1, datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    await test_db.commit()
+    out = await conversation_cost(test_db, tenant, conv)
+    assert out["byStage"] == [{"stage": "orchestrator", "usd": 0.01, "inputTokens": 1, "outputTokens": 1,
+                               "unpriced": False}]
+    assert (await conversation_cost(test_db, await _tenant(test_db), uuid.uuid4()))["byStage"] == []
 
 
 async def test_chat_conversation_without_purpose_unchanged(test_db):

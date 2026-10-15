@@ -170,15 +170,31 @@ export async function loadConversation(
   if (!rec) throw new Error(`unknown conversation ${conversationId}`);
   const agent = await deps.session.document(agentConfigDoc, conversationId);
   const rootId = await rootConversationId(deps.session, rec);
+  const agentRole =
+    rec.ownerTaskId === null ? undefined : await owningToolName(deps.session, rec.ownerTaskId);
   return {
     conversation: {
       id: rec.id,
       tenantId: rec.tenantId,
       projectId: rec.projectId,
       ...(rootId !== rec.id ? { rootId } : {}),
+      ...(agentRole !== undefined ? { agentRole } : {}),
     },
     agent,
   };
+}
+
+/** The subagent tool name of the task that owns a child conversation (its role), if it is a tool task. */
+async function owningToolName(
+  session: AgentDeps["session"],
+  ownerTaskId: string,
+): Promise<string | undefined> {
+  const task = await session.reader.getTask(ownerTaskId);
+  const input = task?.input;
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return undefined;
+  const call = input.call;
+  if (typeof call !== "object" || call === null || Array.isArray(call)) return undefined;
+  return typeof call.name === "string" ? call.name : undefined;
 }
 
 /**

@@ -71,6 +71,9 @@ class LLMUsageRecord(Base):
     # Why the call was made: generation (default) or compaction (engine summaries)
     purpose = Column(String(20), nullable=True)
 
+    # Subagent tool name for child-conversation usage (Deep Work stage split); null for the root
+    agent_role = Column(String(64), nullable=True)
+
     # Status
     status = Column(String(20), default="success")  # success, failed, cached, unpriced
 

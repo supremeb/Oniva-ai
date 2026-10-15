@@ -2,9 +2,10 @@
  * Backend model policy client and usage reporter (U9) against the fake gateway.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { createSubagentTool } from "../../src/agent/subagents.js";
 import { ManualClock } from "../../src/core/clock.js";
 import { Context } from "../../src/core/context.js";
-import { fakeText } from "../../src/models/fake.js";
+import { fakeText, fakeToolCall } from "../../src/models/fake.js";
 import {
   BackendPolicyClient,
   requestIdFor,
@@ -230,6 +231,74 @@ describe("UsageReporter", () => {
     expect(JSON.stringify(gw.requests.filter((r) => r.path.endsWith("/usage")))).not.toContain(
       "sk-once",
     );
+  });
+
+  it("tags child-conversation usage with the subagent tool name and leaves the root untagged", async () => {
+    const gw = await start();
+    const rep = reporter(gw);
+    const fx = await memoryBackend.fixture();
+    const policy = workerHostPolicy({
+      modelDefaults: {
+        provider: "fake",
+        model: "m",
+        summaryModel: "m",
+        maxTokens: 10,
+        apiKey: () => "k",
+      },
+      gateway: null,
+      approvalTtlMs: null,
+      clock: fx.clock,
+      backend: client(gw),
+    });
+    const worker = createSubagentTool({
+      name: "research_worker",
+      description: "Research",
+      systemPrompt: "child",
+      tools: [],
+    });
+    fx.provider.enqueue(
+      fakeToolCall("research_worker", { prompt: "find x" }, { id: "c1" }),
+      fakeText("x is 42"),
+      fakeText("done"),
+    );
+    const w = await fx.open({ policy, hooks: rep.hooks, tools: [worker] });
+    const conv = await w.harness.createConversation({
+      tenantId: "t1",
+      projectId: "p1",
+      agent: { systemPrompt: "s", tools: ["research_worker"] },
+    });
+    const settled = await (await conv.submit({ text: "go" })).wait();
+    expect(settled.status).toBe("done");
+    await rep.flush();
+    await w.crash();
+    const rows = gw.usage as Any[];
+    expect(rows).toHaveLength(3);
+    const child = rows.filter((r) => r.engineConversationId !== r.conversationId);
+    const root = rows.filter((r) => r.engineConversationId === r.conversationId);
+    expect(child).toHaveLength(1);
+    expect(child[0].agentRole).toBe("research_worker");
+    expect(root).toHaveLength(2);
+    for (const r of root) expect("agentRole" in r).toBe(false);
+  });
+
+  it("the fake gateway rejects a malformed agentRole with 422 [usage-agent-role-422]", async () => {
+    const gw = await start();
+    const post = (agentRole: string) =>
+      fetch(`${gw.baseUrl}/internal/models/usage`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${gw.serviceToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          tenantId: "t1",
+          runId: "r",
+          requestId: `q-${agentRole}`,
+          provider: "fake",
+          model: "m",
+          agentRole,
+        }),
+      });
+    expect((await post("Bad Role!")).status).toBe(422);
+    expect((await post("x".repeat(65))).status).toBe(422);
+    expect((await post("research_worker")).status).toBe(200);
   });
 
   it("denied policy blocks the model request and reports no usage", async () => {

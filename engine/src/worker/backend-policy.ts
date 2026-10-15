@@ -232,6 +232,9 @@ export class UsageReporter {
       runId: event.runId,
       requestId,
       purpose,
+      ...(event.conversation.agentRole !== undefined
+        ? { agentRole: event.conversation.agentRole }
+        : {}),
       provider: event.message.provider,
       model: event.message.model,
       usage: {

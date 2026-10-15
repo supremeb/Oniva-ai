@@ -35,4 +35,47 @@ describe('CostPopover', () => {
     fireEvent.keyDown(btn, { key: 'Escape' });
     expect(screen.queryByTestId('cost-popover')).not.toBeInTheDocument();
   });
+
+  it('shows per-stage rows when byStage is present, with n/a for unpriced and byPurpose ignored', () => {
+    render(
+      <CostPopover
+        cost={{
+          ...base,
+          byPurpose: [{ purpose: 'generation', usd: 0.02, inputTokens: 1, outputTokens: 1, unpriced: false }],
+          byStage: [
+            { stage: 'orchestrator', usd: 0.01, inputTokens: 2000, outputTokens: 100, unpriced: false },
+            { stage: 'worker', usd: 0, inputTokens: 9000, outputTokens: 500, unpriced: true },
+            { stage: 'reflection', usd: 0.004, inputTokens: 300, outputTokens: 50, unpriced: false },
+            { stage: 'output', usd: 0.006, inputTokens: 400, outputTokens: 60, unpriced: false },
+            { stage: 'compaction', usd: 0.001, inputTokens: 10, outputTokens: 2, unpriced: false },
+          ],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cost by phase' }));
+    const rows = screen.getByTestId('cost-popover').querySelectorAll('li');
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toHaveTextContent('Orchestrator');
+    expect(rows[0]).toHaveTextContent('$0.010');
+    expect(rows[1]).toHaveTextContent('Workers');
+    expect(rows[1]).toHaveTextContent('n/a');
+    expect(rows[2]).toHaveTextContent('Reflection');
+    expect(rows[3]).toHaveTextContent('Output');
+    expect(rows[4]).toHaveTextContent('Compaction');
+    expect(screen.queryByText('Generation')).not.toBeInTheDocument();
+  });
+
+  it('falls back to byPurpose when byStage is empty', () => {
+    render(
+      <CostPopover
+        cost={{
+          ...base,
+          byStage: [],
+          byPurpose: [{ purpose: 'generation', usd: 0.02, inputTokens: 1, outputTokens: 1, unpriced: false }],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cost by phase' }));
+    expect(screen.getByTestId('cost-popover').querySelectorAll('li')[0]).toHaveTextContent('Generation');
+  });
 });

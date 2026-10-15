@@ -9,8 +9,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.llm_usage import LLMUsageRecord
 
 
+# Deep Work stage for a subagent tool name (agent_role); null/"root" is the orchestrator.
+_STAGE_BY_ROLE = {"research_worker": "worker", "reflector": "reflection", "output_agent": "output"}
+_STAGE_ORDER = ["orchestrator", "worker", "reflection", "output", "compaction"]
+
+
+def stage_for(purpose: str | None, agent_role: str | None) -> str:
+    """Compaction is its own stage; otherwise the stage comes from the subagent role."""
+    if purpose == "compaction":
+        return "compaction"
+    if agent_role is None or agent_role in ("", "root"):
+        return "orchestrator"
+    return _STAGE_BY_ROLE.get(agent_role, agent_role)
+
+
 async def conversation_cost(db: AsyncSession, tenant_id: UUID, conversation_id: UUID) -> Dict[str, Any]:
-    """Totals, per-run and per-purpose breakdown. Subagent usage is stored under the root conversation id. Unpriced rows add tokens but no dollars and flag the run."""
+    """Totals, per-run and per-purpose and per-stage breakdown. Subagent usage is stored under the root conversation id. Unpriced rows add tokens but no dollars and flag the run."""
     rows = (
         await db.execute(
             select(
@@ -20,6 +34,7 @@ async def conversation_cost(db: AsyncSession, tenant_id: UUID, conversation_id: 
                 LLMUsageRecord.output_tokens,
                 LLMUsageRecord.status,
                 LLMUsageRecord.purpose,
+                LLMUsageRecord.agent_role,
                 LLMUsageRecord.created_at,
             )
             .where(LLMUsageRecord.tenant_id == tenant_id, LLMUsageRecord.conversation_id == conversation_id)
@@ -29,7 +44,8 @@ async def conversation_cost(db: AsyncSession, tenant_id: UUID, conversation_id: 
 
     runs: Dict[str, Dict[str, Any]] = {}
     purposes: Dict[str, Dict[str, Any]] = {}
-    for run_id, cost, tin, tout, status, purpose, created in rows:
+    stages: Dict[str, Dict[str, Any]] = {}
+    for run_id, cost, tin, tout, status, purpose, agent_role, created in rows:
         key = run_id or ""
         r = runs.setdefault(key, {"runId": key, "usd": Decimal(0), "inputTokens": 0, "outputTokens": 0,
                                   "unpriced": False, "startedAt": created})
@@ -47,6 +63,14 @@ async def conversation_cost(db: AsyncSession, tenant_id: UUID, conversation_id: 
             p["unpriced"] = True
         else:
             p["usd"] += Decimal(cost or 0)
+        st = stages.setdefault(stage_for(purpose, agent_role), {"usd": Decimal(0), "inputTokens": 0,
+                                                                "outputTokens": 0, "unpriced": False})
+        st["inputTokens"] += tin or 0
+        st["outputTokens"] += tout or 0
+        if status == "unpriced":
+            st["unpriced"] = True
+        else:
+            st["usd"] += Decimal(cost or 0)
         if created is not None and (r["startedAt"] is None or created < r["startedAt"]):
             r["startedAt"] = created
 
@@ -61,4 +85,9 @@ async def conversation_cost(db: AsyncSession, tenant_id: UUID, conversation_id: 
         "unpriced": any(r["unpriced"] for r in out),
         "runs": out,
         "byPurpose": [{"purpose": k, **v, "usd": float(v["usd"])} for k, v in sorted(purposes.items())],
+        "byStage": [
+            {"stage": k, **v, "usd": float(v["usd"])}
+            for k, v in sorted(stages.items(), key=lambda kv: (
+                _STAGE_ORDER.index(kv[0]) if kv[0] in _STAGE_ORDER else len(_STAGE_ORDER), kv[0]))
+        ],
     }

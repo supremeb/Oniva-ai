@@ -204,6 +204,8 @@ class UsageRequest(_Camel):
     latency_ms: Optional[int] = Field(None, alias="latencyMs", ge=0)
     status: Literal["success", "failed", "cached"] = "success"
     purpose: Literal["generation", "compaction"] = "generation"
+    # Subagent tool name for child-conversation usage (e.g. research_worker); absent/"root" for the root.
+    agent_role: Optional[str] = Field(None, alias="agentRole", min_length=1, max_length=64, pattern=r"^[a-z0-9_]+$")
 
 
 async def record_usage(db: AsyncSession, req: UsageRequest) -> bool:
@@ -263,6 +265,7 @@ async def record_usage(db: AsyncSession, req: UsageRequest) -> bool:
         run_id=req.run_id,
         conversation_id=req.conversation_id,
         purpose=req.purpose,
+        agent_role=req.agent_role,
         status=status,
     )
     if db.get_bind().dialect.name == "postgresql":
