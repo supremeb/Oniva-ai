@@ -41,3 +41,16 @@ async def fail_stale_knowledge_documents(session_factory, stale_seconds: int) ->
         )
         await db.commit()
         return result.rowcount or 0
+
+
+async def interrupt_stale_tool_invocations(session_factory) -> int:
+    """Give stale in-flight non-idempotent tool claims the ``interrupted/unknown`` outcome (plan 003 U5).
+
+    A claim older than the longest tool timeout plus grace belongs to a worker that died mid-effect.
+    Reconcile must not say "did not run" for it, so it is answered as unknown; idempotent tools are
+    left to re-run on their next call.
+    """
+    from app.internal_api.invocations import interrupt_stale
+    from app.internal_api.tools import idempotent_tool_names, stale_after_seconds
+
+    return await interrupt_stale(session_factory, stale_after_seconds(), idempotent_tool_names())

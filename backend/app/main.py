@@ -104,6 +104,11 @@ async def lifespan(app: FastAPI):
         n = await fail_stale_knowledge_documents(SystemSessionLocal, stale)
         if n:
             print(f"✅ Cleaned up {n} stale knowledge documents")
+        if app_settings.ENGINE_GATEWAY_TOKEN:
+            from app.services.startup_recovery import interrupt_stale_tool_invocations
+            n = await interrupt_stale_tool_invocations(SystemSessionLocal)
+            if n:
+                print(f"✅ Marked {n} stale engine tool invocations as interrupted")
     except Exception as e:
         print(f"⚠️ Failed startup recovery sweep: {e}")
 

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, FastAPI
 
 from app.config import Settings
 from app.internal_api.auth import InternalAuth, InternalUnauthorized, internal_unauthorized_handler
+from app.internal_api.fence import GatewayError, gateway_error_handler
 from app.internal_api.logging import install_redaction
 from app.internal_api.models import router as models_router
 from app.internal_api.tools import router as tools_router
@@ -31,6 +32,7 @@ def mount_internal_router(app: FastAPI, settings: Settings) -> bool:
         return False
     install_redaction()
     app.add_exception_handler(InternalUnauthorized, internal_unauthorized_handler)
+    app.add_exception_handler(GatewayError, gateway_error_handler)
     app.include_router(build_internal_router(settings))
     logger.info("Mounted /internal (engine gateway)")
     return True

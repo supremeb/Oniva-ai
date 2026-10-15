@@ -82,8 +82,8 @@ def _strip_titles(node: Any, in_properties: bool = False) -> Any:
     return node
 
 
-def build_parameters_schema(handler: Callable, tool_name: str = "tool") -> Dict[str, Any]:
-    """JSON Schema (type=object, additionalProperties=false) for a skill's arguments, minus `ctx`."""
+def build_args_model(handler: Callable, tool_name: str = "tool") -> type[BaseModel]:
+    """Pydantic model of a skill's arguments (minus `ctx`); extra arguments are forbidden."""
     fn = inspect.unwrap(handler)
     sig = inspect.signature(fn)
     try:
@@ -102,11 +102,16 @@ def build_parameters_schema(handler: Callable, tool_name: str = "tool") -> Dict[
         default = ... if param.default is inspect.Parameter.empty else param.default
         fields[pname] = (ann, Field(default, description=docs.get(pname)))
 
-    model = create_model(
+    return create_model(
         f"{tool_name}_args",
         __config__=ConfigDict(extra="forbid"),
         **fields,
     )
+
+
+def build_parameters_schema(handler: Callable, tool_name: str = "tool") -> Dict[str, Any]:
+    """JSON Schema (type=object, additionalProperties=false) for a skill's arguments, minus `ctx`."""
+    model = build_args_model(handler, tool_name)
     schema = model.model_json_schema()
     defs = schema.get("$defs", {})
     schema = _strip_titles(_resolve_refs(schema, defs))
