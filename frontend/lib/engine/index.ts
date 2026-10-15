@@ -8,3 +8,16 @@ export { viewToMessages, createViewAdapter, type EngineMessage } from './viewToM
 export { DecisionError, toDecisionError, summarizeArguments } from './approval';
 export { isCompactionRunning } from './compaction';
 export { isRunActive, activeRunId } from './run';
+export {
+  viewToDeepWork,
+  createDeepWorkAdapter,
+  type DeepWorkState,
+  type DeepWorkWorker,
+  type DeepWorkRound,
+  type DeepWorkReflection,
+  type DeepWorkSection,
+  type DeepWorkRunStatus,
+  type DeepWorkRunMeta,
+} from './deepWork';
+export { useEngineDeepWork, useWorkerTranscript, type UseEngineDeepWork } from './useEngineDeepWork';
+export * from './deepWorkApi';

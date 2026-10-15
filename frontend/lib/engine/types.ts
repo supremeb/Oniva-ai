@@ -92,6 +92,19 @@ export interface ToolOutputState {
   [key: string]: JsonValue | undefined;
 }
 
+/** A subagent child as the parent's view shows it (engine/src/watch/view.ts `SubagentView`). */
+export interface SubagentView {
+  conversationId: string;
+  submissionId: string;
+  status: 'running' | 'done' | 'aborted' | 'failed';
+  startedAt: string;
+  endedAt?: string;
+  toolCalls: number;
+  /** Last five tool-call descriptions, oldest first (<= 160 chars each). */
+  recent: string[];
+  usage: UsageTally;
+}
+
 export interface ConversationView {
   entries: EntryRecord[];
   live: LiveState;
@@ -102,6 +115,8 @@ export interface ConversationView {
   toolOutput: { [toolTaskId: string]: ToolOutputState };
   /** Whether a run is active, across tool rounds and approval waits. Absent on older engines. */
   run?: RunView;
+  /** Subagent children by the parent's tool task id. Absent on older engines. */
+  subagents?: { [toolTaskId: string]: SubagentView };
 }
 
 export interface RunView {
@@ -177,6 +192,9 @@ export function parseConversationView(raw: unknown): ConversationView {
   if (!isObj(usage) || !isObj(usage.total)) throw new WireError('view.usage');
   if (!isObj(agent) || !isJson(agent)) throw new WireError('view.agent');
   if (!isObj(toolOutput) || !isJson(toolOutput)) throw new WireError('view.toolOutput');
+  if ('subagents' in raw && raw.subagents !== undefined && (!isObj(raw.subagents) || !isJson(raw.subagents))) {
+    throw new WireError('view.subagents');
+  }
   // Skeleton verified above; the engine's zod schemas own the leaves.
   return raw as unknown as ConversationView;
 }
