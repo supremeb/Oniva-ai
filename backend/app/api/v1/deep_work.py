@@ -25,6 +25,7 @@ from app.auth.dependencies import get_current_user_id, get_current_tenant_id
 from app.config import get_settings
 from app.core.database import get_db, AsyncSessionLocal, set_tenant_context
 from app.api.v1 import deep_work_engine as engine_dw
+from app.services import deep_work_state as dws
 from app.models.background_job import BackgroundJob, JobStatus, JobType, JobTrigger
 
 logger = logging.getLogger(__name__)
@@ -126,12 +127,16 @@ class SessionListItem(BaseModel):
     status: str
     plan_title: str | None = None
     created_at: str | None = None
+    updated_at: str | None = None
+    source: str = "legacy"  # "legacy" | "engine"
 
 
 class EnginePlanResponse(BaseModel):
     title: str
     steps: list[str]
     raw_plan: dict
+    session_id: str | None = None  # engine path only
+    conversation_id: str | None = None  # engine path only
 
 
 class DeepWorkEngineRequest(BaseModel):
@@ -140,12 +145,18 @@ class DeepWorkEngineRequest(BaseModel):
     conversation_id: str | None = None
     plan: dict | None = None  # Pre-approved plan from /engine/plan
     enriched_query: str | None = None  # Enriched query from intake clarification
+    # Engine path only (ignored by the legacy pipeline):
+    project_id: str | None = None
+    knowledge_base_ids: list[str] = Field(default_factory=list)
+    connector_ids: list[str] = Field(default_factory=list)
 
 
 class ClarifyRequest(BaseModel):
     query: str = Field(..., min_length=5, max_length=5000)
     available_kbs: list[str] = Field(default_factory=list)
     available_connectors: list[str] = Field(default_factory=list)
+    project_id: str | None = None  # Engine path only
+    session_id: str | None = None  # Engine path only: reuse the session
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +435,10 @@ async def get_full_state_by_conversation(
     conv_uuid = _parse_uuid(conversation_id)
     if not conv_uuid:
         raise HTTPException(status_code=404, detail="No Deep Work session for this conversation")
+
+    run = await dws.load_run(engine_dw.reading(db), tenant_id, conv_uuid)
+    if run is not None:
+        return await engine_dw.full_state(db, run, user_id)
 
     try:
         return await _build_full_state(db, conv_uuid, user_id, tenant_id)
@@ -772,6 +787,9 @@ async def get_session_status(
 ):
     """Get current status and progress of a Deep Work session."""
     _check_feature_enabled()
+    run = await engine_dw.find_engine_run(engine_dw.reading(db), tenant_id, session_id)
+    if run is not None:
+        return await engine_dw.session_status(db, run, user_id)
 
     from app.services.session_storage import get_session_storage
     storage = get_session_storage()
@@ -849,11 +867,13 @@ async def get_session_status(
 @router.get("/deep-work/{session_id}/workspace")
 async def list_workspace_files(
     session_id: str,
+    db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
     """List files in the session workspace."""
     _check_feature_enabled()
+    await engine_dw.check_workspace_access(engine_dw.reading(db), tenant_id, user_id, session_id)
 
     from app.services.session_storage import get_session_storage
     storage = get_session_storage()
@@ -885,11 +905,13 @@ async def list_workspace_files(
 async def download_workspace_file(
     session_id: str,
     file_path: str,
+    db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
     """Download a file from the session workspace."""
     _check_feature_enabled()
+    await engine_dw.check_workspace_access(engine_dw.reading(db), tenant_id, user_id, session_id)
 
     from fastapi.responses import FileResponse
     from app.services.session_storage import get_session_storage
@@ -941,6 +963,8 @@ async def list_deep_work_sessions(
     sessions = []
     needs_commit = False
     for job in jobs:
+        if isinstance(job.input_data, dict) and job.input_data.get("engine") == engine_dw.ENGINE_JOB_MARK:
+            continue  # engine sessions are listed from deep_work_runs (reconciled), not as orphans
         plan_title = None
         effective_status = job.status
         if job.input_data and isinstance(job.input_data, dict):
@@ -964,12 +988,18 @@ async def list_deep_work_sessions(
             status=effective_status,
             plan_title=plan_title,
             created_at=job.created_at.isoformat() if job.created_at else None,
+            updated_at=(job.completed_at or job.started_at or job.created_at).isoformat()
+            if (job.completed_at or job.started_at or job.created_at) else None,
         ))
 
     if needs_commit:
         await db.commit()
 
-    return {"sessions": [s.model_dump() for s in sessions]}
+    items = [s.model_dump() for s in sessions]
+    if await engine_dw.has_engine_runs(db, tenant_id, user_id):
+        items += await engine_dw.list_sessions(user_id, tenant_id)
+        items.sort(key=lambda i: i.get("updated_at") or i.get("created_at") or "", reverse=True)
+    return {"sessions": items}
 
 
 # ---------------------------------------------------------------------------
@@ -985,6 +1015,8 @@ async def delete_deep_work_session(
 ):
     """Delete a Deep Work session: mark job as cancelled and remove filesystem data."""
     _check_feature_enabled()
+    if await engine_dw.find_engine_run(engine_dw.reading(db), tenant_id, session_id) is not None:
+        return await engine_dw.delete_session(session_id, db, user_id, tenant_id)
 
     job = await _verify_session_ownership(db, session_id, tenant_id, user_id)
 
@@ -1267,8 +1299,10 @@ async def cancel_deep_work_engine(
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
-    """Cancel a running deep work engine task."""
+    """Cancel a running deep work engine task (an engine-path session cancels through the engine)."""
     _check_feature_enabled()
+    if await engine_dw.find_engine_run(engine_dw.reading(db), tenant_id, session_id) is not None:
+        return await engine_dw.cancel(session_id, db, user_id, tenant_id)
     await _verify_session_ownership(db, session_id, tenant_id, user_id)
 
     task = _engine_tasks.get(session_id)
@@ -1286,3 +1320,7 @@ async def cancel_deep_work_engine(
         })
 
     return {"session_id": session_id, "status": "cancelled"}
+
+
+# Engine-only routes (steer, worker drill-down watch); each checks ownership / the tenant gate itself.
+router.include_router(engine_dw.router)

@@ -68,6 +68,7 @@ class RunSnapshot:
     job_id: Optional[uuid.UUID]
     is_engine: bool
     created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     @classmethod
     def of(cls, r: DeepWorkRun) -> "RunSnapshot":
@@ -77,7 +78,7 @@ class RunSnapshot:
             status=r.status, phase=r.phase, round=r.round or 0, plan=copy.deepcopy(r.plan),
             rounds=copy.deepcopy(r.rounds or []), reflections=copy.deepcopy(r.reflections or []),
             artifacts=copy.deepcopy(r.artifacts or []), job_id=r.job_id, is_engine=bool(r.is_engine),
-            created_at=r.created_at,
+            created_at=r.created_at, updated_at=r.updated_at,
         )
 
 
@@ -364,3 +365,44 @@ async def reconcile(
         await db.flush()
         logger.info("Deep Work run %s reconciled to %s", row.id, status)
         return RunSnapshot.of(row)
+
+
+async def load_run_by_id(factory: SessionFactory, tenant_id: Any, run_id: Any) -> Optional[RunSnapshot]:
+    """The run with this ``deep_work_runs.id`` (the client's session id), only within ``tenant_id``."""
+    async with factory() as db:
+        row = (
+            await db.execute(
+                select(DeepWorkRun).where(DeepWorkRun.tenant_id == _uuid(tenant_id), DeepWorkRun.id == _uuid(run_id))
+            )
+        ).scalar_one_or_none()
+        return RunSnapshot.of(row) if row else None
+
+
+async def attach_job(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any, job_id: Any,
+) -> Optional[RunSnapshot]:
+    """Link the ``background_jobs`` row once; a run that already has a job keeps it (the caller compares ``job_id``)."""
+    async with factory() as db:
+        row = await _locked(db, tenant_id, conversation_id)
+        if row is None:
+            return None
+        if row.job_id is None:
+            row.job_id = _uuid(job_id)
+            row.updated_at = _now()
+            await db.flush()
+        return RunSnapshot.of(row)
+
+
+async def delete_run(factory: SessionFactory, tenant_id: Any, run_id: Any) -> bool:
+    async with factory() as db:
+        row = (
+            await db.execute(
+                select(DeepWorkRun).where(DeepWorkRun.tenant_id == _uuid(tenant_id), DeepWorkRun.id == _uuid(run_id))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return False
+        await db.delete(row)
+        await db.flush()
+        return True

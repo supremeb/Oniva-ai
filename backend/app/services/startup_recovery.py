@@ -20,6 +20,8 @@ async def fail_stale_deep_work_jobs(session_factory, stale_seconds: int, reason:
                 "UPDATE background_jobs SET status = 'failed', error = :reason, "
                 "completed_at = NOW() "
                 "WHERE status IN ('running', 'pending') AND job_type = 'deep_work' "
+                # Engine sessions survive a restart; their status is reconciled lazily (KTD11).
+                "AND COALESCE(input_data->>'engine', '') <> 'oniva-engine' "
                 "AND COALESCE(started_at, created_at) < NOW() - make_interval(secs => :stale)"
             ),
             {"reason": reason, "stale": stale_seconds},

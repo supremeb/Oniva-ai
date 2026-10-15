@@ -2,7 +2,7 @@
 import uuid
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from app.api.v1 import deep_work as dw
@@ -87,10 +87,6 @@ def make_client(t: Tenant, settings: Settings, *others: Tenant):
     app.state.engine_deep_work_settings = settings
     app.include_router(dw.router, prefix="/api/v1")
 
-    @app.post("/api/v1/deep-work/{session_id}/steer", dependencies=[Depends(dwe.require_engine_deep_work)])
-    async def steer(session_id: str):
-        return {"ok": True}
-
     db = FakeDB(t, *others)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_current_tenant_id] = lambda: t.id
@@ -112,9 +108,10 @@ def test_ae1_engine_tenant_dispatches_off_tenant_stays_legacy_and_gets_404_on_en
     ca = make_client(a, s, b)
     for path, body in [("clarify", {"query": "research query"}), ("plan", {"query": "research query"}), ("", {"query": "research query"})]:
         r = ca.post(f"/api/v1/deep-work/engine/{path}".rstrip("/"), json=body)
-        assert r.status_code == 501, path  # engine handler (filled by U7), not legacy
+        assert r.status_code in (422, 500), path  # engine handler (needs project / engine), not legacy
     assert legacy_calls == []
-    assert ca.post("/api/v1/deep-work/s1/steer").status_code == 200
+    # Steer passes the gate for the flagged tenant (then fails on the unknown session), unlike tenant B below.
+    assert ca.post("/api/v1/deep-work/s1/steer", json={"text": "x"}).status_code == 404
 
     cb = make_client(b, s, a)
     for path in ["clarify", "plan"]:
