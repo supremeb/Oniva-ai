@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState, useCallback } from 'react';
+import { memo, useState, useCallback, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { Check, X, Warning, ShieldCheck, Clock } from '@phosphor-icons/react';
 import { SpringCard } from '../primitives/SpringCard';
@@ -29,10 +29,23 @@ export interface ApprovalCardProps {
   timeout?: number;
   /** Current approval state */
   status?: 'pending' | 'approved' | 'rejected' | 'expired';
-  /** Callback when approved */
-  onApprove?: () => void;
-  /** Callback when rejected */
-  onReject?: () => void;
+  /**
+   * Callbacks. A rejected promise shows its message inline and re-enables the
+   * buttons, unless the error has `retryable === false` (the card then stays
+   * locked). On success the buttons stay disabled until `status` changes.
+   */
+  onApprove?: () => void | Promise<void>;
+  onReject?: () => void | Promise<void>;
+  /** Engine approvals: tool the request is for (shown in the resolved line). */
+  toolName?: string;
+  /** Epoch ms; a pending card past it renders as expired. */
+  expiresAt?: number | null;
+  /** Decision note. */
+  note?: string | null;
+  /** The viewer cannot decide: no buttons. */
+  readOnly?: boolean;
+  /** Render a decided request as a compact transcript line instead of a card. */
+  resolvedAsLine?: boolean;
   /** Show detailed view */
   showDetails?: boolean;
   /** Additional CSS classes */
@@ -85,39 +98,84 @@ export const ApprovalCard = memo(function ApprovalCard({
   items,
   blocking = true,
   timeout,
-  status = 'pending',
+  status: statusProp = 'pending',
   onApprove,
   onReject,
+  toolName,
+  expiresAt,
+  note,
+  readOnly = false,
+  resolvedAsLine = false,
   showDetails = true,
   className,
 }: ApprovalCardProps) {
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [submitted, setSubmitted] = useState<'approve' | 'reject' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [locked, setLocked] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const inFlight = useRef(false);
   const [showAllItems, setShowAllItems] = useState(false);
+
+  const expired = statusProp === 'pending' && expiresAt != null && now >= expiresAt;
+  const status = expired ? 'expired' : statusProp;
+  useEffect(() => {
+    if (statusProp !== 'pending' || expiresAt == null) return;
+    const wait = expiresAt - Date.now();
+    if (wait <= 0) {
+      setNow(Date.now());
+      return;
+    }
+    const t = setTimeout(() => setNow(Date.now()), wait);
+    return () => clearTimeout(t);
+  }, [statusProp, expiresAt]);
 
   const risk = riskConfig[riskLevel];
   const isPending = status === 'pending';
   const displayItems = showAllItems ? items : items?.slice(0, 3);
   const hasMoreItems = items && items.length > 3;
 
-  const handleApprove = useCallback(async () => {
-    if (!onApprove) return;
-    setIsProcessing(true);
+  const decide = useCallback(async (kind: 'approve' | 'reject', fn: (() => void | Promise<void>) | undefined) => {
+    if (!fn || inFlight.current) return; // a second click while a decision is in flight is ignored
+    inFlight.current = true;
+    setSubmitted(kind);
+    setError(null);
     try {
-      await onApprove();
-    } finally {
-      setIsProcessing(false);
+      await fn();
+    } catch (e) {
+      inFlight.current = false;
+      setSubmitted(null);
+      setError(e instanceof Error && e.message ? e.message : 'Could not send your decision.');
+      if ((e as { retryable?: boolean } | null)?.retryable === false) setLocked(true);
     }
-  }, [onApprove]);
+  }, []);
+  const handleApprove = useCallback(() => decide('approve', onApprove), [decide, onApprove]);
+  const handleReject = useCallback(() => decide('reject', onReject), [decide, onReject]);
+  const busy = submitted !== null || locked;
 
-  const handleReject = useCallback(async () => {
-    if (!onReject) return;
-    setIsProcessing(true);
-    try {
-      await onReject();
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [onReject]);
+  if (resolvedAsLine && !isPending) {
+    const label = status === 'approved' ? 'Approved' : status === 'rejected' ? 'Denied' : 'Expired, not run';
+    return (
+      <div
+        role="status"
+        data-testid="approval-resolved"
+        data-status={status}
+        className={cn('flex items-center gap-2 text-sm text-muted-foreground', className)}
+      >
+        {status === 'approved' ? (
+          <Check className="h-4 w-4 text-green-500" weight="bold" />
+        ) : status === 'rejected' ? (
+          <X className="h-4 w-4 text-red-500" weight="bold" />
+        ) : (
+          <Clock className="h-4 w-4" />
+        )}
+        <span>
+          {label}
+          {toolName ? `: ${toolName}` : ''}
+          {note ? ` (${note})` : ''}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <FadeSlide>
@@ -222,14 +280,25 @@ export const ApprovalCard = memo(function ApprovalCard({
         )}
 
         {/* Actions */}
-        {isPending && (onApprove || onReject) && (
+        {isPending && readOnly && (
+          <p className="mt-4 pt-4 border-t border-border text-xs text-muted-foreground">
+            Waiting for the conversation owner or an admin to decide.
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="mt-3 text-sm text-red-500">
+            {error}
+          </p>
+        )}
+        {isPending && !readOnly && (onApprove || onReject) && (
           <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border">
             {onReject && (
               <ActionButton
                 variant="outline"
                 size="sm"
                 onClick={handleReject}
-                disabled={isProcessing}
+                disabled={busy}
+                loading={submitted === 'reject'}
                 icon={<X className="h-3.5 w-3.5" weight="bold" />}
               >
                 Reject
@@ -240,8 +309,9 @@ export const ApprovalCard = memo(function ApprovalCard({
                 variant="primary"
                 size="sm"
                 onClick={handleApprove}
-                loading={isProcessing}
-                icon={!isProcessing ? <Check className="h-3.5 w-3.5" weight="bold" /> : undefined}
+                disabled={busy}
+                loading={submitted === 'approve'}
+                icon={submitted !== 'approve' ? <Check className="h-3.5 w-3.5" weight="bold" /> : undefined}
               >
                 Approve
               </ActionButton>
@@ -267,7 +337,7 @@ export const ApprovalCard = memo(function ApprovalCard({
         {status === 'expired' && (
           <div className="mt-4 pt-4 border-t border-muted flex items-center gap-2 text-sm text-muted-foreground">
             <Clock className="h-4 w-4" />
-            <span>Expired - auto-rejected</span>
+            <span>Expired, auto-denied</span>
           </div>
         )}
       </SpringCard>

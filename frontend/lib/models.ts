@@ -193,6 +193,15 @@ export type MessagePart =
           riskLevel?: 'low' | 'medium' | 'high' | 'critical';
           items?: ApprovalItem[];
           status?: 'pending' | 'approved' | 'rejected' | 'expired';
+          /** Engine approvals: the tool task the decision route is keyed by (equals `id`). */
+          toolTaskId?: string;
+          toolName?: string;
+          /** UI hint only (owner or admin); the server decides. */
+          canDecide?: boolean;
+          /** Epoch ms after which a pending request is expired. */
+          expiresAt?: number | null;
+          /** Decision note, once decided. */
+          note?: string | null;
       }
     | {
           type: 'form';

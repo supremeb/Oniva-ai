@@ -12,7 +12,10 @@
  *   system / unknown -> ignored (display-only)
  * `view.live.message` (the streaming assistant message) extends the trailing
  * assistant message; `view.toolOutput` feeds the running tool's progress step;
- * `view.approvals` marks calls that wait for a human as `pending`.
+ * `view.approvals` marks calls that wait for a human as `pending` and adds an
+ * `approval` part per request (a card while pending, a resolved line after).
+ * `partial: true` assistant entries (text streamed before a failed generation)
+ * render their text; their tool calls were never run and are skipped.
  *
  * Pure. `createViewAdapter()` memoizes per message, so a patch that touches one
  * message leaves every other message referentially equal.
@@ -28,6 +31,7 @@ import {
   parseToolResultContent,
 } from '@/lib/chat/parts';
 import type { ApprovalItem, ConversationView, EntryRecord, JsonValue } from './types';
+import { summarizeArguments } from './approval';
 
 export interface EngineMessage {
   id: string;
@@ -45,6 +49,13 @@ export interface EngineMessage {
   createdAt: number | null;
   /** User messages: the client's request id, to match optimistic entries. */
   requestId?: string;
+  /** Engine run of the (last) entry of an assistant message, to match the cost ledger. */
+  runId?: string;
+}
+
+export interface AdapterOptions {
+  /** UI hint from the viewer's role; the server enforces. Default true. */
+  canDecide?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,9 +139,10 @@ interface Ctx {
   view: ConversationView;
   /** tool task ids already tied to a call (by result entry or approval). */
   linkedTasks: Set<string>;
+  canDecide: boolean;
 }
 
-function buildCtx(view: ConversationView): Ctx {
+function buildCtx(view: ConversationView, canDecide: boolean): Ctx {
   const results = new Map<string, ToolResult>();
   const linkedTasks = new Set<string>();
   for (const e of view.entries) {
@@ -150,7 +162,7 @@ function buildCtx(view: ConversationView): Ctx {
     approvalByCall.set(a.toolCallId, a);
     linkedTasks.add(a.toolTaskId);
   }
-  return { results, approvalByCall, view, linkedTasks };
+  return { results, approvalByCall, view, linkedTasks, canDecide };
 }
 
 /** The status text the engine's non-ok results carry, for an error line. */
@@ -227,24 +239,62 @@ function argsOf(block: Block): Record<string, unknown> | undefined {
   return isObj(block.arguments) && Object.keys(block.arguments).length > 0 ? (block.arguments as Obj) : undefined;
 }
 
+const isPartial = (e: EntryRecord): boolean => isObj(e.payload) && e.payload.partial === true;
+
+function runIdOf(entries: readonly EntryRecord[]): string | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const p = (entries[i] as EntryRecord).payload;
+    if (isObj(p) && typeof p.runId === 'string') return p.runId;
+  }
+  return undefined;
+}
+
+/** A pending request is a card; a decided one a resolved line; a cancelled one nothing. */
+function approvalPart(a: ApprovalItem, canDecide: boolean): MessagePart | null {
+  if (a.status === 'cancelled') return null;
+  const status = a.status === 'denied' ? 'rejected' : a.status;
+  const decision = isObj(a.decision) ? a.decision : null;
+  const note = decision && typeof decision.note === 'string' ? decision.note : null;
+  return {
+    type: 'approval',
+    id: a.toolTaskId,
+    title: `Allow ${a.toolName}?`,
+    ...(a.reason ? { description: a.reason } : {}),
+    riskLevel: 'medium',
+    items: summarizeArguments(a.arguments),
+    status,
+    toolTaskId: a.toolTaskId,
+    toolName: a.toolName,
+    canDecide,
+    expiresAt: a.expiresAt,
+    ...(note !== null ? { note } : {}),
+  };
+}
+
 function buildAssistant(group: Group, ctx: Ctx, live: JsonValue | null): EngineMessage {
   const parts: MessagePart[] = [];
   const sources: SourceItem[] = [];
   const entries = group.entries;
   const lastAssistantIdx = entries.reduce((acc, e, i) => (e.kind === 'assistant' ? i : acc), -1);
 
-  // Unlinked tool outputs can only be tied to a running call when exactly one
-  // of each exists (the view carries no call id for a task without a result or
-  // an approval).
-  const unlinked = Object.keys(ctx.view.toolOutput).filter((t) => !ctx.linkedTasks.has(t));
+  // Outputs carry their toolCallId: link exactly. Only documents without one
+  // (written before the link existed) fall back to the one-call/one-output heuristic.
+  const byCall = new Map<string, string>();
+  const unlinked: string[] = [];
+  for (const [taskId, out] of Object.entries(ctx.view.toolOutput)) {
+    if (typeof out.toolCallId === 'string') byCall.set(out.toolCallId, out.text);
+    else if (!ctx.linkedTasks.has(taskId)) unlinked.push(taskId);
+  }
   const runningCalls: string[] = [];
   entries.forEach((e, i) => {
-    if (e.kind !== 'assistant' || i !== lastAssistantIdx || !group.trailing) return;
+    if (e.kind !== 'assistant' || i !== lastAssistantIdx || !group.trailing || isPartial(e)) return;
     for (const b of blocksOf(isObj(e.payload) ? e.payload.message : null)) {
       if (b.type === 'tool_call' && typeof b.id === 'string' && !ctx.results.has(b.id)) runningCalls.push(b.id);
     }
   });
   const outputFor = (callId: string): string | undefined => {
+    const exact = byCall.get(callId);
+    if (exact !== undefined) return exact;
     const approval = ctx.approvalByCall.get(callId);
     if (approval) return ctx.view.toolOutput[approval.toolTaskId]?.text;
     if (runningCalls.length === 1 && runningCalls[0] === callId && unlinked.length === 1) {
@@ -265,6 +315,7 @@ function buildAssistant(group: Group, ctx: Ctx, live: JsonValue | null): EngineM
           const t = str(b.text);
           if (t) parts.push(buildTextPart(t, false));
         } else if (b.type === 'tool_call' && typeof b.id === 'string') {
+          if (isPartial(e)) continue; // the generation failed: this call never ran
           const callParts = toolCallParts(
             { id: b.id, name: str(b.name) ?? 'tool', args: argsOf(b), assistantAt: e.createdAt, superseded },
             ctx,
@@ -306,6 +357,14 @@ function buildAssistant(group: Group, ctx: Ctx, live: JsonValue | null): EngineM
     });
   }
 
+  // Approval requests of this message's calls, after the activity feed.
+  const callIds = new Set(callIdsOf(group));
+  for (const a of ctx.view.approvals.items) {
+    if (!callIds.has(a.toolCallId)) continue;
+    const part = approvalPart(a, ctx.canDecide);
+    if (part) parts.push(part);
+  }
+
   for (const p of parts) {
     if (p.type === 'source') {
       sources.push({
@@ -319,9 +378,11 @@ function buildAssistant(group: Group, ctx: Ctx, live: JsonValue | null): EngineM
   const texts = parts.filter((p): p is Extract<MessagePart, { type: 'text' }> => p.type === 'text');
   const thoughts = parts.filter((p): p is Extract<MessagePart, { type: 'thinking' }> => p.type === 'thinking');
   const reasoning = thoughts.map((p) => p.thinkingContent ?? '').join('\n');
+  const runId = runIdOf(entries);
   return {
     id: group.id,
     role: 'assistant',
+    ...(runId !== undefined ? { runId } : {}),
     content: texts.map((p) => p.content).join(''),
     ...(reasoning ? { reasoning } : {}),
     richParts: parts,
@@ -370,12 +431,13 @@ const sameRefs = (a: readonly unknown[], b: readonly unknown[]) =>
  * Create an adapter that reuses a message when everything it was built from is
  * referentially unchanged (patch application keeps untouched subtrees' identity).
  */
-export function createViewAdapter(): (view: ConversationView) => EngineMessage[] {
+export function createViewAdapter(options: AdapterOptions = {}): (view: ConversationView) => EngineMessage[] {
+  const canDecide = options.canDecide !== false;
   let cache = new Map<string, { deps: unknown[]; message: EngineMessage }>();
   return (view) => {
     const groups = groupEntries(view.entries);
     const live = view.live.message;
-    const ctx = buildCtx(view);
+    const ctx = buildCtx(view, canDecide);
     const next = new Map<string, { deps: unknown[]; message: EngineMessage }>();
     const out: EngineMessage[] = [];
 
@@ -425,7 +487,7 @@ export function createViewAdapter(): (view: ConversationView) => EngineMessage[]
 function callIdsOf(g: Group): string[] {
   const ids: string[] = [];
   for (const e of g.entries) {
-    if (e.kind !== 'assistant') continue;
+    if (e.kind !== 'assistant' || isPartial(e)) continue;
     for (const b of blocksOf(isObj(e.payload) ? e.payload.message : null)) {
       if (b.type === 'tool_call' && typeof b.id === 'string') ids.push(b.id);
     }

@@ -76,6 +76,10 @@ export interface UsageTotals {
 export interface ToolOutputState {
   text: string;
   truncated: boolean;
+  /** The call this output belongs to; null for documents written before the link existed. */
+  toolCallId?: string | null;
+  toolName?: string | null;
+  attempt?: number;
   [key: string]: JsonValue | undefined;
 }
 

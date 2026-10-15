@@ -44,6 +44,8 @@ export interface ChatShellProps {
     rightPanel: ReactNode;
     /** Modal overlays rendered after the main column. */
     overlay?: ReactNode;
+    /** Extra header content before the actions (engine chat: conversation cost). */
+    headerExtra?: ReactNode;
 }
 
 /** Layout and header for the chat page: header actions, optional right panel, content slots. */
@@ -60,6 +62,7 @@ export function ChatShell({
     composer,
     rightPanel,
     overlay,
+    headerExtra,
 }: ChatShellProps) {
     // Right panel UI state (separate store per Kieran P1)
     const { rightPanelOpen, toggleRightPanel } = useChatUIStore();
@@ -107,6 +110,7 @@ export function ChatShell({
                     <div className="flex-1 flex justify-end gap-2">
                         {hasMessages && (
                             <>
+                                {headerExtra}
                                 <button className={cn(
                                     'flex items-center gap-2 px-3 py-1.5 rounded-lg',
                                     'text-sm text-neutral-600 hover:text-neutral-900',

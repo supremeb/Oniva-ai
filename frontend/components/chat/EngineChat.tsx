@@ -13,9 +13,13 @@ import { EngineMessageList } from './EngineMessageList';
 import { QueuedChips, type SendingChip } from './QueuedChips';
 import { ConnectionBanner } from './ConnectionBanner';
 import { buildSelectionPopovers } from './ChatSelections';
+import { CostBadge, runForTurn } from './CostBadge';
+import { useConversationCost, type ConversationCost } from '@/lib/engine/cost';
 import {
     createViewAdapter,
+    toDecisionError,
     EngineConversationClient,
+    type EngineMessage,
     useEngineConversation,
     type PendingEntry,
     type WatcherOptions,
@@ -30,6 +34,8 @@ export interface EngineChatProps {
     /** Injected in tests. */
     client?: EngineConversationClient;
     watcherOptions?: WatcherOptions;
+    /** Injected in tests. */
+    costFetcher?: (conversationId: string) => Promise<ConversationCost>;
 }
 
 interface Sources {
@@ -60,12 +66,13 @@ function writeConversationToUrl(id: string) {
  * Chat on the engine. One state owner: the server view from `useEngineConversation`
  * plus optimistic pending entries the adapter does not merge (KTD12, R19).
  */
-export function EngineChat({ projectId, initialConversationId = null, client: clientProp, watcherOptions }: EngineChatProps) {
+export function EngineChat({ projectId, initialConversationId = null, client: clientProp, watcherOptions, costFetcher }: EngineChatProps) {
     const router = useRouter();
     const client = useMemo(() => clientProp ?? new EngineConversationClient(), [clientProp]);
     const [conversationId, setConversationId] = useState<string | null>(initialConversationId);
     const conv = useEngineConversation(conversationId, { client, watcher: watcherOptions });
-    const { view, connection, pending, error, submit, retry, abort } = conv;
+    const { view, connection, pending, error, submit, retry, abort, decide } = conv;
+    const { cost, active: costActive, liveTokens, refresh: refreshCost } = useConversationCost(conversationId, view, costFetcher);
 
     const draftKey = conversationId ?? NEW_DRAFT_KEY;
     const [input, setInputState] = useState(() => useEngineChatPrefs.getState().drafts[draftKey] ?? '');
@@ -97,6 +104,41 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
 
     const adapt = useMemo(() => createViewAdapter(), []);
     const messages = useMemo(() => (view ? adapt(view) : []), [adapt, view]);
+
+    // Approve/deny go through the backend route. The card keeps itself disabled
+    // until the approvals document reflects the decision; a failure surfaces inline.
+    const approvalHandlers = useMemo(
+        () => ({
+            onApprove: (toolTaskId: string) => decide(toolTaskId, 'approve').catch((e) => { throw toDecisionError(e); }),
+            onReject: (toolTaskId: string) => decide(toolTaskId, 'deny').catch((e) => { throw toDecisionError(e); }),
+        }),
+        [decide]
+    );
+
+    // Per-turn cost under the last assistant message of each run.
+    const liveRunId = view?.live.runId ?? null;
+    const lastOfRun = useMemo(() => {
+        const order: string[] = [];
+        const last = new Map<string, string>();
+        for (const m of messages) {
+            if (m.role !== 'assistant' || !m.runId) continue;
+            if (!last.has(m.runId)) order.push(m.runId);
+            last.set(m.runId, m.id);
+        }
+        return { order, last };
+    }, [messages]);
+    const renderMessageFooter = useCallback(
+        (message: { id: string }) => {
+            const runId = (message as EngineMessage).runId;
+            if (!runId || lastOfRun.last.get(runId) !== message.id || runId === liveRunId) return null;
+            const runs = cost?.runs ?? [];
+            // Match the ledger by run id; if the ids do not line up, fall back to start order.
+            const byId = runs.find((r) => r.runId === runId);
+            const run = byId ?? (runs.some((r) => lastOfRun.order.includes(r.runId)) ? null : runForTurn(cost ?? null, lastOfRun.order.indexOf(runId)));
+            return run ? <CostBadge variant="turn" run={run} /> : null;
+        },
+        [lastOfRun, liveRunId, cost]
+    );
 
     const running = view?.live.runId != null;
     const awaitingApproval = running && (view?.approvals.items.some((a) => a.status === 'pending') ?? false);
@@ -255,6 +297,8 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                     pending={bubbles}
                     running={running}
                     onRetry={handleRetry}
+                    approvalHandlers={approvalHandlers}
+                    renderMessageFooter={renderMessageFooter}
                     onOpenModal={(data) => setArtifactModal({ ...data, open: true })}
                 />
             }
@@ -264,6 +308,13 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                     <ConnectionBanner connection={connection} error={error} stalledAfterSeconds={Math.round((watcherOptions?.stalledAfterMs ?? 45_000) / 1000)} />
                     {composer}
                 </div>
+            }
+            headerExtra={
+                conversationId ? (
+                    <span className="self-center mr-1 text-neutral-500">
+                        <CostBadge variant="total" cost={cost ?? null} active={costActive} liveTokens={liveTokens} onRefresh={() => void refreshCost()} />
+                    </span>
+                ) : null
             }
             rightPanel={<RightPanel files={[]} sources={panelSources} />}
             overlay={

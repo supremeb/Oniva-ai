@@ -90,17 +90,19 @@ describe('legacy fixture parity', () => {
     expect(msgs[1].reasoning).toBe('Need to search the web. Then write a report.');
   });
 
-  it('chat_error: legacy persisted nothing; the engine keeps an error part with the engine retryable flag', () => {
+  it('chat_error: legacy persisted nothing; the engine keeps the partial text, then an error part with the engine retryable flag', () => {
     expect((legacyError as any).persisted_messages).toEqual([]); // legacy dropped the failed turn
     const sse = (legacyError as any).events.find((e: any) => e.event === 'error').data;
     const msgs = viewToMessages(views.chat_error);
     expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant']);
-    expect(parts(msgs[1])).toEqual([
-      { type: 'error', id: expect.any(String), message: sse.message, title: sse.title, retryable: sse.retryable },
-    ]);
-    // Deliberate: the engine discards the partial text when a run fails, so no
-    // text part survives the commit (legacy streamed it, then dropped it).
-    expect(parts(msgs[1]).some((p) => p.type === 'text')).toBe(false);
+    // Deliberate: legacy streamed "partial " and then dropped the failed turn; the
+    // engine commits the partial reply (payload.partial, stopReason error) before
+    // run_error, so the text survives and the error part follows it.
+    const got = parts(msgs[1]);
+    expect(got.map((p) => p.type)).toEqual(['text', 'error']);
+    expect(got[0].content).toBe('partial ');
+    expect(got[1]).toEqual({ type: 'error', id: expect.any(String), message: sse.message, title: sse.title, retryable: sse.retryable });
+    expect(msgs[1].content).toBe('partial ');
   });
 });
 
@@ -145,10 +147,61 @@ describe('tool result statuses', () => {
 });
 
 describe('approvals and running tools', () => {
-  it('a call with a pending approval is pending', () => {
+  it('a call with a pending approval is pending and gets an approval card part (credential-scrubbed args)', () => {
     const msgs = viewToMessages(views.approval_pending);
     const tool = parts(msgs[1]).find((p) => p.type === 'tool_call');
     expect(tool).toMatchObject({ id: 'call_report_1', toolName: 'save_report', status: 'pending' });
+    const card = parts(msgs[1]).find((p) => p.type === 'approval');
+    const item = views.approval_pending.approvals.items[0];
+    expect(card).toMatchObject({
+      id: item.toolTaskId, toolTaskId: item.toolTaskId, toolName: 'save_report', status: 'pending',
+      canDecide: true, description: 'needs a human', expiresAt: null,
+    });
+    expect(card.items).toEqual([
+      { label: 'filename', value: 'report.md' },
+      { label: 'report_content', value: '# Report' },
+    ]);
+    expect(parts(msgs[1]).at(-1)).toBe(card); // after the activity feed
+  });
+
+  it('scrubs credential-looking arguments entirely', () => {
+    const v = clone(views.approval_pending);
+    v.approvals.items[0].arguments = { api_key: 'sk-secret', Authorization: 'Bearer abc', url: 'https://x' };
+    const card = parts(viewToMessages(v)[1]).find((p) => p.type === 'approval');
+    expect(card.items).toEqual([
+      { label: 'api_key', value: '[hidden]', sensitive: true },
+      { label: 'Authorization', value: '[hidden]', sensitive: true },
+      { label: 'url', value: 'https://x' },
+    ]);
+    expect(JSON.stringify(card)).not.toContain('sk-secret');
+  });
+
+  it('canDecide comes from the adapter option', () => {
+    const card = parts(createViewAdapter({ canDecide: false })(views.approval_pending)[1]).find((p) => p.type === 'approval');
+    expect(card.canDecide).toBe(false);
+  });
+
+  it('decided approvals become resolved parts (denied -> rejected, note kept); cancelled shows nothing', () => {
+    const decided = (status: string, decision: unknown) => {
+      const v = clone(views.approval_pending);
+      Object.assign(v.approvals.items[0], { status, decision, closedAt: 5 });
+      return parts(viewToMessages(v)[1]).find((p) => p.type === 'approval');
+    };
+    expect(decided('approved', { decision: 'approve', principal: 'u1', note: null, decidedAt: 1 })).toMatchObject({ status: 'approved' });
+    expect(decided('denied', { decision: 'deny', principal: 'u1', note: 'too risky', decidedAt: 1 })).toMatchObject({ status: 'rejected', note: 'too risky' });
+    expect(decided('expired', null)).toMatchObject({ status: 'expired' });
+    expect(decided('cancelled', null)).toBeUndefined();
+  });
+
+  it('a patch resolving the approval rebuilds the message (card -> resolved)', () => {
+    const adapt = createViewAdapter();
+    const v1 = clone(views.approval_pending);
+    const m1 = adapt(v1);
+    const v2 = applyJsonPatch(v1 as unknown as JsonValue, [{ op: 'replace', path: '/approvals/items/0/status', value: 'approved' }]) as unknown as ConversationView;
+    const m2 = adapt(v2);
+    expect(m2[0]).toBe(m1[0]);
+    expect(m2[1]).not.toBe(m1[1]);
+    expect(parts(m2[1]).find((p) => p.type === 'approval').status).toBe('approved');
   });
 
   it('an unresolved call in the last assistant entry is running; its approval-linked output is attached', () => {
@@ -160,7 +213,25 @@ describe('approvals and running tools', () => {
     expect(tool.steps).toEqual([{ id: 'output-call_report_1', label: 'Output', status: 'active', message: 'writing...' }]);
   });
 
-  it('an unlinked output is attached only when exactly one call runs and one output exists', () => {
+  it('output is linked by toolCallId, exactly, even with several running calls', () => {
+    const v = viewOf([user('u1', 'go'), assistant('a1', [call('c1', 'slow'), call('c2', 'slow')])], {
+      toolOutput: {
+        task_a: { text: 'for c2', truncated: false, attempt: 1, toolCallId: 'c2', toolName: 'slow' },
+        task_b: { text: 'for c1', truncated: false, attempt: 1, toolCallId: 'c1', toolName: 'slow' },
+      },
+    });
+    const calls = parts(viewToMessages(v)[1]).filter((p) => p.type === 'tool_call');
+    expect(calls.map((c) => [c.id, c.steps?.[0].message])).toEqual([['c1', 'for c1'], ['c2', 'for c2']]);
+  });
+
+  it('a linked output never leaks to another call through the heuristic', () => {
+    const v = viewOf([user('u1', 'go'), assistant('a1', [call('c1', 'slow')])], {
+      toolOutput: { task_a: { text: 'not mine', truncated: false, attempt: 1, toolCallId: 'other', toolName: 'slow' } },
+    });
+    expect(parts(viewToMessages(v)[1])[0].steps).toBeUndefined();
+  });
+
+  it('an unlinked output (toolCallId null) is attached only when exactly one call runs and one output exists', () => {
     const base = [user('u1', 'go'), assistant('a1', [call('c1', 'slow')])];
     const one = viewOf(base, { toolOutput: { task_x: { text: 'tick', truncated: false } } });
     expect(parts(viewToMessages(one)[1])[0].steps?.[0].message).toBe('tick');
@@ -360,5 +431,21 @@ describe('memoization', () => {
     const m2 = adapt(v2);
     expect(m2[0]).toBe(m1[0]);
     expect(parts(m2[1])[0].status).toBe('success');
+  });
+});
+
+describe('partial assistant entries (failed runs)', () => {
+  it('renders the partial text then the error; the never-run tool calls of a partial reply are skipped', () => {
+    const partial = entry(
+      'assistant',
+      { runId: 'run', round: 0, partial: true, message: { role: 'assistant', provider: 'p', model: 'm', blocks: [{ type: 'text', text: 'Looking' }, call('c9', 'read')], stopReason: 'error' }, usage: {} },
+      { id: 'a1' },
+    );
+    const err = entry('run_error', { runId: 'run', error: { kind: 'x', message: 'boom', retryable: false } }, { id: 'r1' });
+    const msgs = viewToMessages(viewOf([user('u1', 'go'), partial, err]));
+    const got = parts(msgs[1]);
+    expect(got.map((p) => p.type)).toEqual(['text', 'error']);
+    expect(msgs[1].runId).toBe('run');
+    expect(msgs[1].isStreaming).toBe(false);
   });
 });

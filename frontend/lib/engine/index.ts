@@ -5,3 +5,4 @@ export { EngineConversationClient, WatchHttpError, type ChatSelectionsInput } fr
 export { ConversationWatcher, type Connection, type PendingEntry, type WatcherOptions, type WatcherState } from './watcher';
 export { useEngineConversation, type UseEngineConversation } from './useEngineConversation';
 export { viewToMessages, createViewAdapter, type EngineMessage } from './viewToMessages';
+export { DecisionError, toDecisionError, summarizeArguments } from './approval';

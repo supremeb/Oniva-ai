@@ -3,6 +3,7 @@
 import type { RefObject } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ChatMessageList, ChatLoadingIndicator } from './shared';
+import type { ChatMessageListProps } from './shared/ChatMessage';
 import type { ArtifactModalData } from './shared/data/FilePreview';
 import type { EngineMessage, PendingEntry } from '@/lib/engine';
 
@@ -15,6 +16,8 @@ export interface EngineMessageListProps {
     running: boolean;
     onRetry: (requestId: string) => void;
     onOpenModal: (data: ArtifactModalData) => void;
+    approvalHandlers?: ChatMessageListProps['approvalHandlers'];
+    renderMessageFooter?: ChatMessageListProps['renderMessageFooter'];
 }
 
 export const pendingText = (p: PendingEntry): string =>
@@ -25,7 +28,7 @@ export const pendingText = (p: PendingEntry): string =>
  * reader hears new messages; `aria-busy` while a run streams defers announcements
  * until the text settles instead of reading every 100 ms diff.
  */
-export function EngineMessageList({ scrollRef, viewportRef, messages, pending, running, onRetry, onOpenModal }: EngineMessageListProps) {
+export function EngineMessageList({ scrollRef, viewportRef, messages, pending, running, onRetry, onOpenModal, approvalHandlers, renderMessageFooter }: EngineMessageListProps) {
     const streaming = messages.find((m) => m.isStreaming);
     const waiting = running && !streaming;
     return (
@@ -46,6 +49,8 @@ export function EngineMessageList({ scrollRef, viewportRef, messages, pending, r
                     streamingMessageId={streaming?.id}
                     streamingRichParts={streaming?.richParts ?? []}
                     onOpenModal={onOpenModal}
+                    approvalHandlers={approvalHandlers}
+                    renderMessageFooter={renderMessageFooter}
                 />
                 {pending.map((p) => (
                     <div key={p.requestId} className="mt-6 flex justify-end" data-testid="pending-message" data-status={p.status}>

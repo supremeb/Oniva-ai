@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { Robot, User, Copy, Check, ThumbsUp, ThumbsDown, ArrowsClockwise, Brain, CaretDown, CaretRight } from '@phosphor-icons/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useState, useCallback, useEffect, useRef, memo } from 'react';
+import { useState, useCallback, useEffect, useRef, memo, Fragment } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { GenerativeO } from '@/components/ui/GenerativeO';
 import type { MessagePart, SourceItem } from '@/lib/models';
@@ -425,6 +425,10 @@ export interface ChatMessageListProps {
     onFeedback?: (messageId: string, messageIndex: number, rating: 'positive' | 'negative') => void;
     /** Callback to open artifact modal */
     onOpenModal?: (data: ArtifactModalData) => void;
+    /** Approve/reject handlers for approval parts (receive the part id). */
+    approvalHandlers?: { onApprove?: (id: string) => void | Promise<void>; onReject?: (id: string) => void | Promise<void> };
+    /** Extra content under a message (e.g. a per-turn cost caption). */
+    renderMessageFooter?: (message: ChatMessageData) => React.ReactNode;
 }
 
 /**
@@ -452,6 +456,8 @@ export const ChatMessageList = memo(function ChatMessageList({
     onRegenerate,
     onFeedback,
     onOpenModal,
+    approvalHandlers,
+    renderMessageFooter,
 }: ChatMessageListProps) {
     if (messages.length === 0) {
         return null;
@@ -460,6 +466,16 @@ export const ChatMessageList = memo(function ChatMessageList({
     return (
         <div className={cn('space-y-6', compact && 'space-y-4', className)}>
             {messages.map((message, index) => {
+                const footer = renderMessageFooter?.(message);
+                const wrap = (el: React.ReactElement) =>
+                    footer ? (
+                        <Fragment key={message.id}>
+                            {el}
+                            <div className={cn('-mt-3', showAvatars && 'pl-10')}>{footer}</div>
+                        </Fragment>
+                    ) : (
+                        el
+                    );
                 const isStreamingMsg = message.id === streamingMessageId;
 
                 // Determine rich parts: streaming message uses live parts, restored messages use persisted
@@ -473,7 +489,7 @@ export const ChatMessageList = memo(function ChatMessageList({
                 // Groups thinking + tool calls into one collapsible timeline,
                 // renders response parts (text, tables, sources) below.
                 if (message.role === 'assistant' && richParts && richParts.length > 0) {
-                    return (
+                    return wrap(
                         <div key={message.id} className="flex gap-3 justify-start group">
                             {showAvatars && (
                                 <div className="shrink-0">
@@ -487,7 +503,7 @@ export const ChatMessageList = memo(function ChatMessageList({
                                     animated={isStreamingMsg}
                                     toolCallMeta={isStreamingMsg ? toolCallMeta : undefined}
                                     sources={isStreamingMsg ? sources : (message as any).sources}
-                                    handlers={onOpenModal ? { onOpenModal } : undefined}
+                                    handlers={onOpenModal || approvalHandlers ? { ...(onOpenModal ? { onOpenModal } : {}), ...approvalHandlers } : undefined}
                                 />
                                 {!isStreamingMsg && (
                                     <MessageActions
@@ -506,7 +522,7 @@ export const ChatMessageList = memo(function ChatMessageList({
                     );
                 }
 
-                return (
+                return wrap(
                     <ChatMessage
                         key={message.id}
                         message={message}

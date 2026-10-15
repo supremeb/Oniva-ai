@@ -368,6 +368,36 @@
         "createdAt": 1000000
       },
       {
+        "id": "ent_01a14005-d4ce-73bc-8358-2324896e4d4c",
+        "conversationId": "conv_01a14005-d4cd-739d-906f-c631d81f0685",
+        "taskId": "task_01a14005-d4cd-739d-906f-c633dadb3852",
+        "kind": "assistant",
+        "payload": {
+          "runId": "task_01a14005-d4cd-739d-906f-c633dadb3852",
+          "round": 0,
+          "partial": true,
+          "message": {
+            "role": "assistant",
+            "provider": "fake",
+            "model": "fake-1",
+            "blocks": [
+              {
+                "type": "text",
+                "text": "partial "
+              }
+            ],
+            "stopReason": "error"
+          },
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        "createdAt": 1000000
+      },
+      {
         "id": "ent_01a14005-d4ce-73bc-8358-23259318865a",
         "conversationId": "conv_01a14005-d4cd-739d-906f-c631d81f0685",
         "taskId": "task_01a14005-d4cd-739d-906f-c633dadb3852",
