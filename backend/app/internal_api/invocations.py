@@ -160,16 +160,18 @@ async def connector_denial(
         if row is None or row[0] is None:
             return None
         allowed = [str(c) for c in (row[0].get("connector_ids") or [])]
+        # Selections are Connector-table UUIDs; the agent addresses connectors by registry/provider id
+        # (e.g. "linear") or, for session connectors, by UUID. Resolve UUIDs to providers, tenant-scoped.
+        ids = [u for u in (_try_uuid(c) for c in allowed) if u is not None]
+        providers = set()
+        if ids:
+            from app.models.connector import Connector
+            providers = {p for (p,) in (await db.execute(
+                select(Connector.provider).where(Connector.tenant_id == tenant, Connector.id.in_(ids)))).all()}
         if name in CONNECTOR_ID_TOOLS:
             target = str((args or {}).get("connector_id", ""))
-            ok = target in allowed
+            ok = target in allowed or target in providers
         else:
-            ids = [u for u in (_try_uuid(c) for c in allowed) if u is not None]
-            providers = set()
-            if ids:
-                from app.models.connector import Connector
-                providers = {p for (p,) in (await db.execute(
-                    select(Connector.provider).where(Connector.tenant_id == tenant, Connector.id.in_(ids)))).all()}
             ok = CONNECTOR_PROVIDER_TOOLS[name] in providers
     if ok:
         return None

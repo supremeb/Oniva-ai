@@ -615,6 +615,20 @@ async def test_selected_connector_id_passes_the_gate(gw):
     assert denial is None
 
 
+async def test_selected_connector_uuid_allows_its_registry_id_only(gw):
+    x = str(uuid.uuid4())
+    await _select_connectors(gw, [x], providers=[(x, "fake_crm")])
+    for name in ("invoke_connector_tool", "get_connector_schema"):
+        ok = await invocations.connector_denial(
+            gw.factory, str(gw.tenant_a), str(gw.conv_a), name, {"connector_id": "fake_crm"})
+        assert ok is None, name
+        bad = await invocations.connector_denial(
+            gw.factory, str(gw.tenant_a), str(gw.conv_a), name, {"connector_id": "other"})
+        assert bad["details"]["error"] == "connector_not_allowed"
+    r = await invoke(gw, "invoke_connector_tool", args={"connector_id": "other", "tool_name": "t"})
+    assert r.json()["details"]["error"] == "connector_not_allowed"
+
+
 async def test_empty_selection_denies_all_and_missing_selections_are_unbound(gw):
     await _select_connectors(gw, [])
     r = await invoke(gw, "invoke_connector_tool", args={"connector_id": "x", "tool_name": "t"})
