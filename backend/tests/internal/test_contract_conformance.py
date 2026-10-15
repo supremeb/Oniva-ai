@@ -352,7 +352,7 @@ async def test_policy_allow_shape(client, test_db):
     j = r.json()
     assert r.status_code == 200 and j["ok"] is True
     assert set(j) >= {"ok", "provider", "model", "apiKey", "maxTokens", "expiresAt", "requestId"}
-    assert j["provider"] == "anthropic" and j["model"] == "claude-sonnet-4-5"
+    assert j["provider"] == "anthropic" and j["model"] == "claude-sonnet-5-5"
     assert j["apiKey"] == tp.ANTHROPIC_KEY and isinstance(j["maxTokens"], int) and j["maxTokens"] > 0
     assert isinstance(j["expiresAt"], int) and j["expiresAt"] > 1_000_000_000_000  # epoch ms
     assert j["requestId"] == payload["requestId"]

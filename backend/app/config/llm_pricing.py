@@ -52,6 +52,7 @@ LLM_PRICING: Dict[str, ModelPricing] = {
     "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
     "claude-sonnet-4-5": {"input": 3.0, "output": 15.0},
     "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
+    "claude-opus-4-5": {"input": 5.0, "output": 25.0},
     # Claude 5.x (claude-api skill reference, models.md / model-migration.md / prompt-caching.md,
     # cached 2026-10-06). 5-minute cache writes are 1.25x input; cache reads differ per model.
     "claude-opus-5-5": {"input": 4.0, "output": 20.0, "cache_read": 0.20, "cache_write": 5.0},

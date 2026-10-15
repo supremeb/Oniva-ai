@@ -90,7 +90,7 @@ async def test_tenant_anthropic_provider_returns_bare_model_and_its_key(client, 
     r = await post(client, body(t))
     j = r.json()
     assert r.status_code == 200 and j["ok"] is True
-    assert j["provider"] == "anthropic" and j["model"] == "claude-sonnet-4-5"
+    assert j["provider"] == "anthropic" and j["model"] == "claude-sonnet-5-5"
     assert j["apiKey"] == ANTHROPIC_KEY and j["maxTokens"] == 1000
     assert j["expiresAt"] > 0 and j["requestId"].startswith("req-")
     assert r.headers["cache-control"] == "no-store"
@@ -142,9 +142,9 @@ async def test_model_hint_tier_compaction_and_routing_policy(client, test_db):
     hint = (await post(client, body(t, agent={"model": "claude-opus-4-1"}))).json()
     assert hint["model"] == "claude-opus-4-1"
     tier = (await post(client, body(t, agent={"tier": "high"}))).json()
-    assert tier["model"] == "claude-opus-4-5"
+    assert tier["model"] == "claude-opus-5-5"
     comp = (await post(client, body(t, purpose="compaction", agent={"model": "claude-opus-4-1"}))).json()
-    assert comp["model"] == "claude-haiku-4-5"
+    assert comp["model"] == "claude-haiku-5-5"
     test_db.add(RoutingPolicy(
         tenant_id=t, name="g", task_type="generation", model_id="anthropic/claude-3-5-haiku", provider="anthropic",
         priority=1, is_active=True,

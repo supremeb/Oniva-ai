@@ -1163,9 +1163,9 @@ async def get_default_provider(
 # ============================================================================
 
 MODEL_FAMILY_TIERS: dict[str, dict[str, str]] = {
-    "anthropic": {"high": "anthropic/claude-opus-4-5", "mid": "anthropic/claude-sonnet-4-5", "low": "anthropic/claude-haiku-4-5"},
+    "anthropic": {"high": "anthropic/claude-opus-5-5", "mid": "anthropic/claude-sonnet-5-5", "low": "anthropic/claude-haiku-5-5"},
     "openai": {"high": "openai/gpt-4o", "mid": "openai/gpt-4o-mini", "low": "openai/gpt-4o-mini"},
-    "openrouter": {"high": "openrouter/anthropic/claude-sonnet-4-5", "mid": "openrouter/google/gemini-2.5-flash", "low": "openrouter/anthropic/claude-haiku-4-5"},
+    "openrouter": {"high": "openrouter/anthropic/claude-opus-5-5", "mid": "openrouter/anthropic/claude-sonnet-5-5", "low": "openrouter/anthropic/claude-haiku-5-5"},
 }
 
 
