@@ -15,21 +15,107 @@ spec:
       labels:
         app: oniva-api
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      initContainers:
+      # Block until the oniva-migrate Job has brought the schema to head.
+      - name: wait-for-migrations
+        image: oniva
+        command:
+        - sh
+        - -c
+        - |
+          until alembic current 2>/dev/null | grep -q "(head)"; do
+            echo "waiting for migrations (oniva-migrate Job)..."; sleep 5
+          done
+        envFrom:
+        - configMapRef:
+            name: oniva-config
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: DB_PASSWORD
+        - name: MIGRATION_DATABASE_URL
+          value: "postgresql+asyncpg://oniva:$(DB_PASSWORD)@postgres:5432/oniva"
+        - name: DATABASE_URL
+          value: "postgresql+asyncpg://oniva:$(DB_PASSWORD)@postgres:5432/oniva"
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
       containers:
       - name: api
-        image: oniva:latest
+        image: oniva
         ports:
         - containerPort: 8000
         envFrom:
         - configMapRef:
             name: oniva-config
-        - secretRef:
-            name: oniva-secrets
+        # NOTE: $(VAR) expansion only sees variables from earlier `env` entries, NOT envFrom.
+        # Secrets are therefore listed explicitly first, then the URLs that reference them.
         env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: SECRET_KEY
+        - name: ENCRYPTION_SALT
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: ENCRYPTION_SALT
+        - name: APP_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: APP_DATABASE_PASSWORD
+        - name: SYSTEM_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: SYSTEM_DATABASE_PASSWORD
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: REDIS_PASSWORD
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: DB_PASSWORD
         - name: DATABASE_URL
-          value: "postgresql+asyncpg://postgres:$(DB_PASSWORD)@postgres:5432/oniva"
+          value: "postgresql+asyncpg://oniva_app:$(APP_DATABASE_PASSWORD)@postgres:5432/oniva"
+        - name: SYSTEM_DATABASE_URL
+          value: "postgresql+asyncpg://oniva_system:$(SYSTEM_DATABASE_PASSWORD)@postgres:5432/oniva"
+        - name: MIGRATION_DATABASE_URL
+          value: "postgresql+asyncpg://oniva:$(DB_PASSWORD)@postgres:5432/oniva"
         - name: REDIS_URL
-          value: "redis://redis:6379"
+          value: "redis://:$(REDIS_PASSWORD)@redis:6379"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: OPENAI_API_KEY
+              optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: ANTHROPIC_API_KEY
+              optional: true
+        - name: OPENROUTER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: OPENROUTER_API_KEY
+              optional: true
         resources:
           requests:
             memory: "2Gi"
@@ -37,18 +123,36 @@ spec:
           limits:
             memory: "4Gi"
             cpu: "2"
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: tmp
+          mountPath: /tmp
+        startupProbe:
+          httpGet:
+            path: /health/live
+            port: 8000
+          periodSeconds: 5
+          failureThreshold: 30
         readinessProbe:
           httpGet:
-            path: /health
+            path: /health/ready
             port: 8000
-          initialDelaySeconds: 10
           periodSeconds: 5
         livenessProbe:
           httpGet:
-            path: /health
+            path: /health/live
             port: 8000
-          initialDelaySeconds: 30
           periodSeconds: 10
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: oniva-data-pvc
+      - name: tmp
+        emptyDir: {}
       imagePullSecrets:
       - name: regcred
 ---
@@ -71,7 +175,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: oniva-frontend:latest
+        image: oniva-frontend
         ports:
         - containerPort: 3000
         env:
@@ -96,6 +200,8 @@ spec:
             port: 3000
           initialDelaySeconds: 30
           periodSeconds: 10
+      imagePullSecrets:
+      - name: regcred
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -106,6 +212,8 @@ metadata:
     app: postgres
 spec:
   replicas: 1
+  strategy:
+    type: Recreate   # single RWO volume
   selector:
     matchLabels:
       app: postgres
@@ -120,15 +228,28 @@ spec:
         ports:
         - containerPort: 5432
         env:
+        # POSTGRES_USER is the schema OWNER; the app connects as oniva_app / oniva_system.
         - name: POSTGRES_USER
-          value: "postgres"
+          value: "oniva"
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
               name: oniva-secrets
               key: DB_PASSWORD
+        - name: APP_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: APP_DATABASE_PASSWORD
+        - name: SYSTEM_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: SYSTEM_DATABASE_PASSWORD
         - name: POSTGRES_DB
           value: "oniva"
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
         resources:
           requests:
             memory: "2Gi"
@@ -139,12 +260,15 @@ spec:
         volumeMounts:
         - name: postgres-data
           mountPath: /var/lib/postgresql/data
+        - name: postgres-init
+          mountPath: /docker-entrypoint-initdb.d
+          readOnly: true
         readinessProbe:
           exec:
             command:
             - pg_isready
             - -U
-            - postgres
+            - oniva
             - -d
             - oniva
           initialDelaySeconds: 5
@@ -154,7 +278,7 @@ spec:
             command:
             - pg_isready
             - -U
-            - postgres
+            - oniva
             - -d
             - oniva
           initialDelaySeconds: 30
@@ -163,6 +287,10 @@ spec:
       - name: postgres-data
         persistentVolumeClaim:
           claimName: postgres-pvc
+      - name: postgres-init
+        configMap:
+          name: postgres-init
+          defaultMode: 0555
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -173,6 +301,8 @@ metadata:
     app: redis
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: redis
@@ -184,8 +314,22 @@ spec:
       containers:
       - name: redis
         image: redis:7-alpine
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: REDIS_PASSWORD
+        # redis-cli reads REDISCLI_AUTH, so the probes authenticate without putting the password in argv
+        - name: REDISCLI_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: oniva-secrets
+              key: REDIS_PASSWORD
         command:
         - redis-server
+        - --requirepass
+        - $(REDIS_PASSWORD)
         - --appendonly
         - "yes"
         - --maxmemory

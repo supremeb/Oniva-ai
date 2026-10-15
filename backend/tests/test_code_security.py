@@ -1,72 +1,30 @@
 """
-Security tests for CodeExecutor
+Security tests for CodeExecutor: workflow code nodes never run in-process.
+See tests/security/test_no_inprocess_exec.py for the AE2 escape-payload coverage.
 """
 
-import pytest
-from app.node_executors.code_executor import CodeExecutor
+from unittest.mock import MagicMock, patch
+
 from app.node_executors import NodeExecutionContext
+from app.node_executors.code_executor import CodeExecutor
 
-@pytest.mark.asyncio
-async def test_code_executor_blocks_os_import(test_db, test_user_id):
-    """
-    Test that the CodeExecutor blocks importing the 'os' module.
-    """
-    executor = CodeExecutor()
-    
-    context = NodeExecutionContext(
-        node_id="test_node",
-        node_type="code",
-        node_data={
-            "code": "import os\nresult = os.getcwd()",
-            "language": "python3"
-        },
-        inputs={},
-        variables={},
-        user_id=str(test_user_id)
+
+def _ctx(code: str) -> NodeExecutionContext:
+    return NodeExecutionContext(
+        node_id="n", node_type="code", node_data={"code": code, "timeout": 1},
+        inputs={}, variables={}, user_id="u", tenant_id="t", session_id="s",
     )
-    
-    result = await executor.execute(context, test_db)
-    
-    # We expect this to fail
-    assert result.status == "failed"
-    # Ideally, it should say something about import not allowed or NameError
-    # Or specifically "__import__ not found" if we removed it from builtins
-    assert "Execution error" in result.error or "__import__ not found" in result.error or "NameError" in result.error or "not allowed" in result.error
 
-@pytest.mark.asyncio
-async def test_code_executor_timeout(test_db, test_user_id):
-    """
-    Test that the CodeExecutor times out for infinite loops.
-    """
-    executor = CodeExecutor()
-    
-    context = NodeExecutionContext(
-        node_id="test_timeout",
-        node_type="code",
-        node_data={
-            "code": "while True: pass",
-            "language": "python3",
-            "timeout": 1 # 1 second timeout
-        },
-        inputs={},
-        variables={},
-        user_id=str(test_user_id)
-    )
-    
-    # This should return a failed result, not hang forever
-    import time
-    import asyncio
-    start = time.time()
-    
-    try:
-        # Wrap in a test-level timeout to prevent hanging the suite
-        result = await asyncio.wait_for(executor.execute(context, test_db), timeout=3.0)
-    except asyncio.TimeoutError:
-        pytest.fail("Executor did not time out the user code")
-        
-    duration = time.time() - start
-    
-    assert result.status == "failed"
-    assert "Timeout" in result.error or "timed out" in result.error
-    assert duration < 2.0 # Should be close to 1 second
 
+async def test_code_executor_refuses_without_sandbox():
+    settings = MagicMock(ENABLE_SANDBOX=False, E2B_API_KEY="")
+    with patch("app.node_executors.code_executor.get_settings", return_value=settings):
+        result = await CodeExecutor().execute(_ctx("import os\nresult = os.getcwd()"), MagicMock())
+    assert result.status == "failed"
+    assert "sandbox" in result.error.lower()
+
+
+async def test_code_executor_rejects_empty_code():
+    result = await CodeExecutor().execute(_ctx(""), MagicMock())
+    assert result.status == "failed"
+    assert "No code" in result.error

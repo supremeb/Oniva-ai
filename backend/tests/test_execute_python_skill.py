@@ -6,8 +6,8 @@ Tests cover:
 - E2B path: successful review ticket creation
 - E2B path: missing session_id returns error
 - E2B path: ReviewQueueService failure handled gracefully
-- Legacy fallback when ENABLE_SANDBOX=False
-- Legacy fallback when E2B_API_KEY is empty
+- Refusal when ENABLE_SANDBOX=False
+- Refusal when E2B_API_KEY is empty
 - Empty code rejection
 """
 
@@ -51,8 +51,8 @@ def mock_e2b_settings():
 
 
 @pytest.fixture
-def mock_legacy_settings():
-    """Mock settings with sandbox disabled (legacy fallback)."""
+def mock_disabled_settings():
+    """Mock settings with sandbox disabled (refusal)."""
     with patch("app.skills.execute_python.tool.get_settings") as mock:
         settings = MagicMock()
         settings.ENABLE_SANDBOX = False
@@ -178,61 +178,23 @@ class TestE2BPath:
                 assert len(call_kwargs["title"]) < len(long_code) + 50
 
 
-class TestLegacyFallback:
-    """Tests for legacy in-process sandbox fallback."""
+class TestSandboxDisabledRefusal:
+    """With the sandbox off the skill refuses; there is no in-process fallback."""
 
     @pytest.mark.asyncio
-    async def test_fallback_when_sandbox_disabled(self, skill_ctx, mock_legacy_settings):
-        """Falls back to legacy when ENABLE_SANDBOX=False."""
-        with patch(
-            "app.skills.execute_python.tool._execute_legacy",
-            new_callable=AsyncMock,
-            return_value={"success": True, "output": "42"},
-        ) as mock_legacy:
-            result = await execute_python(skill_ctx, "print(42)")
-
-            mock_legacy.assert_called_once_with(skill_ctx, "print(42)", 30)
-            assert result["success"]
+    async def test_refuses_when_sandbox_disabled(self, skill_ctx, mock_disabled_settings):
+        result = await execute_python(skill_ctx, "print(42)")
+        assert not result["success"]
+        assert "sandbox" in result["error"].lower()
 
     @pytest.mark.asyncio
-    async def test_fallback_when_no_api_key(self, skill_ctx):
-        """Falls back to legacy when E2B_API_KEY is empty."""
+    async def test_refuses_when_no_api_key(self, skill_ctx):
         with patch("app.skills.execute_python.tool.get_settings") as mock_settings:
             settings = MagicMock()
             settings.ENABLE_SANDBOX = True
             settings.E2B_API_KEY = ""
             mock_settings.return_value = settings
 
-            with patch(
-                "app.skills.execute_python.tool._execute_legacy",
-                new_callable=AsyncMock,
-                return_value={"success": True, "output": "ok"},
-            ) as mock_legacy:
-                result = await execute_python(skill_ctx, "print('ok')")
-                mock_legacy.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_legacy_timeout_capped(self, skill_ctx, mock_legacy_settings):
-        """Legacy timeout is capped at 30 seconds."""
-        with patch(
-            "app.skills.execute_python.tool._execute_legacy",
-            new_callable=AsyncMock,
-            return_value={"success": True},
-        ) as mock_legacy:
-            await execute_python(skill_ctx, "x=1", timeout=120)
-
-            # timeout should be min(120, 30) = 30
-            mock_legacy.assert_called_once_with(skill_ctx, "x=1", 30)
-
-    @pytest.mark.asyncio
-    async def test_legacy_delegates_to_tool_legacy(self, skill_ctx, mock_legacy_settings):
-        """_execute_legacy delegates to tool_legacy.execute_python."""
-        with patch(
-            "app.skills.execute_python.tool_legacy.execute_python",
-            new_callable=AsyncMock,
-            return_value={"success": True, "output": "legacy"},
-        ) as mock_tool:
-            from app.skills.execute_python.tool import _execute_legacy
-            result = await _execute_legacy(skill_ctx, "print('hi')", 15)
-            mock_tool.assert_called_once_with(skill_ctx, "print('hi')", 15)
-            assert result["output"] == "legacy"
+            result = await execute_python(skill_ctx, "print('ok')")
+            assert not result["success"]
+            assert "sandbox" in result["error"].lower()

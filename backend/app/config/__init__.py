@@ -13,6 +13,15 @@ from pathlib import Path
 # Get absolute path to .env file (relative to this config package)
 _ENV_FILE = Path(__file__).parent.parent.parent / ".env"
 
+# Exact-match weak passwords (lower-cased). Placeholder prefixes are checked separately.
+_WEAK_DB_PASSWORDS = frozenset({
+    "", "postgres", "password", "passw0rd", "changeme", "change_me", "change-me",
+    "default", "test", "example", "admin", "root", "secret", "oniva", "oniva_app",
+    "oniva_system", "123456", "12345678", "qwerty", "letmein", "pass", "user",
+})
+_PLACEHOLDER_PREFIXES = ("change_me", "change-me", "changeme", "replace_with", "replace-with")
+_SUPERUSER_NAMES = frozenset({"postgres", "root", "admin", "superuser"})
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -29,7 +38,17 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Database
+    # Request-path URL: MUST connect as the NOSUPERUSER NOBYPASSRLS role `oniva_app`.
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@postgres:5432/oniva"
+    # BYPASSRLS role `oniva_system` (scheduler, webhook ingestion, startup recovery, pre-tenant
+    # auth lookups). Falls back to SCHEDULER_DATABASE_URL, then DATABASE_URL (dev/test only).
+    SYSTEM_DATABASE_URL: str = ""
+    # Schema-owner URL used by Alembic (init_db auto-migrate and the CLI). Falls back to DATABASE_URL.
+    MIGRATION_DATABASE_URL: str = ""
+    # Run `alembic upgrade head` at startup. None => True in development, False in production.
+    AUTO_MIGRATE: Optional[bool] = None
+    # Startup recovery only fails jobs whose last activity is older than this.
+    STALE_JOB_THRESHOLD_SECONDS: int = 3600
 
     # Redis
     REDIS_URL: str = "redis://redis:6379"
@@ -81,8 +100,18 @@ class Settings(BaseSettings):
     E2B_TEMPLATE_ID: str = ""  # Custom E2B template (e.g. "oniva-agent" with data science stack)
 
     # Sandbox Control Plane: proxy-based LLM access (no real keys in sandbox)
-    ENABLE_SANDBOX_CONTROL_PLANE: bool = False  # When True, sandboxes get proxy tokens instead of real LLM keys
-    SANDBOX_PROXY_URL: str = ""  # Publicly reachable backend URL (e.g. https://api.oniva.ai)
+    # Sandboxes ALWAYS get a proxy token, never a real LLM key. This flag is retained only for
+    # backward compatibility with feature_flags; it no longer gates a real-key fallback (removed).
+    ENABLE_SANDBOX_CONTROL_PLANE: bool = True
+    # URL the *sandbox* can reach this backend at. REQUIRED when ENABLE_SANDBOX is on (fail closed).
+    # Local dev: E2B VMs cannot reach localhost, so expose the backend with a tunnel, e.g.
+    #   ngrok http 8000  ->  SANDBOX_PROXY_URL=https://<id>.ngrok-free.app
+    SANDBOX_PROXY_URL: str = ""
+    # Comma-separated hosts/CIDRs the sandbox may reach (the proxy host is always added).
+    # Everything else is denied. "*" disables egress restriction (explicit opt-out).
+    SANDBOX_EGRESS_ALLOW: str = "pypi.org,files.pythonhosted.org"
+    # Comma-separated model allow-list enforced by the sandbox LLM proxy. Empty = DEFAULT_LLM_MODEL only.
+    SANDBOX_ALLOWED_MODELS: str = ""
 
     # Connectors via E2B sandbox (Code Mode: 2 tools per connector instead of N)
     USE_SANDBOX_CONNECTORS: bool = False  # Requires ENABLE_SANDBOX=True
@@ -92,7 +121,8 @@ class Settings(BaseSettings):
 
     # App Database User (for RLS enforcement)
     APP_DATABASE_USER: str = "oniva_app"
-    APP_DATABASE_PASSWORD: str = "app_password_change_me"
+    # No default: role passwords come from env/secrets (set via ALTER ROLE out-of-band).
+    APP_DATABASE_PASSWORD: str = ""
 
     # ========================================
     # Feature Flags
@@ -314,6 +344,82 @@ class Settings(BaseSettings):
     REDIS_CIRCUIT_TIMEOUT_SECONDS: float = 30.0           # Timeout before half-open
     REDIS_FAIL_FAST_ON_CIRCUIT_OPEN: bool = False         # Raise error vs return None
 
+    @property
+    def system_database_url(self) -> str:
+        """URL of the BYPASSRLS `oniva_system` role (see SYSTEM_DATABASE_URL)."""
+        return self.SYSTEM_DATABASE_URL or self.SCHEDULER_DATABASE_URL or self.DATABASE_URL
+
+    @property
+    def migration_database_url(self) -> str:
+        """Schema-owner URL for Alembic (never the request role)."""
+        return self.MIGRATION_DATABASE_URL or self.DATABASE_URL
+
+    @property
+    def auto_migrate(self) -> bool:
+        if self.AUTO_MIGRATE is not None:
+            return self.AUTO_MIGRATE
+        return self.ENVIRONMENT not in ("production", "prod")
+
+    @staticmethod
+    def _is_weak_db_password(password: Optional[str]) -> bool:
+        if password is None:
+            return True
+        lowered = password.strip().lower()
+        return lowered in _WEAK_DB_PASSWORDS or lowered.startswith(_PLACEHOLDER_PREFIXES)
+
+    def _validate_database_credentials(self) -> list[str]:
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.exc import ArgumentError
+
+        errors: list[str] = []
+        parsed = {}
+        for name, raw in (
+            ("DATABASE_URL", self.DATABASE_URL),
+            ("SYSTEM_DATABASE_URL", self.SYSTEM_DATABASE_URL),
+            ("MIGRATION_DATABASE_URL", self.MIGRATION_DATABASE_URL),
+        ):
+            if not raw:
+                if name == "SYSTEM_DATABASE_URL":
+                    errors.append(
+                        "SYSTEM_DATABASE_URL must be set in production "
+                        "(BYPASSRLS oniva_system role for scheduler/webhooks/startup recovery)."
+                    )
+                continue
+            try:
+                url = make_url(raw)
+            except (ArgumentError, ValueError):
+                # Never echo the raw value: it may contain a password.
+                errors.append(f"{name} is not a valid SQLAlchemy database URL.")
+                continue
+            parsed[name] = url
+            if self._is_weak_db_password(url.password):
+                errors.append(
+                    f"{name} has a missing or weak/default password. "
+                    "Generate secure credentials using: python scripts/generate_secrets.py"
+                )
+
+        if self.APP_DATABASE_PASSWORD and self._is_weak_db_password(self.APP_DATABASE_PASSWORD):
+            errors.append(
+                "APP_DATABASE_PASSWORD is a weak/default value. "
+                "Generate a secure password using: python scripts/generate_secrets.py"
+            )
+
+        app_url = parsed.get("DATABASE_URL")
+        if app_url is not None:
+            app_user = (app_url.username or "").lower()
+            if app_user in _SUPERUSER_NAMES:
+                errors.append(
+                    f"DATABASE_URL must connect as the non-superuser '{self.APP_DATABASE_USER}' role, "
+                    f"not '{app_url.username}'."
+                )
+            owner = parsed.get("MIGRATION_DATABASE_URL")
+            if owner is not None and owner.username and app_user == owner.username.lower():
+                errors.append("DATABASE_URL user must differ from the schema owner (MIGRATION_DATABASE_URL user).")
+            system = parsed.get("SYSTEM_DATABASE_URL")
+            if system is not None and system.username and app_user == system.username.lower():
+                errors.append("DATABASE_URL user must differ from the SYSTEM_DATABASE_URL user (RLS separation).")
+        return errors
+
     def validate_production_security(self) -> None:
         """Validate that production deployments use secure credentials.
 
@@ -368,29 +474,9 @@ class Settings(BaseSettings):
                 "Generate a secure salt using: python scripts/generate_secrets.py"
             )
 
-        # 3. Validate database passwords
-        insecure_db_patterns = [
-            "postgres",
-            "password",
-            "changeme",
-            "change",
-            "default",
-            "test",
-            "example",
-        ]
-        if "DATABASE_URL" in str(self.DATABASE_URL):
-            db_url_lower = self.DATABASE_URL.lower()
-            if any(pattern in db_url_lower for pattern in insecure_db_patterns):
-                errors.append(
-                    "DATABASE_URL contains insecure password. "
-                    "Generate secure credentials using: python scripts/generate_secrets.py"
-                )
-
-        if any(pattern in self.APP_DATABASE_PASSWORD.lower() for pattern in insecure_db_patterns):
-            errors.append(
-                "APP_DATABASE_PASSWORD contains insecure default value. "
-                "Generate a secure password using: python scripts/generate_secrets.py"
-            )
+        # 3. Validate database credentials (parse URLs; never substring-match the whole URL,
+        #    a valid URL legitimately contains "postgres" in its scheme/user/host).
+        errors.extend(self._validate_database_credentials())
 
         # 4. Validate CORS configuration
         if not self.CORS_ORIGINS or self.CORS_ORIGINS == "*":

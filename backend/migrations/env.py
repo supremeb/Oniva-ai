@@ -17,7 +17,11 @@ config = context.config
 
 # Configure SQLAlchemy database URL
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("+asyncpg", ""))
+# Alembic runs as the schema owner (MIGRATION_DATABASE_URL), never as oniva_app.
+config.set_main_option(
+    "sqlalchemy.url",
+    settings.migration_database_url.replace("+asyncpg", "").replace("%", "%%"),
+)
 
 # Setup logging
 if config.config_file_name is not None:
@@ -25,6 +29,22 @@ if config.config_file_name is not None:
 
 # Set target metadata
 target_metadata = Base.metadata
+
+
+def _ensure_wide_version_table(connection) -> None:
+    """Create/widen alembic_version.version_num to varchar(255) (long revision ids)."""
+    from sqlalchemy import text
+
+    if connection.dialect.name != "postgresql":
+        return
+    connection.execute(text(
+        "CREATE TABLE IF NOT EXISTS alembic_version "
+        "(version_num varchar(255) NOT NULL PRIMARY KEY)"
+    ))
+    connection.execute(text(
+        "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE varchar(255)"
+    ))
+    connection.commit()
 
 
 def run_migrations_offline() -> None:
@@ -53,6 +73,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        _ensure_wide_version_table(connection)
         context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():

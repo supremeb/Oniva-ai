@@ -16,7 +16,7 @@ from sqlalchemy import select
 import json
 import logging
 import uuid
-from typing import Optional, List, AsyncGenerator, Literal
+from typing import Any, Dict, Optional, List, AsyncGenerator, Literal
 import time
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ from app.services.chat_service import (
     format_error,
 )
 from app.core.builtin_agents import uuid_to_slug
-from app.services.xml_tool_rescue import parse_xml_tool_calls, execute_rescued_tool_calls
+from app.services.xml_tool_rescue import parse_xml_tool_calls
 from app.agents.skills.context import SkillContext
 from app.services.run_event_service import emit_run_event
 
@@ -502,7 +502,7 @@ async def generate_enhanced_sse_stream(
         _xml_leak_suppressing = False
         _XML_LEAK_MAX_BUFFER = 2000  # max chars to buffer before giving up
         _rescued_calls: list = []  # ParsedToolCall objects from leaked XML
-        _rescue_depth = 0  # Guard: max 1 rescue per request
+        kb_rag_results: list = []  # request-scoped RAG sources (never on the shared agent)
 
         async with AsyncSessionLocal() as db:
             if tenant_id:
@@ -537,6 +537,7 @@ async def generate_enhanced_sse_stream(
 
             async for event in agent.stream_events(
                 llm_message, db=db, user_id=user_id, tenant_id=tenant_id,
+                rag_sink=kb_rag_results,
                 **run_kwargs,
             ):
                 if isinstance(event, PartStartEvent):
@@ -876,98 +877,13 @@ async def generate_enhanced_sse_stream(
                     full_content += _cleaned
                     yield builder.text_delta(_cleaned, part_index=0)
 
-            # --- Post-stream XML tool call rescue ---
-            if _rescued_calls and _rescue_depth == 0:
-                _rescue_depth = 1
-                logger.info(f"XML tool rescue: executing {len(_rescued_calls)} rescued tool call(s)")
-
-                # Resolve API keys for SkillContext (LLM + tool-level)
-                from app.services.llm_gateway import resolve_all_llm_keys
-                from uuid import UUID as _UUID
-                _rescue_api_keys: dict[str, str] = {}
-                if tenant_id:
-                    try:
-                        _rescue_api_keys = await resolve_all_llm_keys(db, _UUID(str(tenant_id)))
-                    except Exception:
-                        pass
-                    # Also load tool-level keys (search providers)
-                    try:
-                        from app.models.api_key import APIKey as _APIKey
-                        from app.core.encryption import get_encryption_service as _get_enc
-                        _tool_providers = ("tavily", "parallelai", "exa", "serpapi")
-                        _tool_result = await db.execute(
-                            select(_APIKey).where(
-                                _APIKey.tenant_id == _UUID(str(tenant_id)),
-                                _APIKey.is_active == True,  # noqa: E712
-                                _APIKey.provider.in_(_tool_providers),
-                            )
-                        )
-                        _enc = _get_enc()
-                        for _row in _tool_result.scalars():
-                            if _row.provider not in _rescue_api_keys:
-                                _rescue_api_keys[_row.provider] = _enc.decrypt(_row.encrypted_key)
-                    except Exception:
-                        pass
-                    # Env var fallbacks
-                    import os as _os
-                    for _prov, _env in [("tavily", "TAVILY_API_KEY"), ("parallelai", "PARALLEL_API_KEY"),
-                                         ("exa", "EXA_API_KEY"), ("serpapi", "SERP_API_KEY")]:
-                        if _prov not in _rescue_api_keys:
-                            _val = _os.environ.get(_env, "")
-                            if _val:
-                                _rescue_api_keys[_prov] = _val
-
-                skill_ctx = SkillContext(
-                    user_id=str(user_id),
-                    tenant_id=str(tenant_id) if tenant_id else None,
-                    session_id=str(session_id) if session_id else None,
-                    db=db,
-                    api_keys=_rescue_api_keys,
-                    connectors=connectors_dict or {},
+            # Leaked-XML "tool calls" are never executed (policy bypass: the text
+            # is model/user-influenced and skipped the agent allow-list + guards).
+            if _rescued_calls:
+                logger.warning(
+                    "Dropped %d tool call(s) leaked as text (not executed): %s",
+                    len(_rescued_calls), [c.tool_name for c in _rescued_calls],
                 )
-
-                # Execute rescued tools + yield SSE events
-                tool_results: list = []
-                async for sse_event in execute_rescued_tool_calls(
-                    _rescued_calls, skill_ctx, builder, tool_results
-                ):
-                    yield sse_event
-
-                # Re-prompt model with tool results for final summary
-                if tool_results:
-                    result_summary = "\n\n".join(
-                        f"Tool '{name}' returned:\n{json.dumps(result, default=str)[:2000]}"
-                        for name, args, result in tool_results
-                    )
-                    reprompt_msg = (
-                        f"I executed the following tools and got results:\n\n{result_summary}\n\n"
-                        f"Answer the user's question concisely using these results. "
-                        f"Do NOT call any more tools. Summarize what you found."
-                    )
-
-                    # Pass 2: stream the model's summary of tool results
-                    async for event in agent.stream_events(
-                        reprompt_msg, db=db, user_id=user_id, tenant_id=tenant_id,
-                        **run_kwargs,
-                    ):
-                        # Only emit text/thinking from pass 2 (no tool calls to avoid recursion)
-                        if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
-                            if event.part.content:
-                                full_content += event.part.content
-                                yield builder.text_delta(event.part.content, part_index=event.index)
-                        elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
-                            delta = event.delta.content_delta
-                            if delta:
-                                # Strip any XML leaks in pass 2 (no re-rescue)
-                                _dlc2 = delta.lower()
-                                if "function_calls" in _dlc2 or "invoke" in _dlc2:
-                                    delta = _strip_function_call_xml(delta)
-                                if delta:
-                                    full_content += delta
-                                    yield builder.text_delta(delta, part_index=0)
-                        elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, ThinkingPartDelta):
-                            reasoning_text += event.delta.content_delta
-                            yield builder.reasoning(event.delta.content_delta)
 
             # Commit any changes made by tools (e.g., store_decision → episodic_memories)
             try:
@@ -983,8 +899,7 @@ async def generate_enhanced_sse_stream(
             yield builder.text_delta(full_content, part_index=0)
 
         # Emit SSE source events for Knowledge Base RAG results
-        # (stashed by _build_context_with_memory on the agent instance)
-        kb_rag_results = getattr(agent, '_last_rag_results', None)
+        # (collected via the request-scoped rag_sink passed to stream_events)
         if kb_rag_results:
             seen_docs: set[str] = set()
             for r in kb_rag_results:
@@ -1011,8 +926,6 @@ async def generate_enhanced_sse_stream(
                     "url": kb_url,
                     "description": snippet,
                 })
-            # Clear stashed results
-            agent._last_rag_results = None
 
         # Append response text as a text part to accumulated_parts so that
         # frontend restores from metadata.parts have the response content

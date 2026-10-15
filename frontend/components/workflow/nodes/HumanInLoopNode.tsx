@@ -63,6 +63,12 @@ function HumanInLoopNodeComponent({ id, data, selected }: NodeProps) {
                 label: opt.label,
             }))}
         >
+            <div
+                data-testid="approval-simulated-badge"
+                className="mb-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+            >
+                Simulated — approvals auto-approve
+            </div>
             <NodeInfo
                 label="Approver"
                 value={approverTypeLabels[approverType] || approverType}

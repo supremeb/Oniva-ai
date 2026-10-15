@@ -100,11 +100,6 @@ FLAG_METADATA: dict[str, FlagMeta] = {
         description="E2B Firecracker sandbox for code execution",
         operator_only=True,
     ),
-    "ENABLE_SANDBOX_CONTROL_PLANE": FlagMeta(
-        group="Infrastructure",
-        description="Proxy tokens instead of real LLM keys in sandboxes",
-        operator_only=True,
-    ),
     "ENABLE_BROWSER_SANDBOX": FlagMeta(
         group="Infrastructure",
         description="Full Chromium browser in sandbox",
@@ -254,7 +249,6 @@ def validate_flag_dependencies(flag_name: str, enabled: bool, tenant: Tenant) ->
 # Flag dependency graph: parent -> [children that require it]
 _FLAG_DEPENDENCIES: dict[str, list[str]] = {
     "ENABLE_SANDBOX": [
-        "ENABLE_SANDBOX_CONTROL_PLANE",
         "USE_SANDBOX_CONNECTORS",
         "ENABLE_BROWSER_SANDBOX",
     ],

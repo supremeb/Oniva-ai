@@ -39,9 +39,9 @@ export function traceToMessageParts(steps: ExecutionTraceStep[]): TraceConversio
 
   for (const step of steps) {
     // Detect background agent executor format (has `type` = "tool_call" | "text_response")
-    const bgType = (step as Record<string, unknown>).type as string | undefined;
+    const bgType = (step as unknown as Record<string, unknown>).type as string | undefined;
     if (bgType === 'tool_call' || bgType === 'text_response') {
-      const raw = step as Record<string, unknown>;
+      const raw = step as unknown as Record<string, unknown>;
       const id = `trace-${parts.length}`;
 
       if (bgType === 'tool_call') {
@@ -65,7 +65,7 @@ export function traceToMessageParts(steps: ExecutionTraceStep[]): TraceConversio
           id,
           toolName,
           status,
-          args: raw.tool_args,
+          args: raw.tool_args as Record<string, unknown> | undefined,
           result: resultObj,
           error: errorMsg,
           durationMs: raw.duration_ms as number | undefined,
@@ -75,7 +75,7 @@ export function traceToMessageParts(steps: ExecutionTraceStep[]): TraceConversio
           id,
           toolName,
           status,
-          args: raw.tool_args,
+          args: raw.tool_args as Record<string, unknown> | undefined,
           result: resultObj,
           error: errorMsg,
           durationMs: raw.duration_ms as number | undefined,

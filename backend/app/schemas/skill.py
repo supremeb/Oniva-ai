@@ -12,6 +12,7 @@ class SkillBase(BaseModel):
     skill_dependencies: List[str] = Field(default_factory=list, alias="requires", description="List of other skills this skill depends on")
     mcp_dependencies: List[str] = Field(default_factory=list, description="List of MCP servers this skill depends on")
     config_schema: Optional[Dict[str, Any]] = Field(None, description="JSON schema for configuration")
+    mock: bool = Field(False, description="True if the skill returns simulated data")
 
     @field_validator("name")
     def validate_name(cls, v):

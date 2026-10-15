@@ -267,6 +267,7 @@ class TestContextualRetrieval:
 class TestDocumentProcessorIntegration:
     """B3 + B6: Document processor uses new chunking + populates metadata."""
 
+    @pytest.mark.xfail(strict=True, reason="KNOWN_FAILURES U13: no embedding API key (env-dependent)")
     @pytest.mark.asyncio
     async def test_process_document_uses_new_chunking(self):
         """Verify process_document calls the new chunk_text, not old _chunk_text."""
@@ -338,16 +339,33 @@ class TestBackgroundJobType:
 
 
 class TestMigrationExists:
-    """B7: GIN index migration file exists."""
+    """B7: the GIN full-text indexes are created by the baseline migration.
 
-    def test_gin_index_migration_file_exists(self):
+    The legacy ``072_add_gin_index_for_bm25.py`` is archived (migrations/versions_archive/);
+    the baseline ``100_baseline.py`` now owns that DDL. This is a source-level check; the
+    behavioural check (pg_indexes after ``alembic upgrade head``) lives in
+    ``tests/postgres/test_migrations.py::test_gin_fulltext_indexes_created_by_baseline``.
+    """
+
+    def test_gin_index_defined_in_baseline(self):
         import os
 
-        migration_path = os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "migrations",
-            "versions",
-            "072_add_gin_index_for_bm25.py",
+        baseline = os.path.join(
+            os.path.dirname(__file__), "..", "migrations", "versions", "100_baseline.py"
         )
-        assert os.path.exists(migration_path)
+        assert os.path.exists(baseline)
+        with open(baseline, encoding="utf-8") as fh:
+            src = fh.read()
+        for table, name in (
+            ("knowledge_chunks", "ix_knowledge_chunks_content_gin"),
+            ("documents", "ix_documents_content_gin"),
+        ):
+            assert name in src
+            assert f'"{table}", "USING gin (to_tsvector(\'english\', content))"' in src
+
+    def test_legacy_072_is_archived_not_loaded(self):
+        import os
+
+        here = os.path.join(os.path.dirname(__file__), "..", "migrations")
+        assert not os.path.exists(os.path.join(here, "versions", "072_add_gin_index_for_bm25.py"))
+        assert os.path.exists(os.path.join(here, "versions_archive", "072_add_gin_index_for_bm25.py"))

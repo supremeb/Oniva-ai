@@ -179,7 +179,7 @@ class TestSkillExecutor:
 
         result = await executor.execute(context, test_db)
 
-        assert result.status == "error"
+        assert result.status == "failed"
         assert "Skill name not specified" in result.error
 
     @pytest.mark.asyncio
@@ -189,7 +189,7 @@ class TestSkillExecutor:
 
         result = await executor.execute(node_context, test_db)
 
-        assert result.status == "error"
+        assert result.status == "failed"
         assert "not found in registry" in result.error
 
     @pytest.mark.asyncio

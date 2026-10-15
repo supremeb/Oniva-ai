@@ -15,13 +15,14 @@ Updated in Phase 4 to use PostgreSQL-backed checkpoint storage instead of in-mem
 from typing import Dict, Any, List, Optional, AsyncGenerator
 from uuid import UUID, uuid4
 from datetime import datetime
+import json
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, text
 
 from app.config import get_settings
-from app.services.workflow_orchestrator import WorkflowOrchestrator
+from app.services.workflow_orchestrator import WorkflowOrchestrator, BranchState
 from app.models.workflow_checkpoint import WorkflowCheckpoint
 from app.models.workflow import WorkflowExecution
 from app.node_executors import (
@@ -121,17 +122,13 @@ class DurableWorkflowEngine:
                 workflow_spec, input_variables, workflow_id, workflow_version_id
             )
 
-        # Always generate a unique UUID for each execution
-        # dbos_workflow_uuid must be unique per execution to satisfy the unique constraint
-        # Enable checkpointing only when we have a saved workflow to recover to
-        dbos_workflow_uuid = uuid4()  # Unique per execution
-        if workflow_id:
-            enable_checkpointing = True
-        else:
-            enable_checkpointing = False
-            logger.debug(
-                "Ad-hoc workflow execution - checkpointing disabled (no saved workflow)"
-            )
+        # One UUID per run. Checkpoints are keyed by it, so concurrent runs of the
+        # same saved workflow never share or delete each other's checkpoints.
+        dbos_workflow_uuid = uuid4()
+        # Checkpoint only runs of a saved workflow; ad-hoc runs are not recoverable.
+        enable_checkpointing = bool(workflow_id)
+        if not enable_checkpointing:
+            logger.debug("Ad-hoc workflow execution - checkpointing disabled (no saved workflow)")
 
         logger.info(
             f"Starting durable workflow execution",
@@ -152,6 +149,11 @@ class DurableWorkflowEngine:
             enable_checkpointing=enable_checkpointing,
         )
 
+    @staticmethod
+    def _jsonable(value: Any) -> Any:
+        """JSON-safe copy of a value for JSONB checkpoint columns."""
+        return json.loads(json.dumps(value, default=str))
+
     async def _execute_durable_workflow(
         self,
         workflow_spec: Dict[str, Any],
@@ -161,31 +163,37 @@ class DurableWorkflowEngine:
         dbos_workflow_uuid: UUID,
         resume_from_step: int = 0,
         enable_checkpointing: bool = True,
+        execution_log: Optional[WorkflowExecution] = None,
     ) -> Dict[str, Any]:
         """
         Internal durable execution with database-backed checkpointing.
 
-        Each step follows the pattern:
-        1. Create pending checkpoint in database (if checkpointing enabled)
-        2. Execute node
-        3. Update checkpoint with result (if checkpointing enabled)
+        Each step: create a "running" checkpoint, execute the node, then mark the
+        checkpoint completed (or failed). A completed checkpoint also stores the
+        post-step state (variables, status, chosen branch) so recovery can restore
+        it. A node that returns status "failed" fails the run.
 
         Args:
-            enable_checkpointing: If False, skips checkpoint creation (for ad-hoc workflows)
+            resume_from_step: first step to execute; earlier steps are restored
+                from their completed checkpoints (recovery).
+            enable_checkpointing: False skips checkpoint rows (ad-hoc workflows).
+            execution_log: existing execution record to continue (recovery).
         """
+        orch = self._base_orchestrator
         nodes = workflow_spec.get("nodes", [])
         edges = workflow_spec.get("edges", [])
         execution_start_time = datetime.utcnow()
 
-        # Clean up old checkpoints before starting new execution
-        # This prevents unique constraint violations if previous execution failed
-        if enable_checkpointing and workflow_id:
-            await self._ensure_rls_context()
-            await self._cleanup_old_checkpoints(workflow_id)
+        orch._node_map = orch._build_node_map(nodes)
+        orch._edges_by_target = orch._build_edges_by_target(edges)
 
-        # Create WorkflowExecution record for logs and monitoring
-        execution_log = None
-        if workflow_id:
+        if execution_log is not None:
+            await self._ensure_rls_context()
+            execution_log.status = "running"
+            execution_log.error = None
+            execution_log.completed_at = None
+            await self.db.commit()
+        elif workflow_id:
             await self._ensure_rls_context()
             execution_log = WorkflowExecution(
                 workflow_id=workflow_id,
@@ -204,52 +212,84 @@ class DurableWorkflowEngine:
             await self.db.commit()
 
         variables = input_variables.copy() if input_variables else {}
-        execution_order = self._base_orchestrator._topological_sort(nodes, edges)
+        execution_order = orch._topological_sort(nodes, edges)
 
         results: Dict[str, NodeExecutionResult] = {}
         node_outputs: Dict[str, Any] = {}
-        consumed_node_ids = set()
+        consumed_node_ids: set = set()
+        branches = BranchState(edges)
+        total_tokens = 0
         checkpoint_count = 0
+        final_status = "completed"
+        error_message: Optional[str] = None
+
+        if resume_from_step > 0:
+            restored = {
+                cp.step_number: cp
+                for cp in await self._get_all_checkpoints(dbos_workflow_uuid)
+                if cp.status == "completed"
+            }
+            for step_number in range(min(resume_from_step, len(execution_order))):
+                cp = restored.get(step_number)
+                if cp is None:
+                    raise RuntimeError(
+                        f"Cannot resume at step {resume_from_step}: step {step_number} has no completed checkpoint"
+                    )
+                node_id = execution_order[step_number]
+                post = (cp.input_data or {}).get("post", {})
+                if post.get("skipped"):
+                    branches.mark_skipped(node_id)
+                    results[node_id] = orch.skipped_result(node_id)
+                    continue
+                result = NodeExecutionResult(
+                    node_id=node_id,
+                    status=post.get("status", "success"),
+                    output=cp.output_data,
+                    next_node_id=post.get("next_node_id"),
+                    tokens_used=post.get("tokens_used"),
+                )
+                results[node_id] = result
+                total_tokens += result.tokens_used or 0
+                variables = post.get("variables", variables)
+                self._absorb(
+                    orch._get_node(nodes, node_id), result, edges,
+                    node_outputs, consumed_node_ids, branches,
+                )
 
         for step_number, node_id in enumerate(execution_order):
-            if step_number < resume_from_step:
-                # Skip already completed steps (recovery mode)
-                # Load output from checkpoint for downstream nodes
-                if workflow_id:
-                    checkpoint = await self._get_checkpoint_by_step(
-                        workflow_id, step_number  # Use workflow_id for checkpoint lookup
-                    )
-                    if checkpoint and checkpoint.output_data:
-                        node_outputs[node_id] = checkpoint.output_data
+            if step_number < resume_from_step or node_id in consumed_node_ids:
                 continue
 
-            if node_id in consumed_node_ids:
-                continue
-
-            node = self._base_orchestrator._get_node(nodes, node_id)
+            node = orch._get_node(nodes, node_id)
             node_type = node.get("type", "").lower()
-            inputs = self._base_orchestrator._get_node_inputs(node_id, edges, node_outputs)
+            skip = branches.should_skip(node_id)
+            inputs = {} if skip else orch._get_node_inputs(node_id, edges, node_outputs)
 
-            # Step 1: Create checkpoint in database with "running" status (if enabled)
-            # Use workflow_id for checkpoints (FK constraint requires valid workflow reference)
             checkpoint = None
-            if enable_checkpointing and workflow_id:
+            if enable_checkpointing:
                 checkpoint = await self._create_checkpoint(
-                    workflow_uuid=workflow_id,  # Use actual workflow_id for FK constraint
+                    workflow_uuid=dbos_workflow_uuid,
                     step_number=step_number,
                     step_name=f"{node_type}:{node_id}",
                     node_id=node_id,
-                    input_data={
+                    input_data=self._jsonable({
                         "node_data": node.get("data", {}),
                         "inputs": inputs,
                         "variables": variables,
-                    },
+                    }),
+                    workflow_execution_id=execution_log.id if execution_log else None,
                 )
                 checkpoint_count += 1
 
+            if skip:
+                branches.mark_skipped(node_id)
+                results[node_id] = orch.skipped_result(node_id)
+                if checkpoint:
+                    await self._complete_checkpoint(checkpoint, output_data={}, post={"skipped": True})
+                continue
+
             try:
-                # Step 2: Execute node
-                result = await self._base_orchestrator._execute_node(
+                result = await orch._execute_node(
                     node_id=node_id,
                     node_type=node_type,
                     node_data=node.get("data", {}),
@@ -257,75 +297,105 @@ class DurableWorkflowEngine:
                     variables=variables,
                     workflow_spec=workflow_spec,
                 )
-
-                results[node_id] = result
-
-                if result.output:
-                    node_outputs[node_id] = result.output
-
-                # Handle iteration nodes
-                if node_type == "iteration" and result.status == "success":
-                    target_node_id = node.get("data", {}).get("targetNodeId")
-                    if target_node_id:
-                        reachable = self._base_orchestrator._get_reachable_nodes(
-                            target_node_id, edges
-                        )
-                        consumed_node_ids.update(reachable)
-
-                # Step 3: Update checkpoint with success (if enabled)
-                if checkpoint:
-                    await self._complete_checkpoint(
-                        checkpoint,
-                        output_data=result.output if result.output else {}
-                    )
-
             except Exception as e:
-                # Step 3: Update checkpoint with failure (if enabled)
                 if checkpoint:
                     await self._fail_checkpoint(checkpoint, str(e))
-
                 logger.error(
-                    f"Durable workflow step failed",
+                    "Durable workflow step failed",
                     extra={
                         "workflow_uuid": str(dbos_workflow_uuid),
                         "step": step_number,
                         "node_id": node_id,
                         "error": str(e),
-                    }
+                    },
                 )
-
-                # Update execution log on failure
                 if execution_log:
-                    await self._ensure_rls_context()
-                    execution_log.status = "failed"
-                    execution_log.error = str(e)
-                    execution_log.completed_at = datetime.utcnow()
-                    execution_log.duration_ms = int((datetime.utcnow() - execution_start_time).total_seconds() * 1000)
-                    await self.db.commit()
-
-                # Re-raise to fail the workflow
+                    await self._finalize_log(
+                        execution_log, "failed", str(e), results, total_tokens, execution_start_time
+                    )
                 raise
 
-        # Update execution log on success
+            results[node_id] = result
+            total_tokens += result.tokens_used or 0
+
+            if result.status == "failed":
+                # A failed node fails the run; its checkpoint records the error.
+                if checkpoint:
+                    await self._fail_checkpoint(checkpoint, result.error or "Node failed")
+                final_status = "failed"
+                error_message = result.error
+                break
+
+            self._absorb(node, result, edges, node_outputs, consumed_node_ids, branches)
+
+            if checkpoint:
+                await self._complete_checkpoint(
+                    checkpoint,
+                    output_data=result.output if result.output else {},
+                    post={
+                        "status": result.status,
+                        "next_node_id": result.next_node_id,
+                        "tokens_used": result.tokens_used,
+                        "variables": self._jsonable(variables),
+                    },
+                )
+
         if execution_log:
-            await self._ensure_rls_context()
-            execution_log.status = "completed"
-            execution_log.nodes_executed = len(results)
-            execution_log.results = {k: v.model_dump() for k, v in results.items()}
-            execution_log.completed_at = datetime.utcnow()
-            execution_log.duration_ms = int((datetime.utcnow() - execution_start_time).total_seconds() * 1000)
-            await self.db.commit()
+            await self._finalize_log(
+                execution_log, final_status, error_message, results, total_tokens, execution_start_time
+            )
 
         return {
             "workflow_id": str(workflow_id) if workflow_id else None,
             "dbos_workflow_uuid": str(dbos_workflow_uuid),
-            "status": "completed",
+            "status": final_status,
+            "error": error_message,
             "results": {k: v.model_dump() for k, v in results.items()},
-            "executed_nodes": len(results),
+            "executed_nodes": orch.count_executed(results),
             "total_nodes": len(nodes),
+            "total_tokens": total_tokens,
             "checkpoints": checkpoint_count,
             "durable": True,
         }
+
+    def _absorb(
+        self,
+        node: Dict[str, Any],
+        result: NodeExecutionResult,
+        edges: List[Dict[str, Any]],
+        node_outputs: Dict[str, Any],
+        consumed_node_ids: set,
+        branches: BranchState,
+    ) -> None:
+        """Fold one completed node's effects into the run state."""
+        if result.output:
+            node_outputs[result.node_id] = result.output
+        if node.get("type", "").lower() == "iteration" and result.status == "success":
+            target_node_id = node.get("data", {}).get("targetNodeId")
+            if target_node_id:
+                consumed_node_ids.update(
+                    self._base_orchestrator._get_reachable_nodes(target_node_id, edges)
+                )
+        branches.record(result.node_id, result)
+
+    async def _finalize_log(
+        self,
+        execution_log: WorkflowExecution,
+        status: str,
+        error: Optional[str],
+        results: Dict[str, NodeExecutionResult],
+        total_tokens: int,
+        started: datetime,
+    ) -> None:
+        await self._ensure_rls_context()
+        execution_log.status = status
+        execution_log.error = error
+        execution_log.nodes_executed = self._base_orchestrator.count_executed(results)
+        execution_log.results = {k: v.model_dump() for k, v in results.items()}
+        execution_log.total_tokens = total_tokens
+        execution_log.completed_at = datetime.utcnow()
+        execution_log.duration_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+        await self.db.commit()
 
     async def recover_workflow(
         self,
@@ -334,10 +404,14 @@ class DurableWorkflowEngine:
         input_variables: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Recover a crashed workflow from its last checkpoint.
+        Recover a crashed or failed run from its last completed checkpoint.
+
+        State (node outputs, variables, branch decisions) is restored from the
+        completed checkpoints; the first step without one is re-executed and
+        its stale checkpoint (and any later ones) discarded.
 
         Args:
-            dbos_workflow_uuid: The DBOS workflow UUID to recover
+            dbos_workflow_uuid: The run's UUID (returned by execute_workflow)
             workflow_spec: Original workflow specification
             input_variables: Original input variables
 
@@ -347,38 +421,38 @@ class DurableWorkflowEngine:
         if not settings.USE_DURABLE_WORKFLOWS:
             raise RuntimeError("Durable workflows not enabled")
 
-        # Find last successful checkpoint from database
-        last_checkpoint = await self._get_last_completed_checkpoint(dbos_workflow_uuid)
-
-        if not last_checkpoint:
-            logger.info(
-                f"No checkpoints found, starting from beginning",
-                extra={"dbos_uuid": str(dbos_workflow_uuid)}
-            )
-            return await self._execute_durable_workflow(
-                workflow_spec=workflow_spec,
-                input_variables=input_variables,
-                workflow_id=None,
-                dbos_workflow_uuid=dbos_workflow_uuid,
-                resume_from_step=0,
-            )
+        checkpoints = await self._get_all_checkpoints(dbos_workflow_uuid)
+        resume_from_step = 0
+        for cp in checkpoints:
+            if cp.step_number != resume_from_step or cp.status != "completed":
+                break
+            resume_from_step += 1
 
         logger.info(
-            f"Recovering workflow from step {last_checkpoint.step_number + 1}",
-            extra={
-                "dbos_uuid": str(dbos_workflow_uuid),
-                "last_step": last_checkpoint.step_number,
-                "last_node": last_checkpoint.node_id,
-            }
+            "Recovering workflow",
+            extra={"dbos_uuid": str(dbos_workflow_uuid), "resume_from_step": resume_from_step},
         )
 
-        # Resume from next step after last successful checkpoint
+        await self._discard_checkpoints_from(dbos_workflow_uuid, resume_from_step)
+
+        await self._ensure_rls_context()
+        found = await self.db.execute(
+            select(WorkflowExecution).where(
+                WorkflowExecution.dbos_workflow_uuid == dbos_workflow_uuid,
+                WorkflowExecution.tenant_id == self.tenant_id,
+            )
+        )
+        execution_log = found.scalar_one_or_none()
+
         return await self._execute_durable_workflow(
             workflow_spec=workflow_spec,
             input_variables=input_variables,
-            workflow_id=None,
+            workflow_id=execution_log.workflow_id if execution_log else None,
+            workflow_version_id=None,
             dbos_workflow_uuid=dbos_workflow_uuid,
-            resume_from_step=last_checkpoint.step_number + 1,
+            resume_from_step=resume_from_step,
+            enable_checkpointing=True,
+            execution_log=execution_log,
         )
 
     async def replay_workflow(
@@ -452,6 +526,7 @@ class DurableWorkflowEngine:
             return
 
         dbos_workflow_uuid = uuid4()
+        orch = self._base_orchestrator
 
         yield {
             "type": "workflow_started",
@@ -462,21 +537,40 @@ class DurableWorkflowEngine:
 
         nodes = workflow_spec.get("nodes", [])
         edges = workflow_spec.get("edges", [])
+        orch._node_map = orch._build_node_map(nodes)
+        orch._edges_by_target = orch._build_edges_by_target(edges)
 
         variables = input_variables.copy() if input_variables else {}
-        execution_order = self._base_orchestrator._topological_sort(nodes, edges)
+        execution_order = orch._topological_sort(nodes, edges)
 
         results: Dict[str, NodeExecutionResult] = {}
         node_outputs: Dict[str, Any] = {}
-        consumed_node_ids = set()
+        consumed_node_ids: set = set()
+        branches = BranchState(edges)
+        total_tokens = 0
+        final_status = "completed"
+        error_message: Optional[str] = None
 
         for step_number, node_id in enumerate(execution_order):
             if node_id in consumed_node_ids:
                 continue
 
-            node = self._base_orchestrator._get_node(nodes, node_id)
+            node = orch._get_node(nodes, node_id)
             node_type = node.get("type", "").lower()
-            inputs = self._base_orchestrator._get_node_inputs(node_id, edges, node_outputs)
+
+            if branches.should_skip(node_id):
+                branches.mark_skipped(node_id)
+                results[node_id] = orch.skipped_result(node_id)
+                yield {
+                    "type": "node_complete",
+                    "node_id": node_id,
+                    "result": results[node_id].model_dump(),
+                    "checkpoint_status": "skipped",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                continue
+
+            inputs = orch._get_node_inputs(node_id, edges, node_outputs)
 
             # Create checkpoint in database
             checkpoint = await self._create_checkpoint(
@@ -484,7 +578,7 @@ class DurableWorkflowEngine:
                 step_number=step_number,
                 step_name=f"{node_type}:{node_id}",
                 node_id=node_id,
-                input_data={"inputs": inputs},
+                input_data=self._jsonable({"inputs": inputs, "variables": variables}),
             )
 
             yield {
@@ -503,7 +597,7 @@ class DurableWorkflowEngine:
             }
 
             try:
-                result = await self._base_orchestrator._execute_node(
+                result = await orch._execute_node(
                     node_id=node_id,
                     node_type=node_type,
                     node_data=node.get("data", {}),
@@ -511,22 +605,34 @@ class DurableWorkflowEngine:
                     variables=variables,
                     workflow_spec=workflow_spec,
                 )
-
                 results[node_id] = result
-                if result.output:
-                    node_outputs[node_id] = result.output
+                total_tokens += result.tokens_used or 0
 
-                if node_type == "iteration" and result.status == "success":
-                    target_node_id = node.get("data", {}).get("targetNodeId")
-                    if target_node_id:
-                        reachable = self._base_orchestrator._get_reachable_nodes(
-                            target_node_id, edges
-                        )
-                        consumed_node_ids.update(reachable)
+                if result.status == "failed":
+                    error_message = result.error or "Node failed"
+                    final_status = "failed"
+                    await self._fail_checkpoint(checkpoint, error_message)
+                    yield {
+                        "type": "node_error",
+                        "node_id": node_id,
+                        "error": error_message,
+                        "checkpoint_status": "failed",
+                        "recoverable": True,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                    break
+
+                self._absorb(node, result, edges, node_outputs, consumed_node_ids, branches)
 
                 await self._complete_checkpoint(
                     checkpoint,
-                    output_data=result.output if result.output else {}
+                    output_data=result.output if result.output else {},
+                    post={
+                        "status": result.status,
+                        "next_node_id": result.next_node_id,
+                        "tokens_used": result.tokens_used,
+                        "variables": self._jsonable(variables),
+                    },
                 )
 
                 yield {
@@ -539,7 +645,8 @@ class DurableWorkflowEngine:
 
             except Exception as e:
                 await self._fail_checkpoint(checkpoint, str(e))
-
+                error_message = str(e)
+                final_status = "failed"
                 yield {
                     "type": "node_error",
                     "node_id": node_id,
@@ -548,13 +655,17 @@ class DurableWorkflowEngine:
                     "recoverable": True,
                     "timestamp": datetime.utcnow().isoformat(),
                 }
+                break
 
         yield {
             "type": "complete",
             "dbos_workflow_uuid": str(dbos_workflow_uuid),
+            "status": final_status,
+            "error": error_message,
             "results": {k: v.model_dump() for k, v in results.items()},
-            "executed_nodes": len(results),
+            "executed_nodes": orch.count_executed(results),
             "total_nodes": len(nodes),
+            "total_tokens": total_tokens,
             "durable": True,
             "timestamp": datetime.utcnow().isoformat(),
         }
@@ -563,32 +674,19 @@ class DurableWorkflowEngine:
     # Database Operations for Checkpoints (PostgreSQL-backed)
     # =========================================================================
 
-    async def _cleanup_old_checkpoints(self, workflow_id: UUID) -> None:
-        """
-        Clean up old checkpoints for a workflow before starting a new execution.
-
-        This prevents unique constraint violations if a previous execution failed
-        mid-way and left orphaned checkpoints.
-
-        Args:
-            workflow_id: The workflow ID to clean up checkpoints for
-        """
+    async def _discard_checkpoints_from(self, dbos_workflow_uuid: UUID, from_step: int) -> None:
+        """Delete this run's own checkpoints at or after ``from_step`` (never another run's)."""
         from sqlalchemy import delete
 
         await self._ensure_rls_context()
-
-        # Delete all existing checkpoints for this workflow
-        stmt = delete(WorkflowCheckpoint).where(
-            WorkflowCheckpoint.workflow_uuid == workflow_id,
-            WorkflowCheckpoint.tenant_id == self.tenant_id,
+        await self.db.execute(
+            delete(WorkflowCheckpoint).where(
+                WorkflowCheckpoint.workflow_uuid == dbos_workflow_uuid,
+                WorkflowCheckpoint.tenant_id == self.tenant_id,
+                WorkflowCheckpoint.step_number >= from_step,
+            )
         )
-        await self.db.execute(stmt)
         await self.db.commit()
-
-        logger.debug(
-            f"Cleaned up old checkpoints for workflow",
-            extra={"workflow_id": str(workflow_id)}
-        )
 
     async def _create_checkpoint(
         self,
@@ -597,6 +695,7 @@ class DurableWorkflowEngine:
         step_name: str,
         node_id: str,
         input_data: Dict[str, Any],
+        workflow_execution_id: Optional[UUID] = None,
     ) -> WorkflowCheckpoint:
         """
         Create a new checkpoint in database with "running" status.
@@ -617,6 +716,7 @@ class DurableWorkflowEngine:
         checkpoint = WorkflowCheckpoint(
             tenant_id=self.tenant_id,
             workflow_uuid=workflow_uuid,
+            workflow_execution_id=workflow_execution_id,
             step_number=step_number,
             step_name=step_name,
             node_id=node_id,
@@ -644,6 +744,7 @@ class DurableWorkflowEngine:
         self,
         checkpoint: WorkflowCheckpoint,
         output_data: Dict[str, Any],
+        post: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Mark checkpoint as completed with output data.
@@ -651,11 +752,15 @@ class DurableWorkflowEngine:
         Args:
             checkpoint: The checkpoint to update
             output_data: Output state after completion
+            post: Post-step state kept for recovery (variables, status, branch)
         """
         # Re-set RLS context - it's lost after each commit()
         await self._ensure_rls_context()
 
-        checkpoint.mark_completed(output_data)
+        if post is not None:
+            # Reassign (not mutate) so SQLAlchemy detects the JSONB change
+            checkpoint.input_data = {**(checkpoint.input_data or {}), "post": post}
+        checkpoint.mark_completed(self._jsonable(output_data))
         await self.db.commit()
 
         logger.debug(
@@ -743,36 +848,6 @@ class DurableWorkflowEngine:
 
         return checkpoint
 
-    async def _get_checkpoint_by_step(
-        self,
-        workflow_uuid: UUID,
-        step_number: int,
-    ) -> Optional[WorkflowCheckpoint]:
-        """
-        Get a specific checkpoint by workflow UUID and step number.
-
-        Used for loading output data during recovery.
-
-        Args:
-            workflow_uuid: The workflow UUID
-            step_number: The step number
-
-        Returns:
-            Checkpoint or None if not found
-        """
-        # Re-set RLS context for query
-        await self._ensure_rls_context()
-
-        query = select(WorkflowCheckpoint).where(
-            and_(
-                WorkflowCheckpoint.workflow_uuid == workflow_uuid,
-                WorkflowCheckpoint.step_number == step_number,
-            )
-        )
-
-        result = await self.db.execute(query)
-        return result.scalar_one_or_none()
-
     async def _get_all_checkpoints(
         self,
         workflow_uuid: UUID,
@@ -793,7 +868,10 @@ class DurableWorkflowEngine:
 
         query = (
             select(WorkflowCheckpoint)
-            .where(WorkflowCheckpoint.workflow_uuid == workflow_uuid)
+            .where(
+                WorkflowCheckpoint.workflow_uuid == workflow_uuid,
+                WorkflowCheckpoint.tenant_id == self.tenant_id,
+            )
             .order_by(WorkflowCheckpoint.step_number)
         )
 

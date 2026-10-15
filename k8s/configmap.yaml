@@ -6,6 +6,14 @@ metadata:
 data:
   DEBUG: "false"
   ENVIRONMENT: "production"
+  # Explicit origins only; "*" is rejected by the production validator. Edit for your domain.
+  CORS_ORIGINS: "https://oniva.example.com"
+  # Schema is migrated by the oniva-migrate Job as the owner, never by the app.
+  AUTO_MIGRATE: "false"
+  # Read-only root filesystem: writable state lives on the /data volume.
+  SESSION_BASE_PATH: "/data/sessions"
+  VOLUMES_BASE_PATH: "/data/volumes"
+  ARTIFACTS_BASE_PATH: "/data/artifacts"
   DEFAULT_LLM_PROVIDER: "openrouter"
   DEFAULT_LLM_MODEL: "openai/gpt-4o-mini"
   RATE_LIMIT_ENABLED: "true"

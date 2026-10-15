@@ -91,23 +91,26 @@ async def browser_navigate(
 
         executor = get_sandbox_executor()
 
-        # Zero-secrets: use proxy token instead of real key when control plane enabled
-        sandbox_token = None
-        if settings.ENABLE_SANDBOX_CONTROL_PLANE and settings.SANDBOX_PROXY_URL:
-            from app.services.sandbox_tokens import create_sandbox_token, revoke_sandbox_token
-
-            sandbox_token = await create_sandbox_token(
-                tenant_id=str(ctx.tenant_id),
-                user_id=str(ctx.user_id),
-                session_id=ctx.session_id or "browser_nav",
-                worker_id="browser_navigate",
+        # Zero-secrets: the sandbox only ever gets a short-lived proxy token, never a
+        # real LLM key. Fail closed when the proxy is not configured.
+        if not settings.SANDBOX_PROXY_URL:
+            raise RuntimeError(
+                "SANDBOX_PROXY_URL is not configured; browser_navigate refuses to run "
+                "without the sandbox proxy (real API keys are never passed to the sandbox)."
             )
-            env_vars = {
-                "OPENAI_API_KEY": sandbox_token,
-                "OPENAI_BASE_URL": f"{settings.SANDBOX_PROXY_URL}/api/v1/sandbox-proxy/v1",
-            }
-        else:
-            env_vars = {"OPENAI_API_KEY": ctx.api_keys.get("openai", "")}
+
+        from app.services.sandbox_tokens import create_sandbox_token, revoke_sandbox_token
+
+        sandbox_token = await create_sandbox_token(
+            tenant_id=str(ctx.tenant_id),
+            user_id=str(ctx.user_id),
+            session_id=ctx.session_id or "browser_nav",
+            worker_id="browser_navigate",
+        )
+        env_vars = {
+            "OPENAI_API_KEY": sandbox_token,
+            "OPENAI_BASE_URL": f"{settings.SANDBOX_PROXY_URL}/api/v1/sandbox-proxy/v1",
+        }
 
         # execute_with_lifecycle passes code to run_code() (Jupyter kernel)
         # Browser Use needs OPENAI_API_KEY for the LLM; timeout=120 for Chromium+LLM chain.
@@ -121,11 +124,10 @@ async def browser_navigate(
             )
         finally:
             # Revoke control plane token after sandbox lifecycle completes
-            if sandbox_token:
-                try:
-                    await revoke_sandbox_token(sandbox_token)
-                except Exception:
-                    logger.warning("Failed to revoke browser_navigate sandbox token")
+            try:
+                await revoke_sandbox_token(sandbox_token)
+            except Exception:
+                logger.warning("Failed to revoke browser_navigate sandbox token")
 
         if not result.success:
             return {

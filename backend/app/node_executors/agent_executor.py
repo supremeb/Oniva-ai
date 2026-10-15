@@ -119,9 +119,9 @@ class AgentExecutor(BaseNodeExecutor):
             if not agent_id_str:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error="Agent ID not specified",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Get max iterations from node config or use default
@@ -151,9 +151,9 @@ class AgentExecutor(BaseNodeExecutor):
             except ValueError:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error=f"Invalid agent ID: {agent_id_str}. Expected UUID or one of: {list(BUILTIN_AGENTS.keys())}",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Get custom agent from database
@@ -164,17 +164,17 @@ class AgentExecutor(BaseNodeExecutor):
             if not custom_agent:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error=f"Agent not found: {agent_id}",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             if not custom_agent.is_active:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error=f"Agent '{custom_agent.name}' is not active",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Get user prompt with variable substitution
@@ -188,9 +188,9 @@ class AgentExecutor(BaseNodeExecutor):
             if not user_prompt:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error="User prompt not specified",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Get model configuration via unified gateway
@@ -204,9 +204,9 @@ class AgentExecutor(BaseNodeExecutor):
                 provider_type = get_provider_from_model(model_id)
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error=f"No API key found for provider: {provider_type}. Add your key in Settings > LLM Providers.",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Create LiteLLM-backed pydantic-ai model (no os.environ mutation)
@@ -319,6 +319,7 @@ class AgentExecutor(BaseNodeExecutor):
             all_thoughts: List[str] = []
             stopped_reason = "complete"
             final_response = ""
+            total_tokens_used = 0
 
             if enable_tool_loop and tools:
                 # Multi-iteration tool loop
@@ -327,7 +328,7 @@ class AgentExecutor(BaseNodeExecutor):
 
                 # Get model context window for truncation budget
                 try:
-                    _model_info = litellm.get_model_info(model) if model else {}
+                    _model_info = litellm.get_model_info(model_id) if model_id else {}
                 except Exception:
                     _model_info = {}
                 _max_input_tokens = _model_info.get("max_input_tokens", 128_000)
@@ -361,6 +362,7 @@ class AgentExecutor(BaseNodeExecutor):
                             )
                             message_history = _kept
 
+                    history_len = len(message_history)
                     try:
                         # Run the agent for this iteration
                         result = await pydantic_agent.run(
@@ -373,21 +375,20 @@ class AgentExecutor(BaseNodeExecutor):
                         response_text = result.output if hasattr(result, 'output') else str(result)
                         iteration_record.response = response_text
 
-                        # Track tool calls from this iteration if available
-                        if hasattr(result, '_all_messages'):
-                            for msg in result._all_messages:
-                                # Check for tool calls in messages
-                                if hasattr(msg, 'parts'):
-                                    for part in msg.parts:
-                                        if hasattr(part, 'tool_name'):
-                                            tool_record = ToolCallRecord(
-                                                tool_name=part.tool_name,
-                                                arguments=getattr(part, 'args', {}),
-                                                result=getattr(part, 'content', None),
-                                                duration_ms=0
-                                            )
-                                            iteration_record.tool_calls.append(tool_record)
-                                            total_tool_calls += 1
+                        # Tool calls made in THIS iteration only. all_messages() carries the
+                        # whole history, so count just the new messages' tool-call parts;
+                        # scanning the history made every iteration after the first look
+                        # like it called tools and the loop never exited early.
+                        for tool_part, tool_result in self._new_tool_calls(result, history_len):
+                            iteration_record.tool_calls.append(ToolCallRecord(
+                                tool_name=tool_part.tool_name,
+                                arguments=getattr(tool_part, 'args', {}),
+                                result=tool_result,
+                                duration_ms=0
+                            ))
+                            total_tool_calls += 1
+
+                        total_tokens_used += self._run_tokens(result)
 
                         # Check if agent made tool calls this iteration
                         made_tool_calls = len(iteration_record.tool_calls) > 0
@@ -442,9 +443,9 @@ class AgentExecutor(BaseNodeExecutor):
 
                         return NodeExecutionResult(
                             node_id=context.node_id,
-                            status="error",
+                            status="failed",
                             error=f"Agent execution failed at iteration {iteration_num}: {str(e)}",
-                            execution_time=time.time() - start_time
+                            elapsed_ms=int((time.time() - start_time) * 1000)
                         )
 
             else:
@@ -452,6 +453,7 @@ class AgentExecutor(BaseNodeExecutor):
                 try:
                     result = await pydantic_agent.run(user_prompt, deps=agent_deps)
                     final_response = result.output if hasattr(result, 'output') else str(result)
+                    total_tokens_used += self._run_tokens(result)
                     stopped_reason = "no_tool_calls" if not tools else "complete"
                 except Exception as e:
                     # Capture error for learning system (fire-and-forget)
@@ -470,9 +472,9 @@ class AgentExecutor(BaseNodeExecutor):
 
                     return NodeExecutionResult(
                         node_id=context.node_id,
-                        status="error",
+                        status="failed",
                         error=f"Agent execution failed: {str(e)}",
-                        execution_time=time.time() - start_time
+                        elapsed_ms=int((time.time() - start_time) * 1000)
                     )
 
             execution_time = time.time() - start_time
@@ -507,7 +509,8 @@ class AgentExecutor(BaseNodeExecutor):
                 node_id=context.node_id,
                 status="success",
                 output=output.model_dump(),
-                execution_time=execution_time,
+                elapsed_ms=int((execution_time) * 1000),
+                tokens_used=total_tokens_used or None,
                 reasoning=combined_reasoning
             )
 
@@ -515,10 +518,38 @@ class AgentExecutor(BaseNodeExecutor):
             logger.exception(f"Unexpected error in agent execution: {e}")
             return NodeExecutionResult(
                 node_id=context.node_id,
-                status="error",
+                status="failed",
                 error=f"Unexpected error in agent execution: {str(e)}",
-                execution_time=time.time() - start_time
+                elapsed_ms=int((time.time() - start_time) * 1000)
             )
+
+    @staticmethod
+    def _new_tool_calls(result: Any, history_len: int) -> list:
+        """(call part, return content) pairs produced by one agent run.
+
+        Only messages after ``history_len`` count, so earlier iterations'
+        tool calls are not seen again.
+        """
+        messages = getattr(result, '_all_messages', None) or []
+        calls = []
+        returns = {}
+        for msg in messages[history_len:]:
+            for part in getattr(msg, 'parts', None) or []:
+                kind = getattr(part, 'part_kind', None)
+                if kind == 'tool-call':
+                    calls.append(part)
+                elif kind == 'tool-return':
+                    returns[getattr(part, 'tool_call_id', None)] = getattr(part, 'content', None)
+        return [(c, returns.get(getattr(c, 'tool_call_id', None))) for c in calls]
+
+    @staticmethod
+    def _run_tokens(result: Any) -> int:
+        """Total tokens the model reported for a run (0 when unavailable)."""
+        try:
+            usage = result.usage()
+            return int(getattr(usage, 'total_tokens', 0) or 0)
+        except Exception:
+            return 0
 
     async def _load_tool_api_keys(
         self,
@@ -596,9 +627,9 @@ class AgentExecutor(BaseNodeExecutor):
             if not user_prompt:
                 return NodeExecutionResult(
                     node_id=context.node_id,
-                    status="error",
+                    status="failed",
                     error="No prompt provided for built-in agent",
-                    execution_time=time.time() - start_time
+                    elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
             # Get API key for the model - prioritize environment variables for built-in agents
@@ -671,14 +702,14 @@ class AgentExecutor(BaseNodeExecutor):
                 node_id=context.node_id,
                 status="success",
                 output=output.model_dump(),
-                execution_time=execution_time
+                elapsed_ms=int((execution_time) * 1000)
             )
 
         except Exception as e:
             logger.exception(f"Error executing built-in agent {agent_type}: {e}")
             return NodeExecutionResult(
                 node_id=context.node_id,
-                status="error",
+                status="failed",
                 error=f"Built-in agent execution failed: {str(e)}",
-                execution_time=time.time() - start_time
+                elapsed_ms=int((time.time() - start_time) * 1000)
             )

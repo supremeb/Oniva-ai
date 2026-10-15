@@ -76,6 +76,8 @@ export function FleetChat({ runId, agentName, status: initialStatus }: FleetChat
     );
   }
 
+  const result = job?.result as { score?: number; passed?: boolean; action?: string } | null | undefined;
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -102,31 +104,31 @@ export function FleetChat({ runId, agentName, status: initialStatus }: FleetChat
       </div>
 
       {/* Channel status — evaluator score + webhook delivery */}
-      {!isRunning && job?.result && (job.result.score != null || job.result.action) && (
+      {!isRunning && result && (result.score != null || result.action) && (
         <div className="px-4 py-2 border-b border-border flex items-center gap-4 text-xs text-muted-foreground">
-          {job.result.score != null && (
+          {result.score != null && (
             <span className={cn(
               'flex items-center gap-1',
-              job.result.passed ? 'text-green-600' : 'text-amber-600'
+              result.passed ? 'text-green-600' : 'text-amber-600'
             )}>
               <Exam className="h-3.5 w-3.5" />
-              Score: {job.result.score}/100
-              {job.result.passed ? ' (passed)' : ' (review)'}
+              Score: {result.score}/100
+              {result.passed ? ' (passed)' : ' (review)'}
             </span>
           )}
-          {job.result.action === 'delivered' && (
+          {result.action === 'delivered' && (
             <span className="flex items-center gap-1 text-green-600">
               <Link className="h-3.5 w-3.5" />
               Webhook delivered
             </span>
           )}
-          {job.result.action === 'delivered_without_evaluation' && (
+          {result.action === 'delivered_without_evaluation' && (
             <span className="flex items-center gap-1">
               <CheckCircle className="h-3.5 w-3.5" />
               Delivered (no evaluation)
             </span>
           )}
-          {job.result.action === 'routed_to_review' && (
+          {result.action === 'routed_to_review' && (
             <span className="flex items-center gap-1 text-amber-600">
               <XCircle className="h-3.5 w-3.5" />
               Sent to review queue

@@ -1,17 +1,19 @@
 """
-XML Tool Call Rescue Service
+XML Tool Call Parser (detection only)
 
 Parses XML-formatted tool calls leaked by models (e.g., DeepSeek via OpenRouter)
 that emit tool invocations as plain text instead of using the function-calling API.
-Executes parsed calls via SkillRegistry and yields SSE events.
+
+SECURITY: leaked text is never executed. Executing it dispatched any registered
+skill, bypassing the agent allow-list and harness guards. This module only
+detects and strips such text; callers log and drop the calls.
 """
 
 import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator
-from uuid import uuid4
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -164,81 +166,3 @@ def parse_xml_tool_calls(xml_text: str) -> list[ParsedToolCall]:
         )
 
     return results
-
-
-# ---------------------------------------------------------------------------
-# Rescued Tool Execution
-# ---------------------------------------------------------------------------
-
-async def execute_rescued_tool_calls(
-    parsed_calls: list[ParsedToolCall],
-    skill_ctx: Any,  # SkillContext
-    builder: Any,  # SSEBuilder
-    collected_results: list,  # mutable out-param: list of (tool_name, args, result)
-) -> AsyncGenerator[dict, None]:
-    """Execute rescued tool calls via SkillRegistry and yield SSE events.
-
-    For each parsed call:
-    1. Validate the skill exists
-    2. Yield tool_call_start SSE event
-    3. Execute via SkillRegistry.invoke_skill()
-    4. Yield tool_call_complete SSE event
-    5. Append (tool_name, args, result) to collected_results
-    """
-    from app.agents.skills.registry import SkillRegistry
-    from app.services.sse_builder import ToolCallStatus
-    import time
-
-    for parsed in parsed_calls:
-        # Skip tool calls with empty/bogus arguments
-        if parsed.tool_name in ("web_search", "search_web") and not parsed.arguments.get("query", "").strip():
-            logger.info(f"XML tool rescue: skipping {parsed.tool_name} with empty query")
-            continue
-        if parsed.tool_name in ("browse_url",) and not parsed.arguments.get("url", "").strip():
-            logger.info(f"XML tool rescue: skipping {parsed.tool_name} with empty URL")
-            continue
-
-        skill = SkillRegistry.get_skill(parsed.tool_name)
-        if not skill:
-            logger.warning(f"XML tool rescue: skill '{parsed.tool_name}' not found, skipping")
-            continue
-
-        tool_call_id = f"rescue-{uuid4().hex[:12]}"
-        start_time = time.monotonic()
-
-        # Yield tool_call_start
-        yield builder.tool_call_start(
-            tool_call_id=tool_call_id,
-            tool_name=parsed.tool_name,
-            args=parsed.arguments,
-            label=parsed.tool_name.replace("_", " ").title(),
-        )
-
-        try:
-            result = await SkillRegistry.invoke_skill(
-                skill_ctx, parsed.tool_name, **parsed.arguments
-            )
-            duration_ms = int((time.monotonic() - start_time) * 1000)
-
-            # Normalize result for JSON serialization
-            if hasattr(result, 'model_dump'):
-                result = result.model_dump()
-
-            yield builder.tool_call_complete(
-                tool_call_id=tool_call_id,
-                status=ToolCallStatus.SUCCESS,
-                result=result if isinstance(result, (dict, str, list)) else str(result),
-                duration_ms=duration_ms,
-            )
-            collected_results.append((parsed.tool_name, parsed.arguments, result))
-
-        except Exception as e:
-            duration_ms = int((time.monotonic() - start_time) * 1000)
-            logger.error(f"XML tool rescue: error executing '{parsed.tool_name}': {e}")
-            yield builder.tool_call_complete(
-                tool_call_id=tool_call_id,
-                status=ToolCallStatus.ERROR,
-                error=str(e)[:500],
-                duration_ms=duration_ms,
-            )
-            collected_results.append((parsed.tool_name, parsed.arguments, {"error": str(e)}))

@@ -1,0 +1,41 @@
+# Mirrors postgres/init/01-roles.sh (a test asserts they are identical). Runs once, on first
+# initialisation of an empty Postgres data directory.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: oniva
+data:
+  01-roles.sh: |
+    #!/bin/bash
+    # Runs once, on first initialisation of an empty data directory (docker-entrypoint-initdb.d).
+    # Creates the two runtime login roles WITH passwords and the extensions Oniva needs.
+    #
+    #   oniva_app    NOSUPERUSER NOBYPASSRLS  request path; RLS is enforced against it
+    #   oniva_system BYPASSRLS                scheduler, webhooks, startup recovery, pre-tenant auth
+    #
+    # Alembic migrations 100/101 create these roles only IF MISSING and never set passwords, so
+    # pre-creating them here is what gives them passwords. Table grants come from the migrations.
+    # The schema owner is POSTGRES_USER (the bootstrap superuser of this container).
+    #
+    # Existing volumes are NOT re-initialised. See DEPLOYMENT.md ("Role passwords") for the
+    # equivalent ALTER ROLE statements.
+    set -euo pipefail
+
+    : "${APP_DATABASE_PASSWORD:?APP_DATABASE_PASSWORD is required}"
+    : "${SYSTEM_DATABASE_PASSWORD:?SYSTEM_DATABASE_PASSWORD is required}"
+
+    # psql variables are quoted server-safe via :'name'; no shell interpolation into SQL.
+    psql -v ON_ERROR_STOP=1 \
+         -v app_pw="$APP_DATABASE_PASSWORD" \
+         -v sys_pw="$SYSTEM_DATABASE_PASSWORD" \
+         -v dbname="$POSTGRES_DB" \
+         --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
+    CREATE EXTENSION IF NOT EXISTS vector;
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+    CREATE ROLE oniva_app    WITH LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD :'app_pw';
+    CREATE ROLE oniva_system WITH LOGIN NOSUPERUSER BYPASSRLS   PASSWORD :'sys_pw';
+
+    SELECT format('GRANT CONNECT ON DATABASE %I TO oniva_app, oniva_system', :'dbname') \gexec
+    SQL

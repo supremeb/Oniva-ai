@@ -42,6 +42,55 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+# ---------------------------------------------------------------------------
+# System session factory (BYPASSRLS role `oniva_system`, KTD4 / R10).
+#
+# Use ONLY for: the workflow scheduler, webhook ingestion, startup recovery, and
+# pre-tenant auth lookups (login, signup, check-email, onboarding register/check-slug,
+# create-org tenant insert, token -> user lookup). Request handlers must use get_db().
+# ---------------------------------------------------------------------------
+system_engine = create_async_engine(
+    settings.system_database_url,
+    echo=settings.DEBUG,
+    future=True,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_timeout=30,
+    pool_recycle=3600,
+    connect_args={
+        "server_settings": {"statement_timeout": "30000"},
+        "command_timeout": 30,
+    },
+)
+
+SystemSessionLocal = async_sessionmaker(
+    system_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
+
+@asynccontextmanager
+async def get_system_session() -> AsyncGenerator[AsyncSession, None]:
+    """Context-manager session on the BYPASSRLS system role (commit on success)."""
+    async with SystemSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+async def get_system_db() -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI dependency: system-role session for pre-tenant / cross-tenant routes."""
+    async with get_system_session() as session:
+        yield session
+
+
 async def set_tenant_context(session: AsyncSession, tenant_id: str) -> None:
     """
     Set tenant context on a database session using parameterized SQL.
@@ -138,25 +187,14 @@ async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
 
 
 async def get_db_no_tenant() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Get database session WITHOUT tenant context.
+    """Session WITHOUT tenant context. Alias of :func:`get_system_db`.
 
-    Use this ONLY for:
-    - Superuser/admin operations across tenants
-    - System migrations
-    - Authentication (before user is known)
-
-    WARNING: RLS policies will not filter data!
+    Without a tenant GUC the request role (oniva_app) sees zero rows, so every caller of
+    this dependency (login/signup/check-email, webhook receipt, API-key/OAuth/SAML auth,
+    platform-operator admin) runs on the BYPASSRLS system role. RLS does NOT filter data here.
     """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+    async with get_system_session() as session:
+        yield session
 
 
 async def set_background_audit_context(
@@ -206,19 +244,81 @@ async def get_db_for_tenant(tenant_id: str) -> AsyncGenerator[AsyncSession, None
             await session.close()
 
 
+async def assert_request_role_unprivileged(conn_engine=None) -> None:
+    """Refuse to serve if the request-path DB role can bypass RLS (R10).
+
+    The role must be NOT rolsuper AND NOT rolbypassrls. Skipped for non-PostgreSQL
+    (SQLite unit tests).
+    """
+    eng = conn_engine or engine
+    if eng.dialect.name != "postgresql":
+        return
+    async with eng.connect() as conn:
+        row = (await conn.execute(text(
+            "SELECT current_user, r.rolsuper, r.rolbypassrls "
+            "FROM pg_roles r WHERE r.rolname = current_user"
+        ))).one()
+    name, is_super, bypass = row
+    if is_super or bypass:
+        raise RuntimeError(
+            f"Refusing to start: DATABASE_URL connects as role '{name}' "
+            f"(rolsuper={is_super}, rolbypassrls={bypass}). Row-level security would not "
+            "apply. Use the NOSUPERUSER NOBYPASSRLS role 'oniva_app' for DATABASE_URL and "
+            "SYSTEM_DATABASE_URL / MIGRATION_DATABASE_URL for the other roles."
+        )
+
+
+def _alembic_config():
+    from pathlib import Path
+    from alembic.config import Config
+
+    backend_dir = Path(__file__).resolve().parents[2]
+    cfg = Config(str(backend_dir / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend_dir / "migrations"))
+    return cfg
+
+
+def _run_alembic_upgrade() -> None:
+    from alembic import command
+
+    command.upgrade(_alembic_config(), "head")
+
+
+async def _verify_alembic_head() -> None:
+    from alembic.script import ScriptDirectory
+
+    expected = set(ScriptDirectory.from_config(_alembic_config()).get_heads())
+    mig_engine = create_async_engine(settings.migration_database_url)
+    try:
+        async with mig_engine.connect() as conn:
+            rows = (await conn.execute(text("SELECT version_num FROM alembic_version"))).fetchall()
+    except Exception as e:
+        raise RuntimeError(f"Cannot read alembic_version ({e}); run `alembic upgrade head`.") from e
+    finally:
+        await mig_engine.dispose()
+    current = {r[0] for r in rows}
+    if current != expected:
+        raise RuntimeError(
+            f"Database schema is at {sorted(current)} but code expects {sorted(expected)}. "
+            "Run `alembic upgrade head` (as MIGRATION_DATABASE_URL) or set AUTO_MIGRATE=true."
+        )
+
+
 async def init_db():
-    """
-    Initialize database.
-    Create tables and extensions if they don't exist.
-    """
-    from app.models import Base
+    """Bring the schema to Alembic head, then assert the request role is unprivileged.
 
-    async with engine.begin() as conn:
-        # Create pgvector extension
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    No more ``create_all``: AUTO_MIGRATE (default on in dev, off in prod) runs
+    ``alembic upgrade head`` as the schema owner (MIGRATION_DATABASE_URL); otherwise the
+    current revision is only verified.
+    """
+    import asyncio
 
-        # Create all tables
-        await conn.run_sync(Base.metadata.create_all)
+    if engine.dialect.name == "postgresql":
+        if settings.auto_migrate:
+            await asyncio.to_thread(_run_alembic_upgrade)
+        else:
+            await _verify_alembic_head()
+        await assert_request_role_unprivileged()
 
     logger.info("Database initialized")
 
@@ -228,4 +328,5 @@ async def close_db():
     Close database connections.
     """
     await engine.dispose()
+    await system_engine.dispose()
     logger.info("Database connections closed")

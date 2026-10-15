@@ -33,7 +33,7 @@ async def check_and_create_background_job(
 ) -> BackgroundJob:
     """Atomically check concurrent limit and create a BackgroundJob.
 
-    Uses FOR UPDATE row locking to prevent race conditions between
+    Uses a per-agent advisory lock to prevent race conditions between
     scheduler dispatch and webhook dispatch for the same agent.
 
     Args:
@@ -52,7 +52,17 @@ async def check_and_create_background_job(
     Raises:
         ConcurrentLimitExceeded: If agent is at max concurrent runs
     """
-    # Count running/pending jobs for this agent with row lock
+    # Serialize dispatch per agent. Postgres rejects SELECT count(*) ... FOR UPDATE ("FOR UPDATE
+    # is not allowed with aggregate functions"), so take a transaction-scoped advisory lock keyed
+    # on the agent instead; it is released at commit/rollback. The count below then runs as a new
+    # statement (READ COMMITTED snapshot), so it sees jobs committed by the previous lock holder.
+    # Other dialects (SQLite in the unit tier) have no row/advisory locks and serialize writers.
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"background_dispatch:{agent_id}"},
+        )
+
     running_count_result = await db.execute(
         select(func.count())
         .select_from(BackgroundJob)
@@ -60,7 +70,6 @@ async def check_and_create_background_job(
             BackgroundJob.agent_id == agent_id,
             BackgroundJob.status.in_([JobStatus.PENDING.value, JobStatus.RUNNING.value]),
         )
-        .with_for_update()
     )
     running_count = running_count_result.scalar() or 0
 

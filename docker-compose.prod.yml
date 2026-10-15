@@ -7,34 +7,81 @@
 # - ENVIRONMENT must be production
 # - CORS_ORIGINS must be set to explicit domains
 # - Redis password required
+# - Three DB roles: POSTGRES_USER (schema owner, runs migrations), oniva_app (request path,
+#   RLS enforced), oniva_system (BYPASSRLS). See DEPLOYMENT.md.
+# - The app and frontend publish NO host ports (so replicas can scale); traffic enters via nginx.
 
 version: '3.8'
 
+x-app-env: &app-env
+  DEBUG: "false"
+  ENVIRONMENT: production
+  DATABASE_URL: postgresql+asyncpg://oniva_app:${APP_DATABASE_PASSWORD:?APP_DATABASE_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-oniva}
+  SYSTEM_DATABASE_URL: postgresql+asyncpg://oniva_system:${SYSTEM_DATABASE_PASSWORD:?SYSTEM_DATABASE_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-oniva}
+  MIGRATION_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-oniva}
+  APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+  SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+  ENCRYPTION_SALT: ${ENCRYPTION_SALT:?ENCRYPTION_SALT is required}
+  CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required}
+  # Read-only rootfs: all writable state lives on the /data volume (see volume-init)
+  SESSION_BASE_PATH: /data/sessions
+  VOLUMES_BASE_PATH: /data/volumes
+  ARTIFACTS_BASE_PATH: /data/artifacts
+
 services:
+  # One-shot: make the data volume writable by the non-root app user (uid 1000).
+  volume-init:
+    image: busybox:1.36
+    command: ["sh", "-c", "mkdir -p /data/sessions /data/volumes /data/artifacts && chown -R 1000:1000 /data"]
+    user: "0:0"
+    volumes:
+      - appdata:/data
+    restart: "no"
+
+  # One-shot: `alembic upgrade head` as the schema owner. The app runs with AUTO_MIGRATE=false.
+  migrate:
+    image: oniva:${VERSION:?VERSION is required (pin an image tag)}
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *app-env
+      AUTO_MIGRATE: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    user: "1000:1000"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:mode=1777,size=50m
+    restart: "no"
+
   app:
-    image: oniva:${VERSION:-latest}
+    image: oniva:${VERSION:?VERSION is required (pin an image tag)}
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
     environment:
-      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL is required}
-      - REDIS_URL=${REDIS_URL:?REDIS_URL is required}
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
-      - ENCRYPTION_SALT=${ENCRYPTION_SALT:?ENCRYPTION_SALT is required}
-      - DEBUG=false
-      - ENVIRONMENT=production
-      - CORS_ORIGINS=${CORS_ORIGINS:?CORS_ORIGINS is required}
+      <<: *app-env
+      AUTO_MIGRATE: "false"
       # LLM Configuration (user provides)
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-    ports:
-      - "8000:8000"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    expose:
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      volume-init:
+        condition: service_completed_successfully
+    volumes:
+      - appdata:/data
     # SECURITY: Container hardening
     read_only: true
     security_opt:
@@ -56,7 +103,7 @@ services:
         delay: 5s
         max_attempts: 3
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -68,14 +115,14 @@ services:
         max-file: "5"
 
   frontend:
-    image: oniva-frontend:${VERSION:-latest}
+    image: oniva-frontend:${VERSION:?VERSION is required (pin an image tag)}
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
     environment:
       - NEXT_PUBLIC_API_URL=http://app:8000
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       - app
     # SECURITY: Container hardening
@@ -102,8 +149,12 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:?POSTGRES_USER is required}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       - POSTGRES_DB=${POSTGRES_DB:-oniva}
+      - APP_DATABASE_PASSWORD=${APP_DATABASE_PASSWORD:?APP_DATABASE_PASSWORD is required}
+      - SYSTEM_DATABASE_PASSWORD=${SYSTEM_DATABASE_PASSWORD:?SYSTEM_DATABASE_PASSWORD is required}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Alphabetical: 01-roles.sh (creates oniva_app/oniva_system with passwords) then init.sql
+      - ./postgres/init/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
     # SECURITY: Container hardening
     security_opt:
@@ -149,7 +200,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Optional: Nginx reverse proxy for TLS termination
+  # Nginx reverse proxy for TLS termination: the only published entrypoint (app/frontend scale behind it)
   nginx:
     image: nginx:alpine
     ports:
@@ -168,10 +219,9 @@ services:
     tmpfs:
       - /var/cache/nginx:mode=1777
       - /var/run:mode=1777
-    profiles:
-      - with-nginx
 
 volumes:
+  appdata:
   pgdata:
   redisdata:
 

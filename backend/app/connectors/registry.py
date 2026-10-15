@@ -4,7 +4,9 @@ from .base import BaseConnector, ConnectorMetadata
 import pkgutil
 import importlib
 import inspect
+import json
 import logging
+import uuid
 import app.connectors
 
 logger = logging.getLogger(__name__)
@@ -16,8 +18,10 @@ class ConnectorRegistry:
     Follows plugin pattern for easy extensibility.
     """
 
+    # Class registry only. NEVER cache instances: connector instances hold
+    # credentials after authenticate(), and a process-global instance would
+    # share one tenant's credentials with every other tenant (R2).
     _connectors: Dict[str, Type[BaseConnector]] = {}
-    _instances: Dict[str, BaseConnector] = {} # In-memory cache of authenticated instances? Or just instances.
 
     @classmethod
     def auto_discover(cls):
@@ -70,16 +74,51 @@ class ConnectorRegistry:
 
     @classmethod
     def get_connector(cls, connector_id: str) -> Optional[BaseConnector]:
-        """Get or create connector instance. Note: Does not handle auth here, just instantiation."""
-        if connector_id in cls._instances:
-            return cls._instances[connector_id]
+        """Return a FRESH, unauthenticated instance (metadata / tool schemas only).
 
+        Each call returns a new object. To act on a tenant's behalf use
+        get_authenticated_connector(), which binds that tenant's stored
+        credentials to a per-call instance.
+        """
         connector_cls = cls._connectors.get(connector_id)
-        if connector_cls:
-            instance = connector_cls()
-            cls._instances[connector_id] = instance
-            return instance
-        return None
+        return connector_cls() if connector_cls else None
+
+    @classmethod
+    async def get_authenticated_connector(
+        cls,
+        connector_id: str,
+        tenant_id: Any,
+        db: Optional[Any] = None,
+    ) -> Optional[BaseConnector]:
+        """Build a per-call connector authenticated with THIS tenant's stored credentials.
+
+        Returns None if the connector is unknown, the tenant has not connected it
+        (connectors with auth_type "none" need no stored credentials), or
+        authentication fails. The caller owns the instance and should disconnect() it.
+        """
+        connector = cls.get_connector(connector_id)
+        if connector is None or not tenant_id:
+            return None
+
+        if connector.metadata.auth_type == "none":
+            stored: Dict[str, Any] = {}  # public/built-in data: no tenant secret exists
+        else:
+            try:
+                loaded = await load_tenant_credentials(connector_id, tenant_id, db=db)
+            except ValueError:  # malformed tenant id
+                return None
+            if loaded is None:
+                return None
+            stored = loaded
+        try:
+            ok = await connector.authenticate(stored)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Connector %s authentication failed: %s", connector_id, type(exc).__name__)
+            ok = False
+        if not ok:
+            await _safe_disconnect(connector)
+            return None
+        return connector
 
     @classmethod
     def list_available(cls) -> List[ConnectorMetadata]:
@@ -105,7 +144,7 @@ class ConnectorRegistry:
 
         tools: list = []
         for cid in connector_ids:
-            instance = cls._instances.get(cid)
+            instance = cls.get_connector(cid)
             if instance is None:
                 continue
 
@@ -182,3 +221,106 @@ async def _resolve_connector_credentials(
     except Exception as exc:
         logger.warning("Failed to resolve credentials for connector %s: %s", connector_id, exc)
     return {}
+
+
+# ---------------------------------------------------------------------------
+# Per-tenant credential storage (connectors table, encrypted_credentials)
+# ---------------------------------------------------------------------------
+
+def encrypt_credentials(credentials: Dict[str, Any]) -> str:
+    from app.core.encryption import get_encryption_service
+
+    return get_encryption_service().encrypt(json.dumps(credentials))
+
+
+def decrypt_credentials(blob: str) -> Dict[str, Any]:
+    from app.core.encryption import get_encryption_service
+
+    raw = get_encryption_service().decrypt(blob)
+    return json.loads(raw) if raw else {}
+
+
+def _as_uuid(value: Any) -> uuid.UUID:
+    return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+
+async def _safe_disconnect(connector: BaseConnector) -> None:
+    try:
+        await connector.disconnect()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _native_row(db: Any, connector_id: str, tenant_id: uuid.UUID):
+    from sqlalchemy import select
+    from app.models.connector import Connector
+
+    result = await db.execute(
+        select(Connector)
+        .where(Connector.tenant_id == tenant_id)
+        .where(Connector.provider == connector_id)
+        .where(Connector.connector_type == "native")
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def load_tenant_credentials(
+    connector_id: str, tenant_id: Any, db: Optional[Any] = None
+) -> Optional[Dict[str, Any]]:
+    """Decrypted credentials the given tenant stored for a native connector, or None.
+
+    Always filtered by tenant_id in the query (defence in depth on top of RLS).
+    With db=None a short-lived tenant-scoped session is opened.
+    """
+    tid = _as_uuid(tenant_id)
+
+    async def _load(session: Any) -> Optional[Dict[str, Any]]:
+        row = await _native_row(session, connector_id, tid)
+        if row is None or not row.is_active or not row.encrypted_credentials:
+            return None
+        return decrypt_credentials(row.encrypted_credentials)
+
+    if db is not None:
+        return await _load(db)
+
+    from app.core.database import AsyncSessionLocal, set_tenant_context
+
+    async with AsyncSessionLocal() as session:
+        await set_tenant_context(session, str(tid))
+        return await _load(session)
+
+
+async def store_tenant_credentials(
+    db: Any,
+    connector: BaseConnector,
+    tenant_id: Any,
+    user_id: Any,
+    credentials: Dict[str, Any],
+) -> None:
+    """Upsert the tenant's native connector row with encrypted credentials."""
+    from app.models.connector import Connector
+
+    tid, uid = _as_uuid(tenant_id), _as_uuid(user_id)
+    meta = connector.metadata
+    row = await _native_row(db, meta.id, tid)
+    blob = encrypt_credentials(credentials)
+    if row is None:
+        db.add(Connector(
+            tenant_id=tid,
+            user_id=uid,
+            connector_type="native",
+            provider=meta.id,
+            name=meta.name,
+            description=meta.description,
+            config={},
+            encrypted_credentials=blob,
+            is_active=True,
+            is_verified=True,
+            source_type="native",
+        ))
+    else:
+        row.encrypted_credentials = blob
+        row.is_active = True
+        row.is_verified = True
+    await db.flush()

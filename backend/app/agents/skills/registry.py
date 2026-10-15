@@ -53,6 +53,7 @@ class SkillManifest:
     mcp_server: Optional[str] = None
     mcp_tool: Optional[str] = None
     required_feature: Optional[str] = None  # Feature flag required for this skill (e.g., "ENABLE_FINANCE_SKILLS")
+    mock: bool = False  # Returns simulated data (not a real provider)
 
 # Global skills registry (loaded skills)
 _registry: Dict[str, Skill] = {}
@@ -548,6 +549,7 @@ class SkillRegistry:
                         mcp_server=loaded_skill.metadata.mcp_server,
                         mcp_tool=loaded_skill.metadata.mcp_tool,
                     )
+                    skill_is_mock = loaded_skill.metadata.mock
 
                     # Check for name collision with legacy skills
                     if name in _registry:
@@ -573,6 +575,7 @@ class SkillRegistry:
                         version=loaded_skill.metadata.version,
                         mcp_server=loaded_skill.metadata.mcp_server,
                         mcp_tool=loaded_skill.metadata.mcp_tool,
+                        mock=skill_is_mock,
                     )
 
         except Exception as e:

@@ -100,7 +100,7 @@ async def register(
 async def create_org(
     request: CreateOrgRequest,
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_no_tenant)  # tenant insert: pre-tenant, system role,
 ):
     """
     Create a new organization for existing user.

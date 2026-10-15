@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.database import get_db
 from app.schemas.sandbox_proxy import (
     SandboxProxyChatChoice,
@@ -21,9 +22,8 @@ from app.schemas.sandbox_proxy import (
     SandboxProxyChatUsage,
 )
 from app.services.llm_gateway import LLMGateway, LLMRequest
+from app.services.sandbox_executor import _MAX_COST_PER_EXECUTION
 from app.services.sandbox_tokens import (
-    SandboxTokenMetadata,
-    _COST_CAP_USD,
     increment_sandbox_token_usage,
     validate_sandbox_token,
 )
@@ -31,6 +31,19 @@ from app.services.sandbox_tokens import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sandbox-proxy")
+
+
+def _bare(model: str) -> str:
+    return model.rsplit("/", 1)[-1].strip().lower()
+
+
+def _model_allowed(model: str) -> bool:
+    """Allow-list from SANDBOX_ALLOWED_MODELS (default: DEFAULT_LLM_MODEL only)."""
+    settings = get_settings()
+    raw = (getattr(settings, "SANDBOX_ALLOWED_MODELS", "") or "").strip()
+    allowed = [m.strip() for m in raw.split(",") if m.strip()] or [settings.DEFAULT_LLM_MODEL]
+    wanted = model.strip().lower()
+    return any(wanted == a.lower() or _bare(wanted) == _bare(a) for a in allowed)
 
 
 async def _extract_proxy_token(request: Request) -> str:
@@ -54,14 +67,20 @@ async def proxy_chat_completions(
     if meta is None:
         raise HTTPException(status_code=401, detail="Expired or revoked token")
 
-    # 2. Cost cap check (hardcoded $2.00)
-    if meta.tokens_used > 0:
-        # Rough estimate: ~$3 per 1M tokens average across models
-        estimated_cost = meta.tokens_used * 0.000003
-        if estimated_cost > _COST_CAP_USD:
-            raise HTTPException(status_code=429, detail="Session LLM cost cap exceeded")
+    # 2. Model allow-list (sandbox code must not pick arbitrary/expensive models)
+    if not _model_allowed(body.model):
+        logger.warning("SANDBOX_PROXY_DENIED reason=model model=%s session=%s", body.model, meta.session_id)
+        raise HTTPException(status_code=403, detail="Model not allowed in sandbox")
 
-    # 3. Forward via LLMGateway
+    # 3. Real usage-based cost cap per execution
+    if meta.cost_usd >= _MAX_COST_PER_EXECUTION:
+        logger.warning(
+            "SANDBOX_PROXY_DENIED reason=cost_cap session=%s spent=%.4f cap=%.2f",
+            meta.session_id, meta.cost_usd, _MAX_COST_PER_EXECUTION,
+        )
+        raise HTTPException(status_code=429, detail="Sandbox execution LLM cost cap exceeded")
+
+    # 4. Forward via LLMGateway
     tenant_id = UUID(meta.tenant_id)
     user_id = UUID(meta.user_id)
 
@@ -79,14 +98,16 @@ async def proxy_chat_completions(
         logger.error("Sandbox proxy LLM call failed: %s", e)
         raise HTTPException(status_code=502, detail="LLM provider error")
 
-    # 4. Increment usage (fire-and-forget on failure)
+    # 5. Increment usage (fire-and-forget on failure)
     total_tokens = llm_response.input_tokens + llm_response.output_tokens
     try:
-        await increment_sandbox_token_usage(token, total_tokens)
+        await increment_sandbox_token_usage(
+            token, total_tokens, cost_usd=llm_response.cost_usd,
+        )
     except Exception:
         logger.warning("Failed to increment sandbox token usage", exc_info=True)
 
-    # 5. Audit log (structured logging — SHA-256 token hash, not plaintext)
+    # 6. Audit log (structured logging — SHA-256 token hash, not plaintext)
     token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
     logger.info(
         "SANDBOX_PROXY_CALL tenant=%s user=%s session=%s token_hash=%s model=%s tokens=%d cost=%.6f",
@@ -99,7 +120,7 @@ async def proxy_chat_completions(
         llm_response.cost_usd,
     )
 
-    # 6. Return OpenAI-format response
+    # 7. Return OpenAI-format response
     return SandboxProxyChatResponse(
         id=f"sbx-{uuid4().hex[:24]}",
         choices=[

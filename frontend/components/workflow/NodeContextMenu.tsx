@@ -59,10 +59,7 @@ const NODE_CATEGORIES = [
   {
     name: 'Financial',
     items: [
-      { type: 'data', label: 'Data Retrieval', icon: Database },
-      { type: 'analysis', label: 'Analysis', icon: TrendUp },
       { type: 'compliance', label: 'Compliance', icon: ShieldCheck },
-      { type: 'research', label: 'Research', icon: BookOpen },
     ],
   },
   {

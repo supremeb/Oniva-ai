@@ -4,10 +4,9 @@ Execute Python Skill (E2B Sandbox)
 Executes Python code in an E2B Firecracker microVM with hypervisor-level isolation.
 Requires human review approval before execution.
 
-When ENABLE_SANDBOX is False, falls back to the legacy in-process sandbox
-for backward compatibility.
+When ENABLE_SANDBOX is False the skill refuses. There is no in-process fallback.
 
-Timeout: 60 seconds (E2B remote), vs 5 seconds (legacy in-process).
+Timeout: 60 seconds (E2B remote).
 """
 
 import logging
@@ -32,7 +31,7 @@ async def execute_python(
     human review ticket and returns pending_review status. The node executor
     handles the review polling loop and sandbox execution on approval.
 
-    When ENABLE_SANDBOX is False, falls back to the legacy in-process sandbox.
+    When ENABLE_SANDBOX is False, refuses (never executes in-process).
 
     Args:
         ctx: Skill execution context (must have session_id).
@@ -41,7 +40,7 @@ async def execute_python(
         timeout: Maximum execution time in seconds (default: 60, max: 60).
 
     Returns:
-        Dict with success, status, and ticket_id (E2B) or execution result (legacy).
+        Dict with success, status, and ticket_id (E2B) or review-ticket info.
     """
     if not code or not code.strip():
         return {
@@ -55,8 +54,10 @@ async def execute_python(
     if settings.ENABLE_SANDBOX and settings.E2B_API_KEY:
         return await _execute_e2b(ctx, code, input_files)
 
-    # Legacy fallback: in-process sandbox
-    return await _execute_legacy(ctx, code, min(timeout, 30))
+    # Fail closed: no in-process fallback
+    from app.agents.skills.code import SANDBOX_REFUSAL
+
+    return {"success": False, "output": None, "error": SANDBOX_REFUSAL}
 
 
 async def _execute_e2b(
@@ -123,12 +124,3 @@ async def _execute_e2b(
             "error": f"Failed to submit code for review: {e}",
         }
 
-
-async def _execute_legacy(
-    ctx: SkillContext,
-    code: str,
-    timeout: int,
-) -> Dict[str, Any]:
-    """Legacy in-process sandbox execution (backward compatibility)."""
-    from app.skills.execute_python.tool_legacy import execute_python as legacy_execute
-    return await legacy_execute(ctx, code, timeout)

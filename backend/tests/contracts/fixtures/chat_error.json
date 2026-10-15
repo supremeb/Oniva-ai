@@ -1,0 +1,23 @@
+{
+  "events": [
+    {
+      "event": "text_delta",
+      "id": "1",
+      "data": {
+        "delta": "partial ",
+        "partIndex": 0
+      }
+    },
+    {
+      "event": "error",
+      "id": "2",
+      "data": {
+        "message": "API rate limit exceeded. Please try again in a moment.",
+        "title": "Chat Error",
+        "details": null,
+        "retryable": true
+      }
+    }
+  ],
+  "persisted_messages": []
+}

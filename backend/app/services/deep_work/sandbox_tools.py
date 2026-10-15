@@ -284,9 +284,9 @@ async def _exec_browser_navigate(
         'await main()\n'
     )
     try:
-        # LLM API keys are injected at sandbox creation time via env_vars
-        # (see engine.py _build_sandbox_env_vars), so they're already
-        # available to the python process.
+        # The sandbox env holds only a proxy token + proxy base URL (never a real
+        # LLM key), injected at sandbox creation time via env_vars
+        # (see engine.py _build_sandbox_env_vars).
         result = await sandbox.execute_code(script, timeout=120)
         if not result.success:
             return {"error": result.stderr or result.error or "Navigation failed", "status": "failed"}

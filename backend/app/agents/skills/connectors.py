@@ -179,15 +179,26 @@ async def invoke_connector_tool(
             # Attach flag for observability and retry gating
             tool_info["_is_write"] = True
 
-        # Authenticate connector if credentials available
-        credentials = conn_info.get("credentials", {})
-        config = conn_info.get("config", {})
-
-        if credentials:
-            await connector_instance.authenticate({**config, **credentials})
-
-        # Call the tool
-        result = await connector_instance.call_tool(tool_name, arguments or {})
+        # Bind THIS tenant's stored credentials to a per-call instance (R2).
+        # The registry never hands out a shared, credential-holding client.
+        tenant_id = getattr(ctx, "tenant_id", None) or (
+            getattr(getattr(ctx, "deps", None), "tenant_id", None)
+        )
+        authed = await ConnectorRegistry.get_authenticated_connector(
+            conn_info["provider"], tenant_id, db=getattr(ctx, "db", None)
+        )
+        if authed is None:
+            return {
+                "success": False,
+                "error": f"Connector '{conn_info.get('name', conn_info['provider'])}' is not connected for this workspace."
+            }
+        try:
+            result = await authed.call_tool(tool_name, arguments or {})
+        finally:
+            try:
+                await authed.disconnect()
+            except Exception:
+                pass
 
         return {
             "success": True,

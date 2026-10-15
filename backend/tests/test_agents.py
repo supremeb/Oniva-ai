@@ -8,6 +8,7 @@ from app.agents.data_retrieval import DataRetrievalAgent
 from app.agents.compliance import ComplianceAgent
 
 
+@pytest.mark.xfail(strict=True, reason="KNOWN_FAILURES U13: needs an LLM API key (env-dependent)")
 @pytest.mark.asyncio
 async def test_analysis_agent_result_type(test_db, test_user_id):
     """Test that analysis agent returns correct result type"""

@@ -10,6 +10,8 @@ tool:
   function: fetch_market_data
   async: true
 
+mock: true
+
 metadata:
   author: oniva
   version: "1.0.0"

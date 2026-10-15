@@ -10,6 +10,8 @@ tool:
   function: fetch_economic_indicators
   async: true
 
+mock: true
+
 metadata:
   author: oniva
   version: "1.0.0"

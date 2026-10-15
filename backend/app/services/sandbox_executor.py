@@ -23,6 +23,7 @@ import os
 import time
 import uuid as _uuid
 from dataclasses import dataclass
+from urllib.parse import urlparse
 from typing import Any, Optional
 
 from app.config import get_settings
@@ -34,7 +35,12 @@ logger = logging.getLogger(__name__)
 # Module constants (promote to config when deployments need to override)
 _DEFAULT_TIMEOUT = 3600  # 1 hour max sandbox lifetime
 _EXECUTION_TIMEOUT = 60  # 60 seconds per code execution
-_MAX_COST_PER_EXECUTION = 0.50  # USD per execution
+_MAX_COST_PER_EXECUTION = 0.50  # USD of real LLM spend per execution (enforced by sandbox_proxy)
+_PROVIDER_KEY_ENV_NAMES = frozenset({
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "GOOGLE_API_KEY",
+    "GEMINI_API_KEY", "MISTRAL_API_KEY", "COHERE_API_KEY", "GROQ_API_KEY",
+    "AZURE_OPENAI_API_KEY", "TOGETHER_API_KEY", "DEEPSEEK_API_KEY",
+})
 _MAX_DOWNLOAD_SIZE_MB = 100
 _MAX_DOWNLOAD_FILES = 50
 _COST_PER_SECOND = 0.000014  # E2B pricing: $0.000014/sec/vCPU
@@ -309,7 +315,37 @@ class SandboxExecutor:
             return False, "Sandbox execution is disabled. Set ENABLE_SANDBOX=True."
         if not self._resolve_api_key(api_key):
             return False, "E2B API key not configured. Add it in Settings > API Keys or set E2B_API_KEY in environment."
+        if not self._settings.SANDBOX_PROXY_URL:
+            # Fail closed: without a proxy the sandbox would have no key-free LLM path.
+            return False, (
+                "SANDBOX_PROXY_URL is not set. Sandboxes only get a proxy token (never a "
+                "provider key), so a backend URL reachable from the sandbox is required. "
+                "Local dev: tunnel the backend (e.g. ngrok http 8000) and set SANDBOX_PROXY_URL."
+            )
         return True, None
+
+    @staticmethod
+    def _guard_env(env_vars: dict[str, str] | None) -> None:
+        """Refuse to hand a real LLM provider key to a sandbox."""
+        for name, value in (env_vars or {}).items():
+            if name in _PROVIDER_KEY_ENV_NAMES and not (
+                name == "OPENAI_API_KEY" and str(value).startswith("sbx_tok_")
+            ):
+                raise RuntimeError(
+                    f"Refusing to inject provider key {name} into a sandbox; "
+                    "use a sandbox proxy token (OPENAI_API_KEY=sbx_tok_...) instead."
+                )
+
+    def _network_opts(self) -> dict[str, Any] | None:
+        """Egress allow-list for E2B: deny all, allow proxy host + SANDBOX_EGRESS_ALLOW."""
+        raw = getattr(self._settings, "SANDBOX_EGRESS_ALLOW", "")
+        entries = [e.strip() for e in raw.split(",") if e.strip()] if isinstance(raw, str) else []
+        if "*" in entries:
+            return None  # explicit operator opt-out
+        proxy = getattr(self._settings, "SANDBOX_PROXY_URL", "")
+        host = urlparse(proxy).hostname if isinstance(proxy, str) else None
+        allow = list(dict.fromkeys(([host] if host else []) + entries))
+        return {"allow_out": allow, "deny_out": ["0.0.0.0/0"]}
 
     # ── New multi-sandbox API ──────────────────────────────────
 
@@ -331,6 +367,7 @@ class SandboxExecutor:
         enabled, error = self._check_enabled(api_key)
         if not enabled:
             raise RuntimeError(error)
+        self._guard_env(env_vars)
 
         resolved_key = self._resolve_api_key(api_key)
         key = f"{session_id}:{worker_id}" if worker_id else session_id
@@ -381,6 +418,9 @@ class SandboxExecutor:
                     create_kwargs["template"] = template
                 if env_vars:
                     create_kwargs["envs"] = env_vars
+                network = self._network_opts()
+                if network:
+                    create_kwargs["network"] = network
 
                 sandbox = await AsyncSandbox.create(**create_kwargs)
                 self._sandboxes[key] = sandbox
@@ -480,6 +520,7 @@ class SandboxExecutor:
         enabled, error = self._check_enabled()
         if not enabled:
             raise RuntimeError(error)
+        self._guard_env(env_vars)
 
         try:
             from e2b_code_interpreter import AsyncSandbox
@@ -490,6 +531,9 @@ class SandboxExecutor:
             }
             if env_vars:
                 create_kwargs["envs"] = env_vars
+            network = self._network_opts()
+            if network:
+                create_kwargs["network"] = network
 
             sandbox = await AsyncSandbox.create(**create_kwargs)
 

@@ -66,6 +66,9 @@ class SkillMetadata:
     compatibility: Optional[str] = None
     allowed_tools: Optional[str] = None
 
+    # True when the skill returns simulated data rather than calling a real provider
+    mock: bool = False
+
     # Content
     documentation: str = ""  # Markdown content after frontmatter
 
@@ -125,6 +128,7 @@ class SkillMetadata:
             license=frontmatter.get("license"),
             compatibility=frontmatter.get("compatibility"),
             allowed_tools=frontmatter.get("allowed-tools"),
+            mock=bool(frontmatter.get("mock", False)),
             documentation=content,
         )
 

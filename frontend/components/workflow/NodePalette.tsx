@@ -2,17 +2,14 @@
 
 import { Database, Brain, Export, MagnifyingGlass, Code, Globe, GitBranch, ArrowsClockwise, TextT, FunnelSimple, ChatTeardropText, Play, TrendUp, ShieldCheck, BookOpen, Toolbox, Plugs, Robot, Timer, Equals, ListBullets, Note, FileText, Crosshair, Scan, Bell, Link, TreeStructure, UserCircle, CalendarBlank, Table } from '@phosphor-icons/react';
 
-const nodeTypes = [
+export const nodeTypes = [
     // Agents & Integrations
     { type: 'agent', label: 'Agent', icon: Robot, color: 'text-indigo-600', bg: 'bg-indigo-50', category: 'Agents & Integrations' },
     { type: 'skill', label: 'Skill', icon: Toolbox, color: 'text-green-600', bg: 'bg-green-50', category: 'Agents & Integrations' },
     { type: 'connector', label: 'Connector', icon: Plugs, color: 'text-teal-600', bg: 'bg-teal-50', category: 'Agents & Integrations' },
 
     // Financial Agents
-    { type: 'data', label: 'Data Retrieval', icon: Database, color: 'text-blue-600', bg: 'bg-blue-50', category: 'Financial Agents' },
-    { type: 'analysis', label: 'Analysis', icon: TrendUp, color: 'text-green-600', bg: 'bg-green-50', category: 'Financial Agents' },
     { type: 'compliance', label: 'Compliance', icon: ShieldCheck, color: 'text-purple-600', bg: 'bg-purple-50', category: 'Financial Agents' },
-    { type: 'research', label: 'Research', icon: BookOpen, color: 'text-orange-600', bg: 'bg-orange-50', category: 'Financial Agents' },
 
     // Basic nodes
     { type: 'start', label: 'Start', icon: Play, color: 'text-gray-600', bg: 'bg-gray-50', category: 'Basic' },
@@ -45,7 +42,6 @@ const nodeTypes = [
     { type: 'http', label: 'HTTP Request', icon: Globe, color: 'text-orange-600', bg: 'bg-orange-50', category: 'Utilities' },
     { type: 'notification', label: 'Notification', icon: Bell, color: 'text-orange-600', bg: 'bg-orange-50', category: 'Utilities' },
     { type: 'webhook_trigger', label: 'Webhook Trigger', icon: Link, color: 'text-orange-600', bg: 'bg-orange-50', category: 'Utilities' },
-    { type: 'schedule_trigger', label: 'Schedule Trigger', icon: CalendarBlank, color: 'text-blue-600', bg: 'bg-blue-50', category: 'Utilities' },
     { type: 'notes', label: 'Notes', icon: Note, color: 'text-yellow-600', bg: 'bg-yellow-50', category: 'Utilities' },
 ];
 

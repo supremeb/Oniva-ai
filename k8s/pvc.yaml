@@ -23,3 +23,18 @@ spec:
     requests:
       storage: 10Gi
   storageClassName: standard
+---
+# Shared by all API replicas (sessions, volumes, artifacts). Needs a ReadWriteMany-capable
+# storage class (NFS, EFS, Filestore, CephFS). Change storageClassName for your cluster.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oniva-data-pvc
+  namespace: oniva
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: standard-rwx

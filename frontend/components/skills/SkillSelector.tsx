@@ -188,6 +188,9 @@ export function SkillSelector({
                                                                 {skill.category}
                                                             </Badge>
                                                             <span>{skill.name}</span>
+                                                            {skill.mock && (
+                                                                <Badge variant="outline" className="text-[10px] border-amber-500 text-amber-700">Mock</Badge>
+                                                            )}
                                                         </div>
                                                         {isSelected && <Check className="h-4 w-4" />}
                                                     </div>

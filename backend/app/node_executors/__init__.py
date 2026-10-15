@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 import json
 import logging
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +55,14 @@ class NodeExecutionResult(BaseModel):
     timestamp: str = ""
     # Data classification for high-water mark propagation
     classification: DataClassification = DataClassification.INTERNAL
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _canonical_failed(cls, value: Any) -> Any:
+        """Single failure status: legacy "error"/"failure" mean "failed"."""
+        if value in ("error", "errored", "failure", "fail"):
+            return "failed"
+        return value
 
     def __init__(self, **data):
         if not data.get("timestamp"):
