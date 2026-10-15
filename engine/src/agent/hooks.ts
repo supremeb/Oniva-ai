@@ -32,6 +32,19 @@ export interface AfterResponseEvent {
   usage: Usage;
 }
 
+/** A compaction summary request finished (a reply came back, usable or not). */
+export interface AfterCompactionEvent {
+  conversation: ToolConversation;
+  agent: AgentConfig;
+  /** The run and round whose request started the compaction. */
+  runId: string;
+  round: number;
+  /** The compaction task: stable across retries and crash re-runs. */
+  taskId: string;
+  message: AssistantMessage;
+  usage: Usage;
+}
+
 export interface BeforeToolEvent {
   conversation: ToolConversation;
   agent: AgentConfig;
@@ -52,6 +65,8 @@ type Change<T> = MaybePromise<T | undefined>;
 export interface AgentHooks {
   beforeRequest?(event: BeforeRequestEvent): Change<{ input?: ModelInput }>;
   afterResponse?(event: AfterResponseEvent): MaybePromise<void>;
+  /** Observes the model spend of a compaction summary request. */
+  afterCompaction?(event: AfterCompactionEvent): MaybePromise<void>;
   beforeTool?(event: BeforeToolEvent): Change<{ arguments?: JsonObject }>;
   afterTool?(event: AfterToolEvent): Change<{ result?: ToolResult }>;
 }
@@ -111,6 +126,17 @@ export class HookRunner {
         await h.afterResponse(structuredClone(event));
       } catch (err) {
         this.#report(err, { during: "hook:afterResponse", taskId });
+      }
+    }
+  }
+
+  async afterCompaction(event: AfterCompactionEvent, taskId: string): Promise<void> {
+    for (const h of this.#hooks) {
+      if (!h.afterCompaction) continue;
+      try {
+        await h.afterCompaction(structuredClone(event));
+      } catch (err) {
+        this.#report(err, { during: "hook:afterCompaction", taskId });
       }
     }
   }

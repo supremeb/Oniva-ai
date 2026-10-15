@@ -557,6 +557,10 @@ export function compactionTaskDefinition(
     }
     const message = terminal.message;
     const spend = { provider: message.provider, model: message.model, usage: terminal.usage };
+    await deps.hooks.afterCompaction(
+      { conversation, agent, runId, round, taskId: task.id, message, usage: terminal.usage },
+      task.id,
+    );
     const summary = assistantText(message).trim();
     if (summary.length === 0) {
       const error = modelError("provider", "the summary request returned no text", {

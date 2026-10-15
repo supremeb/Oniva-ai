@@ -414,3 +414,19 @@ def test_patch_selections_keeps_the_continuation_summary(renv):
     assert r.status_code == 200
     sent = json.loads(renv.calls[0].content)
     assert "SUMMARY-XYZ" in sent["systemPrompt"] and "web_search" in sent["tools"]
+
+
+def test_agent_config_carries_compaction_settings():
+    cfg = compose(Selections()).agent["compaction"]
+    window = eca.DEFAULT_CONTEXT_WINDOW
+    assert set(cfg) == {"enabled", "contextWindow", "reserveTokens", "backgroundMargin", "keepRecentTokens"}
+    assert cfg["enabled"] is True and cfg["contextWindow"] == window
+    # Engine thresholds: background at window - reserve - margin (70 percent), blocking at window - reserve.
+    assert window - cfg["reserveTokens"] - cfg["backgroundMargin"] == int(window * 0.70)
+    assert cfg["reserveTokens"] > 0 and cfg["keepRecentTokens"] > 0
+
+
+def test_compaction_settings_scale_with_window_and_fraction():
+    cfg = eca.compaction_settings(100_000, 0.5)
+    assert cfg["contextWindow"] == 100_000
+    assert 100_000 - cfg["reserveTokens"] - cfg["backgroundMargin"] == 50_000

@@ -181,3 +181,18 @@ def test_engine_default_models_are_priced(model_id):
     pricing = find_model_pricing(model_id)
     assert pricing is not None
     assert pricing["input"] > 0 and pricing["output"] > pricing["input"]
+
+
+async def test_purpose_is_stored_and_defaults_to_generation(client, test_db):
+    t = await make_tenant(test_db)
+    await post(client, body(t, purpose="compaction", requestId="r1:0:compaction:task-1"))
+    await post(client, body(t))
+    by_req = {r.request_id: r.purpose for r in await rows(test_db, t)}
+    assert by_req["r1:0:compaction:task-1"] == "compaction"
+    assert sorted(by_req.values()) == ["compaction", "generation"]
+
+
+async def test_unknown_purpose_is_rejected(client, test_db):
+    t = await make_tenant(test_db)
+    r = await post(client, body(t, purpose="embedding"))
+    assert r.status_code == 422

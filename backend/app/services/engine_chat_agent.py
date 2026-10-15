@@ -36,6 +36,32 @@ KNOWLEDGE_INSTRUCTION = (
 )
 
 
+# Compaction (U11, R9). The agent config names no model (the policy endpoint picks it per
+# request), so the context window is a conservative default rather than a per-model lookup.
+# Background compaction starts at COMPACT_FRACTION of the window; a request waits for one
+# once only the reply reserve is left.
+DEFAULT_CONTEXT_WINDOW = 200_000
+COMPACT_FRACTION = 0.70
+RESERVE_FRACTION = 0.10
+KEEP_RECENT_FRACTION = 0.10
+
+
+def compaction_settings(
+    context_window: int = DEFAULT_CONTEXT_WINDOW, compact_fraction: float = COMPACT_FRACTION,
+) -> Dict[str, Any]:
+    """Engine ``CompactionOverrides`` for a conversation (camelCase, engine schema)."""
+    reserve = int(context_window * RESERVE_FRACTION)
+    background_start = int(context_window * compact_fraction)
+    return {
+        "enabled": True,
+        "contextWindow": context_window,
+        "reserveTokens": reserve,
+        # Engine: background starts at window - reserve - margin == background_start.
+        "backgroundMargin": max(0, context_window - reserve - background_start),
+        "keepRecentTokens": int(context_window * KEEP_RECENT_FRACTION),
+    }
+
+
 CONTINUATION_HEADING = "Earlier conversation summary"
 
 
@@ -160,7 +186,12 @@ def compose_agent_config(
     if inputs.agent_id:
         metadata["agentId"] = inputs.agent_id
     # No model id and no keys: the engine asks the policy endpoint per request.
-    agent = {"systemPrompt": "\n\n".join(parts), "tools": sorted(tools), "metadata": metadata}
+    agent = {
+        "systemPrompt": "\n\n".join(parts),
+        "tools": sorted(tools),
+        "compaction": compaction_settings(),
+        "metadata": metadata,
+    }
     return BuiltAgent(agent=agent, selections=stored, dropped=dropped)
 
 

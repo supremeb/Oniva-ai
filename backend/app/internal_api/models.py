@@ -203,6 +203,7 @@ class UsageRequest(_Camel):
     usage: UsageTokens = Field(default_factory=UsageTokens)
     latency_ms: Optional[int] = Field(None, alias="latencyMs", ge=0)
     status: Literal["success", "failed", "cached"] = "success"
+    purpose: Literal["generation", "compaction"] = "generation"
 
 
 async def record_usage(db: AsyncSession, req: UsageRequest) -> bool:
@@ -261,6 +262,7 @@ async def record_usage(db: AsyncSession, req: UsageRequest) -> bool:
         request_id=req.request_id,
         run_id=req.run_id,
         conversation_id=req.conversation_id,
+        purpose=req.purpose,
         status=status,
     )
     if db.get_bind().dialect.name == "postgresql":

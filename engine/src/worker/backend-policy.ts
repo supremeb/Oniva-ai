@@ -21,7 +21,7 @@
  *   times with backoff; other statuses are logged and dropped. `flush` waits
  *   for reports in flight (bounded by the caller) at shutdown.
  */
-import type { AfterResponseEvent, AgentHooks } from "../agent/hooks.js";
+import type { AfterCompactionEvent, AfterResponseEvent, AgentHooks } from "../agent/hooks.js";
 import type { ModelRequestInfo } from "../agent/policy.js";
 import type { ModelResolution } from "../models/types.js";
 import { backendConversationIds } from "../tools/registry.js";
@@ -194,19 +194,44 @@ export class UsageReporter {
       afterResponse: (event) => {
         this.report(event);
       },
+      afterCompaction: (event) => {
+        this.reportCompaction(event);
+      },
     };
   }
 
   /** Start reporting one response; returns at once. */
   report(event: AfterResponseEvent): void {
     if (this.#closed) return;
-    const requestId = requestIdFor(event.runId, event.round, "generation");
+    this.#start(requestIdFor(event.runId, event.round, "generation"), "generation", event);
+  }
+
+  /**
+   * Start reporting one compaction summary request. The request id carries the
+   * compaction task id, so a retried or re-run task posts the same id (and the
+   * ledger records it once) while two compactions in one round stay distinct.
+   */
+  reportCompaction(event: AfterCompactionEvent): void {
+    this.#start(
+      `${requestIdFor(event.runId, event.round, "compaction")}:${event.taskId}`,
+      "compaction",
+      event,
+    );
+  }
+
+  #start(
+    requestId: string,
+    purpose: "generation" | "compaction",
+    event: AfterResponseEvent | AfterCompactionEvent,
+  ): void {
+    if (this.#closed) return;
     const body = JSON.stringify({
       tenantId: event.conversation.tenantId,
       projectId: event.conversation.projectId,
       ...backendConversationIds(event.conversation),
       runId: event.runId,
       requestId,
+      purpose,
       provider: event.message.provider,
       model: event.message.model,
       usage: {

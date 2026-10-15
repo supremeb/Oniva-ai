@@ -68,6 +68,9 @@ class LLMUsageRecord(Base):
     run_id = Column(String(128), nullable=True)
     conversation_id = Column(UUID(as_uuid=True), nullable=True)
 
+    # Why the call was made: generation (default) or compaction (engine summaries)
+    purpose = Column(String(20), nullable=True)
+
     # Status
     status = Column(String(20), default="success")  # success, failed, cached, unpriced
 
