@@ -193,6 +193,14 @@ async function main(): Promise<number> {
           fetch: delayedFetch(pauses),
         }
       : null,
+    backendPolicy:
+      config.policy === "backend" && config.policyUrl
+        ? {
+            baseUrl: config.policyUrl,
+            serviceToken: config.gatewayToken ?? config.serviceToken,
+            timeoutMs: config.policyTimeoutMs,
+          }
+        : null,
     approvalTtlMs: config.approvalTtlMs,
     subagentTool: config.subagentTool,
     clock,

@@ -61,6 +61,14 @@ async function main(): Promise<number> {
     gateway: config.gatewayUrl
       ? { baseUrl: config.gatewayUrl, serviceToken: config.gatewayToken ?? config.serviceToken }
       : null,
+    backendPolicy:
+      config.policy === "backend" && config.policyUrl
+        ? {
+            baseUrl: config.policyUrl,
+            serviceToken: config.gatewayToken ?? config.serviceToken,
+            timeoutMs: config.policyTimeoutMs,
+          }
+        : null,
     approvalTtlMs: config.approvalTtlMs,
     subagentTool: config.subagentTool,
     settings: { progressIntervalMs: config.progressIntervalMs },

@@ -95,7 +95,10 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_LEASE_RETRY_MS` | TTL/3 | standby retry interval |
 | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
 | `ENGINE_APPROVAL_TTL_MS` | `86400000` | approval expiry (`0`: none) |
-| `ANTHROPIC_API_KEY` | none | model key (read per request) |
+| `ANTHROPIC_API_KEY` | none | model key (read per request; unused under `ENGINE_POLICY=backend`) |
+| `ENGINE_POLICY` | `backend` if `ENGINE_POLICY_URL` is set, else `local` | `backend`: the backend resolves each model request (provider, model, tenant key, token budget, quota) and records usage; a policy failure denies the request (`policy_unavailable`), never falling back to a local key |
+| `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` when `ENGINE_POLICY=backend` | backend origin for `/internal/models/policy` and `/internal/models/usage`; uses `ENGINE_GATEWAY_TOKEN` |
+| `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
 | `ENGINE_MODEL` / `ENGINE_SUMMARY_MODEL` | Anthropic defaults | models for replies / compaction |
 | `ENGINE_MAX_TOKENS` | `8192` | reply budget |
 | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle |

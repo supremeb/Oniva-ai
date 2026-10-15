@@ -49,6 +49,7 @@ import { PostgresStorageProvider } from "../storage/postgres/storage.js";
 import type { StorageProvider } from "../storage/types.js";
 import { createGatewayTools, type GatewayToolset } from "../tools/gateway.js";
 import type { ToolDefinition } from "../tools/registry.js";
+import { BackendPolicyClient, UsageReporter } from "./backend-policy.js";
 
 export type WorkerLog = (event: string, fields?: Record<string, unknown>) => void;
 
@@ -62,6 +63,14 @@ export interface WorkerModelDefaults {
   maxTokens: number;
   /** The API key, read per request; undefined denies the request. */
   apiKey: () => string | undefined;
+}
+
+/** Backend-managed model policy and usage ledger (U9); replaces `modelDefaults` for requests. */
+export interface WorkerBackendPolicyOptions {
+  baseUrl: string;
+  serviceToken: string;
+  timeoutMs?: number;
+  fetch?: typeof fetch;
 }
 
 export interface WorkerGatewayOptions {
@@ -87,6 +96,12 @@ export interface WorkerOptions {
   models: ModelRegistry;
   modelDefaults: WorkerModelDefaults;
   gateway?: WorkerGatewayOptions | null;
+  /**
+   * When set, every model request is resolved by the backend and every
+   * response's usage is reported to it; `modelDefaults.apiKey` is never read.
+   * Unset: the local `modelDefaults` decide.
+   */
+  backendPolicy?: WorkerBackendPolicyOptions | null;
   /** Approval expiry for gateway tools that require approval; null for none. */
   approvalTtlMs?: number | null;
   /** Register a subagent tool under this name. */
@@ -139,10 +154,13 @@ export function workerHostPolicy(options: {
   gateway: Pick<GatewayToolset, "requiresApproval"> | null;
   approvalTtlMs: number | null;
   clock: Clock;
+  /** Resolves model requests instead of `modelDefaults`; no local fallback. */
+  backend?: Pick<BackendPolicyClient, "resolveModelRequest"> | null;
 }): HostPolicy {
-  const { modelDefaults: d, gateway, approvalTtlMs, clock } = options;
+  const { modelDefaults: d, gateway, approvalTtlMs, clock, backend } = options;
   return {
     resolveModelRequest(info) {
+      if (backend) return backend.resolveModelRequest(info);
       const apiKey = d.apiKey();
       if (!apiKey) return { ok: false, reason: "no model API key is configured", code: "no_key" };
       return {
@@ -231,6 +249,16 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
   });
   let wake: (() => void) | null = null;
   let teardown: Promise<void> | null = null;
+  const backendPolicy = options.backendPolicy
+    ? new BackendPolicyClient({
+        ...options.backendPolicy,
+        supportedProviders: () => options.models.names(),
+        log,
+      })
+    : null;
+  const usageReporter = options.backendPolicy
+    ? new UsageReporter({ ...options.backendPolicy, log })
+    : null;
 
   const currentOwner = async (): Promise<string | null> => {
     const lease = await leases.current(sessionId);
@@ -308,6 +336,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       );
       await step("engine", engine?.close(), left());
       await step("harness", harness?.close(), left());
+      await step("usage", usageReporter?.close(), left());
       if (exit.reason !== "lease_lost") await step("lease", keeper?.release(), closeTimeoutMs);
       state = exit.reason === "lease_lost" ? "lost" : "stopped";
       log("exited", { reason: exit.reason });
@@ -375,13 +404,21 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
         gateway,
         approvalTtlMs: options.approvalTtlMs ?? null,
         clock,
+        backend: backendPolicy,
       }),
       clock,
       fence: k.fence,
       signal: k.signal,
       ...(options.settings ? { settings: options.settings } : {}),
       ...(options.redact ? { redact: options.redact } : {}),
-      ...(options.hooks ? { hooks: options.hooks } : {}),
+      ...(options.hooks || usageReporter
+        ? {
+            hooks: [
+              ...(options.hooks ? [options.hooks].flat() : []),
+              ...(usageReporter ? [usageReporter.hooks] : []),
+            ],
+          }
+        : {}),
       onError: (err, info) => log("engine_error", { ...info, error: logErrorText(err) }),
     });
     harness = h;

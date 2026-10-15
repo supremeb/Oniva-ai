@@ -213,6 +213,7 @@ describe("gateway invoke", () => {
       toolCallId: "c1",
       tenantId: "t1",
       projectId: "p1",
+      conversationId: "conv-1",
     });
     expect(gw.effects("send_email")).toBe(1);
   });
@@ -559,7 +560,12 @@ describe("gateway tools in the agent loop (memory backend)", () => {
     const [result] = results(await conv.entries());
     expect(result).toMatchObject({ status: "ok", content: "sent to a@x" });
     const [req] = gw.invokes("send_email");
-    expect(req?.body).toMatchObject({ tenantId: "t9", projectId: "p9", toolCallId: "c1" });
+    expect(req?.body).toMatchObject({
+      tenantId: "t9",
+      projectId: "p9",
+      toolCallId: "c1",
+      conversationId: conv.id,
+    });
     expect(req?.headers["idempotency-key"]).toMatch(/:c1$/);
     expect(gw.effects("send_email")).toBe(1);
     await w.crash();

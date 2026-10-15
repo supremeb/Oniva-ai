@@ -203,3 +203,37 @@ describe("workerHostPolicy", () => {
     expect(keyless.resolveModelRequest(info("generation", null))).toMatchObject({ ok: false });
   });
 });
+
+describe("backend policy configuration", () => {
+  it("defaults to the local policy", () => {
+    expect(workerConfigFromEnv(BASE)).toMatchObject({
+      policy: "local",
+      policyUrl: null,
+      policyTimeoutMs: 5_000,
+    });
+  });
+
+  it("selects the backend policy by ENGINE_POLICY_URL or ENGINE_POLICY=backend", () => {
+    const token = { ...BASE, ENGINE_GATEWAY_TOKEN: "gw" };
+    expect(workerConfigFromEnv({ ...token, ENGINE_POLICY_URL: "https://b" })).toMatchObject({
+      policy: "backend",
+      policyUrl: "https://b",
+    });
+    expect(
+      workerConfigFromEnv({ ...token, ENGINE_POLICY: "backend", ENGINE_GATEWAY_URL: "https://g" }),
+    ).toMatchObject({ policy: "backend", policyUrl: "https://g" });
+    expect(
+      workerConfigFromEnv({ ...token, ENGINE_POLICY: "local", ENGINE_POLICY_URL: "https://b" }),
+    ).toMatchObject({ policy: "local", policyUrl: null });
+  });
+
+  it("rejects an unknown mode, a missing URL or a missing gateway token", () => {
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_POLICY: "x" })).toThrow(WorkerConfigError);
+    expect(() =>
+      workerConfigFromEnv({ ...BASE, ENGINE_POLICY: "backend", ENGINE_GATEWAY_TOKEN: "gw" }),
+    ).toThrow(/ENGINE_POLICY_URL/);
+    expect(() =>
+      workerConfigFromEnv({ ...BASE, ENGINE_POLICY: "backend", ENGINE_POLICY_URL: "https://b" }),
+    ).toThrow(/ENGINE_GATEWAY_TOKEN/);
+  });
+});

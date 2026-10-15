@@ -48,6 +48,26 @@
  * (including a call still in flight). This is what reconciliation after a
  * restart, or after a write timed out, reads. Fenced like the other routes.
  *
+ * An invoke body also carries `conversationId` (the engine conversation the
+ * call belongs to); the fake accepts it and records it, and an older client
+ * without it still works.
+ *
+ * Model policy and usage (the backend's `/internal/models/*`; the real
+ * contract lives in `backend/app/internal_api/models.py`). Same bearer token;
+ * neither route is fenced.
+ *
+ * `POST /internal/models/policy` with `{ tenantId, projectId?, conversationId?,
+ * runId, round, purpose, requestId, agent: { model?, tier? },
+ * supportedProviders }` → always `200` with `Cache-Control: no-store`:
+ * `{ ok: true, provider, model, apiKey, maxTokens, expiresAt (epoch ms),
+ * requestId }`, or a denial `{ ok: false, code, reason, retryable }`.
+ *
+ * `POST /internal/models/usage` with `{ tenantId, projectId?, conversationId?,
+ * runId, requestId, provider, model, usage: { inputTokens, outputTokens,
+ * cacheReadTokens, cacheWriteTokens }, latencyMs?, status }` →
+ * `200 { recorded }`; a repeated `(tenantId, requestId)` is `recorded: false`
+ * and counts once.
+ *
  * Test controls: per-tool effect counters ({@link FakeGateway.effects}),
  * scripted failures and delays, stored outcomes by key, the per-session fence
  * high-water mark, and a log of every request with its headers.
@@ -68,6 +88,8 @@ export interface FakeInvocation {
   toolCallId: string;
   tenantId: string;
   projectId: string;
+  /** Absent from clients older than the conversation binding. */
+  conversationId?: string;
   idempotencyKey: string;
 }
 
@@ -114,7 +136,16 @@ export interface FakeGatewayOptions {
 
 const MANIFEST = "/internal/tools/manifest";
 const INVOKE = /^\/internal\/tools\/([^/]+)\/invoke$/;
+const POLICY = "/internal/models/policy";
+const USAGE = "/internal/models/usage";
 const INVOCATION = /^\/internal\/tools\/invocations\/([^/]+)$/;
+
+/** What the fake answers a model policy request with. */
+export type FakePolicy =
+  | { ok: true; provider?: string; model?: string; apiKey?: string; maxTokens?: number }
+  | { ok: false; code: string; reason: string; retryable?: boolean }
+  | { status: number; body?: JsonValue }
+  | { hang: true };
 
 export class FakeGateway {
   readonly serviceToken: string;
@@ -129,6 +160,12 @@ export class FakeGateway {
   readonly #highWater = new Map<string, number>();
   readonly #requireFence: boolean;
   #manifestFailures: number[] = [];
+  readonly #policyScripts: FakePolicy[] = [];
+  #usageFailures: number[] = [];
+  /** Usage rows recorded, once per `(tenantId, requestId)`. */
+  readonly usage: JsonObject[] = [];
+  /** The answer when no script is queued. Default: allow with the key `fake-key`. */
+  defaultPolicy: FakePolicy = { ok: true };
   #baseUrl = "";
 
   private constructor(tools: FakeToolSpec[], options: FakeGatewayOptions) {
@@ -182,6 +219,28 @@ export class FakeGateway {
     return this;
   }
 
+  /** Queue answers for the next policy requests (then `defaultPolicy`). */
+  scriptPolicy(...answers: FakePolicy[]): this {
+    this.#policyScripts.push(...answers);
+    return this;
+  }
+
+  /** Fail the next usage posts with these statuses (nothing is recorded). */
+  failUsage(...statuses: number[]): this {
+    this.#usageFailures.push(...statuses);
+    return this;
+  }
+
+  /** Policy requests received, in order. */
+  policyRequests(): FakeRequest[] {
+    return this.requests.filter((r) => r.method === "POST" && r.path === POLICY);
+  }
+
+  /** Usage posts received (including failed and repeated ones), in order. */
+  usageRequests(): FakeRequest[] {
+    return this.requests.filter((r) => r.method === "POST" && r.path === USAGE);
+  }
+
   /**
    * Wait this long before running `name` (the request is answered after).
    * The effect runs even if the client disconnects meanwhile.
@@ -233,6 +292,8 @@ export class FakeGateway {
     if (req.headers.authorization !== `Bearer ${this.serviceToken}`) {
       return send(res, 401, { error: "unauthorized" });
     }
+    if (req.method === "POST" && path === POLICY) return this.#policy(res, body);
+    if (req.method === "POST" && path === USAGE) return this.#recordUsage(res, body);
     const invoke = INVOKE.exec(path);
     if (!(req.method === "POST" && invoke)) {
       const session = header(req, "x-engine-session");
@@ -240,7 +301,10 @@ export class FakeGateway {
     }
     if (req.method === "GET" && path === MANIFEST) {
       const failure = this.#manifestFailures.shift();
-      if (failure !== undefined) return send(res, failure, { error: "scripted" });
+      if (failure !== undefined) {
+        send(res, failure, { error: "scripted" });
+        return;
+      }
       return send(res, 200, {
         tools: this.tools.map(({ handler: _h, ...spec }) => spec) as unknown as JsonValue,
       });
@@ -256,6 +320,58 @@ export class FakeGateway {
       return this.#invoke(decodeURIComponent(invoke[1] as string), req, res, body);
     }
     return send(res, 404, { error: "not_found" });
+  }
+
+  async #policy(res: ServerResponse, body: JsonValue | null): Promise<void> {
+    const b = body && typeof body === "object" && !Array.isArray(body) ? body : null;
+    if (!b || typeof b.requestId !== "string" || typeof b.tenantId !== "string") {
+      send(res, 422, { error: "invalid_request" });
+      return;
+    }
+    const answer = this.#policyScripts.shift() ?? this.defaultPolicy;
+    if ("hang" in answer) return;
+    if ("status" in answer) return send(res, answer.status, answer.body ?? { error: "scripted" });
+    const headers = { "cache-control": "no-store" };
+    if (!answer.ok) {
+      return send(res, 200, { retryable: false, ...answer } as unknown as JsonValue, headers);
+    }
+    return send(
+      res,
+      200,
+      {
+        ok: true,
+        provider: answer.provider ?? "fake",
+        model: answer.model ?? "fake-model",
+        apiKey: answer.apiKey ?? "fake-key",
+        maxTokens: answer.maxTokens ?? 1024,
+        expiresAt: Date.now() + 60_000,
+        requestId: b.requestId,
+      },
+      headers,
+    );
+  }
+
+  #recordUsage(res: ServerResponse, body: JsonValue | null): void {
+    const failure = this.#usageFailures.shift();
+    if (failure !== undefined) {
+      send(res, failure, { error: "scripted" });
+      return;
+    }
+    const b = body && typeof body === "object" && !Array.isArray(body) ? body : null;
+    if (
+      !b ||
+      typeof b.requestId !== "string" ||
+      typeof b.tenantId !== "string" ||
+      typeof b.runId !== "string" ||
+      typeof b.provider !== "string" ||
+      typeof b.model !== "string"
+    ) {
+      send(res, 422, { error: "invalid_request" });
+      return;
+    }
+    const seen = this.usage.some((u) => u.tenantId === b.tenantId && u.requestId === b.requestId);
+    if (!seen) this.usage.push(b);
+    send(res, 200, { recorded: !seen }, { "cache-control": "no-store" });
   }
 
   async #invoke(

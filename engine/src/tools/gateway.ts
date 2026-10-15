@@ -326,6 +326,7 @@ class GatewayHttp {
       toolCallId: api.toolCallId,
       tenantId: api.conversation.tenantId,
       projectId: api.conversation.projectId,
+      conversationId: api.conversation.id,
     });
     const init: RequestInit = {
       method: "POST",
