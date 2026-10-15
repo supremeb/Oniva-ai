@@ -109,6 +109,17 @@ class EngineClient:
             tenant_id=tenant_id, project_id=project_id,
             json={"reason": reason} if reason else {})
 
+    async def cancel_submission(self, session_id, tenant_id, project_id, conversation_id,
+                                submission_id: str) -> dict:
+        """Cancel a still-queued input (engine ``DELETE .../submissions/:id``).
+
+        Raises ``EngineError`` 409 ``not_queued`` once it started, 404 if unknown.
+        """
+        return await self._json(
+            "DELETE", session_id,
+            f"/v1/conversations/{conversation_id}/submissions/{submission_id}",
+            tenant_id=tenant_id, project_id=project_id)
+
     async def decide(self, session_id, tenant_id, project_id, conversation_id, tool_task_id,
                      decision: str, note: Optional[str], principal: str) -> dict:
         payload: dict[str, Any] = {"decision": decision}

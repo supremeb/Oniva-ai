@@ -111,6 +111,14 @@ export class EngineConversationClient {
     });
   }
 
+  /** Withdraw a still-queued input. Rejects with a 409 APIError once it started. */
+  cancel(conversationId: string, submissionId: string): Promise<unknown> {
+    return apiFetch<unknown>(
+      `${BASE}/${encodeURIComponent(conversationId)}/submissions/${encodeURIComponent(submissionId)}`,
+      { method: 'DELETE' }
+    );
+  }
+
   decide(
     conversationId: string,
     toolTaskId: string,

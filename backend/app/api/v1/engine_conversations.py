@@ -239,6 +239,23 @@ async def abort(
         raise _engine_http_error(e) from None
 
 
+@router.delete("/{conversation_id}/submissions/{submission_id}")
+async def cancel_submission(
+    conversation_id: UUID,
+    submission_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    engine: EngineClient = Depends(get_engine_client),
+):
+    """Withdraw a queued (not yet started) input; 409 once the engine has started it."""
+    conv = await _binding(db, conversation_id, user)
+    try:
+        return await engine.cancel_submission(conv.session_id, conv.tenant_id, conv.project_id,
+                                              conv.conversation_id, submission_id)
+    except EngineError as e:
+        raise _engine_http_error(e) from None
+
+
 @router.post("/{conversation_id}/approvals/{tool_task_id}/decision")
 async def decide_approval(
     conversation_id: UUID,

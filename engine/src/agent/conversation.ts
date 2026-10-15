@@ -169,7 +169,12 @@ export class Conversation {
       }
       if (busy) {
         tx.createSubmission({ ...base, status: "pending", result: null, taskId: null });
-        inbox.enqueue(submissionId, record.whenBusy === "steer" ? "steer" : "followUp");
+        inbox.enqueue(
+          submissionId,
+          record.whenBusy === "steer" ? "steer" : "followUp",
+          record.content,
+          base.requestId,
+        );
         return submissionId;
       }
       const runId = tx.mintId("task");
@@ -179,6 +184,22 @@ export class Conversation {
       return submissionId;
     });
     return new Submission(this.core, id);
+  }
+
+  /**
+   * Cancel one still-queued input, settling it `unanswered(withdrawn)` in one
+   * commit. `"cancelled"` when it was queued; `"not_queued"` when it already
+   * started, was placed into a run or settled (nothing changes);
+   * `"unknown"` when no such submission exists in this conversation.
+   */
+  async cancelSubmission(submissionId: string): Promise<"cancelled" | "not_queued" | "unknown"> {
+    await this.info();
+    return this.core.runtime.commit(async (tx) => {
+      const sub = await tx.getSubmission(submissionId);
+      if (!sub || sub.conversationId !== this.id) return "unknown";
+      const inbox = await Inbox.load(tx, this.id);
+      return inbox.cancel(submissionId) ? "cancelled" : "not_queued";
+    });
   }
 
   /**

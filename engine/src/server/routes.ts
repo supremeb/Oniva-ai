@@ -10,6 +10,10 @@
  *   `{ text? | content?, requestId?, whenBusy?, type? }`; an `Idempotency-Key`
  *   header stands in for a missing `requestId`. A repeat with the same
  *   request id returns the same submission. → 202
+ * - `DELETE /v1/conversations/:id/submissions/:submissionId` cancels a
+ *   still-queued input, settling it `unanswered(withdrawn)`. → 200
+ *   `{ conversationId, submissionId, cancelled: true }`; 404 for an unknown
+ *   submission, 409 `not_queued` when it already started or settled.
  * - `GET /v1/conversations/:id/watch` streams watch frames over SSE (`id:` is
  *   the cursor; resumes from `Last-Event-ID` or `?cursor=`).
  * - `POST /v1/conversations/:id/abort` aborts queued and running work.
@@ -70,7 +74,7 @@ export interface RouteContext {
 export type RouteResult = { status: number; body: JsonObject } | null;
 
 export interface Route {
-  method: "GET" | "POST" | "PUT";
+  method: "GET" | "POST" | "PUT" | "DELETE";
   /** Path segments; `:name` captures one. */
   pattern: string;
   auth: boolean;
@@ -190,6 +194,23 @@ export const ROUTES: readonly Route[] = Object.freeze([
           requestId: record?.requestId ?? null,
           status: record?.status ?? null,
         },
+      };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: "/v1/conversations/:id/submissions/:submissionId",
+    auth: true,
+    async handle(ctx) {
+      const conv = await ctx.conversation();
+      const submissionId = ctx.params.submissionId;
+      if (submissionId === undefined) throw bad("submissionId");
+      const outcome = await ctx.harness.conversation(conv.id).cancelSubmission(submissionId);
+      if (outcome === "unknown") throw new HttpError(404, "not_found", "submission");
+      if (outcome === "not_queued") throw new HttpError(409, "not_queued");
+      return {
+        status: 200,
+        body: { conversationId: conv.id, submissionId, cancelled: true },
       };
     },
   },

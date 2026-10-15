@@ -44,6 +44,7 @@ function fakeClient() {
     }),
     submit: jest.fn(async () => ({})),
     abort: jest.fn(),
+    cancel: jest.fn(async () => ({})),
     decide: jest.fn(),
   };
   return { client: client as unknown as EngineConversationClient, raw: client, calls, bodies, failWith: (e: Error) => (failNext = e) };
@@ -169,6 +170,16 @@ describe('useEngineConversation', () => {
       await result.current.submit({ text: 'x' }).catch(() => {});
     });
     expect(result.current.pending[0].status).toBe('failed');
+  });
+
+  it('cancelSubmission calls client.cancel for the conversation', async () => {
+    const f = fakeClient();
+    const { result } = renderHook(() => useEngineConversation('c1', opts(f.client)));
+    await settle();
+    await act(async () => {
+      await result.current.cancelSubmission('subm_1');
+    });
+    expect(f.raw.cancel).toHaveBeenCalledWith('c1', 'subm_1');
   });
 
   it('strict-mode double mount opens exactly one connection', async () => {

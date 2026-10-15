@@ -288,6 +288,46 @@ describe("engine HTTP server", () => {
     gates[1].open();
   });
 
+  it("cancels a queued submission over DELETE, 409 once settled, 404 for a stranger", async () => {
+    const gates: [ReturnType<typeof gate>, ReturnType<typeof gate>] = [gate(), gate()];
+    const { url, w, fx } = await start({ tools: [gatedTool(gates)] });
+    fx.provider.enqueue(fakeToolCall("work", {}, { id: "c1" }));
+    const id = await createConv(url, { agent: { systemPrompt: "s", tools: ["work"] } });
+    const first = await call(url, "POST", `/v1/conversations/${id}/submissions`, {
+      headers: AUTH,
+      body: { text: "go" },
+    });
+    await waitFor(() => w.harness.runtime.tasks().some((t) => t.kind === "agent.tool"));
+    const queued = await call(url, "POST", `/v1/conversations/${id}/submissions`, {
+      headers: AUTH,
+      body: { text: "later", requestId: "rq-1" },
+    });
+    expect(queued.status).toBe(202);
+    const path = (sid: string) => `/v1/conversations/${id}/submissions/${sid}`;
+
+    const noAuth = await call(url, "DELETE", path(queued.body.submissionId), { headers: TENANT });
+    expect(noAuth.status).toBe(401);
+    const wrongTenant = await call(url, "DELETE", path(queued.body.submissionId), {
+      headers: { ...AUTH, "x-oniva-tenant": "t2" },
+    });
+    expect(wrongTenant.status).toBe(403);
+
+    const del = await call(url, "DELETE", path(queued.body.submissionId), { headers: AUTH });
+    expect(del.status).toBe(200);
+    expect(del.body).toMatchObject({ submissionId: queued.body.submissionId, cancelled: true });
+    const settled = await w.harness.submission(queued.body.submissionId).wait();
+    expect(settled.status).toBe("unanswered");
+    const again = await call(url, "DELETE", path(queued.body.submissionId), { headers: AUTH });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toBe("not_queued");
+    const running = await call(url, "DELETE", path(first.body.submissionId), { headers: AUTH });
+    expect(running.status).toBe(409);
+    const missing = await call(url, "DELETE", path("subm_nope"), { headers: AUTH });
+    expect(missing.status).toBe(404);
+    gates[0].open();
+    gates[1].open();
+  });
+
   it("requires a principal for decisions, and a valid decision wakes the tool", async () => {
     const log: string[] = [];
     const { url, w, fx } = await start({ tools: [deployTool(log)], policy: approvalPolicy });

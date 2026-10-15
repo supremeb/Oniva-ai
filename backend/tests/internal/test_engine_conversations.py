@@ -96,6 +96,8 @@ class Env:
             return httpx.Response(202, json={"submissionId": "s1"})
         if req.url.path.endswith("/decision"):
             return httpx.Response(200, json={"approval": {}})
+        if req.method == "DELETE":
+            return httpx.Response(200, json={"cancelled": True})
         if req.url.path.endswith("/abort"):
             return httpx.Response(200, json={"aborted": True})
         return httpx.Response(201, json={"conversationId": "x"})
@@ -172,6 +174,7 @@ def test_other_tenant_gets_404_on_every_route_and_engine_untouched(env):
         env.http.get(f"{base}/watch"),
         env.http.post(f"{base}/submissions", json={"text": "hi"}),
         env.http.post(f"{base}/abort", json={}),
+        env.http.delete(f"{base}/submissions/subm_1"),
         env.http.post(f"{base}/approvals/t1/decision", json={"decision": "approve"}),
     ):
         assert r.status_code == 404
@@ -187,6 +190,25 @@ def test_submit_forwards_idempotency_and_binding_headers(env):
     assert req.headers["idempotency-key"] == "k-1"
     assert json.loads(req.content) == {"text": "hi", "requestId": "k-1"}
     assert req.headers["x-oniva-tenant"] == TENANT_A
+
+
+def test_cancel_submission_forwards_delete_with_binding_headers(env):
+    cid = env.seed()
+    r = env.http.delete(f"/api/v1/engine/conversations/{cid}/submissions/subm_9")
+    assert r.status_code == 200 and r.json() == {"cancelled": True}
+    req = env.calls[0]
+    assert req.method == "DELETE" and req.url.path == f"/v1/conversations/{cid}/submissions/subm_9"
+    assert req.headers["x-oniva-tenant"] == TENANT_A
+
+
+def test_cancel_submission_non_owner_is_403_and_engine_409_passes_through(env):
+    other = env.seed(owner=str(uuid.uuid4()))
+    r = env.http.delete(f"/api/v1/engine/conversations/{other}/submissions/subm_9")
+    assert r.status_code == 403 and not env.calls
+    cid = env.seed()
+    env.respond = lambda req: httpx.Response(409, json={"error": "not_queued"})
+    r = env.http.delete(f"/api/v1/engine/conversations/{cid}/submissions/subm_9")
+    assert r.status_code == 409 and r.json()["detail"] == "not_queued"
 
 
 def test_submit_touches_and_titles_from_first_message_only_when_untitled(env):

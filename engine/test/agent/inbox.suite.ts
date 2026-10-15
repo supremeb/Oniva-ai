@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { Conversation } from "../../src/agent/conversation.js";
 import type { Harness } from "../../src/agent/harness.js";
+import { type InboxState, inboxDoc } from "../../src/agent/inbox.js";
 import { ConversationBusy } from "../../src/core/errors.js";
 import { fakeText, fakeToolCall } from "../../src/models/fake.js";
 import type { ModelRequest } from "../../src/models/types.js";
@@ -303,6 +304,42 @@ export function defineInboxSuite(backend: AgentBackend): void {
       fx.provider.enqueue(fakeText("fresh"));
       const again = await conv.submit({ text: "again", whenBusy: "reject" });
       expect(((await again.wait()).result as Any).text).toBe("fresh");
+      await w.crash();
+    });
+
+    it("queued items carry a text preview and requestId; cancelSubmission withdraws only queued ones", async () => {
+      const fx = await backend.fixture();
+      fx.provider.enqueue(fakeToolCall("wait", {}, { id: "c1" }), fakeText("done"));
+      const g = gateTool();
+      const w = await fx.open({ tools: [g.tool] });
+      const conv = await setup(w.harness);
+      const main = await conv.submit({ text: "one" });
+      await toolRunning(w.harness);
+      const long = "x".repeat(500);
+      const follow = await conv.submit({ text: long, requestId: "rq-follow" });
+      const other = await conv.submit({ text: "later", requestId: "rq-other" });
+
+      const view = async () => (await w.harness.session.document(inboxDoc, conv.id)) as InboxState;
+      const queued = (await view()).queue;
+      expect(queued.map((q) => q.submissionId)).toEqual([follow.id, other.id]);
+      expect(queued[0]?.preview).toBe("x".repeat(200));
+      expect(queued[0]?.requestId).toBe("rq-follow");
+
+      expect(await conv.cancelSubmission(follow.id)).toBe("cancelled");
+      const r = await follow.wait();
+      expect(r.status).toBe("unanswered");
+      expect((r.result as Any).reason).toBe("withdrawn");
+      expect((await view()).queue.map((q) => q.submissionId)).toEqual([other.id]);
+      // Cancelling again, the running input, or a stranger changes nothing.
+      expect(await conv.cancelSubmission(follow.id)).toBe("not_queued");
+      expect(await conv.cancelSubmission(main.id)).toBe("not_queued");
+      expect(await conv.cancelSubmission("subm_nope")).toBe("unknown");
+
+      g.open();
+      expect((await main.wait()).status).toBe("done");
+      fx.provider.enqueue(fakeText("two"));
+      expect((await other.wait()).status).toBe("done");
+      expect(kinds(await conv.entries()).filter((k) => k === "user")).toHaveLength(2);
       await w.crash();
     });
 

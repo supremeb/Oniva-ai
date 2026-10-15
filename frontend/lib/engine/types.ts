@@ -32,8 +32,17 @@ export interface LiveState {
   message: JsonValue;
 }
 
+export interface InboxQueueItem {
+  submissionId: string;
+  mode: 'followUp' | 'steer';
+  /** First ~200 characters of the queued text. Absent on older engines. */
+  preview?: string;
+  /** The caller's request id. Absent on older engines. */
+  requestId?: string;
+}
+
 export interface InboxState {
-  queue: { submissionId: string; mode: 'followUp' | 'steer' }[];
+  queue: InboxQueueItem[];
   placed: { submissionId: string; runId: string }[];
 }
 

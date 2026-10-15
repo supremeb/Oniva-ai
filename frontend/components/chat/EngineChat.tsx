@@ -80,7 +80,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
     const client = useMemo(() => clientProp ?? new EngineConversationClient(), [clientProp]);
     const [conversationId, setConversationId] = useState<string | null>(initialConversationId);
     const conv = useEngineConversation(conversationId, { client, watcher: watcherOptions });
-    const { view, connection, pending, error, submit, retry, abort, decide } = conv;
+    const { view, connection, pending, error, submit, retry, abort, decide, cancelSubmission } = conv;
     const { cost, active: costActive, liveTokens, refresh: refreshCost } = useConversationCost(conversationId, view, costFetcher);
 
     const draftKey = conversationId ?? NEW_DRAFT_KEY;
@@ -298,7 +298,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                     </div>
                 ) : null
             }
-            chips={<QueuedChips inbox={view?.inbox ?? null} sending={sending} />}
+            chips={<QueuedChips inbox={view?.inbox ?? null} sending={sending} onCancel={cancelSubmission} />}
         />
     );
 

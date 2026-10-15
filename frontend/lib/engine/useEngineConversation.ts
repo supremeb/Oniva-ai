@@ -13,6 +13,8 @@ export interface UseEngineConversation extends WatcherState {
   /** Resend a failed pending submission with its original requestId. */
   retry(requestId: string): Promise<void>;
   abort(reason?: string): Promise<void>;
+  /** Withdraw a queued input by submission id (409 once it has started). */
+  cancelSubmission(submissionId: string): Promise<void>;
   decide(toolTaskId: string, decision: 'approve' | 'deny', note?: string): Promise<void>;
 }
 
@@ -64,6 +66,12 @@ export function useEngineConversation(
     },
     [client, conversationId]
   );
+  const cancelSubmission = useCallback(
+    async (submissionId: string) => {
+      if (conversationId) await client.cancel(conversationId, submissionId);
+    },
+    [client, conversationId]
+  );
   const decide = useCallback(
     async (toolTaskId: string, decision: 'approve' | 'deny', note?: string) => {
       if (conversationId) await client.decide(conversationId, toolTaskId, decision, note);
@@ -71,5 +79,5 @@ export function useEngineConversation(
     [client, conversationId]
   );
 
-  return { ...state, submit, retry, abort, decide };
+  return { ...state, submit, retry, abort, cancelSubmission, decide };
 }
