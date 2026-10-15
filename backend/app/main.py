@@ -374,6 +374,10 @@ app.include_router(sandbox_proxy.router, prefix="/api/v1", tags=["sandbox-proxy"
 from app.internal_api.router import mount_internal_router
 mount_internal_router(app, app_settings)
 
+# Browser-facing engine conversations: only when ENABLE_ENGINE_API and the engine is configured.
+from app.api.v1.engine_conversations import mount_engine_conversations
+mount_engine_conversations(app, app_settings)
+
 @app.get("/")
 async def root():
     return {
