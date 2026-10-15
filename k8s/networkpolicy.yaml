@@ -1,0 +1,21 @@
+# The engine is reachable only from the API pods; /internal on the API is reachable only from the engine
+# pods and other in-cluster pods (it is also blocked at the ingress and at nginx, and token-guarded).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oniva-engine-ingress
+  namespace: oniva
+spec:
+  podSelector:
+    matchLabels:
+      app: oniva-engine
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: oniva-api
+    ports:
+    - protocol: TCP
+      port: 8080

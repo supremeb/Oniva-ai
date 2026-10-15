@@ -13,6 +13,7 @@ resources:
   - migrate-job.yaml
   - service.yaml
   - ingress.yaml
+  - networkpolicy.yaml
   # redis-sentinel.yaml is an optional HA alternative to the single Redis in deployment.yaml.
 images:
   - name: oniva
@@ -20,4 +21,7 @@ images:
     newTag: REPLACE_WITH_RELEASE_TAG
   - name: oniva-frontend
     newName: oniva-frontend   # e.g. registry.example.com/oniva-frontend
+    newTag: REPLACE_WITH_RELEASE_TAG
+  - name: oniva-engine
+    newName: oniva-engine     # e.g. registry.example.com/oniva-engine
     newTag: REPLACE_WITH_RELEASE_TAG

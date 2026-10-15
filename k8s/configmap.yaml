@@ -18,3 +18,11 @@ data:
   DEFAULT_LLM_MODEL: "openai/gpt-4o-mini"
   RATE_LIMIT_ENABLED: "true"
   DEFAULT_RATE_LIMIT: "100"
+  # Engine (plan 003). The browser routes stay off until the engine is deployed and ENGINE_URL answers.
+  ENABLE_ENGINE_API: "false"
+  # Global ceiling for engine chat; each tenant must also opt in (features.ENABLE_ENGINE_CHAT).
+  ENABLE_ENGINE_CHAT: "false"
+  ENGINE_URL: "http://oniva-engine:8080"
+  ENGINE_SESSION_ID: "oniva-default"
+  # ENGINE_URL is plain http inside the cluster (ClusterIP Service); the production validator needs this opt-in.
+  INTERNAL_ALLOW_PLAINTEXT: "true"

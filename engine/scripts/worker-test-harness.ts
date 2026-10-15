@@ -4,7 +4,8 @@
  * Runs the same wiring as `scripts/worker.ts` (`src/worker/worker.ts`) with
  * test doubles swapped in:
  * - the model is a rule-scripted fake (`ENGINE_TEST_MODEL_SCRIPT`, a JSON file
- *   re-read per request; see `test/support/scripted-model.ts`);
+ *   re-read per request; see `test/support/scripted-model.ts`), registered under
+ *   `ENGINE_TEST_MODEL_PROVIDER` (default `fake`);
  * - the engine clock is the database-backed shared test clock
  *   (`engine_test_clock`, created here), so every worker sees one scenario time;
  * - `ENGINE_TEST_INVOKE_PAUSE` (`{"<tool>": ms}`) models a gateway invoke of
@@ -144,7 +145,9 @@ async function main(): Promise<number> {
   const pool = createWorkerPool(config);
   const clock = await SharedTestClock.open(pool);
   const samples: CommitSample[] = [];
-  const models = new ModelRegistry().register(new ScriptedModel(scriptPath, "fake"));
+  // The provider name the scripted model answers to; set it to the name a backend policy returns.
+  const providerName = process.env.ENGINE_TEST_MODEL_PROVIDER ?? "fake";
+  const models = new ModelRegistry().register(new ScriptedModel(scriptPath, providerName));
 
   const intercept = async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
     const path = (req.url ?? "/").split("?")[0];
@@ -180,7 +183,7 @@ async function main(): Promise<number> {
     ...(config.leaseRetryMs === null ? {} : { leaseRetryMs: config.leaseRetryMs }),
     models,
     modelDefaults: {
-      provider: "fake",
+      provider: providerName,
       model: "fake-model",
       summaryModel: "fake-model",
       maxTokens: config.maxTokens,

@@ -1,0 +1,61 @@
+name: e2e
+
+# Required check, but only runs when the engine seams change: the gateway/policy/ledger router,
+# the browser-facing engine routes, the engine itself, or the smoke test.
+on:
+  push:
+    paths:
+      - "backend/app/internal_api/**"
+      - "backend/app/api/v1/engine_conversations.py"
+      - "backend/app/services/engine_client.py"
+      - "backend/tests/e2e/**"
+      - "engine/**"
+      - ".github/workflows/e2e.yml"
+  pull_request:
+    paths:
+      - "backend/app/internal_api/**"
+      - "backend/app/api/v1/engine_conversations.py"
+      - "backend/app/services/engine_client.py"
+      - "backend/tests/e2e/**"
+      - "engine/**"
+      - ".github/workflows/e2e.yml"
+
+jobs:
+  engine-smoke:
+    runs-on: ubuntu-latest
+    services:
+      # The engine's storage. The backend side of the smoke uses file SQLite.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ONIVA_E2E: "1"
+      ONIVA_E2E_PG_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci
+        working-directory: engine
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+        working-directory: backend
+      - run: uv run pytest -q -m e2e tests/e2e/test_engine_smoke.py
+        working-directory: backend

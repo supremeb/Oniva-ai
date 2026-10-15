@@ -1,0 +1,14 @@
+# Engine worker image. Build context: ./engine. One worker serves one ENGINE_SESSION_ID.
+FROM node:22-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+# tsx (a devDependency) runs the TypeScript entry point, so install everything.
+RUN npm ci
+COPY tsconfig.json tsconfig.build.json ./
+COPY src ./src
+COPY scripts/worker.ts ./scripts/worker.ts
+COPY migrations ./migrations
+ENV NODE_ENV=production
+USER node
+EXPOSE 8080
+CMD ["node", "--import", "tsx", "scripts/worker.ts"]

@@ -122,3 +122,91 @@ def test_prod_compose_wiring():
     assert app["read_only"] is True and any(v.endswith(":/data") for v in app["volumes"])
     assert "/health/live" in " ".join(app["healthcheck"]["test"])
     assert "migrate" in c["services"] and "migrate" in app["depends_on"]
+
+
+# ---- engine wiring (plan 003 U11 / R19) ----------------------------------------------------
+
+ENGINE_SECRET_KEYS = {"ENGINE_GATEWAY_TOKEN", "ENGINE_SERVICE_TOKEN", "ENGINE_DATABASE_URL"}
+
+
+def _secret_refs(container: dict) -> dict[str, str]:
+    return {e["name"]: e["valueFrom"]["secretKeyRef"]["key"]
+            for e in container.get("env", []) if "secretKeyRef" in e.get("valueFrom", {})}
+
+
+def test_engine_secret_template_and_references():
+    keys = set(_find("Secret", "oniva-secrets")["stringData"])
+    assert ENGINE_SECRET_KEYS <= keys
+    api = _secret_refs(_container(_find("Deployment", "oniva-api"), "api"))
+    assert api["ENGINE_GATEWAY_TOKEN"] == "ENGINE_GATEWAY_TOKEN"
+    assert api["ENGINE_SERVICE_TOKEN"] == "ENGINE_SERVICE_TOKEN"
+    eng = _secret_refs(_container(_find("Deployment", "oniva-engine"), "engine"))
+    assert eng["ENGINE_GATEWAY_TOKEN"] == "ENGINE_GATEWAY_TOKEN"
+    assert eng["ENGINE_SERVICE_TOKEN"] == "ENGINE_SERVICE_TOKEN"
+    assert eng["DATABASE_URL"] == "ENGINE_DATABASE_URL"
+
+
+def test_engine_deployment_is_single_owner_and_policy_backed():
+    d = _find("Deployment", "oniva-engine")
+    assert d["spec"]["replicas"] == 1 and d["spec"]["strategy"]["type"] == "Recreate"
+    c = _container(d, "engine")
+    env = {e["name"]: e.get("value") for e in c["env"]}
+    assert env["ENGINE_POLICY"] == "backend"
+    assert env["ENGINE_GATEWAY_URL"].startswith("http://oniva-api:")
+    assert "ENGINE_TEST_HARNESS" not in env and "ANTHROPIC_API_KEY" not in env
+    assert c["readinessProbe"]["httpGet"]["path"] == "/v1/health"
+    assert c["securityContext"]["readOnlyRootFilesystem"] is True
+
+
+def test_engine_service_is_cluster_internal_and_policy_restricts_it():
+    svc = _find("Service", "oniva-engine")
+    assert svc["spec"]["type"] == "ClusterIP"
+    pol = _find("NetworkPolicy", "oniva-engine-ingress")
+    sources = [f["podSelector"]["matchLabels"]["app"] for r in pol["spec"]["ingress"] for f in r["from"]]
+    assert sources == ["oniva-api"]
+
+
+def test_backend_engine_config_defaults_off_and_valid():
+    cm = _find("ConfigMap", "oniva-config")["data"]
+    assert cm["ENABLE_ENGINE_API"] == "false" and cm["ENABLE_ENGINE_CHAT"] == "false"
+    assert cm["ENGINE_URL"] == "http://oniva-engine:8080"
+    assert cm["INTERNAL_ALLOW_PLAINTEXT"] == "true"  # plain http inside the cluster
+    kust = yaml.safe_load((K8S / "kustomization.yaml").read_text())
+    assert "networkpolicy.yaml" in kust["resources"]
+    assert "oniva-engine" in {i["name"] for i in kust["images"]}
+
+
+def test_ingress_never_routes_or_exposes_internal():
+    ing = _find("Ingress", "oniva-ingress")
+    for rule in ing["spec"]["rules"]:
+        for p in rule["http"]["paths"]:
+            assert not p["path"].startswith("/internal"), "ingress must not route /internal"
+            assert p["backend"]["service"]["name"] != "oniva-engine"
+    snippet = ing["metadata"]["annotations"]["nginx.ingress.kubernetes.io/server-snippet"]
+    assert re.search(r"location\s+\^~\s+/internal\s*\{\s*return\s+404", snippet)
+
+
+def test_nginx_blocks_internal_before_other_routes():
+    conf = (ROOT / "nginx" / "nginx.conf").read_text()
+    m = re.search(r"location\s+\^~\s+/internal\s*\{\s*return\s+404;", conf)
+    assert m, "nginx must answer 404 for /internal"
+    assert m.start() < conf.index("location /api")
+
+
+def test_prod_compose_engine_service():
+    c = yaml.safe_load((ROOT / "docker-compose.prod.yml").read_text())
+    eng, app = c["services"]["engine"], c["services"]["app"]
+    assert "ports" not in eng and "ports" not in c["services"]["engine-db"]
+    env = eng["environment"]
+    assert env["ENGINE_POLICY"] == "backend" and env["ENGINE_GATEWAY_URL"] == "http://app:8000"
+    assert "ENGINE_TEST_HARNESS" not in env
+    for key in ("ENGINE_GATEWAY_TOKEN", "ENGINE_SERVICE_TOKEN"):
+        assert ":?" in env[key] and ":?" in app["environment"][key]
+    assert app["environment"]["ENGINE_URL"] == "http://engine:8080"
+    assert "false" in app["environment"]["ENABLE_ENGINE_API"]
+    assert "/internal" not in " ".join(c["services"]["nginx"].get("ports", []))
+
+
+def test_engine_image_never_ships_the_test_harness():
+    dockerfile = (ROOT / "engine" / "Dockerfile.prod").read_text()
+    assert "worker-test-harness" not in dockerfile and "scripts/worker.ts" in dockerfile

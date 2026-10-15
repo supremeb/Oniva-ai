@@ -69,6 +69,15 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Engine seams (plan 003). /internal is token-guarded and blocked at nginx.
+      ENGINE_GATEWAY_TOKEN: ${ENGINE_GATEWAY_TOKEN:?ENGINE_GATEWAY_TOKEN is required}
+      ENGINE_GATEWAY_TOKEN_PREVIOUS: ${ENGINE_GATEWAY_TOKEN_PREVIOUS:-}
+      ENGINE_SERVICE_TOKEN: ${ENGINE_SERVICE_TOKEN:?ENGINE_SERVICE_TOKEN is required}
+      ENGINE_URL: http://engine:8080
+      ENGINE_SESSION_ID: ${ENGINE_SESSION_ID:-oniva-default}
+      ENABLE_ENGINE_API: ${ENABLE_ENGINE_API:-false}
+      ENABLE_ENGINE_CHAT: ${ENABLE_ENGINE_CHAT:-false}
+      INTERNAL_ALLOW_PLAINTEXT: "true"
     expose:
       - "8000"
     depends_on:
@@ -142,6 +151,54 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Engine worker: one process serves one session. Reaches the backend only over the compose network.
+  engine:
+    image: oniva-engine:${VERSION:?VERSION is required (pin an image tag)}
+    build:
+      context: ./engine
+      dockerfile: Dockerfile.prod
+    environment:
+      NODE_ENV: production
+      ENGINE_PORT: "8080"
+      ENGINE_SESSION_ID: ${ENGINE_SESSION_ID:-oniva-default}
+      ENGINE_SERVICE_TOKEN: ${ENGINE_SERVICE_TOKEN:?ENGINE_SERVICE_TOKEN is required}
+      ENGINE_GATEWAY_TOKEN: ${ENGINE_GATEWAY_TOKEN:?ENGINE_GATEWAY_TOKEN is required}
+      DATABASE_URL: postgres://engine:${ENGINE_DB_PASSWORD:?ENGINE_DB_PASSWORD is required}@engine-db:5432/engine
+      ENGINE_GATEWAY_URL: http://app:8000
+      ENGINE_POLICY: backend
+      ENGINE_POLICY_URL: http://app:8000
+    expose:
+      - "8080"
+    depends_on:
+      engine-db:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:mode=1777,size=50m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  engine-db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=engine
+      - POSTGRES_PASSWORD=${ENGINE_DB_PASSWORD:?ENGINE_DB_PASSWORD is required}
+      - POSTGRES_DB=engine
+    volumes:
+      - enginedata:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engine -d engine"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -223,6 +280,7 @@ services:
 volumes:
   appdata:
   pgdata:
+  enginedata:
   redisdata:
 
 networks:
