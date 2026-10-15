@@ -10,7 +10,7 @@ from app.models.llm_usage import LLMUsageRecord
 
 
 async def conversation_cost(db: AsyncSession, tenant_id: UUID, conversation_id: UUID) -> Dict[str, Any]:
-    """Totals and per-run breakdown. Unpriced rows add tokens but no dollars and flag the run."""
+    """Totals, per-run and per-purpose breakdown. Subagent usage is stored under the root conversation id. Unpriced rows add tokens but no dollars and flag the run."""
     rows = (
         await db.execute(
             select(
@@ -19,6 +19,7 @@ async def conversation_cost(db: AsyncSession, tenant_id: UUID, conversation_id: 
                 LLMUsageRecord.input_tokens,
                 LLMUsageRecord.output_tokens,
                 LLMUsageRecord.status,
+                LLMUsageRecord.purpose,
                 LLMUsageRecord.created_at,
             )
             .where(LLMUsageRecord.tenant_id == tenant_id, LLMUsageRecord.conversation_id == conversation_id)
@@ -27,7 +28,8 @@ async def conversation_cost(db: AsyncSession, tenant_id: UUID, conversation_id: 
     ).all()
 
     runs: Dict[str, Dict[str, Any]] = {}
-    for run_id, cost, tin, tout, status, created in rows:
+    purposes: Dict[str, Dict[str, Any]] = {}
+    for run_id, cost, tin, tout, status, purpose, created in rows:
         key = run_id or ""
         r = runs.setdefault(key, {"runId": key, "usd": Decimal(0), "inputTokens": 0, "outputTokens": 0,
                                   "unpriced": False, "startedAt": created})
@@ -37,6 +39,14 @@ async def conversation_cost(db: AsyncSession, tenant_id: UUID, conversation_id: 
             r["unpriced"] = True
         else:
             r["usd"] += Decimal(cost or 0)
+        p = purposes.setdefault(purpose or "generation", {"usd": Decimal(0), "inputTokens": 0, "outputTokens": 0,
+                                                          "unpriced": False})
+        p["inputTokens"] += tin or 0
+        p["outputTokens"] += tout or 0
+        if status == "unpriced":
+            p["unpriced"] = True
+        else:
+            p["usd"] += Decimal(cost or 0)
         if created is not None and (r["startedAt"] is None or created < r["startedAt"]):
             r["startedAt"] = created
 
@@ -50,4 +60,5 @@ async def conversation_cost(db: AsyncSession, tenant_id: UUID, conversation_id: 
         "outputTokens": sum(r["outputTokens"] for r in out),
         "unpriced": any(r["unpriced"] for r in out),
         "runs": out,
+        "byPurpose": [{"purpose": k, **v, "usd": float(v["usd"])} for k, v in sorted(purposes.items())],
     }

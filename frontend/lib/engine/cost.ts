@@ -14,12 +14,23 @@ export interface RunCost {
   startedAt: string | null;
 }
 
+export interface PurposeCost {
+  /** generation | compaction (ledger purpose); rows without one count as generation. */
+  purpose: string;
+  usd: number;
+  inputTokens: number;
+  outputTokens: number;
+  unpriced: boolean;
+}
+
 export interface ConversationCost {
   totalUsd: number;
   inputTokens: number;
   outputTokens: number;
   unpriced: boolean;
   runs: RunCost[];
+  /** Same rows as `runs`, partitioned by purpose (root plus subagent usage). Absent on older backends. */
+  byPurpose?: PurposeCost[];
 }
 
 export function fetchConversationCost(conversationId: string): Promise<ConversationCost> {
