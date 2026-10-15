@@ -5,14 +5,10 @@ import type { KeyboardEvent, ReactNode, RefObject } from 'react';
 import { ArrowUp, Stop } from '@phosphor-icons/react';
 import { GenerativeO } from '@/components/ui/GenerativeO';
 import { DeepWorkProgressBar } from '@/components/deep-work/DeepWorkProgressBar';
-import { AgentQuestion } from './shared/interactive/AgentQuestion';
 import { DeepWorkSuggestionBanner } from './DeepWorkSuggestionBanner';
 import { WelcomeInput } from './inputs/WelcomeInput';
 import { ConversationInput } from './inputs/ConversationInput';
 import type { Skill } from '@/lib/api/skills';
-import type { useDeepWorkStore } from '@/lib/stores/deep-work';
-
-type PendingQuestion = ReturnType<typeof useDeepWorkStore.getState>['pendingQuestion'];
 
 /** Props shared by the welcome and conversation inputs. */
 export interface ComposerInputProps {
@@ -82,18 +78,14 @@ export interface ComposerProps extends ComposerInputProps {
     deepWorkSuggestion: string | null;
     onAcceptDeepWork: () => void;
     onDismissDeepWork: () => void;
-    isAwaitingDeepWorkInput: boolean;
-    pendingQuestion: PendingQuestion;
-    onStructuredAnswer: (answer: { optionIds: string[]; otherValue?: string }) => void;
     isDeepWorkExecuting: boolean;
     deepWorkActivity: ComponentDeepWorkActivity;
 }
 
 type ComponentDeepWorkActivity = React.ComponentProps<typeof ConversationInput>['deepWorkActivity'];
 
-/** Bottom dock of an active conversation: suggestion banner, progress bar, question chips, input. */
+/** Bottom dock of an active conversation: suggestion banner, progress bar, input. */
 export function Composer(props: ComposerProps) {
-    const { pendingQuestion } = props;
     return (
         <>
             {props.deepWorkSuggestion && (
@@ -105,18 +97,6 @@ export function Composer(props: ComposerProps) {
             )}
             <DeepWorkProgressBar />
             <div className="px-6 pb-5 pt-3 ">
-                {props.isAwaitingDeepWorkInput && typeof pendingQuestion === 'object' && pendingQuestion?.options ? (
-                    <div className="mb-3">
-                        <AgentQuestion
-                            id={`dw-q-${Date.now()}`}
-                            header="Agent Question"
-                            question={pendingQuestion.question}
-                            options={pendingQuestion.options}
-                            multiSelect={pendingQuestion.multiSelect}
-                            onAnswer={props.onStructuredAnswer}
-                        />
-                    </div>
-                ) : null}
                 <ConversationInput
                     value={props.value} onChange={props.onChange} onSubmit={props.onSubmit}
                     isLoading={props.isLoading} isStreaming={props.isStreaming} onStop={props.onStop}
@@ -128,7 +108,6 @@ export function Composer(props: ComposerProps) {
                     slashQuery={props.slashQuery} onSkillSelect={props.onSkillSelect}
                     webSearchPopover={props.webSearchPopover} knowledgePopover={props.knowledgePopover}
                     isDeepWorkExecuting={props.isDeepWorkExecuting}
-                    isAwaitingDeepWorkInput={props.isAwaitingDeepWorkInput}
                     deepWorkActivity={props.deepWorkActivity}
                 />
             </div>

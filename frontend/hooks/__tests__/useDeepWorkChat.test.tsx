@@ -46,7 +46,6 @@ describe('useDeepWorkChat engine rejoin', () => {
   it('publishes the engine session without hydrating the legacy store or opening SSE', async () => {
     (getDeepWorkFullState as jest.Mock).mockResolvedValue(ENGINE_FS);
     const hydrate = jest.spyOn(useDeepWorkStore.getState(), 'hydrateFromBackend');
-    const connectEvents = jest.spyOn(useDeepWorkStore.getState(), 'connectEvents');
     const connectEngine = jest.spyOn(useDeepWorkStore.getState(), 'connectEngineEvents');
     const ES = jest.fn();
     (globalThis as unknown as { EventSource: unknown }).EventSource = ES;
@@ -55,7 +54,6 @@ describe('useDeepWorkChat engine rejoin', () => {
     await waitFor(() => expect(result.current.isDeepWorkForThisChat).toBe(true));
     expect(result.current.engineSession).toMatchObject({ sessionId: 'dw_1', conversationId: 'conv_1', chatId: 'chat_1', planTitle: 'Battery market' });
     expect(hydrate).not.toHaveBeenCalled();
-    expect(connectEvents).not.toHaveBeenCalled();
     expect(connectEngine).not.toHaveBeenCalled();
     expect(ES).not.toHaveBeenCalled();
   });
@@ -85,6 +83,24 @@ describe('useDeepWorkChat engine rejoin', () => {
     await waitFor(() => expect(hydrate).toHaveBeenCalledTimes(1));
     expect(result.current.engineSession).toBeNull();
     expect(useEngineSessionStore.getState().session).toBeNull();
+  });
+
+  it('a historical v1 session opens read-only with its saved summary and files, and opens no stream', async () => {
+    (getDeepWorkFullState as jest.Mock).mockResolvedValue({
+      ...LEGACY_V2_FS, is_engine: false, session_id: 'v1_1', status: 'running',
+      summary: 'saved summary', key_findings: ['f1'], workspace_files: [{ name: 'a.md', path: 'a.md', size: 3, type: 'md', modified_at: 0 }],
+    });
+    const ES = jest.fn();
+    (globalThis as unknown as { EventSource: unknown }).EventSource = ES;
+    const connectEngine = jest.spyOn(useDeepWorkStore.getState(), 'connectEngineEvents');
+    renderHook(() => useDeepWorkChat('chat_v1'), { wrapper });
+    await waitFor(() => expect(useDeepWorkStore.getState().sessionId).toBe('v1_1'));
+    const st = useDeepWorkStore.getState();
+    expect(st.status).toBe('stopped'); // its executor is gone; never shown as live
+    expect(st.summary).toBe('saved summary');
+    expect(st.workspaceFiles.map((f) => f.path)).toEqual(['a.md']);
+    expect(connectEngine).not.toHaveBeenCalled();
+    expect(ES).not.toHaveBeenCalled();
   });
 
   it('saves the result message once, only when the card watched the run end', async () => {

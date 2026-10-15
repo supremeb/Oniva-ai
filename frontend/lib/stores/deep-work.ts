@@ -25,16 +25,7 @@ import type {
   EnginePhase,
   IntakeResult,
 } from '@/lib/types/deep-work';
-import type { StructuredQuestion } from '@/lib/models';
 import {
-  executeDeepWork,
-  sendHumanInput,
-  pauseSession,
-  resumeSession,
-  stopSession,
-  buildEventsUrl,
-  getSessionStatus,
-  listWorkspaceFiles,
   startEngine,
   cancelEngine,
   buildEngineEventsUrl,
@@ -98,9 +89,6 @@ interface DeepWorkState {
   totalSteps: number;
   iterationCount: number;
   elapsedSeconds: number;
-
-  // Human input
-  pendingQuestion: string | StructuredQuestion | null;
 
   // Workspace files
   workspaceFiles: WorkspaceFile[];
@@ -166,14 +154,6 @@ export interface EngineIntakeOptions {
 }
 
 interface DeepWorkActions {
-  startSession: (agentId: string, plan: DeepWorkPlan, message: string, conversationId?: string) => Promise<void>;
-  respondToQuestion: (input: string) => Promise<void>;
-  approvePlan: () => void;
-  rejectPlan: () => void;
-  pause: () => Promise<void>;
-  resume: () => Promise<void>;
-  stop: () => Promise<void>;
-  connectEvents: (sessionId: string) => void;
   disconnectEvents: () => void;
   /** Hydrate store from backend full-state response */
   hydrateFromBackend: (fullState: DeepWorkFullState) => void;
@@ -205,7 +185,6 @@ const initialState: DeepWorkState = {
   totalSteps: 0,
   iterationCount: 0,
   elapsedSeconds: 0,
-  pendingQuestion: null,
   workspaceFiles: [],
   currentActivity: null,
   sources: [],
@@ -253,289 +232,6 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
     (set, get) => ({
   ...initialState,
 
-  startSession: async (agentId, plan, message, conversationId) => {
-    set({
-      status: 'executing',
-      conversationId: conversationId || null,
-      plan,
-      todos: plan.steps.map((s) => ({ text: s, status: 'pending' as const })),
-      totalSteps: plan.steps.length,
-      currentStep: 0,
-      iterationCount: 0,
-      error: null,
-      steps: [],
-      workspaceFiles: [],
-      currentActivity: null,
-      sources: [],
-      connectors: [],
-      summary: null,
-      keyFindings: [],
-      artifacts: [],
-    });
-
-    try {
-      const { session_id, job_id } = await executeDeepWork({
-        agent_id: agentId,
-        plan,
-        message,
-        conversation_id: conversationId,
-      });
-
-      set({ sessionId: session_id, jobId: job_id });
-      _tokenRefreshReconnects = 0;
-      get().connectEvents(session_id);
-    } catch (err) {
-      set({
-        status: 'error',
-        error: err instanceof Error ? err.message : 'Failed to start session',
-      });
-    }
-  },
-
-  respondToQuestion: async (input) => {
-    const { sessionId } = get();
-    if (!sessionId) return;
-
-    try {
-      await sendHumanInput(sessionId, { input });
-      set({ pendingQuestion: null, status: 'executing' });
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Failed to send input' });
-    }
-  },
-
-  approvePlan: () => set({ status: 'executing' }),
-
-  rejectPlan: () => set({ status: 'idle', plan: null, todos: [] }),
-
-  pause: async () => {
-    const { sessionId, status } = get();
-    if (!sessionId) return;
-    const prevStatus = status;
-    set({ status: 'paused' });
-    try {
-      await pauseSession(sessionId);
-    } catch (err) {
-      set({ status: prevStatus, error: err instanceof Error ? err.message : 'Failed to pause' });
-    }
-  },
-
-  resume: async () => {
-    const { sessionId } = get();
-    if (!sessionId) return;
-    try {
-      await resumeSession(sessionId);
-      set({ status: 'executing' });
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Failed to resume' });
-    }
-  },
-
-  stop: async () => {
-    const { sessionId, status } = get();
-    if (!sessionId) return;
-    const prevStatus = status;
-    set({ status: 'stopped' });
-    try {
-      await stopSession(sessionId);
-      // SSE stays connected — deep_work_complete handler will naturally
-      // upgrade to 'completed' if backend finishes gracefully
-    } catch (err) {
-      set({ status: prevStatus, error: err instanceof Error ? err.message : 'Failed to stop' });
-    }
-  },
-
-  connectEvents: (sessionId) => {
-    // Close existing connection
-    get().disconnectEvents();
-
-    const url = buildEventsUrl(sessionId);
-    const es = new EventSource(url, { withCredentials: true });
-    let retryCount = 0;
-
-    es.addEventListener('deep_work_start', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        set({
-          status: 'executing',
-          todos: data.todos || [],
-        });
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('step_complete', (e) => {
-      retryCount = 0;
-      try {
-        const step = JSON.parse(e.data);
-        set((state) => {
-          const completedTodos = state.todos.filter((t) => t.status === 'completed').length;
-          return {
-            steps: [...state.steps, step],
-            currentStep: completedTodos,
-            totalSteps: step.total_steps || state.totalSteps,
-            iterationCount: step.iteration || step.step_number || state.iterationCount + 1,
-            currentActivity: null,
-          };
-        });
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('step_activity', (e) => {
-      retryCount = 0;
-      try {
-        const data = JSON.parse(e.data);
-        set({ currentActivity: data.description || null });
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('todo_update', (e) => {
-      retryCount = 0;
-      try {
-        const data = JSON.parse(e.data);
-        const todos = data.todos || [];
-        const completedCount = data.completed_count ?? todos.filter((t: { status: string }) => t.status === 'completed').length;
-        set({
-          todos,
-          currentStep: completedCount,
-        });
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('workspace_update', (e) => {
-      retryCount = 0;
-      try {
-        const data = JSON.parse(e.data);
-        const file: WorkspaceFile = {
-          path: data.path,
-          action: data.action,
-          size: data.size,
-        };
-        set((state) => {
-          if (data.action === 'delete') {
-            return {
-              workspaceFiles: state.workspaceFiles.filter((f) => f.path !== data.path),
-            };
-          }
-          const existing = state.workspaceFiles.findIndex((f) => f.path === data.path);
-          if (existing >= 0) {
-            const updated = [...state.workspaceFiles];
-            updated[existing] = file;
-            return { workspaceFiles: updated };
-          }
-          return { workspaceFiles: [...state.workspaceFiles, file] };
-        });
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('source_update', (e) => {
-      retryCount = 0;
-      try {
-        const data = JSON.parse(e.data);
-        set((state) => {
-          const existingUrls = new Set(state.sources.map((s) => s.url));
-          const newSources = (data.sources || []).filter((s: DeepWorkSource) => !existingUrls.has(s.url));
-          return {
-            sources: [...state.sources, ...newSources],
-            connectors: data.connectors || state.connectors,
-          };
-        });
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('human_input_required', (e) => {
-      retryCount = 0;
-      try {
-        const data = JSON.parse(e.data);
-        const pending: string | StructuredQuestion = data.options
-          ? { question: data.question, options: data.options, multiSelect: data.multiSelect ?? false }
-          : data.question;
-        set({
-          status: 'awaiting_input',
-          pendingQuestion: pending,
-        });
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('deep_work_paused', () => {
-      retryCount = 0;
-      set({ status: 'paused' });
-    });
-
-    es.addEventListener('deep_work_complete', (e) => {
-      retryCount = 0;
-      try {
-        const data = JSON.parse(e.data);
-        const state = get();
-        set({
-          status: 'completed',
-          currentStep: state.totalSteps,
-          summary: data.summary,
-          keyFindings: data.key_findings || [],
-          artifacts: (data.artifacts || []).map((a: string) => ({
-            type: 'file' as const,
-            filename: a.split('/').pop() || a,
-            artifactUri: a,
-          })),
-          elapsedSeconds: data.total_time || 0,
-        });
-        get().disconnectEvents();
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('deep_work_error', (e) => {
-      retryCount = 0;
-      try {
-        const data = JSON.parse(e.data);
-        set({
-          status: 'error',
-          error: data.error,
-        });
-        get().disconnectEvents();
-      } catch { /* ignore */ }
-    });
-
-    es.onerror = () => {
-      retryCount++;
-      if (retryCount === 1 && _tokenRefreshReconnects < MAX_TOKEN_REFRESH_RECONNECTS) {
-        // First error — likely JWT expiry. Refresh token, then reconnect with fresh cookies.
-        import('@/lib/api').then(({ attemptTokenRefresh }) => {
-          attemptTokenRefresh().then((success) => {
-            if (success && get().eventSource === es) {
-              _tokenRefreshReconnects++;
-              es.close();
-              set({ eventSource: null });
-              get().connectEvents(sessionId);
-            }
-          }).catch(() => {});
-        });
-      } else if (retryCount >= 5) {
-        // Reconcile from backend after repeated failures
-        const convId = get().conversationId;
-        if (convId) {
-          import('@/lib/api/deep-work').then(({ getDeepWorkFullState }) => {
-            getDeepWorkFullState(convId).then((fullState) => {
-              if (fullState) {
-                get().hydrateFromBackend(fullState);
-                // If session is terminal, stop reconnecting
-                const terminalStatuses = ['completed', 'failed', 'cancelled'];
-                if (terminalStatuses.includes(fullState.status)) {
-                  es.close();
-                  set({ eventSource: null });
-                  return;
-                }
-              }
-              retryCount = 0;
-            }).catch(() => { /* ignore — EventSource will keep retrying */ });
-          });
-        }
-      }
-    };
-
-    es.onmessage = () => { retryCount = 0; };
-
-    set({ eventSource: es });
-  },
-
   disconnectEvents: () => {
     const { eventSource } = get();
     if (eventSource) {
@@ -545,14 +241,14 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
   },
 
   hydrateFromBackend: (fullState: DeepWorkFullState) => {
+    // A non-engine (v1) session can no longer be running: its executor is gone, so a
+    // saved non-terminal status is shown as stopped and the session is read-only history.
+    const inFlight = ['running', 'executing', 'pending', 'paused', 'awaiting_input'].includes(fullState.status);
     const mappedStatus: DeepWorkStatus =
-      fullState.status === 'running' || fullState.status === 'executing' ? 'executing'
-      : fullState.status === 'paused' ? 'paused'
-      : fullState.status === 'awaiting_input' ? 'awaiting_input'
+      inFlight ? (fullState.is_engine ? 'executing' : 'stopped')
       : fullState.status === 'completed' ? 'completed'
       : fullState.status === 'failed' ? 'error'
       : fullState.status === 'cancelled' ? 'stopped'
-      : fullState.status === 'pending' ? 'executing'
       : 'idle';
 
     const todos = fullState.todos || [];

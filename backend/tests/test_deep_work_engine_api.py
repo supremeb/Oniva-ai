@@ -742,3 +742,48 @@ def test_full_state_response_defaults_to_the_legacy_runtime():
     """The explicit discriminator the frontend routes on: only the engine builder sets ``engine``."""
     assert dw.DeepWorkFullStateResponse(session_id="s", status="completed").runtime == "legacy"
     assert dw.DeepWorkFullStateResponse(session_id="s", status="completed", is_engine=True).runtime == "legacy"
+
+
+# --- U12: v1 executor and routes are gone; historical v1 sessions stay readable ---------------------------------------
+
+
+REMOVED_V1 = [("post", "/deep-work/execute"), ("get", "/deep-work/{session_id}/events"), ("post", "/deep-work/{session_id}/pause"),
+              ("post", "/deep-work/{session_id}/resume"), ("post", "/deep-work/{session_id}/stop"),
+              ("post", "/deep-work/{session_id}/input")]
+
+
+def test_v1_routes_absent_from_openapi_and_executor_is_gone():
+    import importlib.util
+    from app.main import app as real_app
+
+    paths = real_app.openapi()["paths"]
+    for method, path in REMOVED_V1:
+        assert method not in paths.get(f"/api/v1{path}", {}), (method, path)
+    assert importlib.util.find_spec("app.services.autonomous_executor") is None
+    assert not hasattr(dw, "_executors")
+
+
+async def test_historical_v1_session_opens_read_only_with_its_files(w):
+    chat, sid = uuid.uuid4(), "v1-session-1"
+    async with w.factory() as db:
+        db.add(BackgroundJob(
+            id=uuid.uuid4(), tenant_id=w.ta, user_id=w.ua, job_type="deep_work", status="completed", trigger="manual",
+            session_id=sid, conversation_id=chat, input_data={"plan": {"title": "Old study", "steps": ["a", "b"]}, "message": "m"},
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc), completed_at=datetime(2026, 1, 2, tzinfo=timezone.utc)))
+    await w.storage.write(str(w.ta), sid, "state.json", json.dumps({
+        "status": "completed", "plan": {"title": "Old study", "steps": ["a", "b"]}, "summary": "saved summary",
+        "key_findings": ["f1"], "todos": [{"text": "a", "status": "completed"}], "total_steps": 2, "current_step": 2}))
+    await w.storage.write(str(w.ta), sid, "workspace/report.md", "# Old report")
+
+    full = (await w.http.get(f"/api/v1/deep-work/by-conversation/{chat}/full-state")).json()
+    assert full["session_id"] == sid and full["status"] == "completed" and full["runtime"] == "legacy"
+    assert full["summary"] == "saved summary" and full["key_findings"] == ["f1"]
+    assert [f["path"] for f in full["workspace_files"]] == ["report.md"]
+    status = (await w.http.get(f"/api/v1/deep-work/{sid}/status")).json()
+    assert status["status"] == "completed" and status["summary"] == "saved summary"
+    assert [f["path"] for f in (await w.http.get(f"/api/v1/deep-work/{sid}/workspace")).json()["files"]] == ["report.md"]
+    assert (await w.http.get(f"/api/v1/deep-work/{sid}/workspace/report.md")).text == "# Old report"
+    assert sid in [i["session_id"] for i in (await w.http.get("/api/v1/deep-work/sessions")).json()["sessions"]]
+    for method, path in REMOVED_V1:
+        r = await w.http.request(method.upper(), f"/api/v1{path.format(session_id=sid)}", json={})
+        assert r.status_code in (404, 405), (method, path, r.status_code)

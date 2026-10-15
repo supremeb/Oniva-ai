@@ -140,5 +140,5 @@ def test_legacy_session_routes_unchanged_by_flag():
     # Session-scoped legacy routes carry no engine dispatch, so a legacy session keeps working
     # after the flag flips on (R3); the engine cancel delegation arrives with is_engine in U3/U7.
     import inspect
-    for fn in (dw.cancel_deep_work_engine, dw.stop_deep_work, dw.get_session_status, dw.deep_work_events):
+    for fn in (dw.cancel_deep_work_engine, dw.get_session_status):
         assert "tenant_uses_engine_deep_work" not in inspect.getsource(fn)

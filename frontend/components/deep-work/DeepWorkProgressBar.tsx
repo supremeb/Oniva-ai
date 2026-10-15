@@ -48,7 +48,7 @@ export function DeepWorkProgressBar() {
   }, [todos.length, completedTodos, enginePhase, status]);
 
   // Only show during active execution
-  const isExecuting = isActive && (status === 'executing' || status === 'paused');
+  const isExecuting = isActive && status === 'executing';
   if (!isExecuting || hasEngineSession) return null;
 
   const phase =

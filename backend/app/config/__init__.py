@@ -184,13 +184,10 @@ class Settings(BaseSettings):
     # Deep Work Engine (orchestrator-worker) configuration
     DEEP_WORK_MAX_WORKERS: int = 10               # Max research workers per round (matches the legacy plan limit)
     DEEP_WORK_MAX_REFLECTION_ROUNDS: int = 3      # Max reflection rounds (0 = no reflection)
-    DEEP_WORK_COMPLETENESS_THRESHOLD: int = 80    # Reflection score threshold for completion
     # ========================================
     ENABLE_DEEP_WORK: bool = True                 # Master toggle for autonomous execution
-    DEEP_WORK_MAX_TOOL_CALLS: int = 100           # Budget: max tool calls per session
     DEEP_WORK_MAX_DURATION_SEC: int = 1800        # Budget: max time (30 min)
     DEEP_WORK_MAX_LEARNINGS_PER_WORKER: int = 30  # Max learnings before worker stops
-    DEEP_WORK_SYNTHESIS_MAX_TOKENS: int = 10000   # Max tokens for synthesis output
 
     # ========================================
     # Intelligent Routing (Phase B1)

@@ -16,13 +16,6 @@ jest.mock('@/lib/engine/deepWorkApi', () => ({
   startEngineRun: (...a: unknown[]) => mockStartEngineRun(...a),
 }));
 jest.mock('@/lib/api/deep-work', () => ({
-  executeDeepWork: jest.fn(),
-  sendHumanInput: jest.fn(),
-  pauseSession: jest.fn(),
-  resumeSession: jest.fn(),
-  stopSession: jest.fn(),
-  buildEventsUrl: jest.fn(),
-  getSessionStatus: jest.fn(),
   listWorkspaceFiles: jest.fn(),
   startEngine: (...a: unknown[]) => mockStartEngine(...a),
   cancelEngine: jest.fn(),

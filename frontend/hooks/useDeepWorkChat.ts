@@ -21,7 +21,6 @@ export function useDeepWorkChat(currentSessionId: string | null) {
 
     // Deep Work store subscriptions
     const deepWorkStatus = useDeepWorkStore((s) => s.status);
-    const deepWorkRespondToQuestion = useDeepWorkStore((s) => s.respondToQuestion);
     const isDeepWorkActive = useDeepWorkStore(selectIsDeepWorkActive);
     const deepWorkSessionId = useDeepWorkStore((s) => s.sessionId);
     const currentActivity = useDeepWorkStore(selectCurrentActivity);
@@ -81,11 +80,8 @@ export function useDeepWorkChat(currentSessionId: string | null) {
         // Connect SSE for active sessions
         const activeStatuses = ['running', 'executing', 'paused', 'awaiting_input', 'pending'];
         if (activeStatuses.includes(fullState.status)) {
-            if (fullState.is_engine) {
-                store.connectEngineEvents(fullState.session_id);
-            } else {
-                store.connectEvents(fullState.session_id);
-            }
+            // Only the legacy v2 pipeline streams; v1 executor sessions are history (read-only).
+            if (fullState.is_engine) store.connectEngineEvents(fullState.session_id);
         }
     }, [fullState, currentSessionId]);
 
@@ -108,7 +104,6 @@ export function useDeepWorkChat(currentSessionId: string | null) {
     // Derived state: only show deep work UI in the chat session that spawned it
     const isDeepWorkForThisChat =
         isEngineForThisChat || (deepWorkConversationId != null && deepWorkConversationId === currentSessionId);
-    const isAwaitingDeepWorkInput = deepWorkStatus === 'awaiting_input' && isDeepWorkForThisChat;
 
     // Refresh sidebar when Deep Work completes
     useEffect(() => {
@@ -170,12 +165,8 @@ export function useDeepWorkChat(currentSessionId: string | null) {
         deepWorkStatus,
         isDeepWorkActive,
         isDeepWorkForThisChat,
-        isAwaitingDeepWorkInput,
         currentActivity,
         resultMessage,
         engineSession: isEngineForThisChat ? engineSession : null,
-
-        // Actions
-        deepWorkRespondToQuestion,
     };
 }

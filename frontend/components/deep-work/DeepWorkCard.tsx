@@ -303,7 +303,7 @@ const DeepWorkLegacyCard = memo(function DeepWorkLegacyCard() {
   }
 
   // ── Executing / Completed state ──
-  const isExecuting = isActive && (status === 'executing' || status === 'paused');
+  const isExecuting = isActive && status === 'executing';
   const isCompleted = status === 'completed';
 
   return (

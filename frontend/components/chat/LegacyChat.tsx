@@ -17,7 +17,6 @@ import { createChatSession } from '@/lib/api/chat-sessions';
 import { BUILTIN_AGENT_UUIDS, isBuiltinAgentId } from '@/lib/builtin-agents';
 import { useDeepWorkChat } from '@/hooks/useDeepWorkChat';
 import { useDeepWorkIntake } from '@/hooks/useDeepWorkIntake';
-import type { StructuredQuestion } from '@/lib/models';
 import { useStreamingParts } from '@/hooks/useStreamingParts';
 import { ArtifactModal } from './shared/ArtifactModal';
 import type { ArtifactModalData } from './shared/data/FilePreview';
@@ -172,7 +171,6 @@ export function LegacyChat({ projectId }: LegacyChatProps = {}) {
     // Deep work files, sources, and pending question for sidebar bridging
     const deepWorkFiles = useDeepWorkStore(s => s.workspaceFiles);
     const deepWorkSources = useDeepWorkStore(s => s.sources);
-    const pendingQuestion = useDeepWorkStore(s => s.pendingQuestion);
 
     // Build deduplicated FileNode[] + metadata map for the right panel
     const { allFiles, fileMeta } = useMemo(() => {
@@ -963,10 +961,8 @@ export function LegacyChat({ projectId }: LegacyChatProps = {}) {
         deepWorkStatus,
         isDeepWorkActive,
         isDeepWorkForThisChat,
-        isAwaitingDeepWorkInput,
         currentActivity,
         resultMessage: deepWorkResultMessage,
-        deepWorkRespondToQuestion,
     } = useDeepWorkChat(currentSessionId);
 
     // Append deep work result message to local messages list
@@ -994,38 +990,18 @@ export function LegacyChat({ projectId }: LegacyChatProps = {}) {
         }
     }, [projectId, consumePendingInput, sendMessage]);
 
-    // Handle structured question answer (AgentQuestion chips)
-    const handleStructuredAnswer = useCallback((answer: { optionIds: string[]; otherValue?: string }) => {
-        if (!isAwaitingDeepWorkInput) return;
-        // Map optionIds to labels for the response text
-        const structuredQ = typeof pendingQuestion === 'object' && pendingQuestion ? pendingQuestion as StructuredQuestion : null;
-        const labels = structuredQ
-            ? answer.optionIds.map(id => structuredQ.options.find(o => o.id === id)?.label || id)
-            : answer.optionIds;
-        const text = answer.otherValue
-            ? `${labels.join(', ')}${labels.length ? ', ' : ''}${answer.otherValue}`
-            : labels.join(', ');
-        deepWorkRespondToQuestion(text);
-    }, [isAwaitingDeepWorkInput, pendingQuestion, deepWorkRespondToQuestion]);
-
     const handleSubmit = useCallback(() => {
         if (!input.trim() || isLoading || isStreaming) return;
         if (error) setError(null); // auto-dismiss previous error on new submission
         const text = input;
         setInput('');
 
-        // During Deep Work: route input to the human input handler
-        if (isAwaitingDeepWorkInput) {
-            deepWorkRespondToQuestion(text);
-            return;
-        }
-
         if (deepWorkMode) {
             handleDeepWorkSubmit(text);
         } else {
             sendMessage(text);
         }
-    }, [input, isLoading, isStreaming, isAwaitingDeepWorkInput, deepWorkRespondToQuestion, deepWorkMode, sendMessage, handleDeepWorkSubmit]);
+    }, [input, isLoading, isStreaming, deepWorkMode, sendMessage, handleDeepWorkSubmit]);
 
     const handleRetry = useCallback(() => {
         setError(null);
@@ -1246,10 +1222,7 @@ export function LegacyChat({ projectId }: LegacyChatProps = {}) {
                     deepWorkSuggestion={deepWorkSuggestion}
                     onAcceptDeepWork={handleAcceptDeepWork}
                     onDismissDeepWork={handleDismissDeepWork}
-                    isAwaitingDeepWorkInput={isAwaitingDeepWorkInput}
-                    pendingQuestion={pendingQuestion}
-                    onStructuredAnswer={handleStructuredAnswer}
-                    isDeepWorkExecuting={isDeepWorkActive && isDeepWorkForThisChat && !isAwaitingDeepWorkInput}
+                    isDeepWorkExecuting={isDeepWorkActive && isDeepWorkForThisChat}
                     deepWorkActivity={isDeepWorkForThisChat ? currentActivity : null}
                 />
             }

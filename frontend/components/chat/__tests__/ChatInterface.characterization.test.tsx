@@ -47,10 +47,8 @@ jest.mock('@/hooks/useDeepWorkChat', () => ({
         deepWorkStatus: 'idle',
         isDeepWorkActive: false,
         isDeepWorkForThisChat: false,
-        isAwaitingDeepWorkInput: false,
         currentActivity: null,
         resultMessage: null,
-        deepWorkRespondToQuestion: jest.fn(),
     }),
 }));
 
