@@ -362,6 +362,7 @@
     ],
     "connectors": [],
     "is_engine": true,
+    "runtime": "legacy",
     "engine_report": "# Contract Report\n\n## Executive Summary\n\nA summary.\n\n\n## Market\n\nSection body text [1].\n\n## Players\n\nSection body text [1].\n\n## Key Takeaways\n\n1. A takeaway [1].\n\n## Sources\n1. [Source for market size](https://example.com/market-size)\n2. [Source for pricing details](https://example.com/pricing-details)",
     "engine_phase": null,
     "artifacts": null,

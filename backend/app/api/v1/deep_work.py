@@ -114,6 +114,8 @@ class DeepWorkFullStateResponse(BaseModel):
     sources: list[SourceSchema] = []
     connectors: list[ConnectorSchema] = []
     is_engine: bool = False
+    # "engine": run on @oniva/engine (the watch view is the live state). "legacy": v1/v2 executors.
+    runtime: str = "legacy"
     engine_report: str | None = None
     engine_phase: str | None = None
     artifacts: list[dict] | None = None

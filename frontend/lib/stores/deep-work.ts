@@ -41,6 +41,9 @@ import {
   generateEnginePlan,
   clarifyQuery,
 } from '@/lib/api/deep-work';
+import { APIError } from '@/lib/api';
+import { clarifyEngine, planEngine, startEngineRun } from '@/lib/engine/deepWorkApi';
+import { useEngineSessionStore } from '@/components/deep-work/engineSession';
 
 // ── SSE reconnect token refresh tracking ──
 // Proactive token refresh is now handled globally by useTokenRefresh hook.
@@ -63,7 +66,9 @@ export interface DeepWorkFullState {
   connectors: DeepWorkConnector[];
   artifacts?: Array<{ artifact_uri?: string; download_url?: string; filename?: string; size?: number }>;
   is_engine: boolean;
-  engine_report: string | null;
+  /** Explicit discriminator from the backend; absent on older responses. */
+  runtime?: 'engine' | 'legacy';
+  engine_report?: string | null;
   engine_phase: string | null;
   error: string | null;
   workers: Array<{
@@ -135,6 +140,29 @@ interface DeepWorkState {
   engineStartedAt: number | null;
   engineElapsedSeconds: number;
   enginePhase: EnginePhase | null;
+
+  // ── Engine runtime intake (flag ENABLE_ENGINE_DEEP_WORK) ───
+  /** Set while clarify/plan/start run on the engine API; null on the legacy flow. */
+  engineIntake: EngineIntakeContext | null;
+  /** Plan 422 after the server's one repair: the model's raw text, shown so the user can retry. */
+  planFailure: { message: string; text: string | null } | null;
+}
+
+/** What the engine intake carries from clarify through plan to start. */
+export interface EngineIntakeContext {
+  projectId: string;
+  /** deep_work_runs.id, minted by the first clarify/plan call. */
+  sessionId: string | null;
+  /** The run's own engine conversation. */
+  conversationId: string | null;
+  kbIds: string[];
+  connectorIds: string[];
+  enrichedQuery: string | null;
+}
+
+export interface EngineIntakeOptions {
+  /** Present when the tenant's Deep Work runs on the engine; `projectId` is the chat's project. */
+  engine?: { projectId: string };
 }
 
 interface DeepWorkActions {
@@ -151,7 +179,7 @@ interface DeepWorkActions {
   hydrateFromBackend: (fullState: DeepWorkFullState) => void;
   reset: () => void;
   // ── Intake actions ─────────────────────────────────────────
-  clarify: (query: string, conversationId?: string, availableKbs?: string[], availableConnectors?: string[]) => Promise<void>;
+  clarify: (query: string, conversationId?: string, availableKbs?: string[], availableConnectors?: string[], opts?: EngineIntakeOptions) => Promise<void>;
   skipClarification: (enrichedQuery?: string) => void;
   // ── Engine actions ──────────────────────────────────────────
   setDeliverable: (type: string | null, description?: string) => void;
@@ -202,7 +230,23 @@ const initialState: DeepWorkState = {
   engineStartedAt: null,
   engineElapsedSeconds: 0,
   enginePhase: null,
+  engineIntake: null,
+  planFailure: null,
 };
+
+/** 422 from engine plan: `{detail: {message, text, error}}` after the server's repair. */
+function planFailureOf(err: unknown): { message: string; text: string | null } | null {
+  if (!(err instanceof APIError) || err.status !== 422) return null;
+  const detail = (err.data as { detail?: unknown } | undefined)?.detail;
+  if (detail && typeof detail === 'object') {
+    const d = detail as { message?: unknown; text?: unknown };
+    return {
+      message: typeof d.message === 'string' ? d.message : 'The plan could not be parsed',
+      text: typeof d.text === 'string' && d.text ? d.text : null,
+    };
+  }
+  return { message: typeof detail === 'string' ? detail : err.message, text: null };
+}
 
 export const useDeepWorkStore = create<DeepWorkStore>()(
   persist(
@@ -588,14 +632,60 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
 
   // ── Intake actions ─────────────────────────────────────────
 
-  clarify: async (query, conversationId, availableKbs, availableConnectors) => {
+  clarify: async (query, conversationId, availableKbs, availableConnectors, opts) => {
+    // A new intake replaces whatever engine run card the chat was showing.
+    useEngineSessionStore.getState().setSession(null);
+    const engine = opts?.engine;
     set({
       ...initialState,
       engineMode: true,
       status: 'clarifying',
       conversationId: conversationId || null,
       enginePendingQuery: query,
+      engineIntake: engine
+        ? {
+            projectId: engine.projectId,
+            sessionId: null,
+            conversationId: null,
+            kbIds: availableKbs || [],
+            connectorIds: availableConnectors || [],
+            enrichedQuery: null,
+          }
+        : null,
     });
+
+    if (engine) {
+      try {
+        const result = await clarifyEngine({
+          query,
+          projectId: engine.projectId,
+          availableKbs: availableKbs || [],
+          availableConnectors: availableConnectors || [],
+        });
+        set((s) => ({
+          engineIntake: s.engineIntake && {
+            ...s.engineIntake,
+            sessionId: result.session_id,
+            conversationId: result.conversation_id,
+          },
+        }));
+        if (result.action === 'proceed') {
+          await get().generatePlan(query, conversationId, result.enriched_query || undefined);
+        } else {
+          set({
+            intakeResult: {
+              action: 'ask',
+              questions: result.questions ?? null,
+              enriched_query: result.enriched_query ?? null,
+            },
+          });
+        }
+      } catch {
+        // Same graceful fallback as legacy: skip clarification and plan (plan mints the session itself).
+        await get().generatePlan(query, conversationId);
+      }
+      return;
+    }
 
     try {
       const result = await clarifyQuery(query, availableKbs || [], availableConnectors || []);
@@ -651,13 +741,46 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
   },
 
   generatePlan: async (query, conversationId, enrichedQuery) => {
+    const intake = get().engineIntake;
     set((prev) => ({
       ...initialState,
       engineMode: true,
       status: 'planning',
       conversationId: conversationId || prev.conversationId || null,
       enginePendingQuery: query,
+      engineIntake: intake && { ...intake, enrichedQuery: enrichedQuery ?? intake.enrichedQuery },
     }));
+
+    if (intake) {
+      const enriched = enrichedQuery ?? intake.enrichedQuery ?? undefined;
+      try {
+        const res = await planEngine({
+          query,
+          enrichedQuery: enriched,
+          sessionId: intake.sessionId ?? undefined,
+          conversationId: intake.conversationId ?? undefined,
+          projectId: intake.projectId,
+        });
+        set((s) => ({
+          status: 'awaiting_approval',
+          plan: { title: res.title, steps: res.steps },
+          engineRawPlan: res.raw_plan,
+          engineIntake: s.engineIntake && {
+            ...s.engineIntake,
+            sessionId: res.session_id,
+            conversationId: res.conversation_id,
+          },
+        }));
+      } catch (err) {
+        const failure = planFailureOf(err);
+        set({
+          status: 'error',
+          error: failure ? failure.message : err instanceof Error ? err.message : 'Failed to generate plan',
+          planFailure: failure,
+        });
+      }
+      return;
+    }
 
     try {
       const { title, steps, raw_plan } = await generateEnginePlan(query, enrichedQuery);
@@ -675,7 +798,7 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
   },
 
   approveEnginePlan: async () => {
-    const { conversationId, engineRawPlan, enginePendingQuery, plan } = get();
+    const { conversationId, engineRawPlan, enginePendingQuery, plan, engineIntake } = get();
     if (!enginePendingQuery) return;
 
     // Pre-populate todos from plan steps so the checklist renders immediately
@@ -695,6 +818,40 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
       currentActivity: null,
       currentStep: 0,
     });
+
+    if (engineIntake) {
+      if (!engineIntake.sessionId) {
+        set({ status: 'error', error: 'Deep Work session is missing; please try again.' });
+        return;
+      }
+      try {
+        const res = await startEngineRun({
+          sessionId: engineIntake.sessionId,
+          query: enginePendingQuery,
+          plan: engineRawPlan || undefined,
+          enrichedQuery: engineIntake.enrichedQuery ?? undefined,
+          knowledgeBaseIds: engineIntake.kbIds.length ? engineIntake.kbIds : undefined,
+          connectorIds: engineIntake.connectorIds.length ? engineIntake.connectorIds : undefined,
+        });
+        // Hand over to the engine card (it reads the run from its own watch stream), then
+        // clear the intake state so the legacy card and progress bar stay out of the way.
+        useEngineSessionStore.getState().setSession({
+          sessionId: res.session_id,
+          conversationId: res.conversation_id,
+          chatId: conversationId ?? res.conversation_id,
+          status: 'running',
+          error: null,
+          planTitle: plan?.title ?? null,
+        });
+        set({ ...initialState });
+      } catch (err) {
+        set({
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Failed to start Deep Work',
+        });
+      }
+      return;
+    }
 
     try {
       const { session_id } = await startEngine({
@@ -1147,6 +1304,8 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
           intakeResult: state.intakeResult,
           plan: state.plan,
           engineRawPlan: state.engineRawPlan,
+          engineIntake: state.engineIntake,
+          planFailure: state.planFailure,
           error: state.error,
           persistedAt: Date.now(),
         };

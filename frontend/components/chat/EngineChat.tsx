@@ -30,6 +30,11 @@ import {
     type WatcherOptions,
 } from '@/lib/engine';
 import { useProjectsStore } from '@/lib/stores/projects';
+import { useDeepWorkIntake } from '@/hooks/useDeepWorkIntake';
+import { useDeepWorkStore } from '@/lib/stores/deep-work';
+import { DeepWorkCard } from '@/components/deep-work/DeepWorkCard';
+import { useEngineSessionStore } from '@/components/deep-work/engineSession';
+import { DeepWorkToggle } from './inputs/WelcomeInput';
 import { useChatSessionsStore } from '@/lib/stores/chat-sessions';
 import { useEngineChatPrefs, NEW_DRAFT_KEY } from '@/lib/stores/engine-chat-prefs';
 
@@ -111,6 +116,24 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         if (!projectId && projects.length === 0) void loadProjects();
     }, [projectId, projects.length, loadProjects]);
     const resolvedProjectId = projectId ?? projects.find((p) => !p.is_archived)?.id ?? null;
+
+    // Deep Work: offered only when the tenant's Deep Work runs on the engine (the same entry
+    // point the legacy chat has: a toggle in the input, the next send starts the intake).
+    const { mode: deepWorkRuntime, startIntake } = useDeepWorkIntake(projectId);
+    const [deepWorkOn, setDeepWorkOn] = useState(false);
+    const [deepWorkQuery, setDeepWorkQuery] = useState<string | null>(null);
+    const dwChatKey = useRef(`engine-dw-${Math.random().toString(36).slice(2)}`);
+    const dwIntakeActive = useDeepWorkStore((s) => s.status !== 'idle');
+    const dwEngineSession = useEngineSessionStore((s) => s.session);
+    const deepWorkVisible = deepWorkRuntime === 'engine' && (dwIntakeActive || dwEngineSession !== null);
+    // Leaving the chat drops the card so it never shows up in another conversation.
+    useEffect(
+        () => () => {
+            useEngineSessionStore.getState().setSession(null);
+            useDeepWorkStore.getState().reset();
+        },
+        []
+    );
 
     const adapt = useMemo(() => createViewAdapter(), []);
     const messages = useMemo(() => (view ? adapt(view) : []), [adapt, view]);
@@ -226,6 +249,14 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         async (mode: EngineSendMode) => {
             const text = input.trim();
             if (!text || creating) return;
+            if (deepWorkRuntime === 'engine' && deepWorkOn && !running) {
+                useEngineChatPrefs.getState().clearDraft(draftKey);
+                setInputState('');
+                setDeepWorkOn(false);
+                setDeepWorkQuery(text);
+                void startIntake(text, conversationId ?? dwChatKey.current, sources.activeKnowledgeBaseIds, sources.connectorIds);
+                return;
+            }
             if (!conversationId) {
                 await startConversation(text);
                 return;
@@ -235,7 +266,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
             const whenBusy = running ? (mode === 'steer' ? 'steer' : 'followUp') : undefined;
             await doSubmit(text, whenBusy);
         },
-        [input, creating, conversationId, startConversation, draftKey, running, doSubmit]
+        [input, creating, conversationId, startConversation, draftKey, running, doSubmit, deepWorkRuntime, deepWorkOn, startIntake, sources.activeKnowledgeBaseIds, sources.connectorIds]
     );
 
     const handleStop = useCallback(() => {
@@ -280,7 +311,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
 
     const panelSources = useMemo(() => messages.flatMap((m) => m.sources ?? []), [messages]);
     const closed = connection === 'closed' && error !== null;
-    const hasMessages = messages.length > 0 || bubbles.length > 0 || sending.length > 0 || creating;
+    const hasMessages = messages.length > 0 || bubbles.length > 0 || sending.length > 0 || creating || deepWorkVisible;
 
     const composer = (
         <EngineComposer
@@ -295,6 +326,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                 <>
                     {webSearchPopover}
                     {knowledgePopover}
+                    {deepWorkRuntime === 'engine' && <DeepWorkToggle active={deepWorkOn} onToggle={() => setDeepWorkOn((v) => !v)} />}
                     <EngineSkillConnectorPickers
                         conversationId={conversationId}
                         skills={sources.skills}
@@ -350,6 +382,18 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                     onRetry={handleRetry}
                     approvalHandlers={approvalHandlers}
                     renderMessageFooter={renderMessageFooter}
+                    footer={
+                        deepWorkVisible ? (
+                            <>
+                                {deepWorkQuery && (
+                                    <div className="mt-6 flex justify-end" data-testid="deep-work-query">
+                                        <div className="max-w-[85%] rounded-2xl bg-neutral-100 px-4 py-2.5 text-[14px] text-neutral-900 whitespace-pre-wrap">{deepWorkQuery}</div>
+                                    </div>
+                                )}
+                                <DeepWorkCard />
+                            </>
+                        ) : null
+                    }
                     onOpenModal={(data) => setArtifactModal({ ...data, open: true })}
                 />
             }

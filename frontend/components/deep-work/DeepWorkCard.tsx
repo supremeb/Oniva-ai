@@ -72,6 +72,7 @@ const DeepWorkLegacyCard = memo(function DeepWorkLegacyCard() {
   const skipClarification = useDeepWorkStore((s) => s.skipClarification);
   const engineRawPlan = useDeepWorkStore((s) => s.engineRawPlan);
   const setDeliverable = useDeepWorkStore((s) => s.setDeliverable);
+  const planFailure = useDeepWorkStore((s) => s.planFailure);
 
   // Intake answer tracking (local state — not persisted)
   const [intakeAnswers, setIntakeAnswers] = useState<Record<number, string>>({});
@@ -281,6 +282,12 @@ const DeepWorkLegacyCard = memo(function DeepWorkLegacyCard() {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-neutral-900">Research failed</p>
               <p className="text-sm text-neutral-500 mt-1">{error || 'An unexpected error occurred'}</p>
+              {planFailure?.text && (
+                <details className="mt-2">
+                  <summary className="text-xs text-neutral-400 cursor-pointer select-none">What the model returned</summary>
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-50 p-2 text-xs text-neutral-600">{planFailure.text}</pre>
+                </details>
+              )}
             </div>
             <button
               onClick={handleRetry}

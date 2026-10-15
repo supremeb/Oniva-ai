@@ -534,6 +534,7 @@ async def test_full_state_for_an_engine_session_matches_the_row_and_lists_the_wo
     assert r.status_code == 200
     body = r.json()
     assert body["is_engine"] is True and body["status"] == "running" and body["session_id"] == sid
+    assert body["runtime"] == "engine"
     assert body["conversation_id"] == cid and body["plan"]["title"] == "Vendor study"
     assert body["engine_phase"] == "plan" or body["engine_phase"] == "research"
     assert [f["path"] for f in body["workspace_files"]] == ["report.md"]
@@ -649,3 +650,9 @@ def test_run_state_and_answers():
     assert ev.answer_for({"run": {"active": True}, "entries": [user, asst]}, "r1") is None
     assert ev.answer_for({"run": {"active": False}, "entries": [user, err]}, "r1") == ("error", "down")
     assert ev.answer_for({"run": {"active": False}, "entries": [user, asst]}, "other") is None
+
+
+def test_full_state_response_defaults_to_the_legacy_runtime():
+    """The explicit discriminator the frontend routes on: only the engine builder sets ``engine``."""
+    assert dw.DeepWorkFullStateResponse(session_id="s", status="completed").runtime == "legacy"
+    assert dw.DeepWorkFullStateResponse(session_id="s", status="completed", is_engine=True).runtime == "legacy"

@@ -36,12 +36,15 @@ export const useEngineSessionStore = create<EngineSessionStore>((set) => ({
 }));
 
 /**
- * Full-state of an engine-runtime run. The legacy v2 path also reports
- * `is_engine: true` but always carries `engine_report` (nullable); the engine
- * runtime's state has no such key, which is what tells them apart.
+ * Full-state of an engine-runtime run. The backend sets `runtime: "engine"` explicitly
+ * (legacy responses say `"legacy"`). Older responses have no `runtime`; for those only,
+ * fall back to the old heuristic: the legacy v2 path also reports `is_engine: true` but
+ * carries an `engine_report` key, which the engine runtime's state lacks.
  */
 export function isEngineRuntimeSession(fs: DeepWorkFullState | null | undefined): fs is DeepWorkFullState & {
   conversation_id: string;
 } {
-  return !!fs && fs.is_engine === true && !Object.prototype.hasOwnProperty.call(fs, 'engine_report') && !!fs.conversation_id;
+  if (!fs || fs.is_engine !== true || !fs.conversation_id) return false;
+  if (fs.runtime) return fs.runtime === 'engine';
+  return !Object.prototype.hasOwnProperty.call(fs, 'engine_report');
 }

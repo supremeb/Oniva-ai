@@ -1,6 +1,6 @@
 'use client';
 
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CompactionMarker } from './CompactionMarker';
 import { ChatMessageList, ChatLoadingIndicator } from './shared';
@@ -21,6 +21,8 @@ export interface EngineMessageListProps {
     onOpenModal: (data: ArtifactModalData) => void;
     approvalHandlers?: ChatMessageListProps['approvalHandlers'];
     renderMessageFooter?: ChatMessageListProps['renderMessageFooter'];
+    /** Rendered after the transcript (the Deep Work intake/run card). */
+    footer?: ReactNode;
 }
 
 export const pendingText = (p: PendingEntry): string =>
@@ -31,7 +33,7 @@ export const pendingText = (p: PendingEntry): string =>
  * reader hears new messages; `aria-busy` while a run streams defers announcements
  * until the text settles instead of reading every 100 ms diff.
  */
-export function EngineMessageList({ scrollRef, viewportRef, messages, pending, running, compacting = false, onRetry, onOpenModal, approvalHandlers, renderMessageFooter }: EngineMessageListProps) {
+export function EngineMessageList({ scrollRef, viewportRef, messages, pending, running, compacting = false, onRetry, onOpenModal, approvalHandlers, renderMessageFooter, footer }: EngineMessageListProps) {
     const streaming = messages.find((m) => m.isStreaming);
     const waiting = running && !streaming && !compacting;
     return (
@@ -74,6 +76,7 @@ export function EngineMessageList({ scrollRef, viewportRef, messages, pending, r
                         </div>
                     </div>
                 ))}
+                {footer}
                 {compacting && <CompactionMarker state="running" />}
                 {waiting && <ChatLoadingIndicator message="Thinking..." variant="generative" className="mt-6" />}
             </div>

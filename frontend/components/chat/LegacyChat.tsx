@@ -16,6 +16,7 @@ import type { FileNode } from './FileTree';
 import { createChatSession } from '@/lib/api/chat-sessions';
 import { BUILTIN_AGENT_UUIDS, isBuiltinAgentId } from '@/lib/builtin-agents';
 import { useDeepWorkChat } from '@/hooks/useDeepWorkChat';
+import { useDeepWorkIntake } from '@/hooks/useDeepWorkIntake';
 import type { StructuredQuestion } from '@/lib/models';
 import { useStreamingParts } from '@/hooks/useStreamingParts';
 import { ArtifactModal } from './shared/ArtifactModal';
@@ -351,6 +352,8 @@ export function LegacyChat({ projectId }: LegacyChatProps = {}) {
 
     // ── Deep Work Engine Flow ──────────────────────────────
 
+    const { startIntake: startDeepWorkIntake } = useDeepWorkIntake(projectId);
+
     const handleDeepWorkSubmit = useCallback(async (text: string) => {
         const localSessionId = ensureSessionId();
         setError(null);
@@ -389,8 +392,8 @@ export function LegacyChat({ projectId }: LegacyChatProps = {}) {
         const activeSession = getSession(activeSessionId);
         const kbIds = activeSrc.activeKnowledgeBaseIds || [];
         const connectorIds = activeSession?.activeConnectorIds ?? [];
-        useDeepWorkStore.getState().clarify(text, activeSessionId, kbIds, connectorIds);
-    }, [ensureSessionId, addMessageToSession, getSession, getActiveSources, migrateSession, queryClient]);
+        void startDeepWorkIntake(text, activeSessionId, kbIds, connectorIds);
+    }, [ensureSessionId, addMessageToSession, getSession, getActiveSources, migrateSession, queryClient, startDeepWorkIntake]);
 
     // Load messages when switching sessions or on page refresh.
     // IMPORTANT: This effect must NOT depend on isStreaming/isLoading — those cause

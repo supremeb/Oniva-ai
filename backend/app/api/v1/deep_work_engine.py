@@ -529,6 +529,7 @@ async def full_state(db: AsyncSession, run: dws.RunSnapshot, user_id: Any) -> di
             job_error = job.error if job is not None else None
     return {
         "is_engine": True,
+        "runtime": "engine",
         "status": run.status,
         "session_id": str(run.id),
         "conversation_id": str(run.conversation_id),
