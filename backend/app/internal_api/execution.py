@@ -251,8 +251,9 @@ def get_rate_limiter() -> ToolRateLimiter:
     if _default_limiter is None:
         client = None
         try:
-            from app.config import settings
+            from app.config import get_settings
 
+            settings = get_settings()
             if settings.REDIS_URL:
                 import redis.asyncio as redis
 

@@ -15,6 +15,7 @@ pgvector). ``test_system_role_*`` needs the migrated baseline and is skipped loc
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -349,7 +350,7 @@ async def test_simultaneous_claims_have_one_winner(pg):
     codes = sorted(r.status_code for r in results)
     assert codes.count(200) >= 1 and set(codes) <= {200, 503}
     assert pg.counts["pg_write"] == 1
-    bodies = {str(r.json()) for r in results if r.status_code == 200}
+    bodies = {json.dumps(r.json(), sort_keys=True) for r in results if r.status_code == 200}
     assert len(bodies) == 1
 
 
