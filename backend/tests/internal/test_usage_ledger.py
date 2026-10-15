@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from sqlalchemy import func, select
 
 from app.config import Settings
-from app.config.llm_pricing import LLM_PRICING, find_model_pricing
+from app.config.llm_pricing import LLM_PRICING, calculate_cost_with_cache, find_model_pricing
 from app.core.database import get_system_db
 from app.internal_api.router import mount_internal_router
 from app.models.llm_provider import LLMProvider
@@ -196,3 +196,46 @@ async def test_unknown_purpose_is_rejected(client, test_db):
     t = await make_tenant(test_db)
     r = await post(client, body(t, purpose="embedding"))
     assert r.status_code == 422
+
+
+async def test_opus_cache_read_priced_at_documented_rate(client, test_db):
+    t = await make_tenant(test_db)
+    u = {"inputTokens": 1_000, "outputTokens": 500, "cacheReadTokens": 200_000, "cacheWriteTokens": 10_000}
+    await post(client, body(t, model="claude-opus-5-5", usage=u))
+    rec = (await rows(test_db, t))[0]
+    # $4/$20, cache read $0.20 (0.05x, not 0.1x), 5-minute write $5.00
+    assert float(rec.cost_usd) == pytest.approx((1_000 * 4.0 + 500 * 20.0 + 200_000 * 0.20 + 10_000 * 5.0) / 1e6)
+
+
+async def test_fable_cache_read_priced_at_documented_rate(client, test_db):
+    t = await make_tenant(test_db)
+    u = {"inputTokens": 0, "outputTokens": 0, "cacheReadTokens": 1_000_000, "cacheWriteTokens": 1_000_000}
+    await post(client, body(t, model="claude-fable-5-1", usage=u))
+    assert float((await rows(test_db, t))[0].cost_usd) == pytest.approx(0.25 + 12.5)
+
+
+async def test_haiku_request_above_threshold_uses_higher_tier(client, test_db):
+    t = await make_tenant(test_db)
+    low = {"inputTokens": 1_000, "outputTokens": 1_000, "cacheReadTokens": 99_000, "cacheWriteTokens": 0}  # 100K exactly
+    high = {"inputTokens": 1_000, "outputTokens": 1_000, "cacheReadTokens": 99_001, "cacheWriteTokens": 0}  # >100K
+    await post(client, body(t, model="claude-haiku-5-5", requestId="low", usage=low))
+    await post(client, body(t, model="claude-haiku-5-5", requestId="high", usage=high))
+    by = {r.request_id: float(r.cost_usd) for r in await rows(test_db, t)}
+    assert by["low"] == pytest.approx((1_000 * 0.10 + 1_000 * 0.50 + 99_000 * 0.10 * 0.1) / 1e6)
+    # the whole request moves to the higher card: $0.50/$2.50, cache reads/writes derive from $0.50
+    assert by["high"] == pytest.approx((1_000 * 0.50 + 1_000 * 2.50 + 99_001 * 0.50 * 0.1) / 1e6, abs=1e-7)
+
+
+def test_haiku_tier_is_per_request_not_cumulative():
+    p = find_model_pricing("claude-haiku-5-5")
+    small = calculate_cost_with_cache(p, 60_000, 0)
+    assert small == pytest.approx(60_000 * 0.10 / 1e6)
+    assert calculate_cost_with_cache(p, 100_001, 0) == pytest.approx(100_001 * 0.50 / 1e6)
+
+
+@pytest.mark.parametrize("model_id", ["claude-sonnet-4-5", "claude-haiku-4-5", "claude-sonnet-5-5"])
+def test_models_without_overrides_keep_global_multipliers(model_id):
+    p = find_model_pricing(model_id)
+    assert "tiers" not in p
+    expected = (100 * p["input"] + 50 * p["output"] + 10_000 * p["input"] * 0.1 + 2_000 * p["input"] * 1.25) / 1e6
+    assert calculate_cost_with_cache(p, 100, 50, 10_000, 2_000) == pytest.approx(expected)
