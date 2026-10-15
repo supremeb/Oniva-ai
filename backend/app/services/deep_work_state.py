@@ -1,0 +1,242 @@
+"""Deep Work run state on the engine path (deep-work-on-engine plan, U3, KTD11).
+
+Every function opens its own tenant-scoped session from ``factory`` (R17: no shared
+``AsyncSession`` across concurrent tool calls) and takes the run row with ``SELECT ... FOR UPDATE``
+so replays and concurrent worker saves cannot lose or regress state:
+
+* ``phase`` only moves forward (``PHASES``), ``round`` only grows;
+* a terminal ``status`` (completed, failed, cancelled) is sticky and freezes the row;
+* a worker's learnings are keyed by ``(round, worker_id)``, so a replay overwrites itself.
+
+``reconcile`` compares a still-``running`` row with the engine run state and writes ``failed`` or
+``cancelled`` once.
+"""
+import copy
+import logging
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
+from sqlalchemy import select
+
+from app.models.background_job import BackgroundJob
+from app.models.deep_work_run import DeepWorkRun
+
+logger = logging.getLogger(__name__)
+
+SessionFactory = Callable[[], Any]  # () -> async context manager yielding an AsyncSession
+
+PHASES = ("clarify", "plan", "research", "reflect", "synthesize", "done")
+TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+STATUSES = TERMINAL_STATUSES | {"running"}
+
+
+@dataclass(frozen=True)
+class EngineRunState:
+    """What the engine says about the root run: still active, or how it last ended.
+
+    ``ended`` is ``None`` while ``active``; otherwise one of ``run_error`` (the run failed),
+    ``aborted`` (cancelled) or ``finished`` (ended normally).
+    """
+
+    active: bool
+    ended: Optional[str] = None
+    error: Optional[str] = None
+
+
+ReadEngineState = Callable[[], Awaitable[EngineRunState]]
+
+
+@dataclass(frozen=True)
+class RunSnapshot:
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    project_id: uuid.UUID
+    user_id: uuid.UUID
+    conversation_id: uuid.UUID
+    query: str
+    enriched_query: Optional[str]
+    status: str
+    phase: str
+    round: int
+    plan: Optional[Any]
+    rounds: List[Dict[str, Any]]
+    reflections: List[Any]
+    artifacts: List[Any]
+    job_id: Optional[uuid.UUID]
+    is_engine: bool
+
+    @classmethod
+    def of(cls, r: DeepWorkRun) -> "RunSnapshot":
+        return cls(
+            id=r.id, tenant_id=r.tenant_id, project_id=r.project_id, user_id=r.user_id,
+            conversation_id=r.conversation_id, query=r.query, enriched_query=r.enriched_query,
+            status=r.status, phase=r.phase, round=r.round or 0, plan=copy.deepcopy(r.plan),
+            rounds=copy.deepcopy(r.rounds or []), reflections=copy.deepcopy(r.reflections or []),
+            artifacts=copy.deepcopy(r.artifacts or []), job_id=r.job_id, is_engine=bool(r.is_engine),
+        )
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _uuid(value: Any) -> uuid.UUID:
+    return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+
+def _phase_rank(phase: str) -> int:
+    try:
+        return PHASES.index(phase)
+    except ValueError:
+        raise ValueError(f"unknown phase {phase!r}")
+
+
+async def _locked(db: Any, tenant_id: Any, conversation_id: Any) -> Optional[DeepWorkRun]:
+    return (
+        await db.execute(
+            select(DeepWorkRun)
+            .where(DeepWorkRun.tenant_id == _uuid(tenant_id), DeepWorkRun.conversation_id == _uuid(conversation_id))
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+
+async def create_run(
+    factory: SessionFactory, *, tenant_id: Any, project_id: Any, user_id: Any, conversation_id: Any,
+    query: str, enriched_query: Optional[str] = None, job_id: Any = None,
+) -> RunSnapshot:
+    """Create the run for a root conversation; a second call returns the existing row unchanged."""
+    async with factory() as db:
+        existing = await _locked(db, tenant_id, conversation_id)
+        if existing is not None:
+            return RunSnapshot.of(existing)
+        row = DeepWorkRun(
+            id=uuid.uuid4(), tenant_id=_uuid(tenant_id), project_id=_uuid(project_id), user_id=_uuid(user_id),
+            conversation_id=_uuid(conversation_id), query=query, enriched_query=enriched_query,
+            status="running", phase="clarify", round=0, rounds=[], reflections=[], artifacts=[],
+            job_id=_uuid(job_id) if job_id else None, is_engine=True, created_at=_now(), updated_at=_now(),
+        )
+        db.add(row)
+        await db.flush()
+        return RunSnapshot.of(row)
+
+
+async def load_run(factory: SessionFactory, tenant_id: Any, conversation_id: Any) -> Optional[RunSnapshot]:
+    async with factory() as db:
+        row = (
+            await db.execute(
+                select(DeepWorkRun).where(
+                    DeepWorkRun.tenant_id == _uuid(tenant_id), DeepWorkRun.conversation_id == _uuid(conversation_id)
+                )
+            )
+        ).scalar_one_or_none()
+        return RunSnapshot.of(row) if row else None
+
+
+async def update_run(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any, *,
+    phase: Optional[str] = None, round: Optional[int] = None, status: Optional[str] = None,
+    plan: Optional[Any] = None, enriched_query: Optional[str] = None,
+    reflection: Optional[Any] = None, artifact: Optional[Any] = None,
+) -> Optional[RunSnapshot]:
+    """Apply a guarded update; ``None`` when the run does not exist.
+
+    A terminal run is frozen: the call returns it unchanged. Otherwise ``phase`` and ``round`` never
+    move backward, ``reflection`` / ``artifact`` are appended (an identical entry is not added twice).
+    """
+    if phase is not None:
+        _phase_rank(phase)
+    if status is not None and status not in STATUSES:
+        raise ValueError(f"unknown status {status!r}")
+    async with factory() as db:
+        row = await _locked(db, tenant_id, conversation_id)
+        if row is None:
+            return None
+        if row.status in TERMINAL_STATUSES:
+            return RunSnapshot.of(row)
+        if phase is not None and _phase_rank(phase) > _phase_rank(row.phase):
+            row.phase = phase
+        if round is not None and round > (row.round or 0):
+            row.round = round
+        if plan is not None:
+            row.plan = plan
+        if enriched_query is not None:
+            row.enriched_query = enriched_query
+        if reflection is not None and reflection not in (row.reflections or []):
+            row.reflections = [*(row.reflections or []), reflection]
+        if artifact is not None and artifact not in (row.artifacts or []):
+            row.artifacts = [*(row.artifacts or []), artifact]
+        if status is not None:
+            row.status = status
+        row.updated_at = _now()
+        await db.flush()
+        return RunSnapshot.of(row)
+
+
+async def save_worker_learnings(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any, *, round: int, worker_id: str, learnings: Any,
+) -> Optional[RunSnapshot]:
+    """Record one worker's learnings for ``round`` without losing a concurrent worker's.
+
+    Keyed by ``(round, worker_id)``: a replay overwrites itself. Raises the run's ``round`` to
+    ``round`` if it is behind. A terminal run ignores the save (a cancelled run takes no more output).
+    """
+    async with factory() as db:
+        row = await _locked(db, tenant_id, conversation_id)
+        if row is None:
+            return None
+        if row.status in TERMINAL_STATUSES:
+            return RunSnapshot.of(row)
+        rounds = copy.deepcopy(row.rounds or [])
+        entry = next((r for r in rounds if r.get("round") == round), None)
+        if entry is None:
+            entry = {"round": round, "workers": {}}
+            rounds.append(entry)
+            rounds.sort(key=lambda r: r["round"])
+        entry["workers"][worker_id] = learnings
+        row.rounds = rounds  # new object so the JSONB change is detected
+        if round > (row.round or 0):
+            row.round = round
+        row.updated_at = _now()
+        await db.flush()
+        return RunSnapshot.of(row)
+
+
+_ENDED_TO_STATUS = {"run_error": "failed", "aborted": "cancelled", "finished": "failed"}
+
+
+async def reconcile(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any, read_state: ReadEngineState,
+) -> Optional[RunSnapshot]:
+    """Write ``failed`` or ``cancelled`` for a ``running`` row whose engine run has ended (KTD11).
+
+    ``finished`` without a ``completed`` row means the run ended before ``dw_finalize``: ``failed``.
+    Idempotent: a row that is not ``running`` is returned as is, and the engine is not asked.
+    """
+    run = await load_run(factory, tenant_id, conversation_id)
+    if run is None or run.status != "running":
+        return run
+    state = await read_state()
+    if state.active or state.ended not in _ENDED_TO_STATUS:
+        return run
+    status = _ENDED_TO_STATUS[state.ended]
+    async with factory() as db:
+        row = await _locked(db, tenant_id, conversation_id)
+        if row is None:
+            return None
+        if row.status != "running":  # settled by a concurrent finalize / cancel / reconcile
+            return RunSnapshot.of(row)
+        row.status = status
+        row.updated_at = _now()
+        if row.job_id is not None:
+            job = await db.get(BackgroundJob, row.job_id)
+            if job is not None and job.status in ("pending", "running"):
+                job.status = status
+                job.completed_at = _now()
+                if status == "failed":
+                    job.error = state.error or "The engine run ended before the report was produced."
+        await db.flush()
+        logger.info("Deep Work run %s reconciled to %s", row.id, status)
+        return RunSnapshot.of(row)

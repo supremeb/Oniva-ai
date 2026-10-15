@@ -60,6 +60,7 @@ from app.models.project_member import ProjectMember
 from app.models.routing_policy import RoutingPolicy
 from app.models.run_event import RunEvent
 from app.models.engine import ToolInvocation, EngineFence, EngineConversation
+from app.models.deep_work_run import DeepWorkRun
 
 __all__ = [
     'Base',
@@ -166,4 +167,5 @@ __all__ = [
     'ToolInvocation',
     'EngineFence',
     'EngineConversation',
+    'DeepWorkRun',
 ]
