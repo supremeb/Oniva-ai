@@ -9,13 +9,30 @@ import { ModelRegistry } from "../models/stream.js";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-/** `ENGINE_OPENROUTER_BASE_URL` overrides the OpenRouter endpoint. */
-export function defaultModelRegistry(env: Env = {}): ModelRegistry {
+export type ModelLog = (event: string, fields?: Record<string, unknown>) => void;
+
+/**
+ * `ENGINE_OPENROUTER_BASE_URL` overrides the OpenRouter endpoint. `log`
+ * receives `model_retry` whenever the OpenRouter adapter retries a request.
+ */
+export function defaultModelRegistry(env: Env = {}, log?: ModelLog): ModelRegistry {
   const baseURL = env.ENGINE_OPENROUTER_BASE_URL?.trim() || OPENROUTER_BASE_URL;
   return new ModelRegistry().register(new AnthropicProvider()).register(
     openRouterProvider({
       baseURL,
       headers: { "X-Title": "Oniva" },
+      retry: {
+        onRetry: (info) =>
+          log?.("model_retry", {
+            provider: info.provider,
+            model: info.model,
+            attempt: info.attempt,
+            delayMs: info.delayMs,
+            kind: info.error.kind,
+            status: info.error.status,
+            error: info.error.message,
+          }),
+      },
     }),
   );
 }

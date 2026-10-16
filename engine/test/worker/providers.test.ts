@@ -42,7 +42,7 @@ describe("defaultModelRegistry", () => {
     const real = globalThis.fetch;
     globalThis.fetch = (async (url: string | URL | Request) => {
       urls.push(String(url));
-      return new Response("{}", { status: 500 });
+      return new Response("{}", { status: 400 });
     }) as typeof fetch;
     try {
       const models = defaultModelRegistry({ ENGINE_OPENROUTER_BASE_URL: "http://127.0.0.1:1/api" });

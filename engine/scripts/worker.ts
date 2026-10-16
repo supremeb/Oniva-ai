@@ -39,7 +39,7 @@ async function main(): Promise<number> {
   }
 
   const pool = createWorkerPool(config, log);
-  const models = defaultModelRegistry(process.env);
+  const models = defaultModelRegistry(process.env, log);
   const worker = await startWorker({
     pool,
     sessionId: config.sessionId,

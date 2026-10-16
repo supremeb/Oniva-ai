@@ -11,12 +11,22 @@
  *   is not sent.
  * - Usage: `prompt_tokens` includes cached tokens, so uncached input is
  *   `prompt_tokens - cached - cache_write`.
+ * - Retries: transient failures before the first emitted content delta are
+ *   retried (`retry.ts`); a failure after content is final.
  * - Prompt caching: for models matched by `cacheControl`, one breakpoint goes on
  *   the last system part and one on the last stable user/assistant text part.
  */
 import type { Context } from "../core/context.js";
 import type { JsonObject } from "../core/json.js";
 import { isContextOverflowMessage } from "./anthropic.js";
+import {
+  type AttemptMeta,
+  describeError,
+  isTransportError,
+  type RetryPolicy,
+  serverRetryDelay,
+  withRetry,
+} from "./retry.js";
 import { abortMessage, MessageBuilder, modelError } from "./stream.js";
 import type {
   Message,
@@ -41,6 +51,12 @@ export interface OpenAICompatibleProviderOptions {
   fetch?: FetchLike;
   /** Which models take `cache_control` breakpoints. Default: none. */
   cacheControl?: (model: string) => boolean;
+  /**
+   * Retry policy for failures before any content was emitted. Default: 3
+   * retries within 60 s, backoff 500 ms doubling to 8 s with jitter. Set
+   * `onRetry` to log each retry; `maxRetries: 0` turns retrying off.
+   */
+  retry?: RetryPolicy;
 }
 
 interface TextPart {
@@ -124,13 +140,29 @@ export class OpenAICompatibleProvider implements ModelProvider {
     return params;
   }
 
+  /**
+   * Retries a transient failure (connection error, 408/409/429/5xx, a stream
+   * that errors or ends before its first content delta) with capped backoff;
+   * once content has been emitted a failure is final (see `retry.ts`).
+   */
   async *stream(ctx: Context, request: ModelRequest): AsyncIterable<StreamEvent> {
     const b = new MessageBuilder(this.name, request.model);
     if (ctx.cancelled) {
       yield b.fail(modelError("aborted", abortMessage(ctx)));
       return;
     }
+    yield* withRetry(ctx, b, this.#options.retry ?? {}, (meta) =>
+      this.#attempt(ctx, request, b, meta),
+    );
+  }
 
+  /** One request. Yields the stream's events ending in `done` or `error`. */
+  async *#attempt(
+    ctx: Context,
+    request: ModelRequest,
+    b: MessageBuilder,
+    meta: AttemptMeta,
+  ): AsyncGenerator<StreamEvent> {
     let textIndex: number | undefined;
     // Chat Completions tool_call index -> neutral block index.
     const toolIndex = new Map<number, number>();
@@ -159,6 +191,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         signal: ctx.signal,
       });
       if (!res.ok) {
+        meta.retryAfterMs = serverRetryDelay(res.headers, Date.now());
         yield b.fail(await httpError(res));
         return;
       }
@@ -246,6 +279,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       return;
     }
     if (finishReason === "error") {
+      meta.retryable = true;
       yield b.fail(modelError("provider", "the provider reported an error finish"));
       return;
     }
@@ -429,11 +463,12 @@ export function classifyOpenAIError(err: unknown, ctx: Context): ModelError {
   }
   if (
     err instanceof TypeError ||
+    isTransportError(err) ||
     (err instanceof Error && /fetch|network|socket|terminated/i.test(err.message))
   ) {
-    return modelError("network", err.message);
+    return modelError("network", describeError(err));
   }
-  return modelError("provider", err instanceof Error ? err.message : String(err));
+  return modelError("provider", describeError(err));
 }
 
 /** OpenRouter: Claude models accept `cache_control` breakpoints. */
