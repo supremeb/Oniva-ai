@@ -275,6 +275,7 @@ def _alembic_config():
     backend_dir = Path(__file__).resolve().parents[2]
     cfg = Config(str(backend_dir / "alembic.ini"))
     cfg.set_main_option("script_location", str(backend_dir / "migrations"))
+    cfg.attributes["configure_logger"] = False  # keep the server's logging config (see migrations/env.py)
     return cfg
 
 
