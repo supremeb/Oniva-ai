@@ -266,3 +266,10 @@ def test_every_internal_route_401_without_token_and_with_wrong_token():
     for m, p in internal:
         assert c.request(m, _concrete(p)).status_code == 401, (m, p)
         assert c.request(m, _concrete(p), headers={"Authorization": "Bearer wrong"}).status_code == 401, (m, p)
+
+
+def test_browser_refresh_with_empty_body_reaches_the_cookie_check(client):
+    # Browsers send `{}` and carry the refresh token in the httpOnly cookie. Rejecting the empty body
+    # with 422 logged every user out when the access token expired.
+    r = client.post("/api/v1/auth/refresh", json={})
+    assert r.status_code == 401, r.text
