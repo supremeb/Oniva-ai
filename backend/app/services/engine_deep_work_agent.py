@@ -92,6 +92,9 @@ class ExecuteInputs:
     knowledge_base_ids: List[str] = field(default_factory=list)  # accessible KBs only
     connector_ids: List[str] = field(default_factory=list)       # valid connectors only
     sandbox_enabled: bool = False
+    # KBs (subset of knowledge_base_ids) that hold indexed documents; None = unknown, treat all as searchable.
+    searchable_kb_ids: Optional[List[str]] = None
+    has_files: bool = False           # the run has project/workspace files workers can read_file
     run_id: Optional[str] = None
     max_rounds: Optional[int] = None
     deadline_ms: Optional[int] = None
@@ -111,11 +114,24 @@ def intake_agent_config(models: DeepWorkModels, now: Optional[datetime] = None) 
     }
 
 
-def plan_agent_config(models: DeepWorkModels, now: Optional[datetime] = None) -> Dict[str, Any]:
+NO_WEB_PLAN_NOTE = (
+    "## Tool availability\n\n"
+    "Web search and page browsing are NOT available on this run. Do not put `web_search` or `browse_url` "
+    "in any sub_query's `tools`, and do not write sub-queries that depend on live web research. Workers "
+    "answer from their own knowledge (and any knowledge bases or connectors) and must flag uncertainty."
+)
+
+
+def plan_agent_config(
+    models: DeepWorkModels, now: Optional[datetime] = None, has_search: bool = True,
+) -> Dict[str, Any]:
     """Plan phase: no tools, the legacy orchestrator (planner) prompt; the answer is ``DeepWorkPlan`` JSON."""
     now = now or datetime.now(timezone.utc)
+    prompt = _with_date(load_prompt("orchestrator.md"), now)
+    if not has_search:
+        prompt = f"{prompt}\n\n{NO_WEB_PLAN_NOTE}"
     return {
-        "systemPrompt": _with_date(load_prompt("orchestrator.md"), now),
+        "systemPrompt": prompt,
         "tools": [],
         "model": models.high,
         "metadata": {"purpose": PURPOSE_ORCHESTRATOR, "phase": "plan", "subagents": {}},
@@ -226,17 +242,76 @@ def _dedupe(items: Iterable[str]) -> List[str]:
     return list(dict.fromkeys(i for i in items if i))
 
 
+def searchable_kbs(inputs: ExecuteInputs) -> List[str]:
+    kbs = inputs.knowledge_base_ids if inputs.searchable_kb_ids is None else inputs.searchable_kb_ids
+    return [k for k in kbs if k in inputs.knowledge_base_ids]
+
+
 def worker_tools(inputs: ExecuteInputs) -> List[str]:
-    tools: List[str] = [FILE_TOOL, WORKER_SAVE_TOOL]
+    # read_file is offered only when the run has files to read: workers are not pointed at any other file
+    # and guess names ("findings.json") when it is there with nothing behind it.
+    tools: List[str] = [WORKER_SAVE_TOOL]
+    if inputs.has_files:
+        tools.append(FILE_TOOL)
     if inputs.has_search:
         tools += list(WEB_TOOLS)
-    if inputs.knowledge_base_ids:
+    if searchable_kbs(inputs):
         tools.append(KNOWLEDGE_TOOL)
     if inputs.connector_ids:
         tools += list(CONNECTOR_TOOLS)
     if inputs.sandbox_enabled:
         tools += list(SANDBOX_WORKER_TOOLS)
     return sorted(_dedupe(tools))
+
+
+def worker_tools_section(inputs: ExecuteInputs) -> str:
+    """The "Your tools" block of the worker prompt, derived from the worker's real tool set."""
+    tools = set(worker_tools(inputs))
+    lines: List[str] = []
+    if "web_search" in tools:
+        lines.append("- `web_search` and `browse_url`: find pages, then read the two or three most promising.")
+    if KNOWLEDGE_TOOL in tools:
+        lines.append("- `search_knowledge`: search the attached knowledge bases when the sub-query may be covered there.")
+    if FILE_TOOL in tools:
+        lines.append("- `read_file`: read the project files you were pointed to. Do not guess file names.")
+    if "invoke_connector_tool" in tools:
+        lines.append("- `list_available_connectors`, `get_connector_schema`, `invoke_connector_tool`: query connected data sources.")
+    if "shell_exec" in tools:
+        lines.append("- `shell_exec` (sandbox): computation and analysis; see Code execution below.")
+    lines.append("- `dw_save_learnings`: save your findings, once.")
+    out = ["## Your tools", "", "These are the only tools you have. Do not call anything else.", ""] + lines
+    gathering = tools & {"web_search", KNOWLEDGE_TOOL, FILE_TOOL, "invoke_connector_tool"}
+    if not gathering:
+        out += [
+            "", "You have NO web search, knowledge base or file access on this run. Do not look for them. "
+            "Answer the sub-query from your own knowledge: state what you know that is relevant and specific, "
+            "be explicit about uncertainty (lower the `confidence` of anything you are unsure of, and say so in "
+            "the `fact`), and never invent URLs, quotes, statistics or sources. Save each finding with "
+            "`source_type` `model_knowledge` and no `source_url`, in one `dw_save_learnings` call. "
+            "Do this even if you have little to add: save what you know, then answer.",
+        ]
+    elif "web_search" not in tools:
+        out += ["", "You have NO web search on this run: use the tools above, and answer the rest from your own "
+                "knowledge as `model_knowledge` learnings (no `source_url`), flagging uncertainty."]
+    return "\n".join(out)
+
+
+def worker_prompt(inputs: ExecuteInputs, now: datetime) -> str:
+    """worker_engine.md with its tool-dependent parts replaced by what this run's worker really has."""
+    text = load_prompt("worker_engine.md")
+    tools = set(worker_tools(inputs))
+    if "{{TOOLS_SECTION}}" not in text:
+        return _with_date(text, now)
+    step1 = ("Start with `web_search` to find pages; read the two or three most promising with `browse_url`. "
+             if "web_search" in tools else "")
+    if not tools & {"web_search", KNOWLEDGE_TOOL, FILE_TOOL, "invoke_connector_tool"}:
+        method = ("Work from your own knowledge: list the specific, relevant points you can state with reasonable "
+                  "confidence, and mark what you are unsure of.")
+    else:
+        method = (step1 + "Use the other tools listed under Your tools only where they fit the sub-query. "
+                  "Never guess file names or retry a tool that returns nothing.")
+    text = text.replace("{{TOOLS_SECTION}}", worker_tools_section(inputs)).replace("{{METHOD}}", method)
+    return _with_date(text, now)
 
 
 def has_output_agent(inputs: ExecuteInputs) -> bool:
@@ -256,7 +331,7 @@ def compose_execute_config(
         RESEARCH_WORKER: {
             "model": models.worker or models.mid,
             "tools": worker_tools(inputs),
-            "systemPrompt": _with_date(load_prompt("worker_engine.md"), now),
+            "systemPrompt": worker_prompt(inputs, now),
         },
         REFLECTOR: {
             "model": models.mid,
@@ -274,6 +349,11 @@ def compose_execute_config(
         parent_tools.append(OUTPUT_AGENT)
 
     prompt_parts = [_with_date(load_prompt("orchestrator_loop.md"), now)]
+    if not inputs.has_search:
+        prompt_parts.append(
+            "## Tool availability\n\nWeb search is NOT available on this run. Workers answer from their own "
+            "knowledge (and any knowledge bases or connectors) and save it as `model_knowledge` learnings; "
+            "do not tell a worker to search the web or browse pages.")
     prompt_parts.append("## Approved plan\n\n```json\n" + inputs.plan.model_dump_json(indent=2) + "\n```")
     if not with_output:
         prompt_parts.append("This plan has no deliverable file: skip step 7 and do not look for `output_agent`.")

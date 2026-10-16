@@ -302,7 +302,7 @@ async def _write_plan_files(run: dws.RunSnapshot) -> List[str]:
 @skill(
     name="dw_save_learnings",
     description=(
-        "Save a research worker's learnings (facts with source URLs). Replaces anything that worker saved "
+        "Save a research worker's learnings (facts with source URLs; source_type 'model_knowledge' needs no URL). Replaces anything that worker saved "
         "before, so saving twice is safe. Call once, when the worker is done."
     ),
     category="deep_work",
@@ -315,6 +315,8 @@ async def dw_save_learnings(ctx: SkillContext, worker_id: str, learnings: List[D
     Args:
         worker_id: The id this worker was registered with in dw_start_round.
         learnings: Findings, each {"fact", "source_url", "confidence" (0-1), "source_title", "source_type", "quote"}.
+            source_type is "web", "knowledge_base", "connector" or "model_knowledge" (from your own knowledge,
+            no source_url needed; every other type requires source_url).
     """
     tenant_id, conv_id, factory = _scope(ctx)
     cap = get_settings().DEEP_WORK_MAX_LEARNINGS_PER_WORKER

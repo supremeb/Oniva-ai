@@ -201,7 +201,6 @@
                 "tools": [
                   "browse_url",
                   "dw_save_learnings",
-                  "read_file",
                   "web_search"
                 ],
                 "systemPrompt": "<prompt:research_worker>"
@@ -508,7 +507,6 @@
                 "tools": [
                   "browse_url",
                   "dw_save_learnings",
-                  "read_file",
                   "web_search"
                 ],
                 "systemPrompt": "<prompt:research_worker>"
@@ -1227,7 +1225,6 @@
                 "tools": [
                   "browse_url",
                   "dw_save_learnings",
-                  "read_file",
                   "web_search"
                 ],
                 "systemPrompt": "<prompt:research_worker>"
@@ -1394,7 +1391,6 @@
                 "tools": [
                   "browse_url",
                   "dw_save_learnings",
-                  "read_file",
                   "web_search"
                 ],
                 "systemPrompt": "<prompt:research_worker>"
