@@ -15,6 +15,7 @@
  * | `ENGINE_POLICY` | `backend` when `ENGINE_POLICY_URL` is set, else `local` | `backend`: model, key and quota come from the backend per request; `local`: `ENGINE_MODEL` and `ANTHROPIC_API_KEY` |
  * | `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` under `ENGINE_POLICY=backend` | backend origin serving `/internal/models/{policy,usage}`; authenticated with the gateway token |
  * | `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
+ * | `ENGINE_POLICY_RETRY_MS` | `60000` | total time a transient policy or usage failure is retried; `0` for none |
  * | `ENGINE_APPROVAL_TTL_MS` | `86400000` | approval expiry; `0` for none |
  * | `ENGINE_MODEL` / `ENGINE_SUMMARY_MODEL` | Anthropic defaults | model ids |
  * | `ENGINE_MAX_TOKENS` | `8192` | reply token budget per request |
@@ -35,7 +36,7 @@
 import pg from "pg";
 import { DEFAULT_PROGRESS_INTERVAL_MS } from "../agent/progress.js";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_ANTHROPIC_SUMMARY_MODEL } from "../models/anthropic.js";
-import { DEFAULT_POLICY_TIMEOUT_MS } from "./backend-policy.js";
+import { DEFAULT_POLICY_TIMEOUT_MS, DEFAULT_RETRY_MS } from "./backend-policy.js";
 
 export type WorkerEnv = Readonly<Record<string, string | undefined>>;
 
@@ -56,6 +57,7 @@ export interface WorkerConfig {
   /** Backend origin for the policy and usage endpoints; set iff `policy` is `backend`. */
   policyUrl: string | null;
   policyTimeoutMs: number;
+  policyRetryMs: number;
   /** Null: approvals never expire. */
   approvalTtlMs: number | null;
   model: string;
@@ -208,6 +210,7 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
     policy,
     policyUrl,
     policyTimeoutMs: integer(env, "ENGINE_POLICY_TIMEOUT_MS", DEFAULT_POLICY_TIMEOUT_MS, 1),
+    policyRetryMs: integer(env, "ENGINE_POLICY_RETRY_MS", DEFAULT_RETRY_MS, 0),
     approvalTtlMs: approval === 0 ? null : approval,
     model: text(env, "ENGINE_MODEL") ?? DEFAULT_ANTHROPIC_MODEL,
     summaryModel: text(env, "ENGINE_SUMMARY_MODEL") ?? DEFAULT_ANTHROPIC_SUMMARY_MODEL,

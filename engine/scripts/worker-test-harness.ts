@@ -202,6 +202,7 @@ async function main(): Promise<number> {
             baseUrl: config.policyUrl,
             serviceToken: config.gatewayToken ?? config.serviceToken,
             timeoutMs: config.policyTimeoutMs,
+            retryMs: config.policyRetryMs,
           }
         : null,
     approvalTtlMs: config.approvalTtlMs,

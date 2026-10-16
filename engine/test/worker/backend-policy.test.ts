@@ -51,8 +51,25 @@ function client(
     baseUrl: `${gw.baseUrl}/`,
     serviceToken: gw.serviceToken,
     supportedProviders: () => ["fake"],
+    retryMs: 0,
     ...extra,
   });
+}
+
+/** A virtual clock: `sleep` advances `now` and records each wait; no real time passes. */
+function virtualTime() {
+  let t = 1_000_000;
+  const waits: number[] = [];
+  return {
+    waits,
+    now: () => t,
+    random: () => 1,
+    sleep: async (ms: number, signal?: AbortSignal) => {
+      if (signal?.aborted) return;
+      waits.push(ms);
+      t += ms;
+    },
+  };
 }
 
 describe("BackendPolicyClient", () => {
@@ -163,6 +180,233 @@ describe("BackendPolicyClient", () => {
     });
     const req = { toolName: "danger" } as Any;
     expect(await policy.authorizeTool(req)).toMatchObject({ decision: "requireApproval" });
+  });
+});
+
+describe("BackendPolicyClient retries", () => {
+  it("retries a dropped connection with the same request id and resolves once", async () => {
+    const gw = await start();
+    gw.scriptPolicy({ reset: true }, { ok: true, apiKey: "sk-after" });
+    const lines: Array<[string, Any]> = [];
+    const c = client(gw, { ...virtualTime(), retryMs: 60_000, log: (e, f) => lines.push([e, f]) });
+    expect(await c.resolveModelRequest(info())).toMatchObject({ ok: true, apiKey: "sk-after" });
+    const posts = gw.policyRequests();
+    expect(posts).toHaveLength(2);
+    expect(posts[0]?.body).toEqual(posts[1]?.body);
+    expect(lines.filter(([e]) => e === "policy_retry")).toHaveLength(1);
+    expect(lines.find(([e]) => e === "policy_retry")?.[1]).toMatchObject({
+      requestId: "run-1:2:generation",
+      attempt: 1,
+    });
+  });
+
+  it("retries 500, 500 then succeeds with growing, capped delays", async () => {
+    const gw = await start();
+    gw.scriptPolicy({ status: 500 }, { status: 502 }, { status: 504 }, { ok: true });
+    const time = virtualTime();
+    const c = client(gw, { ...time, retryMs: 60_000, baseDelayMs: 100, maxDelayMs: 250 });
+    expect(await c.resolveModelRequest(info())).toMatchObject({ ok: true });
+    expect(gw.policyRequests()).toHaveLength(4);
+    expect(time.waits).toEqual([100, 200, 250]);
+  });
+
+  it("retries a timeout", async () => {
+    const gw = await start();
+    gw.scriptPolicy({ hang: true }, { ok: true });
+    const c = client(gw, { ...virtualTime(), retryMs: 60_000, timeoutMs: 50 });
+    expect(await c.resolveModelRequest(info())).toMatchObject({ ok: true });
+    expect(gw.policyRequests()).toHaveLength(2);
+  });
+
+  it("does not retry a definitive answer", async () => {
+    for (const answer of [
+      { status: 403 },
+      { status: 401 },
+      { status: 422 },
+      { status: 404 },
+      { ok: false as const, code: "quota_exceeded", reason: "used up" },
+    ]) {
+      const gw = await start();
+      gw.scriptPolicy(answer, { ok: true });
+      const time = virtualTime();
+      const res = await client(gw, { ...time, retryMs: 60_000 }).resolveModelRequest(info());
+      expect(res).toMatchObject({ ok: false });
+      expect(res).not.toHaveProperty("transient");
+      expect(gw.policyRequests()).toHaveLength(1);
+      expect(time.waits).toEqual([]);
+    }
+  });
+
+  it("does not retry a malformed 200", async () => {
+    const gw = await start();
+    gw.scriptPolicy({ status: 200, body: { ok: true, provider: "fake" } }, { ok: true });
+    const res = await client(gw, { ...virtualTime(), retryMs: 60_000 }).resolveModelRequest(info());
+    expect(res).toMatchObject({ ok: false, code: "policy_unavailable" });
+    expect(res).not.toHaveProperty("transient");
+    expect(gw.policyRequests()).toHaveLength(1);
+  });
+
+  it("honours Retry-After on 429 and 503, not on 500", async () => {
+    const gw = await start();
+    gw.scriptPolicy(
+      { status: 429, headers: { "retry-after": "7" } },
+      { status: 503, headers: { "retry-after": "3" } },
+      { status: 500, headers: { "retry-after": "50" } },
+      { ok: true },
+    );
+    const time = virtualTime();
+    const c = client(gw, { ...time, retryMs: 60_000, baseDelayMs: 100 });
+    expect(await c.resolveModelRequest(info())).toMatchObject({ ok: true });
+    expect(time.waits).toEqual([7000, 3000, 400]);
+  });
+
+  it("gives up at once when Retry-After is longer than the remaining budget", async () => {
+    const gw = await start();
+    gw.scriptPolicy({ status: 429, headers: { "retry-after": "120" } }, { ok: true });
+    const time = virtualTime();
+    const res = await client(gw, { ...time, retryMs: 60_000 }).resolveModelRequest(info());
+    expect(res).toMatchObject({ ok: false, code: "policy_unavailable", transient: true });
+    expect(gw.policyRequests()).toHaveLength(1);
+    expect(time.waits).toEqual([]);
+  });
+
+  it("returns a transient policy_unavailable once the budget is spent", async () => {
+    const gw = await start();
+    gw.defaultPolicy = { status: 500 };
+    const time = virtualTime();
+    const lines: string[] = [];
+    const c = client(gw, {
+      ...time,
+      retryMs: 1000,
+      baseDelayMs: 300,
+      maxDelayMs: 300,
+      log: (e) => lines.push(e),
+    });
+    const res = await c.resolveModelRequest(info());
+    expect(res).toMatchObject({ ok: false, code: "policy_unavailable", transient: true });
+    expect(time.waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(1000);
+    expect(gw.policyRequests()).toHaveLength(time.waits.length + 1);
+    expect(lines).toContain("policy_error");
+    expect(lines.filter((e) => e === "policy_retry")).toHaveLength(time.waits.length);
+  });
+
+  it("does not retry when retryMs is 0", async () => {
+    const gw = await start();
+    gw.scriptPolicy({ status: 500 }, { ok: true });
+    const res = await client(gw, { ...virtualTime(), retryMs: 0 }).resolveModelRequest(info());
+    expect(res).toMatchObject({ ok: false, transient: true });
+    expect(gw.policyRequests()).toHaveLength(1);
+  });
+
+  it("stops retrying when the run aborts during a backoff", async () => {
+    const gw = await start();
+    gw.defaultPolicy = { status: 500 };
+    const ctx = Context.background();
+    let sleeping!: () => void;
+    const slept = new Promise<void>((r) => {
+      sleeping = r;
+    });
+    const c = client(gw, {
+      retryMs: 60_000,
+      sleep: (_ms, signal) =>
+        new Promise<void>((resolve) => {
+          sleeping();
+          signal?.addEventListener("abort", () => resolve(), { once: true });
+        }),
+    });
+    const pending = c.resolveModelRequest({ ...info(), ctx });
+    await slept;
+    ctx.cancel();
+    const res = await pending;
+    expect(res).toMatchObject({ ok: false });
+    expect(res).not.toHaveProperty("transient");
+    expect(gw.policyRequests()).toHaveLength(1);
+  });
+
+  it("makes no request when the run is already aborted", async () => {
+    const gw = await start();
+    const ctx = Context.background();
+    ctx.cancel();
+    const res = await client(gw, { retryMs: 60_000 }).resolveModelRequest({ ...info(), ctx });
+    expect(res).toMatchObject({ ok: false });
+    expect(gw.policyRequests()).toHaveLength(0);
+  });
+
+  it("rides out a short outage: the run completes with one decision and one usage row", async () => {
+    const gw = await start();
+    gw.scriptPolicy({ reset: true }, { status: 500 }, { ok: true, apiKey: "sk-ok" });
+    const time = virtualTime();
+    const policyClient = client(gw, { ...time, retryMs: 60_000 });
+    const fx = await memoryBackend.fixture();
+    const rep = new UsageReporter({
+      baseUrl: gw.baseUrl,
+      serviceToken: gw.serviceToken,
+      ...time,
+    });
+    const policy = workerHostPolicy({
+      modelDefaults: {
+        provider: "fake",
+        model: "m",
+        summaryModel: "m",
+        maxTokens: 10,
+        apiKey: () => "k",
+      },
+      gateway: null,
+      approvalTtlMs: null,
+      clock: fx.clock,
+      backend: policyClient,
+    });
+    fx.provider.enqueue(fakeText("hello"));
+    const w = await fx.open({ policy, hooks: rep.hooks });
+    const conv = await w.harness.createConversation({
+      tenantId: "t1",
+      projectId: "p1",
+      agent: { systemPrompt: "s", tools: [] },
+    });
+    const settled = await (await conv.submit({ text: "hi" })).wait();
+    expect(settled.status).toBe("done");
+    await rep.flush();
+    expect(gw.policyRequests()).toHaveLength(3);
+    expect(new Set(gw.policyRequests().map((r) => (r.body as Any).requestId)).size).toBe(1);
+    expect(gw.usage).toHaveLength(1);
+    await w.crash();
+  });
+
+  it("fails the run with a retryable network error after the budget, not a denial", async () => {
+    const gw = await start();
+    gw.defaultPolicy = { status: 500 };
+    const time = virtualTime();
+    const fx = await memoryBackend.fixture();
+    const policy = workerHostPolicy({
+      modelDefaults: {
+        provider: "fake",
+        model: "m",
+        summaryModel: "m",
+        maxTokens: 10,
+        apiKey: () => "k",
+      },
+      gateway: null,
+      approvalTtlMs: null,
+      clock: fx.clock,
+      backend: client(gw, { ...time, retryMs: 2000 }),
+    });
+    const w = await fx.open({ policy });
+    const conv = await w.harness.createConversation({
+      tenantId: "t1",
+      projectId: "p1",
+      agent: { systemPrompt: "s", tools: [] },
+    });
+    const settled = await (await conv.submit({ text: "hi" })).wait();
+    expect(settled.status).not.toBe("done");
+    const entries = await conv.entries();
+    const err = entries.find((e: Any) => e.kind === "run_error") as Any;
+    expect(err.payload.error).toMatchObject({
+      kind: "network",
+      code: "policy_unavailable",
+      retryable: true,
+    });
+    expect(fx.provider.requests).toHaveLength(0);
+    await w.crash();
   });
 });
 
@@ -353,6 +597,34 @@ describe("UsageReporter", () => {
     expect(gw.usageRequests()).toHaveLength(3);
     expect(gw.usage).toHaveLength(0);
     expect(lines).toContain("usage_failed");
+  });
+
+  it("keeps retrying through an outage longer than four attempts, within the time budget", async () => {
+    const gw = await start();
+    gw.failUsage(503, 503, 502, 500, 500, 504);
+    const time = virtualTime();
+    const rep = reporter(gw, { ...time, retryMs: 60_000, baseDelayMs: 100 });
+    await run(gw, rep);
+    expect(gw.usageRequests()).toHaveLength(7);
+    expect(gw.usage).toHaveLength(1);
+  });
+
+  it("gives up when the time budget is spent", async () => {
+    const gw = await start();
+    gw.failUsage(...Array.from({ length: 50 }, () => 503));
+    const time = virtualTime();
+    const lines: string[] = [];
+    const rep = reporter(gw, {
+      ...time,
+      retryMs: 1000,
+      baseDelayMs: 400,
+      maxDelayMs: 400,
+      log: (e) => lines.push(e),
+    });
+    await run(gw, rep);
+    expect(gw.usage).toHaveLength(0);
+    expect(lines).toContain("usage_failed");
+    expect(time.waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(1000);
   });
 
   it("drops a client error without retrying", async () => {

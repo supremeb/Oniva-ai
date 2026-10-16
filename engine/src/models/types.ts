@@ -250,7 +250,16 @@ export type ModelResolution =
       maxTokens: number;
       thinking?: ThinkingLevel;
     }
-  | { ok: false; reason: string; code?: string };
+  | {
+      ok: false;
+      reason: string;
+      code?: string;
+      /**
+       * The refusal is a transient infrastructure failure, not a decision: the
+       * run fails with a retryable `network` error rather than `denied`.
+       */
+      transient?: boolean;
+    };
 
 /** The non-policy part of a request: what to send, not where or with which key. */
 export interface ModelInput {

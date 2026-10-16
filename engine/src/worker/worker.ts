@@ -70,6 +70,8 @@ export interface WorkerBackendPolicyOptions {
   baseUrl: string;
   serviceToken: string;
   timeoutMs?: number;
+  /** Total time to keep retrying a transient policy or usage failure; default 60 s, `0` for none. */
+  retryMs?: number;
   fetch?: typeof fetch;
 }
 

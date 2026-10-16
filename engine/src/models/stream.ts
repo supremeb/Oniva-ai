@@ -373,7 +373,8 @@ export class ModelRegistry {
         }
         if (!resolution.ok) {
           const extra = resolution.code === undefined ? {} : { code: resolution.code };
-          return { provider: "", model: "", error: modelError("denied", resolution.reason, extra) };
+          const kind = resolution.transient ? "network" : "denied";
+          return { provider: "", model: "", error: modelError(kind, resolution.reason, extra) };
         }
         const call: ModelCall = {
           ...input,

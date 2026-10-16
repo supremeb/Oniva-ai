@@ -93,6 +93,22 @@
  * root conversation [clause:usage-agent-role]; a malformed one is `422`
  * [clause:usage-agent-role-422]. `conversationId` is always the root's.
  *
+ * Transient failures of both routes (restart, overload): a dropped
+ * connection, a timeout, `408`, `429` or any `5xx` is an outage, not an answer,
+ * and the engine retries it with the same `requestId` and body for a bounded
+ * time (`ENGINE_POLICY_RETRY_MS`, default 60 s) (engine client: models-retry-transient);
+ * `Retry-After` on `429`/`503` sets the next delay (engine client: models-retry-after).
+ * The policy route caches the decision per `(tenantId, requestId)`, so a retry
+ * after a lost answer returns the same decision [clause:policy-retry-idempotent];
+ * the usage route counts a retried report once (see usage-repeat-false above).
+ * A definitive answer is never retried: a `200 { ok: false }` denial, `401`,
+ * `403`, `422` and any other `4xx` besides `408`/`429` [clause:models-no-retry-definitive].
+ * Once the budget is spent a policy request fails the run with a retryable
+ * `network` error code `policy_unavailable` (engine client: policy-exhausted-retryable);
+ * a run abort stops retrying at once (engine client: models-retry-abort);
+ * a spent usage report logs `usage_failed` and is dropped
+ * (engine client: usage-exhausted-dropped).
+ *
  * Test controls: per-tool effect counters ({@link FakeGateway.effects}),
  * scripted failures and delays, stored outcomes by key, the per-session fence
  * high-water mark, and a log of every request with its headers.
@@ -169,8 +185,10 @@ const INVOCATION = /^\/internal\/tools\/invocations\/([^/]+)$/;
 export type FakePolicy =
   | { ok: true; provider?: string; model?: string; apiKey?: string; maxTokens?: number }
   | { ok: false; code: string; reason: string; retryable?: boolean }
-  | { status: number; body?: JsonValue }
-  | { hang: true };
+  | { status: number; body?: JsonValue; headers?: Record<string, string> }
+  | { hang: true }
+  /** Drop the connection without answering (a restarting backend). */
+  | { reset: true };
 
 export class FakeGateway {
   readonly serviceToken: string;
@@ -355,7 +373,13 @@ export class FakeGateway {
     }
     const answer = this.#policyScripts.shift() ?? this.defaultPolicy;
     if ("hang" in answer) return;
-    if ("status" in answer) return send(res, answer.status, answer.body ?? { error: "scripted" });
+    if ("reset" in answer) {
+      res.socket?.destroy();
+      return;
+    }
+    if ("status" in answer) {
+      return send(res, answer.status, answer.body ?? { error: "scripted" }, answer.headers);
+    }
     const headers = { "cache-control": "no-store" };
     if (!answer.ok) {
       return send(res, 200, { retryable: false, ...answer } as unknown as JsonValue, headers);
