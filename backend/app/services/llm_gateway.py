@@ -16,6 +16,7 @@ Design principles (from review):
 
 from __future__ import annotations
 
+import re
 import asyncio
 import hashlib
 import json
@@ -1165,7 +1166,8 @@ async def get_default_provider(
 MODEL_FAMILY_TIERS: dict[str, dict[str, str]] = {
     "anthropic": {"high": "anthropic/claude-opus-5-5", "mid": "anthropic/claude-sonnet-5-5", "low": "anthropic/claude-haiku-5-5"},
     "openai": {"high": "openai/gpt-4o", "mid": "openai/gpt-4o-mini", "low": "openai/gpt-4o-mini"},
-    "openrouter": {"high": "openrouter/anthropic/claude-opus-5-5", "mid": "openrouter/anthropic/claude-sonnet-5-5", "low": "openrouter/anthropic/claude-haiku-5-5"},
+    # OpenRouter slugs use dotted versions (anthropic/claude-opus-5.5), unlike Anthropic's own ids.
+    "openrouter": {"high": "openrouter/anthropic/claude-opus-5.5", "mid": "openrouter/anthropic/claude-sonnet-5.5", "low": "openrouter/anthropic/claude-haiku-5.5"},
 }
 
 
@@ -1181,21 +1183,26 @@ async def resolve_model_for_tier(
         if model := models.get(tier):
             return model
 
-    # 2. Infer from tenant's primary model family
+    # 2. A model pinned on the tenant's preferred OpenRouter provider covers every tier, matching the
+    #    engine model policy: a tenant that picked one OpenRouter model never falls through to Claude tiers.
+    providers = await _get_cached_tenant_providers(db, tenant_id)
+    if providers and providers[0].provider_type == "openrouter" and providers[0].default_model:
+        return providers[0].default_model
+
+    # 3. Infer from tenant's primary model family
     primary = await resolve_tenant_default_model(db, tenant_id)
     if primary:
         family = get_provider_from_model(primary)
         if family_tiers := MODEL_FAMILY_TIERS.get(family):
             return family_tiers.get(tier, primary)
 
-    # 3. Infer from tenant's provider type (e.g. deepseek model on openrouter)
-    providers = await _get_cached_tenant_providers(db, tenant_id)
+    # 4. Infer from tenant's provider type (e.g. deepseek model on openrouter)
     if providers:
         provider_type = providers[0].provider_type
         if family_tiers := MODEL_FAMILY_TIERS.get(provider_type):
             return family_tiers.get(tier, get_settings().DEFAULT_LLM_MODEL)
 
-    # 4. System fallback
+    # 5. System fallback
     return get_settings().DEFAULT_LLM_MODEL
 
 
@@ -1306,3 +1313,23 @@ def strip_provider_prefix(model_id: str) -> str:
     """'anthropic/claude-sonnet-4-5' -> 'claude-sonnet-4-5' (the bare id a provider adapter expects)."""
     normalized = normalize_model_id(model_id)
     return normalized.split("/", 1)[1] if "/" in normalized else normalized
+
+
+# A dash between a digit and a single digit that does not begin a longer number: "5-5" yes, "4-20250805" no.
+_CLAUDE_DASHED_VERSION = re.compile(r"(?<=\d)-(?=\d(?!\d))")
+
+
+def to_openrouter_model_id(model_id: str) -> str:
+    """'openrouter/anthropic/claude-opus-5-5' -> 'anthropic/claude-opus-5.5' (the slug OpenRouter expects).
+
+    The "openrouter/" routing prefix is dropped. Anthropic ids written with dashed versions are
+    rewritten to OpenRouter's dotted form; every other slug (e.g. 'deepseek/deepseek-v4.1-flash',
+    'openai/gpt-4o-mini', ':free' suffixes) passes through untouched.
+    """
+    slug = model_id.removeprefix("openrouter/")
+    if "/" not in slug:
+        slug = normalize_model_id(slug)
+    if slug.startswith("anthropic/claude-"):
+        vendor, name = slug.split("/", 1)
+        slug = f"{vendor}/{_CLAUDE_DASHED_VERSION.sub('.', name)}"
+    return slug

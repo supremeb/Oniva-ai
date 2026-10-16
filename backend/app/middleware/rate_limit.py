@@ -13,7 +13,8 @@ Tiers:
 import time
 import logging
 from typing import Optional, Callable
-from fastapi import Request, Response, HTTPException
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 import redis.asyncio as redis
@@ -224,6 +225,10 @@ class RateLimiter:
             self._client = None
 
 
+def _too_many(detail: str, headers: dict) -> JSONResponse:
+    return JSONResponse(status_code=429, content={"detail": detail}, headers=headers)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     FastAPI middleware for 2-tier rate limiting with SSE stream guards.
@@ -241,6 +246,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     # Paths to exclude from rate limiting
     EXCLUDED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+    # Service-to-service traffic from the engine: one source address for every tenant, already
+    # bearer-authenticated and limited per tenant by the gateway itself.
+    EXCLUDED_PREFIXES = ("/internal/",)
 
     def __init__(
         self,
@@ -280,7 +288,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         """Process request with 2-tier rate limiting and SSE stream guard"""
 
         # Skip if disabled or excluded path
-        if not self.enabled or request.url.path in self.EXCLUDED_PATHS:
+        if (
+            not self.enabled
+            or request.url.path in self.EXCLUDED_PATHS
+            or request.url.path.startswith(self.EXCLUDED_PREFIXES)
+        ):
             return await call_next(request)
 
         method = request.method
@@ -303,9 +315,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         if not is_allowed:
             retry_after = max(1, rate_info["reset"] - int(time.time()))
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit exceeded. Please slow down.",
+            # Returned, not raised: an HTTPException raised in BaseHTTPMiddleware skips FastAPI's
+            # handlers and reaches the client as a 500.
+            return _too_many(
+                "Rate limit exceeded. Please slow down.",
                 headers={
                     "X-RateLimit-Limit": str(rate_info["limit"]),
                     "X-RateLimit-Remaining": "0",
@@ -321,9 +334,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if is_sse and raw_user_id:
             sse_acquired = await self.limiter.acquire_sse_slot(raw_user_id)
             if not sse_acquired:
-                raise HTTPException(
-                    status_code=429,
-                    detail="Too many active streams. Please close an existing stream before opening a new one.",
+                return _too_many(
+                    "Too many active streams. Please close an existing stream before opening a new one.",
                     headers={
                         "X-RateLimit-Limit": str(MAX_CONCURRENT_SSE_STREAMS),
                         "X-RateLimit-Remaining": "0",

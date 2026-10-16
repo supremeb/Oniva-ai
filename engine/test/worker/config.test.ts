@@ -223,7 +223,18 @@ describe("backend policy configuration", () => {
       policy: "local",
       policyUrl: null,
       policyTimeoutMs: 5_000,
+      policyRetryMs: 60_000,
     });
+  });
+
+  it("reads ENGINE_POLICY_RETRY_MS and rejects a negative one", () => {
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_POLICY_RETRY_MS: "0" }).policyRetryMs).toBe(0);
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_POLICY_RETRY_MS: "1500" }).policyRetryMs).toBe(
+      1500,
+    );
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_POLICY_RETRY_MS: "-1" })).toThrow(
+      WorkerConfigError,
+    );
   });
 
   it("selects the backend policy by ENGINE_POLICY_URL or ENGINE_POLICY=backend", () => {

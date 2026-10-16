@@ -26,6 +26,7 @@ import type {
 
 type ClientOptions = NonNullable<ConstructorParameters<typeof Anthropic>[0]>;
 
+export const DEFAULT_ANTHROPIC_MAX_RETRIES = 3;
 export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5";
 export const DEFAULT_ANTHROPIC_SUMMARY_MODEL = "claude-haiku-5-5";
 
@@ -33,7 +34,11 @@ export interface AnthropicProviderOptions {
   /** Registry name (default "anthropic"). */
   name?: string;
   baseURL?: string;
-  /** SDK-level retries for 408/409/429/5xx and connection errors (SDK default 2). */
+  /**
+   * SDK-level retries for 408/409/429/5xx and connection errors, before any
+   * event has been received (the SDK never replays a started stream).
+   * Default 3, set explicitly rather than inherited from the SDK.
+   */
   maxRetries?: number;
   /** Request timeout in ms. */
   timeoutMs?: number;
@@ -106,7 +111,7 @@ export class AnthropicProvider implements ModelProvider {
     }
     const clientOptions: ClientOptions = { apiKey: request.apiKey, authToken: null };
     if (this.#options.baseURL !== undefined) clientOptions.baseURL = this.#options.baseURL;
-    if (this.#options.maxRetries !== undefined) clientOptions.maxRetries = this.#options.maxRetries;
+    clientOptions.maxRetries = this.#options.maxRetries ?? DEFAULT_ANTHROPIC_MAX_RETRIES;
     if (this.#options.timeoutMs !== undefined) clientOptions.timeout = this.#options.timeoutMs;
     if (this.#options.fetch !== undefined) clientOptions.fetch = this.#options.fetch;
     const client = new Anthropic(clientOptions);

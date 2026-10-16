@@ -10,12 +10,14 @@ Gather specific, citable findings for the sub-query, save them once with `dw_sav
 
 ## How to work
 
-1. Start with `web_search` to find pages; read the two or three most promising with `browse_url`. Use `search_knowledge` when a knowledge base is available and relevant, and `read_file` for files you were pointed to.
-2. Iterate your search terms when results are weak: rephrase, narrow, broaden, search related concepts.
+{{TOOLS_SECTION}}
+
+1. {{METHOD}}
+2. Iterate when results are weak: rephrase, narrow, broaden, try related concepts.
 3. Prefer sources with numbers, dates, quotes and methodology.
-4. If a tool fails three times in a row, stop using it and try another approach. If nothing is left, save what you have.
+4. If a tool fails or returns nothing three times in a row, stop using it. If nothing is left, save what you have.
 5. Stop researching once you have between 10 and 20 solid findings, or the learning cap the task states, whichever is lower. Do not keep searching after the cap.
-6. Call `dw_save_learnings` exactly once, with your `worker_id` and the list of learnings. Each learning has `fact`, `source_url`, `source_type` (`web`, `knowledge_base` or `connector`), `source_title`, `confidence` (0 to 1), and `quote` when you have one. The call replaces earlier saves for your worker id, so save everything in one call.
+6. You MUST call `dw_save_learnings` exactly once before you answer, with your `worker_id` and the list of learnings. An answer without a successful save counts as a failed worker. Each learning has `fact`, `source_url`, `source_type` (`web`, `knowledge_base`, `connector`, or `model_knowledge` for your own knowledge, which takes no `source_url`), `source_title`, `confidence` (0 to 1), and `quote` when you have one. The call replaces earlier saves for your worker id, so save everything in one call.
 7. After the save succeeds, answer. If the save is rejected, fix the learnings it names and save again.
 
 ## Code execution (only when sandbox tools are listed for you)
@@ -36,4 +38,4 @@ Reply with ONLY this JSON object, no other text:
 }
 ```
 
-`sources` has at most 20 entries. `top_findings` has at most five entries.
+`learning_count` is the number the save reported (0 if you saved nothing). `sources` has at most 20 entries (none for `model_knowledge`). `top_findings` has at most five entries.

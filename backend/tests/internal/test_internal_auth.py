@@ -155,7 +155,10 @@ def test_real_app_has_no_internal_routes_by_default():
 
 # ---- Settings validation -------------------------------------------------
 
-def test_settings_defaults():
+def test_settings_defaults(monkeypatch):
+    # Code defaults only: neither a local .env nor variables a dev loader exported may leak in.
+    for name in ("ENGINE_GATEWAY_TOKEN", "ENABLE_ENGINE_API", "INTERNAL_ALLOW_PLAINTEXT"):
+        monkeypatch.delenv(name, raising=False)
     s = Settings(_env_file=None)
     assert s.ENGINE_GATEWAY_TOKEN is None and s.ENABLE_ENGINE_API is False
     assert s.INTERNAL_ALLOW_PLAINTEXT is False

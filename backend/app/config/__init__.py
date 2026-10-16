@@ -5,6 +5,8 @@ Note: This __init__.py includes the full Settings class because this package
 shadows the original app/config.py module.
 """
 
+import os
+
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
@@ -13,6 +15,18 @@ from pathlib import Path
 
 # Get absolute path to .env file (relative to this config package)
 _ENV_FILE = Path(__file__).parent.parent.parent / ".env"
+
+
+def _resolve_env_file() -> Optional[str]:
+    """The dotenv file Settings reads: backend/.env by default.
+
+    ``ONIVA_ENV_FILE`` overrides the path; set it to an empty string to read no file at all (the test
+    suite does this in tests/conftest.py so a developer's local .env cannot leak into unit tests).
+    """
+    override = os.environ.get("ONIVA_ENV_FILE")
+    if override is None:
+        return str(_ENV_FILE)
+    return override or None
 
 # Exact-match weak passwords (lower-cased). Placeholder prefixes are checked separately.
 _WEAK_DB_PASSWORDS = frozenset({
@@ -26,7 +40,7 @@ _SUPERUSER_NAMES = frozenset({"postgres", "root", "admin", "superuser"})
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=str(_ENV_FILE),
+        env_file=_resolve_env_file(),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore"

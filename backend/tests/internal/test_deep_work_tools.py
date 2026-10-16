@@ -416,3 +416,28 @@ def test_tools_are_in_the_manifest_with_their_specs(gw):
         assert tool.parameters["additionalProperties"] is False
         assert (tool.sideEffect, tool.idempotent) == (TOOL_SPECS[name].side_effect, TOOL_SPECS[name].idempotent)
     assert set(manifest["dw_start_round"].parameters["required"]) == {"round", "workers"}
+
+
+async def test_model_knowledge_learning_needs_no_url_and_is_labelled(dw):
+    mk = {"fact": "From memory.", "source_type": "model_knowledge", "confidence": 0.4}
+    assert Learning(**mk).source_url is None
+    out = build_sources_section([Learning(**mk), Learning(**learning(1, title="T1"))])
+    assert "1. [T1](https://example.com/1)" in out and "model's own knowledge" in out and "None" not in out
+    assert "model's own knowledge" not in build_sources_section([Learning(**learning(1))])
+
+
+def test_non_model_knowledge_without_url_is_rejected():
+    import pytest as _pt
+    from pydantic import ValidationError as _VE
+    for t in ("web", "knowledge_base", "connector"):
+        with _pt.raises(_VE):
+            Learning(fact="x", source_type=t, confidence=0.5)
+
+
+async def test_save_learnings_tool_accepts_model_knowledge_without_url_only(dw):
+    await dw.research("w1", save=False)
+    nourl = {"fact": "x", "confidence": 0.5}
+    bad = await dw.call("dw_save_learnings", {"worker_id": "w1", "learnings": [nourl]})
+    assert bad["isError"] and bad["details"]["error"] == "invalid_learning"
+    ok = await dw.call("dw_save_learnings", {"worker_id": "w1", "learnings": [{**nourl, "source_type": "model_knowledge"}]})
+    assert not ok["isError"] and ok["data"]["learning_count"] == 1 and ok["data"]["source_count"] == 0

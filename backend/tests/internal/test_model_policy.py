@@ -188,3 +188,110 @@ async def test_requires_service_token(client, test_db):
     t = await make_tenant(test_db)
     r = await client.post("/internal/models/policy", json=body(t))
     assert r.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter: tenant whose only stored key is OpenRouter's
+# ---------------------------------------------------------------------------
+
+OR_KEY = "sk-or-tenant-KEY-0123456789abcdef"
+DEEPSEEK = "deepseek/deepseek-v4.1-flash"
+
+
+def or_body(tenant, **kw):
+    return body(tenant, supportedProviders=["anthropic", "openrouter"], **kw)
+
+
+async def test_openrouter_tiers_and_compaction_use_dotted_openrouter_slugs(client, test_db):
+    t = await make_tenant(test_db)
+    await add_provider(test_db, t, ptype="openrouter", key=OR_KEY)
+    for tier, slug in [
+        ("high", "anthropic/claude-opus-5.5"),
+        ("mid", "anthropic/claude-sonnet-5.5"),
+        ("low", "anthropic/claude-haiku-5.5"),
+    ]:
+        j = (await post(client, or_body(t, agent={"tier": tier}))).json()
+        assert j["ok"] is True and j["provider"] == "openrouter" and j["apiKey"] == OR_KEY
+        assert j["model"] == slug
+    default = (await post(client, or_body(t))).json()
+    assert default["model"] == "anthropic/claude-sonnet-5.5"
+    comp = (await post(client, or_body(t, purpose="compaction", agent={"tier": "high"}))).json()
+    assert comp["model"] == "anthropic/claude-haiku-5.5"
+
+
+async def test_openrouter_not_chosen_when_engine_does_not_support_it(client, test_db):
+    t = await make_tenant(test_db)
+    await add_provider(test_db, t, ptype="openrouter", key=OR_KEY)
+    j = (await post(client, body(t))).json()
+    assert j["ok"] is False and j["code"] == "no_supported_provider" and OR_KEY not in str(j)
+
+
+@pytest.mark.parametrize("stored", [DEEPSEEK, f"openrouter/{DEEPSEEK}"])
+async def test_openrouter_default_model_pins_chat_and_every_tier(client, test_db, stored):
+    t = await make_tenant(test_db)
+    await add_provider(test_db, t, ptype="openrouter", key=OR_KEY, default_model=stored)
+    for agent in [{}, {"tier": "high"}, {"tier": "mid"}, {"tier": "low"}]:
+        j = (await post(client, or_body(t, agent=agent))).json()
+        assert j["provider"] == "openrouter" and j["model"] == DEEPSEEK
+    comp = (await post(client, or_body(t, purpose="compaction"))).json()
+    assert comp["model"] == DEEPSEEK
+
+
+async def test_deep_work_tier_models_honour_the_openrouter_pin(client, test_db):
+    """Deep Work sends an explicit per-tier model, so the pin must reach tier resolution itself;
+    otherwise a DeepSeek-pinned tenant runs intake/plan/orchestrator on Claude via OpenRouter."""
+    from app.services.engine_deep_work_agent import resolve_deep_work_models
+    from app.services.llm_gateway import resolve_model_for_tier
+
+    t = await make_tenant(test_db)
+    await add_provider(test_db, t, ptype="openrouter", key=OR_KEY, default_model=DEEPSEEK)
+    for tier in ("high", "mid", "low"):
+        assert await resolve_model_for_tier(test_db, t, tier) == DEEPSEEK
+    models = await resolve_deep_work_models(test_db, t, None, None)
+    for model in filter(None, (models.high, models.mid, models.low, models.worker)):
+        j = (await post(client, or_body(t, agent={"model": model}))).json()
+        assert j["provider"] == "openrouter" and j["model"] == DEEPSEEK, (model, j)
+
+
+async def test_openrouter_explicit_model_hint_still_wins_over_pin(client, test_db):
+    t = await make_tenant(test_db)
+    await add_provider(test_db, t, ptype="openrouter", key=OR_KEY, default_model=DEEPSEEK)
+    j = (await post(client, or_body(t, agent={"model": "openrouter/openai/gpt-4o-mini"}))).json()
+    assert j["model"] == "openai/gpt-4o-mini"
+    j = (await post(client, or_body(t, agent={"model": "openrouter/anthropic/claude-opus-5-5"}))).json()
+    assert j["model"] == "anthropic/claude-opus-5.5"
+
+
+async def test_pin_applies_only_when_openrouter_is_the_preferred_provider(client, test_db):
+    t = await make_tenant(test_db)
+    await add_provider(test_db, t, ptype="anthropic", priority=0)
+    await add_provider(test_db, t, ptype="openrouter", key=OR_KEY, priority=1, default_model=DEEPSEEK)
+    j = (await post(client, or_body(t))).json()
+    assert j["provider"] == "anthropic" and j["model"] == "claude-sonnet-5-5"
+
+
+def test_to_openrouter_model_id_normalises_claude_versions_only():
+    f = llm_gateway.to_openrouter_model_id
+    assert f("openrouter/anthropic/claude-opus-5-5") == "anthropic/claude-opus-5.5"
+    assert f("anthropic/claude-3-5-haiku") == "anthropic/claude-3.5-haiku"
+    assert f("anthropic/claude-opus-4-1-20250805") == "anthropic/claude-opus-4.1-20250805"
+    assert f("anthropic/claude-sonnet-4.5") == "anthropic/claude-sonnet-4.5"
+    assert f("openrouter/deepseek/deepseek-v4.1-flash") == DEEPSEEK
+    assert f("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+    assert f("openrouter/google/gemini-2.0-flash-exp:free") == "google/gemini-2.0-flash-exp:free"
+
+
+def test_openrouter_ids_are_priced():
+    from app.config.llm_pricing import calculate_cost_with_cache, find_model_pricing
+
+    ds = find_model_pricing(DEEPSEEK)
+    assert ds == {"input": 0.036, "output": 0.6435, "cache_read": 0.0054}
+    assert calculate_cost_with_cache(ds, 1_000_000, 1_000_000, 1_000_000) == pytest.approx(0.036 + 0.6435 + 0.0054)
+    for slug, base in [
+        ("anthropic/claude-opus-5.5", "claude-opus-5-5"),
+        ("anthropic/claude-sonnet-5.5", "claude-sonnet-5-5"),
+        ("anthropic/claude-haiku-5.5", "claude-haiku-5-5"),
+        ("anthropic/claude-sonnet-4.5", "claude-sonnet-4-5"),
+    ]:
+        assert find_model_pricing(slug) is find_model_pricing(base) and find_model_pricing(slug) is not None
+    assert find_model_pricing("openai/gpt-4o-mini") is not None

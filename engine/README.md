@@ -13,7 +13,7 @@ Bake-off results against the plan's acceptance examples: [`docs/bakeoff.md`](doc
   conformance suite, and `postgres/` (storage, migrations, fenced leases)
 - `src/session/` the serialized commit line (`Session`) and typed documents
 - `src/tasks/` the durable task runtime (checkpoints, waits, signals, abort)
-- `src/models/` provider-neutral model types, `ModelRegistry`, the Anthropic adapter and `FakeProvider`
+- `src/models/` provider-neutral model types, `ModelRegistry`, the Anthropic and OpenAI-compatible adapters and `FakeProvider`
 - `src/tools/` the tool registry and the HTTP tool gateway client
 - `src/agent/` the harness: conversations, submissions and inbox, generation and
   tool tasks, approvals, subagents, compaction, hooks and `HostPolicy`
@@ -33,7 +33,7 @@ Everything is exported from the package root (`src/index.ts`).
 | Conversations | `conversation.submit({ text, requestId?, whenBusy?: "followUp" \| "steer" \| "reject", type? })` → `Submission` (`wait()`, `record()`), `conversation.abort(reason?)`, `conversation.cancelSubmission(submissionId)` → `"cancelled" \| "not_queued" \| "unknown"`, `entries()`, `live()`, `usage()` |
 | Policy & hooks | `HostPolicy` (`resolveModelRequest`, `authorizeTool` → `allow` / `block` / `requireApproval`), `AgentHooks` |
 | Tools | `defineTool`, `ToolRegistry`, `createGatewayTools`, `createSubagentTool` |
-| Models | `ModelRegistry`, `AnthropicProvider`, `FakeProvider` (`fakeText`, `fakeToolCall`, ...) |
+| Models | `ModelRegistry`, `AnthropicProvider`, `OpenAICompatibleProvider` / `openRouterProvider`, `FakeProvider` (`fakeText`, `fakeToolCall`, ...) |
 | Storage | `PostgresStorageProvider`, `MemoryStorageProvider`, `migrate`, `PostgresLeases`, `LeaseKeeper`, `defineStorageConformanceSuite` |
 | HTTP & watch | `createEngineServer`, `WatchHub`, `loadConversationView` |
 | Worker | `startWorker`, `workerHostPolicy`, `workerConfigFromEnv`, `createWorkerPool` |
@@ -118,10 +118,16 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
 | `ENGINE_APPROVAL_TTL_MS` | `86400000` | approval expiry (`0`: none) |
 | `ANTHROPIC_API_KEY` | none | model key (read per request; unused under `ENGINE_POLICY=backend`) |
-| `ENGINE_POLICY` | `backend` if `ENGINE_POLICY_URL` is set, else `local` | `backend`: the backend resolves each model request (provider, model, tenant key, token budget, quota) and records usage; a policy failure denies the request (`policy_unavailable`), never falling back to a local key |
+| `ENGINE_POLICY` | `backend` if `ENGINE_POLICY_URL` is set, else `local` | `backend`: the backend resolves each model request (provider, model, tenant key, token budget, quota) and records usage; a definitive refusal denies the request, an outage is retried (`ENGINE_POLICY_RETRY_MS`) and then fails it as a retryable `policy_unavailable`; there is never a fallback to a local key |
 | `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` when `ENGINE_POLICY=backend` | backend origin for `/internal/models/policy` and `/internal/models/usage`; uses `ENGINE_GATEWAY_TOKEN` |
 | `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
+| `ENGINE_POLICY_RETRY_MS` | `60000` | total time a transient policy or usage failure is retried (`0`: never); see below |
+
+**Backend outages.** Under `ENGINE_POLICY=backend` a backend restart or blip must not fail a long run. Both `/internal/models/policy` and `/internal/models/usage` retry network errors, timeouts, `408`, `429` and `5xx` with exponential backoff (250 ms doubling, capped at 5 s, jitter 50-100%) for up to `ENGINE_POLICY_RETRY_MS` in total. `Retry-After` on `429`/`503` replaces the computed delay (a value longer than the remaining budget ends the retrying). A policy retry reuses the request id and body, and a run abort stops it at once. Each retry logs `policy_retry` / `usage_retry`. A definitive answer is never retried: a `200 { ok: false }` denial, `401`, `403`, `422` and other `4xx`, or a malformed `200`. When the budget is spent the policy request fails the run with `run_error { kind: "network", code: "policy_unavailable", retryable: true }` (a denial stays `kind: "denied"`, `retryable: false`). A spent usage report logs `usage_failed`. The budget is checked between attempts, so one in-flight attempt may run up to `ENGINE_POLICY_TIMEOUT_MS` past it.
+
+**Known gap: usage reports are memory-only.** The engine records each response's usage in the conversation, but the report to the backend ledger is a background call started by the `afterResponse` hook and is not persisted or re-driven on resume. A report is lost (a cost undercount) if the backend stays down past the budget, or if the worker exits while one is pending (`close()` waits for them, bounded by the budget). Reconciling needs either a durable outbox or the backend pulling usage from the engine's stored entries; neither exists yet.
 | `ENGINE_MODEL` / `ENGINE_SUMMARY_MODEL` | Anthropic defaults | models for replies / compaction |
+| `ENGINE_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter endpoint (the production worker registers the `openrouter` provider next to `anthropic`) |
 | `ENGINE_MAX_TOKENS` | `8192` | reply budget |
 | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle |
 | `ENGINE_SUBAGENT_TOOL` | none | register a subagent tool under this name |
@@ -216,3 +222,17 @@ otherwise each file boots a throwaway local cluster (`initdb` on `PATH` or
 | `maxDocumentBytes` | 1 MiB |
 
 Override any of them with `resolveLimits({...})`.
+
+### OpenAI-compatible provider (OpenRouter)
+
+`OpenAICompatibleProvider` streams the Chat Completions API (`POST {baseURL}/chat/completions`, `stream_options.include_usage`) with plain `fetch` and emits the same events as the Anthropic adapter. `openRouterProvider()` is it configured for OpenRouter (name `openrouter`); `defaultModelRegistry(env)` (`src/worker/providers.ts`) registers it beside `anthropic`, so the worker reports both in `supportedProviders` and a tenant whose only stored key is OpenRouter's runs engine chat and Deep Work. Model ids are OpenRouter slugs (`anthropic/claude-sonnet-5.5`, `deepseek/deepseek-v4.1-flash`); the backend policy returns them.
+
+- Tool calls stream per `index` and become one `tool_call` block each; tool results go out as `role: "tool"` messages.
+- No thinking blocks: `reasoning` / `reasoning_content` deltas are ignored and `thinking` is not sent.
+- Usage: uncached input is `prompt_tokens - cached_tokens - cache_write_tokens`; cache tokens come from `prompt_tokens_details`. Models under `anthropic/` get `cache_control` breakpoints on the system prompt and last stable message.
+- Finish reasons: `stop` → `end_turn` (`tool_use` if tool calls were streamed), `tool_calls` → `tool_use`, `length` → `max_tokens`, `content_filter` → `refusal`.
+- Retries (`src/models/retry.ts`, option `retry`): a request that fails before any content has been emitted is retried with capped exponential backoff (500 ms doubling to 8 s, jitter 50-100%), at most 3 retries within a 60 s wait budget (`maxRetries`, `budgetMs`, `baseDelayMs`, `maxDelayMs`; `maxRetries: 0` turns it off). Retried: connection errors, timeouts and "fetch failed", HTTP 408, 409, 429 and 5xx, an error object in the stream, an `error` finish, and a stream that breaks or ends before its first text or tool-call delta. `Retry-After` (seconds or date) or, failing that, OpenRouter's `x-ratelimit-reset` replaces the computed delay; a delay that does not fit the remaining budget ends the retrying. Never retried: 400, 401, 402, 403, 404, 413, 422, `context_overflow`, aborts. Aborting the run stops a backoff at once and ends the call `aborted`. The caller sees one `start` and one message; a retried attempt leaves no trace. `retry.onRetry({ provider, model, attempt, delayMs, error })` is the logging hook; `defaultModelRegistry(env, log)` logs it as `model_retry` (the retry helpers `withRetry`, `describeError`, `serverRetryDelay` are reusable by any fetch-based provider).
+- Mid-stream failures are not retried. Once a text or tool-call delta has gone out, replaying the request would duplicate partial output, and the generation task has no safe retry: it keeps the streamed text as a `partial` assistant entry and fails the run with the (retryable) `model_error`; a partial tool call is never run. So a connection drop in the middle of a long reply still fails that run, while one before the first token is absorbed.
+- Transport error text keeps the real cause: `fetch failed (UND_ERR_SOCKET: other side closed)`, `terminated (ECONNRESET: other side closed)`. Only `code: message` of each error down the `cause` chain is read, never headers, bodies or keys.
+- The Anthropic adapter relies on the SDK's own retries (connection errors, 408/409/429/5xx, before the stream starts) and sets `maxRetries` explicitly (default 3, option `maxRetries`); it does not use `retry.ts`.
+- Errors: 401/402/403 `auth`, 429 `rate_limited`, 408 `network`, 5xx `overloaded`, 400/413 with a context-length message `context_overflow`, other 4xx `invalid_request`, transport failures `network`, cancellation `aborted`. An `error` object inside the stream fails the generation with the text kept as partial.

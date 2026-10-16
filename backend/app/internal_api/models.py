@@ -29,6 +29,7 @@ from app.services.llm_gateway import (
     resolve_model_for_policy,
     resolve_model_for_tier,
     strip_provider_prefix,
+    to_openrouter_model_id,
 )
 from app.services.quota_service import QuotaService
 
@@ -125,11 +126,33 @@ def _pick(
     family = get_provider_from_model(model)
     for p in providers:
         if p.provider_type == family:
-            return p, strip_provider_prefix(model)
+            return p, _bare_model(p, model)
     p = providers[0]
     tier = "low" if req.purpose == "compaction" else (req.agent.tier or "mid")
-    fallback = MODEL_FAMILY_TIERS.get(p.provider_type, {}).get(tier) or p.default_model
-    return p, strip_provider_prefix(fallback) if fallback else strip_provider_prefix(model)
+    if p.provider_type == "openrouter" and p.default_model:
+        fallback: Optional[str] = p.default_model  # the tenant's own pick beats the Claude tier table
+    else:
+        fallback = MODEL_FAMILY_TIERS.get(p.provider_type, {}).get(tier) or p.default_model
+    return p, _bare_model(p, fallback or model)
+
+
+def _bare_model(p: ProviderConfig, model: str) -> str:
+    """The model id as the provider's adapter expects it."""
+    if p.provider_type == "openrouter":
+        return to_openrouter_model_id(model)
+    return strip_provider_prefix(model)
+
+
+def _pinned_openrouter_model(supported: List[ProviderConfig], req: PolicyRequest) -> Optional[str]:
+    """The tenant's OpenRouter default_model, when OpenRouter is its preferred provider and no model was requested.
+
+    Tier-based requests (Deep Work, compaction) fall back to it too, so a tenant that pinned a model
+    on its OpenRouter provider runs everything on that model instead of the Claude tier table.
+    """
+    first = supported[0]
+    if first.provider_type != "openrouter" or not first.default_model or req.agent.model:
+        return None
+    return first.default_model
 
 
 async def decide(db: AsyncSession, req: PolicyRequest) -> Dict[str, Any]:
@@ -152,7 +175,9 @@ async def decide(db: AsyncSession, req: PolicyRequest) -> Dict[str, Any]:
     if not allowed:
         return _deny("quota_exceeded", reason or "Token quota exceeded.")
 
-    provider, model = _pick(supported, await _choose_model(db, req), req)
+    pinned = _pinned_openrouter_model(supported, req)
+    chosen = f"openrouter/{to_openrouter_model_id(pinned)}" if pinned else await _choose_model(db, req)
+    provider, model = _pick(supported, chosen, req)
     allow = PolicyAllow(
         provider=provider.provider_type,
         model=model,

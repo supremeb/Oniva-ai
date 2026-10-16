@@ -49,7 +49,7 @@ def test_intake_and_plan_have_no_tools_and_legacy_prompts():
 def test_execute_config_shape_full_tenant():
     cfg = compose_execute_config(inputs(
         plan=plan(deliverable="pdf_report"), has_search=True, knowledge_base_ids=["kb1"],
-        connector_ids=["c1"], sandbox_enabled=True, run_id="r1", max_rounds=60, deadline_ms=123), NOW)
+        connector_ids=["c1"], sandbox_enabled=True, has_files=True, run_id="r1", max_rounds=60, deadline_ms=123), NOW)
     assert cfg["tools"] == sorted([
         "dw_start_round", "dw_get_learnings", "dw_write_section", "dw_finalize", "dw_get_report",
         "research_worker", "reflector", "output_agent"])
@@ -204,3 +204,48 @@ def test_round_and_deadline_helpers():
 
 def test_execute_content_is_the_plan():
     assert json.loads(edw.execute_content(plan()).split("\n\n", 1)[1])["title"] == "T"
+
+
+# --- tool-aware worker prompt ---------------------------------------------------------------
+
+
+def _worker(**kw):
+    cfg = compose_execute_config(inputs(**kw), NOW)
+    return cfg, cfg["metadata"]["subagents"]["research_worker"]
+
+
+def test_no_search_empty_kb_worker_is_told_to_use_own_knowledge():
+    cfg, w = _worker(knowledge_base_ids=["kb1"], searchable_kb_ids=[])
+    assert set(w["tools"]) == {"dw_save_learnings"}
+    p = w["systemPrompt"]
+    assert "Start with `web_search`" not in p and "{{" not in p
+    assert "own knowledge" in p and "model_knowledge" in p and "NO web search" in p
+    assert "exactly once before you answer" in p
+    assert "Web search is NOT available" in cfg["systemPrompt"]
+    assert cfg["metadata"]["knowledgeBaseIds"] == ["kb1"]  # authorization unchanged
+
+
+def test_search_present_keeps_web_flow():
+    cfg, w = _worker(has_search=True, knowledge_base_ids=["kb1"])
+    assert {"web_search", "browse_url", "search_knowledge"} <= set(w["tools"])
+    assert "Start with `web_search`" in w["systemPrompt"] and "NO web search" not in w["systemPrompt"]
+    assert "Web search is NOT available" not in cfg["systemPrompt"]
+
+
+def test_search_knowledge_only_with_documents_and_read_file_only_with_files():
+    _, w = _worker(has_search=True, knowledge_base_ids=["a", "b"], searchable_kb_ids=["b"])
+    assert "search_knowledge" in w["tools"] and "read_file" not in w["tools"]
+    _, w = _worker(has_search=True, knowledge_base_ids=["a"], searchable_kb_ids=[])
+    assert "search_knowledge" not in w["tools"]
+    _, w = _worker(has_search=True, has_files=True)
+    assert "read_file" in w["tools"] and "read_file" in w["systemPrompt"]
+
+
+def test_plan_prompt_notes_missing_web_search():
+    assert "Web search and page browsing are NOT available" in plan_agent_config(MODELS, NOW, has_search=False)["systemPrompt"]
+    assert "NOT available" not in plan_agent_config(MODELS, NOW)["systemPrompt"]
+
+
+def test_orchestrator_treats_zero_learning_worker_as_failed():
+    loop = edw.load_prompt("orchestrator_loop.md")
+    assert "learning_count" in loop and "failed_workers" in loop

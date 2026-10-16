@@ -6,15 +6,24 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
+MODEL_KNOWLEDGE = "model_knowledge"
+
+
 class Learning(BaseModel):
     """Single extracted finding from a source."""
     fact: str = Field(..., max_length=800)
-    source_url: str = Field(..., max_length=2000)
-    source_type: str = "web"  # "web" | "knowledge_base" | "connector"
+    source_url: str | None = Field(None, max_length=2000)  # optional only for model_knowledge
+    source_type: str = "web"  # "web" | "knowledge_base" | "connector" | "model_knowledge"
     source_title: str | None = Field(None, max_length=200)
     confidence: float = Field(..., ge=0.0, le=1.0)
     quote: str | None = Field(None, max_length=500)
     sub_query: str = ""
+
+    @model_validator(mode="after")
+    def _url_required_unless_model_knowledge(self) -> "Learning":
+        if self.source_url is None and self.source_type != MODEL_KNOWLEDGE:
+            raise ValueError("source_url is required unless source_type is 'model_knowledge'")
+        return self
 
 
 class WorkerTask(BaseModel):

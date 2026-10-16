@@ -45,10 +45,11 @@ from app.api.v1 import routing_policies  # Model Routing Policies (Deep Work Pha
 from app.api.v1 import workflow_execution  # Workflow Execution SSE (Workflows as Agent Resources)
 from app.core.database import init_db, close_db, SystemSessionLocal
 from app.config import get_settings
+from app.core.logging import setup_logging
 from app.auth.middleware import AuthMiddleware
 from app.middleware.csrf import CSRFMiddleware
 from app.middleware.tenant import TenantMiddleware
-from app.api.exception_handlers import entity_not_found_handler, permission_denied_handler, circuit_breaker_handler, quota_exceeded_handler
+from app.api.exception_handlers import unhandled_exception_handler, entity_not_found_handler, permission_denied_handler, circuit_breaker_handler, quota_exceeded_handler
 from app.exceptions import EntityNotFoundError, PermissionDeniedError, CircuitBreakerOpenError
 from app.services.quota_service import QuotaExceededError
 
@@ -57,7 +58,9 @@ app_settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup: root handler for app loggers (uvicorn keeps its own); it was never configured before.
+    # Done at startup, not import, so importing the app (tests, tooling) leaves logging alone.
+    setup_logging()
     print("🚀 Starting Oniva Backend")
 
     # Validate production security settings
@@ -193,6 +196,7 @@ app.add_exception_handler(EntityNotFoundError, entity_not_found_handler)
 app.add_exception_handler(PermissionDeniedError, permission_denied_handler)
 app.add_exception_handler(CircuitBreakerOpenError, circuit_breaker_handler)
 app.add_exception_handler(QuotaExceededError, quota_exceeded_handler)
+app.add_exception_handler(Exception, unhandled_exception_handler)  # logs, then a generic 500
 
 # Middleware - order matters (last added = first executed)
 # CORS origins: Use config value, fall back to localhost in development

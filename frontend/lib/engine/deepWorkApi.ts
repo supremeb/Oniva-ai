@@ -62,6 +62,11 @@ export interface StartEngineRunResult {
   status: 'started';
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Only a server conversation id links a run to its chat; a brand-new chat's local draft key is not one yet. */
+const chatIdField = (chatId?: string) => (chatId && UUID_RE.test(chatId) ? { chat_id: chatId } : {});
+
 export const clarifyEngine = (i: ClarifyEngineInput): Promise<ClarifyEngineResult> =>
   apiFetch(`${BASE}/engine/clarify`, {
     method: 'POST',
@@ -72,7 +77,7 @@ export const clarifyEngine = (i: ClarifyEngineInput): Promise<ClarifyEngineResul
       available_kbs: i.availableKbs ?? [],
       available_connectors: i.availableConnectors ?? [],
       ...(i.sessionId ? { session_id: i.sessionId } : {}),
-      ...(i.chatId ? { chat_id: i.chatId } : {}),
+      ...chatIdField(i.chatId),
     }),
   });
 
@@ -87,7 +92,7 @@ export const planEngine = (i: PlanEngineInput): Promise<PlanEngineResult> =>
       ...(i.sessionId ? { session_id: i.sessionId } : {}),
       ...(i.conversationId ? { conversation_id: i.conversationId } : {}),
       ...(i.projectId ? { project_id: i.projectId } : {}),
-      ...(i.chatId ? { chat_id: i.chatId } : {}),
+      ...chatIdField(i.chatId),
     }),
   });
 
@@ -103,7 +108,7 @@ export const startEngineRun = (i: StartEngineRunInput): Promise<StartEngineRunRe
       ...(i.enrichedQuery ? { enriched_query: i.enrichedQuery } : {}),
       ...(i.knowledgeBaseIds ? { knowledge_base_ids: i.knowledgeBaseIds } : {}),
       ...(i.connectorIds ? { connector_ids: i.connectorIds } : {}),
-      ...(i.chatId ? { chat_id: i.chatId } : {}),
+      ...chatIdField(i.chatId),
     }),
   });
 

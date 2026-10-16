@@ -348,13 +348,16 @@ async def plan(body, db: AsyncSession, user_id, tenant_id) -> dict:
     engine = _engine()
     factory = tenant_factory(tenant_id)
     text = body.enriched_query or body.query
-    run = await _open_session(engine, db, user_id, tenant_id, body, body.query, edw.plan_agent_config)
+    has_search = await _has_search(db, tenant_id)
+    run = await _open_session(
+        engine, db, user_id, tenant_id, body, body.query,
+        functools.partial(edw.plan_agent_config, has_search=has_search))
     engine_session = await _session_id_of(factory, run)
     ids = _ids(engine_session, run)
     agent_config = await _agent_config_for(db, tenant_id)
     models = await edw.resolve_deep_work_models(db, _uuid(tenant_id), None, agent_config)
     try:
-        await engine.update_agent(*ids, edw.plan_agent_config(models))
+        await engine.update_agent(*ids, edw.plan_agent_config(models, has_search=has_search))
     except EngineError as e:
         raise _engine_http_error(e) from None
     key = f"dw:{run.id}:plan:{_sha(text)}"
@@ -394,6 +397,23 @@ async def _has_search(db: AsyncSession, tenant_id: Any) -> bool:
     except Exception:
         logger.warning("Search key lookup failed", exc_info=True)
     return any(os.environ.get(v) for v in SEARCH_ENV.values())
+
+
+async def _kbs_with_documents(db: AsyncSession, kb_ids: List[str]) -> List[str]:
+    """The given KBs that hold at least one document (cheap indexed count; a failed lookup keeps them all)."""
+    from app.models.knowledge_base import KnowledgeBase
+
+    if not kb_ids:
+        return []
+    try:
+        ids = [_uuid(k) for k in kb_ids]
+        rows = (await db.execute(select(KnowledgeBase.id).where(
+            KnowledgeBase.id.in_(ids), KnowledgeBase.document_count > 0))).all()
+    except Exception:
+        logger.warning("KB document lookup failed", exc_info=True)
+        return list(kb_ids)
+    have = {str(r[0]) for r in rows}
+    return [k for k in kb_ids if k in have]
 
 
 async def start(body, db: AsyncSession, user_id, tenant_id) -> dict:
@@ -445,7 +465,8 @@ async def start(body, db: AsyncSession, user_id, tenant_id) -> dict:
     models = await edw.resolve_deep_work_models(db, _uuid(tenant_id), approved, agent_config)
     execute = edw.compose_execute_config(edw.ExecuteInputs(
         plan=approved, models=models, has_search=await _has_search(db, tenant_id),
-        knowledge_base_ids=kb_ids, connector_ids=connector_ids, sandbox_enabled=sandbox_available(),
+        knowledge_base_ids=kb_ids, searchable_kb_ids=await _kbs_with_documents(db, kb_ids),
+        has_files=bool(chat.project_files), connector_ids=connector_ids, sandbox_enabled=sandbox_available(),
         run_id=str(run.id), max_rounds=edw.default_max_rounds(settings.DEEP_WORK_MAX_REFLECTION_ROUNDS),
         deadline_ms=edw.default_deadline_ms(settings.DEEP_WORK_MAX_DURATION_SEC)))
 

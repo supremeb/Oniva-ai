@@ -157,7 +157,7 @@ class OAuthLoginResponse(BaseModel):
 
 class RefreshRequest(BaseModel):
     """Token refresh request."""
-    refresh_token: str
+    refresh_token: Optional[str] = None  # browsers send it in the httpOnly cookie instead
 
 
 class SignupRequest(BaseModel):

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 
 from app.models.background_job import BackgroundJob
 from app.models.deep_work_run import DeepWorkRun
@@ -179,17 +179,19 @@ async def record_chat_id(factory: SessionFactory, tenant_id: Any, conversation_i
 async def load_run_by_chat(factory: SessionFactory, tenant_id: Any, chat_id: Any) -> Optional[RunSnapshot]:
     """The run to show for a chat: an active one if any, else the most recent. Tenant-scoped; callers check the owner."""
     async with factory() as db:
-        rows = (
+        row = (
             await db.execute(
                 select(DeepWorkRun)
                 .where(DeepWorkRun.tenant_id == _uuid(tenant_id), DeepWorkRun.chat_id == _uuid(chat_id))
-                .order_by(DeepWorkRun.created_at.desc())
+                .order_by(
+                    case((DeepWorkRun.status == "running", 0), else_=1),  # an active run first
+                    DeepWorkRun.created_at.desc(),
+                    DeepWorkRun.updated_at.desc(),
+                )
+                .limit(1)
             )
-        ).scalars().all()
-        if not rows:
-            return None
-        row = next((r for r in rows if r.status == "running"), rows[0])
-        return RunSnapshot.of(row)
+        ).scalars().first()
+        return RunSnapshot.of(row) if row else None
 
 
 async def update_run(

@@ -433,3 +433,22 @@ async def test_usage_agent_role_malformed_422(client, test_db):
     for bad in ("Bad Role", "x" * 65, "has-dash", ""):
         r = await client.post("/internal/models/usage", json=_usage(t, agentRole=bad), headers=tp.AUTH)
         assert r.status_code == 422, bad
+
+
+@clause("policy-retry-idempotent")
+async def test_policy_retry_idempotent(client, test_db):
+    t = await tp.make_tenant(test_db)
+    await tp.add_provider(test_db, t)
+    payload = tp.body(t)
+    first = await client.post("/internal/models/policy", json=payload, headers=tp.AUTH)
+    retried = await client.post("/internal/models/policy", json=payload, headers=tp.AUTH)
+    assert first.status_code == retried.status_code == 200
+    assert first.json()["ok"] is True and retried.json() == first.json()
+
+
+@clause("models-no-retry-definitive")
+async def test_models_no_retry_definitive(client, test_db):
+    # A denial is a definitive 200 { ok: false } answer, never a status the engine would retry.
+    t = await tp.make_tenant(test_db)  # no provider key configured
+    r = await client.post("/internal/models/policy", json=tp.body(t), headers=tp.AUTH)
+    assert r.status_code == 200 and r.json()["ok"] is False and r.json()["code"] == "no_key"

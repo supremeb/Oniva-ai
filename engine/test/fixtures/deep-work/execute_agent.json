@@ -18,7 +18,7 @@
     "subagents": {
       "research_worker": {
         "model": "m/worker",
-        "tools": ["browse_url", "dw_save_learnings", "read_file", "web_search"],
+        "tools": ["browse_url", "dw_save_learnings", "web_search"],
         "systemPrompt": "<prompt:research_worker>"
       },
       "reflector": {

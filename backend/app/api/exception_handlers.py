@@ -2,11 +2,32 @@
 
 Handles custom exceptions and converts them to standardized HTTP responses.
 """
+import logging
+import uuid
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from app.exceptions import EntityNotFoundError, PermissionDeniedError, CircuitBreakerOpenError
 from app.services.quota_service import QuotaExceededError
+
+logger = logging.getLogger(__name__)
+
+
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all: log the traceback with method, path and a request id (never bodies or headers), return a 500."""
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    logger.error(
+        "Unhandled exception: %s %s request_id=%s",
+        request.method, request.url.path, request_id,
+        exc_info=(type(exc), exc, exc.__traceback__),
+        extra={"request_id": request_id, "method": request.method, "path": request.url.path},
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "request_id": request_id},
+        headers={"X-Request-ID": request_id},
+    )
 
 
 async def entity_not_found_handler(request: Request, exc: EntityNotFoundError) -> JSONResponse:

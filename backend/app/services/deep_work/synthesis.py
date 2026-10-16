@@ -1,7 +1,7 @@
 """Pure synthesis helpers shared by the legacy engine and the Deep Work gateway tools (U4, AE6)."""
 from __future__ import annotations
 
-from app.services.deep_work.models import Learning
+from app.services.deep_work.models import MODEL_KNOWLEDGE, Learning
 
 
 def build_sources_section(learnings: list[Learning]) -> str:
@@ -21,6 +21,12 @@ def build_sources_section(learnings: list[Learning]) -> str:
             parts.append(
                 f"{seen_urls[l.source_url]}. [{title}]({l.source_url})"
             )
+    n_model = sum(1 for l in learnings if l.source_type == MODEL_KNOWLEDGE)
+    if n_model:
+        parts.append(
+            f"\nSome findings ({n_model}) come from the model's own knowledge rather than a retrieved source; "
+            "treat them as unverified."
+        )
     return "\n".join(parts)
 
 
