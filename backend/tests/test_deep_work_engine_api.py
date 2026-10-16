@@ -309,7 +309,7 @@ async def test_chat_lookup_prefers_the_active_run_else_the_latest(w):
     assert got.json()["session_id"] == new_sid
     await dws.update_run(w.factory, w.ta, (await run_of(w, new_sid)).conversation_id, status="completed")
     got = await w.http.get(f"/api/v1/deep-work/by-conversation/{chat}/full-state")
-    assert got.json()["session_id"] in (old_sid, new_sid) and got.json()["status"] == "completed"
+    assert got.json()["session_id"] == new_sid and got.json()["status"] == "completed"
 
 
 async def test_chat_lookup_other_tenant_404_other_owner_403(w):
