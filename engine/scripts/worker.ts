@@ -11,14 +11,13 @@
  * Every stored payload passes through the default secret-masking redactor
  * (`src/worker/redact.ts`).
  */
-import { AnthropicProvider } from "../src/models/anthropic.js";
-import { ModelRegistry } from "../src/models/stream.js";
 import {
   assertNotTestHarnessInProduction,
   createWorkerPool,
   WorkerConfigError,
   workerConfigFromEnv,
 } from "../src/worker/config.js";
+import { defaultModelRegistry } from "../src/worker/providers.js";
 import { maskSecrets } from "../src/worker/redact.js";
 import { startWorker, type WorkerLog } from "../src/worker/worker.js";
 
@@ -40,7 +39,7 @@ async function main(): Promise<number> {
   }
 
   const pool = createWorkerPool(config, log);
-  const models = new ModelRegistry().register(new AnthropicProvider());
+  const models = defaultModelRegistry(process.env);
   const worker = await startWorker({
     pool,
     sessionId: config.sessionId,

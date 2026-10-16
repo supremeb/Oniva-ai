@@ -7,6 +7,7 @@ This file is separated from the main config to make it easy to update
 pricing without modifying core application logic.
 """
 
+import re
 from typing import Dict, List, NotRequired, TypedDict
 
 
@@ -66,6 +67,10 @@ LLM_PRICING: Dict[str, ModelPricing] = {
         "tiers": [{"above_input_tokens": 100_000, "input": 0.50, "output": 2.50}],
     },
     "claude-fable-5-1": {"input": 10.0, "output": 50.0, "cache_read": 0.25, "cache_write": 12.5},
+
+    # DeepSeek V4.1 Flash via OpenRouter (https://openrouter.ai/api/v1/models, 2026-10-16):
+    # prompt $0.036/M, completion $0.6435/M, cache read $0.0054/M.
+    "deepseek/deepseek-v4.1-flash": {"input": 0.036, "output": 0.6435, "cache_read": 0.0054},
 
     # DeepSeek Models (via OpenRouter)
     "nex-agi/deepseek-v3.1-nex-n1:free": {"input": 0.0, "output": 0.0},
@@ -133,7 +138,11 @@ def find_model_pricing(model: str) -> ModelPricing | None:
     if model in LLM_PRICING:
         return LLM_PRICING[model]
     if "/" in model:
-        return LLM_PRICING.get(model.split("/", 1)[1])
+        base = model.split("/", 1)[1]
+        if base in LLM_PRICING:
+            return LLM_PRICING[base]
+        # OpenRouter writes Claude versions with dots ("anthropic/claude-opus-5.5"); the table uses dashes.
+        return LLM_PRICING.get(re.sub(r"(?<=\d)\.(?=\d)", "-", base))
     return None
 
 

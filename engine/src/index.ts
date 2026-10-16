@@ -21,6 +21,7 @@ export * from "./core/json.js";
 export * from "./core/limits.js";
 export * from "./models/anthropic.js";
 export * from "./models/fake.js";
+export * from "./models/openai-compatible.js";
 export * from "./models/stream.js";
 export * from "./models/types.js";
 export * from "./models/usage.js";

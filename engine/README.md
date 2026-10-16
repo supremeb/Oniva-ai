@@ -13,7 +13,7 @@ Bake-off results against the plan's acceptance examples: [`docs/bakeoff.md`](doc
   conformance suite, and `postgres/` (storage, migrations, fenced leases)
 - `src/session/` the serialized commit line (`Session`) and typed documents
 - `src/tasks/` the durable task runtime (checkpoints, waits, signals, abort)
-- `src/models/` provider-neutral model types, `ModelRegistry`, the Anthropic adapter and `FakeProvider`
+- `src/models/` provider-neutral model types, `ModelRegistry`, the Anthropic and OpenAI-compatible adapters and `FakeProvider`
 - `src/tools/` the tool registry and the HTTP tool gateway client
 - `src/agent/` the harness: conversations, submissions and inbox, generation and
   tool tasks, approvals, subagents, compaction, hooks and `HostPolicy`
@@ -33,7 +33,7 @@ Everything is exported from the package root (`src/index.ts`).
 | Conversations | `conversation.submit({ text, requestId?, whenBusy?: "followUp" \| "steer" \| "reject", type? })` → `Submission` (`wait()`, `record()`), `conversation.abort(reason?)`, `conversation.cancelSubmission(submissionId)` → `"cancelled" \| "not_queued" \| "unknown"`, `entries()`, `live()`, `usage()` |
 | Policy & hooks | `HostPolicy` (`resolveModelRequest`, `authorizeTool` → `allow` / `block` / `requireApproval`), `AgentHooks` |
 | Tools | `defineTool`, `ToolRegistry`, `createGatewayTools`, `createSubagentTool` |
-| Models | `ModelRegistry`, `AnthropicProvider`, `FakeProvider` (`fakeText`, `fakeToolCall`, ...) |
+| Models | `ModelRegistry`, `AnthropicProvider`, `OpenAICompatibleProvider` / `openRouterProvider`, `FakeProvider` (`fakeText`, `fakeToolCall`, ...) |
 | Storage | `PostgresStorageProvider`, `MemoryStorageProvider`, `migrate`, `PostgresLeases`, `LeaseKeeper`, `defineStorageConformanceSuite` |
 | HTTP & watch | `createEngineServer`, `WatchHub`, `loadConversationView` |
 | Worker | `startWorker`, `workerHostPolicy`, `workerConfigFromEnv`, `createWorkerPool` |
@@ -122,6 +122,7 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` when `ENGINE_POLICY=backend` | backend origin for `/internal/models/policy` and `/internal/models/usage`; uses `ENGINE_GATEWAY_TOKEN` |
 | `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
 | `ENGINE_MODEL` / `ENGINE_SUMMARY_MODEL` | Anthropic defaults | models for replies / compaction |
+| `ENGINE_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter endpoint (the production worker registers the `openrouter` provider next to `anthropic`) |
 | `ENGINE_MAX_TOKENS` | `8192` | reply budget |
 | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle |
 | `ENGINE_SUBAGENT_TOOL` | none | register a subagent tool under this name |
@@ -216,3 +217,13 @@ otherwise each file boots a throwaway local cluster (`initdb` on `PATH` or
 | `maxDocumentBytes` | 1 MiB |
 
 Override any of them with `resolveLimits({...})`.
+
+### OpenAI-compatible provider (OpenRouter)
+
+`OpenAICompatibleProvider` streams the Chat Completions API (`POST {baseURL}/chat/completions`, `stream_options.include_usage`) with plain `fetch` and emits the same events as the Anthropic adapter. `openRouterProvider()` is it configured for OpenRouter (name `openrouter`); `defaultModelRegistry(env)` (`src/worker/providers.ts`) registers it beside `anthropic`, so the worker reports both in `supportedProviders` and a tenant whose only stored key is OpenRouter's runs engine chat and Deep Work. Model ids are OpenRouter slugs (`anthropic/claude-sonnet-5.5`, `deepseek/deepseek-v4.1-flash`); the backend policy returns them.
+
+- Tool calls stream per `index` and become one `tool_call` block each; tool results go out as `role: "tool"` messages.
+- No thinking blocks: `reasoning` / `reasoning_content` deltas are ignored and `thinking` is not sent.
+- Usage: uncached input is `prompt_tokens - cached_tokens - cache_write_tokens`; cache tokens come from `prompt_tokens_details`. Models under `anthropic/` get `cache_control` breakpoints on the system prompt and last stable message.
+- Finish reasons: `stop` → `end_turn` (`tool_use` if tool calls were streamed), `tool_calls` → `tool_use`, `length` → `max_tokens`, `content_filter` → `refusal`.
+- Errors: 401/402/403 `auth`, 429 `rate_limited`, 408 `network`, 5xx `overloaded`, 400/413 with a context-length message `context_overflow`, other 4xx `invalid_request`, transport failures `network`, cancellation `aborted`. An `error` object inside the stream fails the generation with the text kept as partial.
