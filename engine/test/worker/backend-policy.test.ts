@@ -792,3 +792,125 @@ describe("UsageReporter outbox", () => {
     expect(lines).toContain("usage_stale");
   });
 });
+
+describe("UsageReporter outbox failures", () => {
+  const EVENT: Any = {
+    runId: "run-x",
+    round: 1,
+    conversation: CONVERSATION,
+    message: { provider: "fake", model: "m" },
+    usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  };
+
+  function stub(failOn: "enqueue" | "ack" | "claim") {
+    const inner = new MemoryStorageProvider();
+    const calls = { enqueue: 0, ack: 0, claim: 0 };
+    const boom = (): never => {
+      throw new Error("pg down");
+    };
+    return {
+      inner,
+      calls,
+      outbox: {
+        enqueue: async (r: Any) => {
+          calls.enqueue++;
+          if (failOn === "enqueue") boom();
+          return inner.enqueue(r);
+        },
+        ack: async (id: string) => {
+          calls.ack++;
+          if (failOn === "ack") boom();
+          return inner.ack(id);
+        },
+        claimPending: async (ms: number) => {
+          calls.claim++;
+          if (failOn === "claim") boom();
+          return inner.claimPending(ms);
+        },
+      },
+    };
+  }
+
+  function make(gw: FakeGateway, outbox: Any, lines: string[]) {
+    return new UsageReporter({
+      baseUrl: gw.baseUrl,
+      serviceToken: gw.serviceToken,
+      retryMs: 0,
+      outbox,
+      claimTimeoutMs: 0,
+      log: (e) => lines.push(e),
+    });
+  }
+
+  async function noUnhandled(fn: () => Promise<void>) {
+    const seen: unknown[] = [];
+    const h = (e: unknown) => seen.push(e);
+    process.on("unhandledRejection", h);
+    try {
+      await fn();
+      await new Promise((r) => setTimeout(r, 20));
+    } finally {
+      process.off("unhandledRejection", h);
+    }
+    expect(seen).toEqual([]);
+  }
+
+  it("still sends the report when the enqueue throws, and logs usage_outbox_error", async () => {
+    const gw = await start();
+    const s = stub("enqueue");
+    const lines: string[] = [];
+    const rep = make(gw, s.outbox, lines);
+    await noUnhandled(async () => {
+      rep.report(EVENT);
+      await rep.flush();
+    });
+    expect(gw.usage).toHaveLength(1);
+    expect(lines).toContain("usage_outbox_error");
+    // The worker keeps going: a later report is still handled.
+    rep.report({ ...EVENT, round: 2 });
+    await rep.flush();
+    expect(gw.usage).toHaveLength(2);
+  });
+
+  it("leaves the row when the ack throws (no crash, report was sent)", async () => {
+    const gw = await start();
+    const s = stub("ack");
+    const lines: string[] = [];
+    const rep = make(gw, s.outbox, lines);
+    await noUnhandled(async () => {
+      rep.report(EVENT);
+      await rep.flush();
+    });
+    expect(gw.usage).toHaveLength(1);
+    expect(lines).toContain("usage_outbox_error");
+    expect(await s.inner.claimPending(0)).toHaveLength(1);
+  });
+
+  it("catches and logs a flush that cannot claim rows", async () => {
+    const gw = await start();
+    const s = stub("claim");
+    const lines: string[] = [];
+    const rep = make(gw, s.outbox, lines);
+    await noUnhandled(async () => {
+      rep.startFlushing();
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(lines).toContain("usage_outbox_error");
+    await rep.close();
+  });
+
+  it("keeps the row and logs usage_auth_error on 401 and 403", async () => {
+    for (const status of [401, 403]) {
+      const gw = await start();
+      gw.failUsage(status);
+      const inner = new MemoryStorageProvider();
+      const lines: string[] = [];
+      const rep = make(gw, inner, lines);
+      rep.report(EVENT);
+      await rep.flush();
+      expect(lines).toContain("usage_auth_error");
+      expect(lines).not.toContain("usage_dropped");
+      expect(await inner.claimPending(0)).toHaveLength(1);
+    }
+  });
+});

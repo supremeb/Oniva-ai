@@ -142,6 +142,10 @@ def build_capabilities_block(tools: Iterable[str]) -> str:
         for label, names in CAPABILITY_FAMILIES
         if granted.intersection(names)
     ]
+    listed = set().union(*(set(names) for _, names in CAPABILITY_FAMILIES))
+    other = sorted(granted - listed)
+    if other:
+        lines.append(f"- other tools: {', '.join(other)}")
     body = "\n".join(lines) if lines else "You have no tools beyond your own knowledge."
     return f"## {CAPABILITY_HEADING}\n\n{body}\n\n{CAPABILITY_FOOTER}"
 

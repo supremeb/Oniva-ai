@@ -27,7 +27,9 @@
  * - Usage reporting never blocks the conversation: `afterResponse` starts the
  *   report in the background; network errors, 408, 429 and 5xx are retried
  *   with the same backoff and the same time budget as policy (`usage_retry`,
- *   then `usage_failed`); other statuses are logged and dropped (`usage_dropped`).
+ *   then `usage_failed`); 401/403 are logged `usage_auth_error` and the outbox
+ *   row is kept for redelivery after the token is fixed; other statuses are
+ *   logged and dropped (`usage_dropped`).
  *   `flush` waits for reports in flight (each bounded by the budget) at shutdown.
  * - Durable outbox (U6, KTD6): with an outbox every report is enqueued (claimed)
  *   before its first attempt and deleted only on a 2xx, so a report survives a
@@ -446,13 +448,43 @@ export class UsageReporter {
     this.#pending.add(job);
   }
 
-  /** Enqueue a fresh report, then send it; keep the row when the send gives up. */
+  /**
+   * Enqueue a fresh report, then send it; keep the row when the send gives up.
+   * Never rejects: the job runs in the background with no handler. A failed
+   * enqueue still sends (the report is just not durable); a failed ack leaves
+   * the row, and the backend dedupes the redelivery.
+   */
   async #deliver(record: UsageOutboxRecord, fresh: boolean): Promise<void> {
-    if (fresh) await this.#outbox?.enqueue(record);
-    const ageMs = this.#backoff.now() - record.createdAt;
-    if (ageMs > this.#staleAgeMs) this.#log("usage_stale", { requestId: record.requestId, ageMs });
-    if (await this.#send(record.requestId, record.body)) {
-      await this.#outbox?.ack(record.requestId);
+    const outbox = this.#outbox;
+    try {
+      if (fresh && outbox) {
+        try {
+          await outbox.enqueue(record);
+        } catch (err) {
+          this.#log("usage_outbox_error", {
+            requestId: record.requestId,
+            op: "enqueue",
+            error: errorName(err),
+          });
+        }
+      }
+      const ageMs = this.#backoff.now() - record.createdAt;
+      if (ageMs > this.#staleAgeMs) {
+        this.#log("usage_stale", { requestId: record.requestId, ageMs });
+      }
+      if (await this.#send(record.requestId, record.body)) {
+        try {
+          await outbox?.ack(record.requestId);
+        } catch (err) {
+          this.#log("usage_outbox_error", {
+            requestId: record.requestId,
+            op: "ack",
+            error: errorName(err),
+          });
+        }
+      }
+    } catch (err) {
+      this.#log("usage_outbox_error", { requestId: record.requestId, error: errorName(err) });
     }
   }
 
@@ -476,6 +508,11 @@ export class UsageReporter {
         await res.body?.cancel().catch(() => {});
         if (res.ok) return true;
         why = `status ${res.status}`;
+        // Auth failures are fixed by rotating the token, so keep the row for redelivery.
+        if (res.status === 401 || res.status === 403) {
+          this.#log("usage_auth_error", { requestId, status: res.status });
+          return false;
+        }
         // A client error other than 408/429 will not change on retry.
         if (!isTransientStatus(res.status)) {
           this.#log("usage_dropped", { requestId, status: res.status });

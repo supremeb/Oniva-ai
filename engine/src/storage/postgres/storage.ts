@@ -102,7 +102,11 @@ export class PostgresStorageProvider implements StorageProvider {
     );
   }
 
-  /** Claim rows unclaimed or claimed at most `claimTimeoutMs` ago, oldest first. */
+  /**
+   * Claim rows that are unclaimed or whose claim is at least `claimTimeoutMs` old
+   * (stale), oldest first. `FOR UPDATE SKIP LOCKED` keeps concurrent claimers
+   * from taking the same row.
+   */
   async claimPending(claimTimeoutMs: number): Promise<UsageOutboxRecord[]> {
     const now = Date.now();
     const { rows } = await this.pool.query<{
@@ -117,6 +121,7 @@ export class PostgresStorageProvider implements StorageProvider {
             SELECT request_id FROM engine_usage_outbox
              WHERE claimed_at IS NULL OR claimed_at <= $2
              ORDER BY created_at, request_id
+             FOR UPDATE SKIP LOCKED
           )
          RETURNING request_id, body, created_at, claimed_at
        )

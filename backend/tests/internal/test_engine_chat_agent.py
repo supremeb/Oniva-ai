@@ -191,6 +191,19 @@ def test_capability_block_lists_connectors_files_and_code():
     assert "connectors" in block and "read_file" in block and "execute_python" in block
 
 
+def test_capability_block_lists_tools_outside_the_families_by_name():
+    block = eca.build_capabilities_block(["read_file", "generate_chart", "analyze_data"])
+    assert "- other tools: analyze_data, generate_chart" in block
+    assert "file operations: read_file" in block
+    assert block.endswith(eca.CAPABILITY_FOOTER)
+
+
+def test_capability_block_with_no_tools_is_unchanged():
+    block = eca.build_capabilities_block([])
+    assert "You have no tools beyond your own knowledge." in block
+    assert "other tools" not in block
+
+
 def test_prompt_never_contains_a_key_or_secret(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-sentinel-secret-123")
     monkeypatch.setenv("TAVILY_API_KEY", "tvly-sentinel-456")
