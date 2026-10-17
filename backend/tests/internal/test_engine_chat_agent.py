@@ -160,6 +160,48 @@ def test_project_context_matches_legacy_text():
     assert "include the current year (2026)" in text and text.endswith("domains: a.com, b.com.")
 
 
+# --- capability-honest prompt (U4 / R4, KTD4) --------------------------------------
+
+
+def test_capability_block_omits_web_search_when_off_and_states_the_rule():
+    prompt = compose(Selections()).agent["systemPrompt"]
+    assert eca.CAPABILITY_HEADING in prompt
+    assert "Web search is enabled" not in prompt
+    assert "web search" not in prompt.lower()
+    assert eca.CAPABILITY_FOOTER in prompt
+
+
+def test_capability_block_lists_web_search_and_the_instruction_when_on():
+    prompt = compose(Selections(web_search=True)).agent["systemPrompt"]
+    assert "Web search is enabled" in prompt
+    assert "web search" in prompt.lower()
+    assert eca.CAPABILITY_FOOTER in prompt
+
+
+def test_capability_block_lists_knowledge_search_when_kbs_selected():
+    prompt = compose(Selections(knowledge_base_ids=[KB1])).agent["systemPrompt"]
+    block = prompt.split(eca.CAPABILITY_HEADING, 1)[1]
+    assert "search_knowledge" in block
+
+
+def test_capability_block_lists_connectors_files_and_code():
+    built = compose(Selections(connector_ids=[CONN]),
+                    agent_skills=["read_file", "execute_python"])
+    block = built.agent["systemPrompt"].split(eca.CAPABILITY_HEADING, 1)[1]
+    assert "connectors" in block and "read_file" in block and "execute_python" in block
+
+
+def test_prompt_never_contains_a_key_or_secret(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-sentinel-secret-123")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-sentinel-456")
+    built = compose(Selections(web_search=True, knowledge_base_ids=[KB1], connector_ids=[CONN]),
+                    agent_skills=["read_file", "execute_python"])
+    prompt = built.agent["systemPrompt"]
+    assert "sk-sentinel-secret-123" not in prompt and "tvly-sentinel-456" not in prompt
+    assert "api_key" not in prompt.lower() and "apikey" not in prompt.lower()
+    assert "model" not in built.agent  # keys and model ids are resolved per request
+
+
 # --- routes ----------------------------------------------------------------------
 
 
