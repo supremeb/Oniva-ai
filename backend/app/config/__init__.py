@@ -247,6 +247,10 @@ class Settings(BaseSettings):
     SESSION_MAX_SIZE_GB: int = 10
     SESSION_RETENTION_DAYS: int = 30              # Delete stale sessions after N days
 
+    # Phase 5: Audit chain signing backend. "local" writes RSA keys under SESSION_BASE_PATH and
+    # is refused in production (fail closed) — configure a real KMS backend there.
+    AUDIT_KMS_BACKEND: str = "local"
+
     # SSE Tool Result Display
     TOOL_RESULT_SSE_LIMIT: int = 5000             # Max chars for tool results in SSE events (LLM sees full output)
 

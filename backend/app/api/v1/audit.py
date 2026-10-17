@@ -29,6 +29,7 @@ from app.config import get_settings
 
 # Phase 3 imports
 from app.services.audit_logger import get_audit_logger
+from app.services.audit_chain import AuditChain
 from app.services.workflow_replay import WorkflowReplayService
 from app.services.review_queue import (
     ReviewQueueService,
@@ -222,6 +223,20 @@ class VerifyEntryResponse(BaseModel):
     verified_at: datetime
 
 
+class AuditChainBreak(BaseModel):
+    """First broken link in a tenant's audit chain."""
+    seq: int
+    reason: str
+
+
+class AuditChainVerifyResponse(BaseModel):
+    """Result of verifying a tenant's entire signed audit chain."""
+    ok: bool
+    checked: int
+    legacy_unchained: int
+    first_break: Optional[AuditChainBreak] = None
+
+
 class WorkflowReplayResponse(BaseModel):
     """Response for workflow replay."""
     workflow_id: str
@@ -383,6 +398,21 @@ async def verify_compliance_audit_entry(
         message=result.message,
         verified_at=result.verified_at,
     )
+
+
+@router.get("/chain/verify", response_model=AuditChainVerifyResponse)
+async def verify_audit_chain(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    """
+    Verify the tenant's whole signed audit chain.
+
+    Recomputes every entry's hash and signature and checks the links between them. Entries
+    written before the chain existed are reported as ``legacy_unchained`` and never rewritten.
+    """
+    chain = AuditChain(db)
+    return AuditChainVerifyResponse(**await chain.verify_chain(tenant_id))
 
 
 # =============================================================================

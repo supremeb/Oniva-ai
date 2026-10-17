@@ -28,6 +28,7 @@ from app.models.compliance_audit_log import (
     WorkflowStateLog,
     HumanReviewTicket,
     AuditAction,
+    AuditChainHead,
 )
 from app.models.workflow_checkpoint import WorkflowCheckpoint
 from app.models.episodic_memory import EpisodicMemory
@@ -97,6 +98,7 @@ __all__ = [
     'WorkflowStateLog',
     'HumanReviewTicket',
     'AuditAction',
+    'AuditChainHead',
     'WorkflowCheckpoint',
     'EpisodicMemory',
     'UserPreferences',
