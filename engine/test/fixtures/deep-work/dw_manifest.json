@@ -27,7 +27,8 @@
       "sideEffect": "write",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     },
     {
       "name": "dw_get_learnings",
@@ -61,7 +62,8 @@
       "sideEffect": "none",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     },
     {
       "name": "dw_get_report",
@@ -74,7 +76,8 @@
       "sideEffect": "none",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     },
     {
       "name": "dw_record_reflection",
@@ -133,13 +136,19 @@
             "description": "Worker ids of this round that failed without saving learnings."
           }
         },
-        "required": ["round", "score", "gaps", "should_continue"],
+        "required": [
+          "round",
+          "score",
+          "gaps",
+          "should_continue"
+        ],
         "type": "object"
       },
       "sideEffect": "write",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     },
     {
       "name": "dw_save_learnings",
@@ -160,13 +169,17 @@
             "type": "array"
           }
         },
-        "required": ["worker_id", "learnings"],
+        "required": [
+          "worker_id",
+          "learnings"
+        ],
         "type": "object"
       },
       "sideEffect": "write",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     },
     {
       "name": "dw_start_round",
@@ -187,13 +200,17 @@
             "type": "array"
           }
         },
-        "required": ["round", "workers"],
+        "required": [
+          "round",
+          "workers"
+        ],
         "type": "object"
       },
       "sideEffect": "write",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     },
     {
       "name": "dw_write_section",
@@ -210,13 +227,17 @@
             "type": "string"
           }
         },
-        "required": ["heading", "markdown"],
+        "required": [
+          "heading",
+          "markdown"
+        ],
         "type": "object"
       },
       "sideEffect": "write",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     }
   ]
 }

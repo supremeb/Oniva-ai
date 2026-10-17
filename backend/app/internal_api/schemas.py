@@ -17,6 +17,8 @@ class ManifestTool(BaseModel):
     idempotent: bool
     timeoutMs: PositiveInt
     requiresApproval: bool
+    # Reading the result taints the run (Rule of Two). Optional on the wire: absent means false.
+    untrustedOutput: bool = False
 
 
 class ManifestResponse(BaseModel):

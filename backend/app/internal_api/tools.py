@@ -97,6 +97,7 @@ def build_manifest() -> List[ManifestTool]:
                 idempotent=spec.idempotent,
                 timeoutMs=timeouts.get(name, spec.timeout_ms),
                 requiresApproval=spec.requires_approval,
+                untrustedOutput=spec.untrusted_output,
             )
         )
     return tools

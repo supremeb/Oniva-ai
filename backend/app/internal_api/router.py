@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, FastAPI
 
 from app.config import Settings
 from app.internal_api.auth import InternalAuth, InternalUnauthorized, internal_unauthorized_handler
+from app.internal_api.authorize import router as authorize_router
 from app.internal_api.fence import GatewayError, gateway_error_handler
 from app.internal_api.logging import install_redaction
 from app.internal_api.models import router as models_router
@@ -22,6 +23,7 @@ def build_internal_router(settings: Settings) -> APIRouter:
         return {"ok": True}
 
     router.include_router(tools_router)
+    router.include_router(authorize_router)
     router.include_router(models_router)
     return router
 
