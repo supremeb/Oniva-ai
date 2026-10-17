@@ -5,6 +5,7 @@ Uses flush/refresh (NOT commit) to preserve RLS tenant context.
 """
 from uuid import UUID
 from typing import Optional, Literal
+from datetime import datetime, timezone
 
 from sqlalchemy import select, update, func, case, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,11 +15,21 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.knowledge_base import KnowledgeBase
 from app.models.chat_session import ChatSession
+from app.models.engine import EngineConversation
 from app.models.user import User
 from app.exceptions import OptimisticLockError, EntityNotFoundError, PermissionDeniedError
 
 
 ProjectRole = Literal["owner", "editor", "viewer"]
+
+
+def _sort_timestamp(value: Optional[datetime]) -> float:
+    """Sort key for a datetime that may be naive (SQLite) or aware."""
+    if value is None:
+        return 0.0
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
 
 
 class ProjectService:
@@ -505,21 +516,40 @@ class ProjectService:
         user_id: UUID,
         tenant_id: UUID,
     ) -> list[dict]:
-        """List current user's chat sessions within a project."""
+        """List current user's legacy sessions and engine conversations within a project (KTD2)."""
         await self.check_permission(project_id, user_id, tenant_id, required_role="viewer")
 
-        query = (
-            select(ChatSession)
-            .where(
-                ChatSession.project_id == project_id,
-                ChatSession.user_id == user_id,
-                ChatSession.tenant_id == tenant_id,
-            )
-            .order_by(ChatSession.updated_at.desc())
+        legacy_query = select(ChatSession).where(
+            ChatSession.project_id == project_id,
+            ChatSession.user_id == user_id,
+            ChatSession.tenant_id == tenant_id,
         )
-        result = await self.db.execute(query)
-        sessions = result.scalars().all()
-        return [s.to_dict() for s in sessions]
+        legacy = (await self.db.execute(legacy_query)).scalars().all()
+
+        engine_query = select(EngineConversation).where(
+            EngineConversation.project_id == project_id,
+            EngineConversation.user_id == user_id,
+            EngineConversation.tenant_id == tenant_id,
+            EngineConversation.archived_at.is_(None),
+        )
+        engine = (await self.db.execute(engine_query)).scalars().all()
+
+        rows = [
+            (s.updated_at, {**s.to_dict(), "source": "legacy"}) for s in legacy
+        ] + [
+            (c.updated_at, {
+                "id": str(c.conversation_id),
+                "source": "engine",
+                "project_id": str(c.project_id),
+                "title": c.title,
+                "pinned": bool(c.pinned),
+                "legacy_session_id": str(c.legacy_session_id) if c.legacy_session_id else None,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            }) for c in engine
+        ]
+        rows.sort(key=lambda r: _sort_timestamp(r[0]), reverse=True)
+        return [data for _, data in rows]
 
     # ──────────────────────────────────────────────
     # Internal helpers
