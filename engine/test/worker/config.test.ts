@@ -199,6 +199,9 @@ describe("workerHostPolicy", () => {
       conversation: { id: "c", tenantId: "t", projectId: "p" },
       runId: "r",
       toolCallId: "x",
+      toolTaskId: "task-x",
+      toolSource: "gateway" as const,
+      taint: { tainted: false, total: 0, sources: [] },
       arguments: {},
       replay: "unsafe" as const,
       // biome-ignore lint/suspicious/noExplicitAny: agent config is not consulted

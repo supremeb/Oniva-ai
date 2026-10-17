@@ -92,12 +92,15 @@ export type ApprovalRejectedReason =
 /** A decision that was not accepted. Nothing was written. */
 export class ApprovalRejected extends Error {
   readonly code = "approval_rejected";
+  /** The item the rejection concerns, when the request was found (a snapshot). */
+  readonly item: ApprovalItem | null;
   constructor(
     readonly reason: ApprovalRejectedReason,
     message: string,
-    options?: ErrorOptions,
+    options?: ErrorOptions & { item?: ApprovalItem | null },
   ) {
     super(message, options);
+    this.item = options?.item ?? null;
     this.name = "ApprovalRejected";
   }
 }
@@ -224,16 +227,21 @@ export async function applyDecision(
     throw new ApprovalRejected("not_waiting", `tool call ${toolTaskId} has no approval request`);
   }
   if (item.status === "expired" || (item.expiresAt !== null && tx.now >= item.expiresAt)) {
-    throw new ApprovalRejected("expired", `the approval for ${toolTaskId} has expired`);
+    throw new ApprovalRejected("expired", `the approval for ${toolTaskId} has expired`, {
+      item: structuredClone(item),
+    });
   }
   if (item.status !== "pending") {
     throw new ApprovalRejected(
       "already_decided",
       `the approval for ${toolTaskId} is already ${item.status}`,
+      { item: structuredClone(item) },
     );
   }
   if (task.status !== "waiting" || task.waiting?.signal !== APPROVAL_SIGNAL) {
-    throw new ApprovalRejected("not_waiting", `tool call ${toolTaskId} is not awaiting approval`);
+    throw new ApprovalRejected("not_waiting", `tool call ${toolTaskId} is not awaiting approval`, {
+      item: structuredClone(item),
+    });
   }
   const decision: ApprovalDecision = {
     decision: input.decision,

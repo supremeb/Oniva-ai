@@ -2,6 +2,7 @@ import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { HostPolicy } from "../../src/agent/policy.js";
+import { createSubagentTool } from "../../src/agent/subagents.js";
 import { fakeText, fakeToolCall } from "../../src/models/fake.js";
 import { defineTool } from "../../src/tools/registry.js";
 import type { WatchFrame } from "../../src/watch/stream.js";
@@ -61,6 +62,14 @@ async function pendingApproval(w: AgentWorker, conversationId: string) {
   return (await w.harness.approvals(conversationId)).find((i) => i.status === "pending") as Any;
 }
 
+/** The child conversation a parent's still-running `research` subagent call created. */
+function childApprovalOwner(w: AgentWorker, parentId: string): string | undefined {
+  const tool = w.harness.runtime
+    .tasks({ conversationId: parentId })
+    .find((t) => t.kind === "agent.tool" && (t.input as Any)?.call?.name === "research");
+  return (tool?.checkpoint as Any)?.subagent?.conversationId;
+}
+
 describe("engine HTTP server", () => {
   it("serves health without auth", async () => {
     const { url, w } = await start();
@@ -98,6 +107,7 @@ describe("engine HTTP server", () => {
       ["POST", `/v1/conversations/${id}/submissions`],
       ["GET", `/v1/conversations/${id}/watch`],
       ["POST", `/v1/conversations/${id}/abort`],
+      ["GET", `/v1/conversations/${id}/approvals`],
       ["POST", `/v1/conversations/${id}/approvals/task_x/decision`],
     ];
     for (const [method, path] of routes) {
@@ -130,6 +140,7 @@ describe("engine HTTP server", () => {
         ["POST", `/v1/conversations/${id}/submissions`, headers],
         ["GET", `/v1/conversations/${id}/watch`, headers],
         ["POST", `/v1/conversations/${id}/abort`, headers],
+        ["GET", `/v1/conversations/${id}/approvals`, headers],
         [
           "POST",
           `/v1/conversations/${id}/approvals/task_x/decision`,
@@ -159,6 +170,10 @@ describe("engine HTTP server", () => {
       headers: AUTH,
     });
     expect(watch.status).toBe(404);
+    const approvals = await call(url, "GET", "/v1/conversations/conv_missing/approvals", {
+      headers: AUTH,
+    });
+    expect(approvals.status).toBe(404);
     expect((await call(url, "GET", "/v1/nope", { headers: AUTH })).status).toBe(404);
     const wrongMethod = await call(url, "GET", "/v1/conversations", { headers: AUTH });
     expect(wrongMethod.status).toBe(405);
@@ -182,7 +197,7 @@ describe("engine HTTP server", () => {
   });
 
   it("rejects an oversized body with 413 and malformed input with 400", async () => {
-    const { url } = await start({}, { limits: { maxRequestBodyBytes: 512 } });
+    const { url, w } = await start({}, { limits: { maxRequestBodyBytes: 512 } });
     const id = await createConv(url);
     const big = await call(url, "POST", `/v1/conversations/${id}/submissions`, {
       headers: AUTH,
@@ -212,6 +227,16 @@ describe("engine HTTP server", () => {
       body: {},
     });
     expect(noContent.status).toBe(400);
+    const badUntrusted = await call(url, "POST", `/v1/conversations/${id}/submissions`, {
+      headers: AUTH,
+      body: { text: "x", untrusted: "yes" },
+    });
+    expect(badUntrusted.status).toBe(400);
+    expect(badUntrusted.body).toMatchObject({
+      error: "bad_request",
+      reason: "untrusted must be a boolean",
+    });
+    expect(await w.harness.conversation(id).entries()).toHaveLength(0);
   });
 
   it("413s a chunked body that grows past the limit", async () => {
@@ -384,6 +409,63 @@ describe("engine HTTP server", () => {
     });
     expect(again.status).toBe(409);
     expect(again.body.reason).toBe("already_decided");
+    expect(again.body.approval).toMatchObject({ id: item.id, status: "approved" });
+  });
+
+  it("lists a conversation's approval items and reaches a subagent child's item through the root", async () => {
+    const childPolicy: HostPolicy = {
+      resolveModelRequest: allowAll.resolveModelRequest,
+      authorizeTool: ({ toolName }) =>
+        toolName === "scrape"
+          ? { decision: "requireApproval", reason: "needs a human" }
+          : { decision: "allow" },
+    };
+    const research = createSubagentTool({ name: "research", tools: ["scrape"] });
+    const scrape = defineTool({
+      name: "scrape",
+      description: "Scrape",
+      parameters: z.object({}),
+      execute: () => ({ content: "scraped" }),
+    });
+    const { url, w, fx } = await start({ tools: [research, scrape], policy: childPolicy });
+    fx.provider.enqueue(
+      fakeToolCall("research", { prompt: "go" }, { id: "r1" }),
+      fakeToolCall("scrape", {}, { id: "s1" }),
+      fakeText("scraped"),
+      fakeText("done"),
+    );
+    const id = await createConv(url, { agent: { systemPrompt: "s", tools: ["research"] } });
+    const sub = await call(url, "POST", `/v1/conversations/${id}/submissions`, {
+      headers: AUTH,
+      body: { text: "research" },
+    });
+
+    await waitFor(() => childApprovalOwner(w, id) !== undefined);
+    const child = childApprovalOwner(w, id) as string;
+    await w.harness.waitForIdle();
+    const item = (await w.harness.approvals(child)).find((i) => i.status === "pending") as Any;
+
+    const view = await call(url, "GET", `/v1/conversations/${id}/approvals`, { headers: AUTH });
+    expect(view.status).toBe(200);
+    expect(view.body.conversationId).toBe(id);
+    expect(view.body.approvals).toHaveLength(1);
+    expect(child).not.toBe(id);
+    expect(view.body.approvals[0]).toMatchObject({
+      id: item.id,
+      toolName: "scrape",
+      status: "pending",
+    });
+
+    const decided = await call(
+      url,
+      "POST",
+      `/v1/conversations/${id}/approvals/${item.toolTaskId}/decision`,
+      { headers: { ...AUTH, "x-oniva-principal": "user:alice" }, body: { decision: "approve" } },
+    );
+    expect(decided.status).toBe(200);
+    expect(decided.body.approval).toMatchObject({ id: item.id, status: "approved" });
+    const settled = await w.harness.submission(sub.body.submissionId).wait();
+    expect(settled.status).toBe("done");
   });
 
   it("streams a mid-run watch over SSE: snapshot, then patches that reproduce the final view", async () => {

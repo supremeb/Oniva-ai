@@ -147,7 +147,12 @@ function mapError(err: unknown): HttpError | null {
   if (err instanceof UnknownConversation) return new HttpError(404, "not_found", "conversation");
   if (err instanceof ConversationBusy) return new HttpError(409, "conversation_busy");
   if (err instanceof ApprovalRejected) {
-    return new HttpError(err.reason === "invalid" ? 400 : 409, "approval_rejected", err.reason);
+    return new HttpError(
+      err.reason === "invalid" ? 400 : 409,
+      "approval_rejected",
+      err.reason,
+      err.item === null ? {} : { approval: err.item as unknown as JsonObject },
+    );
   }
   if (err instanceof NotOwner) {
     return new HttpError(409, "not_owner", undefined, { ownerId: err.ownerId ?? null });

@@ -233,6 +233,31 @@ def test_write_submission_does_not_set_a_title(env):
     assert env.touched and env.titled == []
 
 
+def test_submit_marks_non_text_content_untrusted(env):
+    cid = env.seed()
+    r = env.http.post(f"/api/v1/engine/conversations/{cid}/submissions",
+                      json={"content": [{"type": "text", "text": "look"},
+                                        {"type": "image", "url": "https://x/i.png"}]})
+    assert r.status_code == 202
+    sent = json.loads(env.calls[0].content)
+    assert sent["untrusted"] is True
+    assert sent["content"] == [{"type": "text", "text": "look"},
+                               {"type": "image", "url": "https://x/i.png"}]
+
+
+def test_submit_text_only_content_is_not_untrusted(env):
+    cid = env.seed()
+    env.http.post(f"/api/v1/engine/conversations/{cid}/submissions",
+                  json={"content": [{"type": "text", "text": "hi"}]})
+    assert "untrusted" not in json.loads(env.calls[0].content)
+
+
+def test_plain_text_submit_is_not_untrusted(env):
+    cid = env.seed()
+    env.http.post(f"/api/v1/engine/conversations/{cid}/submissions", json={"text": "hi"})
+    assert "untrusted" not in json.loads(env.calls[0].content)
+
+
 def test_watch_streams_through_and_forwards_resume(env):
     cid = env.seed()
     with env.http.stream("GET", f"/api/v1/engine/conversations/{cid}/watch?cursor=5",

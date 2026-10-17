@@ -47,6 +47,7 @@ import {
   toSubmissionInput,
   toSubmissionResult,
 } from "./submission.js";
+import { markTainted, rootConversationId } from "./taint.js";
 import { listAllEntries } from "./tool-task.js";
 import { type UsageTotals, usageDoc } from "./usage.js";
 
@@ -129,6 +130,9 @@ export class Conversation {
         if (existing) return existing.id;
       }
       const inbox = await Inbox.load(tx, this.id);
+      // An untrusted input taints the root conversation in the same commit
+      // that stores it (reads first; a mark is a document write).
+      const taintRoot = record.untrusted ? await rootConversationId(tx, conv) : null;
 
       const submissionId = tx.mintId("submission");
       const base = {
@@ -175,11 +179,17 @@ export class Conversation {
           record.content,
           base.requestId,
         );
+        if (taintRoot !== null) {
+          await markTainted(tx, taintRoot, { kind: "input", name: "input", ref: submissionId });
+        }
         return submissionId;
       }
       const runId = tx.mintId("task");
       tx.createSubmission({ ...base, status: "active", result: null, taskId: runId });
       appendUserEntry(tx, this.id, submissionId, record.content, base.requestId);
+      if (taintRoot !== null) {
+        await markTainted(tx, taintRoot, { kind: "input", name: "input", ref: submissionId });
+      }
       startRun(tx, ops, this.core.generation, this.id, submissionId, runId);
       return submissionId;
     });

@@ -11,6 +11,7 @@ export * from "./agent/progress.js";
 export * from "./agent/prompt.js";
 export * from "./agent/subagents.js";
 export * from "./agent/submission.js";
+export * from "./agent/taint.js";
 export * from "./agent/tool-task.js";
 export * from "./agent/usage.js";
 export * from "./core/clock.js";
