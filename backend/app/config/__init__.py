@@ -361,6 +361,8 @@ class Settings(BaseSettings):
     ENABLE_ENGINE_API: bool = False
     ENABLE_ENGINE_CHAT: bool = False  # global gate for engine-backed chat; tenants opt in via settings.features
     ENABLE_ENGINE_DEEP_WORK: bool = False  # global gate for engine-backed Deep Work; tenants opt in via settings.features
+    ENABLE_ENGINE_FLEET: bool = False  # global gate for engine-backed Fleet runs; tenants opt in via settings.features
+    ENABLE_ENGINE_WORKFLOWS: bool = False  # global gate for engine-backed workflow runs; tenants opt in via settings.features
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
     # Legacy POST /api/v1/chat: when a stored session is supplied, rebuild model history from the
     # stored messages and ignore client-supplied assistant/tool parts (anti-forgery). Set to
