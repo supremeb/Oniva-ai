@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy import func, select
 
 from app.models.llm_usage import LLMUsageRecord
-from app.models.scheduled_workflow import ScheduledWorkflowExecution
+from app.models.scheduled_workflow import ScheduledWorkflow, ScheduledWorkflowExecution
 from app.models.workflow import WorkflowExecution
 from app.services import run_handlers
 from app.services import workflow_engine_runs as wer
@@ -67,25 +67,56 @@ def _status_from_summaries(summaries: Dict[str, str]) -> str:
     return "failed" if any(s in ("failed", "blocked") for s in summaries.values()) else "completed"
 
 
-async def _finish_scheduled(db, execution: WorkflowExecution, status: str) -> None:
-    """The scheduled-run row of this execution ends with it (U19 adds the schedule's own last_run_*)."""
+async def finish_scheduled(db, execution: WorkflowExecution, status: str, *, attempts: Optional[int] = None) -> None:
+    """The scheduled-run row of this execution ends with it, and the schedule's ``last_run_*`` follow (U19).
+
+    ``attempts`` is the run's final attempt count (finalize); ``retry_count`` is the retries it took. Without it
+    (settled by the reconciler) the stored ``retry_count`` stays.
+    """
     if execution.trigger != "scheduled":
         return
     rows = (await db.execute(
         select(ScheduledWorkflowExecution).where(ScheduledWorkflowExecution.workflow_execution_id == execution.id)
     )).scalars().all()
+    if not rows:  # linked by the start; fall back to the deterministic request key
+        rows = (await db.execute(
+            select(ScheduledWorkflowExecution).where(ScheduledWorkflowExecution.tenant_id == execution.tenant_id,
+                                                     ScheduledWorkflowExecution.workflow_execution_id.is_(None),
+                                                     ScheduledWorkflowExecution.status.in_(("pending", "running")))
+        )).scalars().all()
+        rows = [r for r in rows if scheduled_execution_key_matches(r, execution)]
     for row in rows:
         if row.status in ("completed", "failed", "skipped"):
             continue
-        row.status = "completed" if status == "completed" else "failed"
+        final = "completed" if status == "completed" else "failed"
+        error = execution.error
+        if attempts is not None:
+            row.retry_count = max(0, attempts - 1)
+            if final == "failed" and attempts > 1 and error:
+                error = f"{error} (failed after {attempts} attempts)"[:2000]
+        row.status = final
         row.completed_at = execution.completed_at
-        row.error = execution.error
-        row.result_summary = {"status": status, "nodes_executed": execution.nodes_executed,
-                              "total_tokens": execution.total_tokens}
+        row.error = error
+        summary = dict(row.result_summary or {})
+        summary.update({"status": status, "nodes_executed": execution.nodes_executed,
+                        "total_tokens": execution.total_tokens})
+        if attempts is not None:
+            summary["attempts"] = attempts
+        row.result_summary = summary
+        schedule = await db.get(ScheduledWorkflow, row.schedule_id)
+        if schedule is not None:
+            schedule.last_run_at = execution.completed_at
+            schedule.last_run_status = final
+            schedule.last_error = error if final == "failed" else None
+
+
+def scheduled_execution_key_matches(row: ScheduledWorkflowExecution, execution: WorkflowExecution) -> bool:
+    """True when ``execution`` is the engine run of scheduled execution ``row`` (deterministic request key)."""
+    return wer.execution_id_for(row.tenant_id, execution.workflow_id, f"scheduled:{row.id}") == execution.id
 
 
 async def apply_final(db, execution: WorkflowExecution, status: str, *, summaries: Optional[Dict[str, str]] = None,
-                      error: Any = None) -> bool:
+                      error: Any = None, attempts: Optional[int] = None) -> bool:
     """Settle ``execution`` (locked by the caller). False when it was already terminal (nothing changes)."""
     if execution.status in TERMINAL:
         return False
@@ -111,7 +142,7 @@ async def apply_final(db, execution: WorkflowExecution, status: str, *, summarie
         if started.tzinfo is None:
             started = started.replace(tzinfo=timezone.utc)
         execution.duration_ms = max(0, int((now - started).total_seconds() * 1000))
-    await _finish_scheduled(db, execution, status)
+    await finish_scheduled(db, execution, status, attempts=attempts)
     return True
 
 
@@ -125,7 +156,8 @@ async def finalize(factory, tenant_id: Any, run_id: Any, body: Any) -> bool:
         )).scalar_one_or_none()
         if execution is None:
             return False
-        moved = await apply_final(db, execution, body.status, summaries=dict(body.nodeSummaries), error=body.error)
+        moved = await apply_final(db, execution, body.status, summaries=dict(body.nodeSummaries), error=body.error,
+                                  attempts=body.attempts)
         await db.commit()
         return moved
 
