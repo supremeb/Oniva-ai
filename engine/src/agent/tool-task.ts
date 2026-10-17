@@ -460,7 +460,7 @@ export function toolTaskDefinition(
             `Invalid arguments for ${call.name}: ${issuesText(first.error.issues)}`,
           );
         }
-        const args = await deps.hooks.beforeTool(
+        const hooked = await deps.hooks.beforeTool(
           {
             conversation,
             agent,
@@ -471,7 +471,7 @@ export function toolTaskDefinition(
           },
           task.id,
         );
-        const final = tool.parameters.safeParse(args);
+        const final = tool.parameters.safeParse(hooked);
         if (!final.success) {
           return fail(
             task,
@@ -481,6 +481,9 @@ export function toolTaskDefinition(
           );
         }
         // Host policy: last, on the final arguments, not overridable.
+        // The arguments policy sees, the approval stores and the tool runs with are the parsed ones (schema
+        // defaults applied): an approval's argument hash must cover exactly what is executed (KTD2).
+        const args = final.data as JsonObject;
         const taint = taintSummary(await taintOf(deps.session, rootOf(conversation)));
         const verdict = await authorize(deps.policy, {
           conversation,
@@ -490,6 +493,7 @@ export function toolTaskDefinition(
           toolName: call.name,
           toolTaskId: task.id,
           toolSource: tool.source,
+          toolInternal: tool.internal,
           taint,
           arguments: args,
           replay: tool.replay,
