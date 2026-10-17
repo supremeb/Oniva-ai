@@ -21,6 +21,7 @@ from app.services.compliance_engine import (
     ComplianceEngine,
 )
 from app.services import workflow_engine_runs as engine_runs
+from app.services import workflow_stream_adapter
 from app.services.workflow_orchestrator import WorkflowOrchestrator
 from app.models.compliance_execution import (
     ComplianceExecution,
@@ -249,7 +250,7 @@ async def execute_compliance_template_stream(
             db, None, template["spec"], dict(request.inputs or {}),
             user_id=user_id, tenant_id=tenant_id, trigger="compliance",
         )
-        updates = engine_runs.execution_events(engine_runs.tenant_factory(tenant_id), execution.id, task_id)
+        updates = workflow_stream_adapter.watch_events(engine_runs.tenant_factory(tenant_id), execution.id, task_id)
     else:
         orchestrator = WorkflowOrchestrator(db=db, user_id=str(user_id))
         updates = orchestrator.execute_workflow_stream(

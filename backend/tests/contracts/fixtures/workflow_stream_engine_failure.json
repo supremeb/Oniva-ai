@@ -1,0 +1,70 @@
+{
+  "events": [
+    {
+      "type": "progress",
+      "node_id": "start-1",
+      "status": "running"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "start-1",
+      "result": {
+        "status": "success",
+        "output": {
+          "query": ""
+        },
+        "error": null
+      }
+    },
+    {
+      "type": "progress",
+      "node_id": "n2",
+      "status": "running"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "n2",
+      "result": {
+        "status": "failed",
+        "output": null,
+        "error": "boom"
+      }
+    },
+    {
+      "type": "error",
+      "node_id": "n2",
+      "error": "boom"
+    },
+    {
+      "type": "node_skipped",
+      "node_id": "n3",
+      "status": "skipped"
+    },
+    {
+      "type": "complete",
+      "status": "failed",
+      "results": {
+        "start-1": {
+          "status": "success",
+          "output": {
+            "query": ""
+          },
+          "error": null
+        },
+        "n2": {
+          "status": "failed",
+          "output": null,
+          "error": "boom"
+        },
+        "n3": {
+          "status": "skipped",
+          "output": null,
+          "error": null
+        }
+      },
+      "executed_nodes": 1,
+      "total_nodes": 3,
+      "execution_id": "<id-1>"
+    }
+  ]
+}

@@ -23,7 +23,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncIterator, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from fastapi import HTTPException
 from sqlalchemy import String, cast, select
@@ -329,50 +329,6 @@ def results_from_trace(execution: WorkflowExecution) -> Dict[str, Any]:
 
 def executed_count(results: Dict[str, Any]) -> int:
     return sum(1 for r in results.values() if r.get("status") == "success")
-
-
-async def execution_events(factory: Callable, execution_id: Any, task_id: Optional[str], *, engine: Any = None,
-                           timeout_s: float = 300.0, poll_s: Optional[float] = None) -> AsyncIterator[dict]:
-    """Orchestrator-shaped events (``progress``, ``node_complete``, ``complete``) for an engine run.
-
-    Built from the stored trace and the run task, polled until the task is terminal. This is the
-    interim live view for the agent-chat and compliance streams; U17 replaces it with the engine watch.
-    Raises ``asyncio.TimeoutError`` when the run is still going after ``timeout_s``.
-    """
-    execution_id = _uuid(execution_id)
-    seen: set = set()
-    deadline = time.monotonic() + timeout_s
-    interval = POLL_INTERVAL_S if poll_s is None else poll_s
-    while True:
-        async with factory() as db:
-            execution = await db.get(WorkflowExecution, execution_id)
-            if execution is None:
-                return
-            outcome = await await_finished(db, execution, task_id, engine=engine, wait_s=0, poll_s=0)
-            # Read the trace after the task state: every step is written before the run settles.
-            await db.refresh(execution)
-            steps = [dict(step) for step in execution.execution_trace or []]
-            total = execution.total_nodes or 0
-        for step in steps:
-            ident = (step.get("node_id"), step.get("run_attempt"), step.get("attempt"))
-            if ident in seen:
-                continue
-            seen.add(ident)
-            yield {"type": "progress", "node_id": step["node_id"]}
-            yield {"type": "node_complete", "node_id": step["node_id"],
-                   "result": {"status": step.get("status"), "output": step.get("output"), "error": step.get("error")}}
-        if outcome is not None:
-            results: Dict[str, Any] = {}
-            for step in steps:
-                results[step["node_id"]] = {"status": step.get("status"), "output": step.get("output"),
-                                            "error": step.get("error")}
-            yield {"type": "complete", "status": outcome_status(outcome), "results": results,
-                   "executed_nodes": executed_count(results), "total_nodes": total,
-                   "execution_id": str(execution_id)}
-            return
-        if time.monotonic() >= deadline:
-            raise asyncio.TimeoutError()
-        await asyncio.sleep(interval)
 
 
 # ---- registry hooks -----------------------------------------------------------------------------

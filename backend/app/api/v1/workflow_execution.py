@@ -25,6 +25,7 @@ from app.models.agent_chat_session import AgentChatSession
 from app.models.workflow import Workflow
 from app.services.sse_builder import create_sse_builder
 from app.services import workflow_engine_runs as engine_runs
+from app.services import workflow_stream_adapter
 from app.services.workflow_orchestrator import WorkflowOrchestrator
 
 logger = logging.getLogger(__name__)
@@ -152,7 +153,7 @@ async def execute_workflow_stream(
             async with (_legacy_session() if engine_start is None else nullcontext()) as exec_db:
                 if engine_start is not None:
                     execution_id, task_id = engine_start
-                    events = engine_runs.execution_events(
+                    events = workflow_stream_adapter.watch_events(
                         engine_runs.tenant_factory(tenant_id), execution_id, task_id,
                         timeout_s=_DEFAULT_EXECUTION_TIMEOUT,
                     )

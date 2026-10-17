@@ -25,6 +25,7 @@ from app.services.workflow_orchestrator import WorkflowOrchestrator
 from app.services.durable_workflow_engine import DurableWorkflowEngine
 from app.services import workflow_engine_runs as engine_runs
 from app.services import workflow_batch_engine as batch_engine
+from app.services import workflow_stream_adapter
 from app.services.webhook_service import (
     WebhookConfig, get_webhook_service
 )
@@ -548,16 +549,35 @@ async def execute_workflow_stream(
             request.workflow_id, user_id, user.role, tenant_id, db
         )
 
+    input_variables = request.inputs or {}
+    if "query" in input_variables and "sys.query" not in input_variables:
+        input_variables["sys.query"] = input_variables["query"]
+
+    if await engine_runs.tenant_uses_engine_workflows(db, tenant_id):
+        # Engine tenants (plan 003 U17): start the run before the stream opens, so an invalid workflow (400)
+        # or an unavailable engine (502) is a real error response, then follow the engine watch.
+        execution, task_id = await engine_runs.start_workflow_run(
+            db, request.workflow_id,
+            {"nodes": [n.model_dump() for n in request.nodes], "edges": [e.model_dump() for e in request.edges]},
+            dict(input_variables), user_id=user_id, tenant_id=tenant_id, trigger="manual",
+        )
+        updates = workflow_stream_adapter.watch_events(engine_runs.tenant_factory(tenant_id), execution.id, task_id)
+
+        async def engine_event_stream():
+            try:
+                async for update in updates:
+                    yield f"data: {json.dumps(update)}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e) or type(e).__name__})}\n\n"
+
+        return StreamingResponse(engine_event_stream(), media_type="text/event-stream")
+
     orchestrator = WorkflowOrchestrator(
         db=db,
         user_id=str(user_id),
         tenant_id=tenant_id,
         trigger="manual"
     )
-    
-    input_variables = request.inputs or {}
-    if "query" in input_variables and "sys.query" not in input_variables:
-        input_variables["sys.query"] = input_variables["query"]
 
     async def event_stream():
         try:
