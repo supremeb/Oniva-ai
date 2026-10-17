@@ -114,7 +114,7 @@ export function FleetChat({ runId, agentName, conversationId = null }: FleetChat
       <div className="px-4 py-3 border-b border-border flex items-center gap-2 shrink-0">
         <Robot className="h-4 w-4 text-primary" weight="fill" />
         <span className="text-sm font-semibold">{job?.agent_name || agentName}</span>
-        <RunStatusBadge status={status} />
+        <RunStatusBadge status={status} testId="fleet-detail-status" />
         {isLive && (
           <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" title="Live" />
         )}

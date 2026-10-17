@@ -1,37 +1,66 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useCallback, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FleetRunList } from '@/components/fleet/FleetRunList';
 import { FleetChat } from '@/components/fleet/FleetChat';
+import { useFleetRuns } from '@/hooks/useFleetRuns';
+import type { FleetRunItem } from '@/lib/models';
 import { Broadcast } from '@phosphor-icons/react';
+
+interface SelectedRun {
+  id: string;
+  agent_name: string | null;
+  status: string;
+  conversation_id: string | null;
+}
+
+function toSelected(run: FleetRunItem): SelectedRun {
+  return {
+    id: run.id,
+    agent_name: run.agent_name,
+    status: run.status,
+    // An engine job carries its conversation; a legacy job has none (trace path).
+    conversation_id: run.engine === false ? null : (run.conversation_id ?? null),
+  };
+}
 
 /**
  * Fleet page — split-panel inbox with chat-style run detail.
  * Left: filterable run list (Running / Needs Attention / Done / All)
  * Right: chat interface showing agent work + operator intervention
+ *
+ * The selected run lives in the URL (`/fleet?run=<jobId>`) so a reload rejoins it.
  */
-export default function FleetPage() {
-  const [selectedRun, setSelectedRun] = useState<{
-    id: string;
-    agent_name: string | null;
-    status: string;
-    conversation_id: string | null;
-  } | null>(null);
+function FleetPageInner() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const runParam = searchParams.get('run');
+
+  // Run picked from the list this session (has full metadata without a lookup).
+  const [picked, setPicked] = useState<SelectedRun | null>(null);
+  const knownPicked = picked && picked.id === runParam ? picked : null;
+
+  // Restoring from the URL: look the run up in the unfiltered list to get its conversation.
+  const { data, isLoading } = useFleetRuns({ page: 1, page_size: 50 }, { enabled: !!runParam && !knownPicked });
+  const fromList = runParam && !knownPicked ? data?.items.find((r) => r.id === runParam) : undefined;
+  const selectedRun: SelectedRun | null = knownPicked ?? (fromList ? toSelected(fromList) : null);
+  const restoring = !!runParam && !selectedRun && isLoading;
+
+  const handleSelect = useCallback(
+    (run: FleetRunItem) => {
+      setPicked(toSelected(run));
+      router.replace(`${pathname}?run=${encodeURIComponent(run.id)}`, { scroll: false });
+    },
+    [router, pathname],
+  );
 
   return (
     <div className="h-full flex">
       {/* Left panel — run list */}
       <div className="w-80 border-r border-border shrink-0 h-full overflow-hidden">
-        <FleetRunList
-          selectedId={selectedRun?.id ?? null}
-          onSelect={(run) => setSelectedRun({
-            id: run.id,
-            agent_name: run.agent_name,
-            status: run.status,
-            // An engine job carries its conversation; a legacy job has none (trace path).
-            conversation_id: run.engine === false ? null : (run.conversation_id ?? null),
-          })}
-        />
+        <FleetRunList selectedId={runParam} onSelect={handleSelect} />
       </div>
 
       {/* Right panel — chat interface */}
@@ -44,6 +73,8 @@ export default function FleetPage() {
             status={selectedRun.status}
             conversationId={selectedRun.conversation_id}
           />
+        ) : restoring ? (
+          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
         ) : (
           <div className="h-full flex items-center justify-center text-muted-foreground">
             <div className="text-center">
@@ -55,5 +86,13 @@ export default function FleetPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function FleetPage() {
+  return (
+    <Suspense fallback={null}>
+      <FleetPageInner />
+    </Suspense>
   );
 }
