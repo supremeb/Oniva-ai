@@ -3,7 +3,7 @@ Deep Work Architecture E2E Integration Tests
 
 10 real end-to-end scenarios covering the three Deep Work phases:
 - File System Memory (workspace skills, session lifecycle)
-- E2B Code Execution Sandbox (review ticket creation)
+- E2B Code Execution Sandbox (refuses outside the approved gateway path)
 - Wide Research Orchestrator (parallel execution, workspace save)
 
 Plus: state machine gating, todo recitation, path traversal, connector pipeline,
@@ -145,71 +145,34 @@ class TestStateMachineGating:
 
 
 # ===========================================================================
-# Scenario 4: E2B Sandbox Creates Review Ticket
+# Scenario 4: execute_python needs an approved gateway call (no review tickets)
 # ===========================================================================
 
-class TestSandboxReviewTicket:
-    """Scenario 4: execute_python creates a review ticket via ReviewQueueService."""
+class TestSandboxNeedsApproval:
+    """Scenario 4: outside the tool gateway execute_python refuses and creates no ticket."""
 
     @pytest.mark.asyncio
-    async def test_sandbox_creates_review_ticket(self, skill_context, integration_db):
-        # Attach db to context (required after our bug fix)
+    async def test_sandbox_refuses_outside_gateway(self, skill_context, integration_db):
         skill_context.db = integration_db
 
         mock_settings = MagicMock()
         mock_settings.ENABLE_SANDBOX = True
         mock_settings.E2B_API_KEY = "test_key"
 
-        mock_ticket = MagicMock()
-        mock_ticket.id = "ticket-abc-123"
-
         mock_service = AsyncMock()
-        mock_service.create_ticket.return_value = mock_ticket
 
         with patch("app.skills.execute_python.tool.get_settings", return_value=mock_settings):
             with patch(
                 "app.services.review_queue.ReviewQueueService",
                 return_value=mock_service,
             ):
-                with patch(
-                    "app.services.review_queue.ReviewTicketCreate"
-                ) as MockCreate:
-                    MockCreate.return_value = MagicMock()
+                from app.skills.execute_python.tool import execute_python
 
-                    from app.skills.execute_python.tool import execute_python
-
-                    result = await execute_python(
-                        skill_context, "print('hello world')"
-                    )
-
-        assert result["success"] is True
-        assert result["status"] == "pending_review"
-        assert result["ticket_id"] == "ticket-abc-123"
-
-        # Verify ReviewTicketCreate was called with correct fields
-        call_kwargs = MockCreate.call_args[1]
-        assert call_kwargs["risk_level"] == "high"
-        assert call_kwargs["review_type"] == "code_execution"
-        assert call_kwargs["session_id"] == skill_context.session_id
-        assert call_kwargs["agent_id"] == "analysis-agent"
-        assert "print('hello world')" in call_kwargs["review_data"]["code"]
-
-    @pytest.mark.asyncio
-    async def test_sandbox_requires_db(self, skill_context):
-        """Verify the bug fix: execute_python returns error when ctx.db is None."""
-        skill_context.db = None
-
-        mock_settings = MagicMock()
-        mock_settings.ENABLE_SANDBOX = True
-        mock_settings.E2B_API_KEY = "test_key"
-
-        with patch("app.skills.execute_python.tool.get_settings", return_value=mock_settings):
-            from app.skills.execute_python.tool import execute_python
-
-            result = await execute_python(skill_context, "print('hello')")
+                result = await execute_python(skill_context, "print('hello world')")
 
         assert result["success"] is False
-        assert "database" in result["error"].lower() or "db" in result["error"].lower()
+        assert "approved" in result["error"].lower()
+        mock_service.create_ticket.assert_not_called()
 
 
 # ===========================================================================

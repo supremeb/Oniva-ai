@@ -37,7 +37,7 @@ from app.api.v1 import mentions  # Mention resolution for Hybrid Document Editor
 from app.api.v1 import knowledge_management  # Knowledge Management (Frontier Phase C)
 from app.api.v1 import admin  # Org Admin Dashboard (Frontier Phase D)
 from app.api.v1 import feedback  # Inline Feedback (Frontier Phase E)
-from app.api.v1 import sandbox, workspace  # Deep Work Phase 2: Sandbox + Workspace
+from app.api.v1 import workspace  # Deep Work Phase 2: Sandbox + Workspace
 from app.api.v1 import wide_research  # Deep Work Phase 3: Wide Research Orchestrator
 from app.api.v1 import deep_work  # Deep Work: Autonomous Execution
 from app.api.v1 import projects  # Project Workspaces
@@ -364,7 +364,6 @@ app.include_router(fleet.router, prefix="/api/v1", tags=["fleet"])
 app.include_router(feedback.router, prefix="/api/v1", tags=["feedback"])
 
 # Deep Work Phase 2: Sandbox + Workspace
-app.include_router(sandbox.router, prefix="/api/v1", tags=["sandbox"])
 app.include_router(workspace.router, prefix="/api/v1", tags=["workspace"])
 
 # Deep Work Phase 3: Wide Research Orchestrator

@@ -23,6 +23,7 @@ from sqlalchemy import select
 from app.agents.harness import _scan_credentials
 from app.agents.skills.context import SkillContext
 from app.agents.skills.registry import SkillRegistry
+from app.internal_api.fence import GatewayError
 from app.internal_api.tool_specs import ToolSpec, spec_for
 
 logger = logging.getLogger(__name__)
@@ -291,7 +292,7 @@ def _error(tool: str, error: str, message: str) -> ToolOutcome:
     return ToolOutcome(content=message, is_error=True, details={"error": error, "tool": tool})
 
 
-async def execute_tool(
+async def _run_tool(
     name: str,
     args: Dict[str, Any],
     *,
@@ -304,16 +305,11 @@ async def execute_tool(
     bindings: Optional[Dict[str, Any]] = None,
     spec: Optional[ToolSpec] = None,
     timeout_ms: Optional[int] = None,
-    rate_limit: Any = None,
-    limiter: Optional[ToolRateLimiter] = None,
     key_resolver=resolve_tool_keys,
     connector_resolver=resolve_tool_connectors,
 ) -> ToolOutcome:
-    """Run one skill with a scoped context. Raises ToolRateLimited (429); everything else is an outcome."""
+    """Run one skill with a scoped context (no approval or rate-limit checks)."""
     spec = spec or spec_for(name)
-    limit = parse_rate_limit(rate_limit if rate_limit is not None else skill_rate_limit(name))
-    await (limiter or get_rate_limiter()).check(tenant_id, name, limit)
-
     timeout_s = (timeout_ms if timeout_ms is not None else spec.timeout_ms) / 1000
     held: Dict[str, str] = {}
     try:
@@ -337,3 +333,79 @@ async def execute_tool(
         return ToolOutcome(content=content, is_error=result.is_error, details={**result.details, **guard_details})
     content, details = guard_result(result, name, held.values())
     return ToolOutcome(content=content, is_error=False, details=details)
+
+
+class ToolApprovalRefused(GatewayError):
+    """403 with ``approval_required`` / ``approval_arguments_mismatch`` / ``approval_consumed``; nothing ran."""
+
+    def __init__(self, code: str):
+        super().__init__(403, {"error": code})
+        self.code = code
+
+
+# One in-process gate per approval: the row lock serialises across processes, this makes the
+# common single-process case (and SQLite tests, which ignore FOR UPDATE) exactly-once too.
+_approval_gates: Dict[Tuple[str, str, str], asyncio.Lock] = {}
+
+
+async def _guarded_run(name: str, args: Dict[str, Any], *, tenant_id: Any, run_id: Any,
+                       tool_call_id: Optional[str], **kwargs: Any) -> ToolOutcome:
+    """Run a ``requires_approval`` tool only against an unused, matching, approved ledger row (KTD7)."""
+    from app.core.database import set_tenant_context
+    from app.services.approval_service import ApprovalError, ApprovalService
+    from app.services.tool_policy import canonical_args_hash
+
+    if run_id is None or not tool_call_id:
+        raise ToolApprovalRefused("approval_required")
+    gate_key = (str(tenant_id), str(run_id), str(tool_call_id))
+    gate = _approval_gates.setdefault(gate_key, asyncio.Lock())
+    session = _session_factory()()
+    try:
+        async with gate:
+            if session.get_bind().dialect.name == "postgresql":
+                await set_tenant_context(session, str(tenant_id))
+            service = ApprovalService(session)
+            row = await service.find_for_execution(tenant_id, str(run_id), str(tool_call_id), lock=True)
+            try:
+                service.check_executable(row, canonical_args_hash(args or {}))
+            except ApprovalError as e:
+                raise ToolApprovalRefused(e.code) from None
+            outcome = await _run_tool(
+                name, args, tenant_id=tenant_id, run_id=run_id, tool_call_id=tool_call_id, **kwargs)
+            if not outcome.is_error:
+                await service.consume(row)
+                await session.commit()
+            return outcome
+    except BaseException:
+        try:
+            await session.rollback()
+        except Exception:
+            logger.warning("Approval guard rollback failed", exc_info=True)
+        raise
+    finally:
+        await session.close()
+        if not gate.locked() and not getattr(gate, "_waiters", None):
+            _approval_gates.pop(gate_key, None)
+
+
+async def execute_tool(
+    name: str,
+    args: Dict[str, Any],
+    *,
+    rate_limit: Any = None,
+    limiter: Optional[ToolRateLimiter] = None,
+    spec: Optional[ToolSpec] = None,
+    **kwargs: Any,
+) -> ToolOutcome:
+    """Run one skill with a scoped context.
+
+    Raises ToolRateLimited (429) and ToolApprovalRefused (403); everything else is an outcome. A
+    ``requires_approval`` tool never reaches its handler without an approved, unused ledger row whose
+    argument hash matches (KTD7); other tools are untouched.
+    """
+    spec = spec or spec_for(name)
+    limit = parse_rate_limit(rate_limit if rate_limit is not None else skill_rate_limit(name))
+    await (limiter or get_rate_limiter()).check(kwargs.get("tenant_id"), name, limit)
+    if spec.requires_approval:
+        return await _guarded_run(name, args, spec=spec, **kwargs)
+    return await _run_tool(name, args, spec=spec, **kwargs)

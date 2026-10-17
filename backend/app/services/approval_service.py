@@ -122,6 +122,35 @@ class ApprovalService:
             ToolApproval.run_id == run_id, ToolApproval.tool_call_id == tool_call_id))
         return res.scalars().first()
 
+    # --- execution guard (U6 / KTD7) -------------------------------------------
+
+    async def find_for_execution(self, tenant_id, run_id: str, tool_call_id: str,
+                                 *, lock: bool = True) -> Optional[ToolApproval]:
+        """The ledger row for one tool call, locked ``FOR UPDATE`` so concurrent invokes serialise."""
+        stmt = select(ToolApproval).where(
+            ToolApproval.tenant_id == _uuid(tenant_id),
+            ToolApproval.run_id == run_id, ToolApproval.tool_call_id == tool_call_id)
+        if lock:
+            stmt = stmt.with_for_update()
+        res = await self.db.execute(stmt.execution_options(populate_existing=True))
+        return res.scalars().first()
+
+    @staticmethod
+    def check_executable(row: Optional[ToolApproval], arguments_hash: str) -> None:
+        """Raise ``ApprovalError`` (403) unless ``row`` is an unused approve decision for these arguments."""
+        if row is None or row.status != "approved" or row.decision != "approve":
+            raise ApprovalError(403, "approval_required")
+        if row.consumed_at is not None:
+            raise ApprovalError(403, "approval_consumed")
+        if not row.arguments_hash or row.arguments_hash != arguments_hash:
+            raise ApprovalError(403, "approval_arguments_mismatch")
+
+    async def consume(self, row: ToolApproval) -> None:
+        """Mark the approval used. The caller holds the row lock and commits."""
+        row.consumed_at = _now()
+        row.updated_at = _now()
+        await self.db.flush()
+
     # --- record ---------------------------------------------------------------
 
     async def record_pending(
