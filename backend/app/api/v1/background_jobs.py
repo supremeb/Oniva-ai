@@ -308,9 +308,14 @@ async def cancel_job(
             detail="Job has already completed"
         )
 
+    reason = request.reason if request and request.reason else None
+    if fleet_engine.is_engine_job(job):
+        # Stop the engine run first; an outage still cancels the job and leaves the abort for the reconciler.
+        settled = await fleet_engine.abort_run(db, job, reason)
+        fleet_engine.set_abort_pending(job, not settled)
     job.cancel()
-    if request and request.reason:
-        job.error = f"Cancelled: {request.reason}"
+    if reason:
+        job.error = f"Cancelled: {reason}"
 
     await db.commit()
     await db.refresh(job)
