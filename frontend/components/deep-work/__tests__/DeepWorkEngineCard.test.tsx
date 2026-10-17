@@ -141,6 +141,15 @@ describe('DeepWorkEngineCard', () => {
     expect(mockHook).toHaveBeenCalledWith('conv_1', expect.objectContaining({ sessionId: 'dw_1' }));
   });
 
+  it('shows "Planning workers…" before any worker row appears (R3, AE3)', () => {
+    setHook({ deepWork: state({ phase: 'planning_workers', workers: [] }) });
+    render(<DeepWorkEngineCard session={SESSION} />);
+    expect(screen.getByTestId('deep-work-status')).toHaveTextContent('Planning workers…');
+    expect(screen.getAllByText('Planning workers…').length).toBeGreaterThan(0);
+    expect(screen.queryAllByTestId('worker-row')).toHaveLength(0);
+    expect(screen.getByRole('progressbar')).toBeInTheDocument();
+  });
+
   it('workers carry a text status cue besides colour', () => {
     setHook();
     render(<DeepWorkEngineCard session={SESSION} />);

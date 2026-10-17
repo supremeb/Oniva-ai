@@ -29,6 +29,14 @@ import type { ConversationView, EntryRecord, JsonValue, SubagentView, UsageTally
 // Public shape
 // ---------------------------------------------------------------------------
 
+/**
+ * The card's phase. `planning_workers` is adapter-only: it covers the gap
+ * between a round's `dw_start_round` registration and its first worker
+ * subagent, while the orchestrator's delegation turn is still streaming (U3,
+ * KTD3). It is not an engine wire phase.
+ */
+export type DeepWorkPhase = EnginePhase | 'planning_workers';
+
 /** Card status. The adapter derives the last four; the earlier ones belong to the intake flow. */
 export type DeepWorkRunStatus =
   | 'clarifying'
@@ -86,7 +94,7 @@ export interface DeepWorkSection {
 export interface DeepWorkState {
   status: DeepWorkRunStatus;
   /** Null once completed or stopped. */
-  phase: EnginePhase | null;
+  phase: DeepWorkPhase | null;
   /** Round 1's sub-queries as plan steps; null before the first round is registered. */
   plan: { title: string; steps: string[] } | null;
   rounds: DeepWorkRound[];
@@ -615,12 +623,26 @@ export function createDeepWorkAdapter(): DeepWorkAdapter {
     } else status = 'executing'; // idle with no verdict yet: the backend reconcile decides
     if (status === 'error' && error === null) error = scanned.runError?.message ?? meta.error ?? null;
 
-    let phase: EnginePhase | null = null;
+    let phase: DeepWorkPhase | null = null;
     if (status === 'executing') {
-      const running = scanned.calls.filter((c) => !scanned.results.has(c.id));
-      const byRunning = [...running].reverse().map((c) => phaseOfTool(c.name)).find((p) => p !== null);
-      const byLast = [...scanned.calls].reverse().map((c) => phaseOfTool(c.name)).find((p) => p !== null);
-      phase = byRunning ?? byLast ?? 'researching';
+      // KTD3: the orchestrator's own turn is live (`live.runId`), the latest
+      // registered round has no worker subagent yet. The predicate holds from
+      // the view alone; a named `research_worker` block in `live.message` only
+      // ever makes it more specific, so it is not consulted.
+      const currentRound = defs.length > 0 ? defs[defs.length - 1].round : null;
+      const planningWorkers =
+        runActive &&
+        view.live.runId != null &&
+        currentRound !== null &&
+        !workers.some((w) => w.round === currentRound && w.childConversationId !== null);
+      if (planningWorkers) {
+        phase = 'planning_workers';
+      } else {
+        const running = scanned.calls.filter((c) => !scanned.results.has(c.id));
+        const byRunning = [...running].reverse().map((c) => phaseOfTool(c.name)).find((p) => p !== null);
+        const byLast = [...scanned.calls].reverse().map((c) => phaseOfTool(c.name)).find((p) => p !== null);
+        phase = byRunning ?? byLast ?? 'researching';
+      }
     }
 
     // -- usage --
