@@ -11,6 +11,11 @@
  *   delay (`Retry-After`, OpenRouter's `x-ratelimit-reset`) replaces the
  *   computed one; if it does not fit the remaining budget, retrying stops.
  * - A cancelled context stops the wait at once and ends with `aborted`.
+ * - Per-attempt timers bound how long an attempt may wait for its first data
+ *   event (`firstByteTimeoutMs`) and how long it may go silent between data
+ *   events (`idleTimeoutMs`). A timeout aborts only that attempt's controller;
+ *   before any block event the attempt is retried as `network`, after one it
+ *   ends `network, retryable: true` with the partial kept.
  * - `describeError` renders a thrown value with its `cause` chain (code and
  *   message only), so undici's bare "fetch failed" keeps its real reason.
  *   Headers, request bodies and keys are never read.
@@ -39,13 +44,27 @@ export interface RetryPolicy {
   maxDelayMs?: number;
   /** Called before each wait (log it; never throws into the stream). */
   onRetry?: (info: RetryInfo) => void;
+  /**
+   * Abort an attempt that has produced no data event within this long, in ms.
+   * Default 120 000; `0` disables it.
+   */
+  firstByteTimeoutMs?: number;
+  /** Abort an attempt silent for this long between data events, in ms. Default 120 000; `0` disables. */
+  idleTimeoutMs?: number;
   /** Test seams (`sleep` must resolve early when the signal aborts). */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   random?: () => number;
+  /** Test seam for the attempt timers: arm `callback` after `ms`, return a cancel. */
+  setTimer?: SetTimer;
 }
+
+/** Arms a callback after `ms`, returning a function that cancels it. */
+export type SetTimer = (ms: number, callback: () => void) => () => void;
 
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_RETRY_BUDGET_MS = 60_000;
+export const DEFAULT_FIRST_BYTE_TIMEOUT_MS = 120_000;
+export const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
 const DEFAULT_BASE_DELAY_MS = 500;
 const DEFAULT_MAX_DELAY_MS = 8_000;
 
@@ -55,6 +74,28 @@ export interface AttemptMeta {
   retryAfterMs?: number | null;
   /** Force the decision (otherwise derived from the error's kind). */
   retryable?: boolean;
+}
+
+/**
+ * Fired by an attempt timer and used as the attempt controller's abort reason,
+ * so a provider can tell a timeout from a run abort (`aborted`).
+ */
+export class ModelTimeoutError extends Error {
+  constructor(
+    readonly phase: "first_byte" | "idle",
+    readonly timeoutMs: number,
+  ) {
+    super(
+      phase === "first_byte" ? `no response within ${timeoutMs}ms` : `no data for ${timeoutMs}ms`,
+    );
+    this.name = "ModelTimeoutError";
+  }
+}
+
+/** The timeout that aborted `signal`, or null when it aborted for any other reason. */
+export function modelTimeout(signal: AbortSignal): ModelTimeoutError | null {
+  const reason: unknown = signal.reason;
+  return reason instanceof ModelTimeoutError ? reason : null;
 }
 
 /** Kinds worth another try (plus HTTP 409). Never auth, invalid_request, context_overflow, denied or aborted. */
@@ -74,12 +115,16 @@ const EMITTED: ReadonlySet<StreamEvent["type"]> = new Set([
  * usual events ending in `done` or `error` and may fill `meta` before it
  * yields an error. The first `start` event is passed on; later ones are
  * dropped so the caller sees one message.
+ *
+ * Each attempt gets its own `AbortController`, combined with the run signal:
+ * the run signal still wins, while the per-attempt timers abort only this
+ * attempt (see {@link ModelTimeoutError}).
  */
 export async function* withRetry(
   ctx: Context,
   b: MessageBuilder,
   policy: RetryPolicy,
-  attempt: (meta: AttemptMeta) => AsyncIterable<StreamEvent>,
+  attempt: (meta: AttemptMeta, signal: AbortSignal) => AsyncIterable<StreamEvent>,
 ): AsyncGenerator<StreamEvent> {
   const maxRetries = Math.max(0, policy.maxRetries ?? DEFAULT_MAX_RETRIES);
   const budget = Math.max(0, policy.budgetMs ?? DEFAULT_RETRY_BUDGET_MS);
@@ -87,41 +132,59 @@ export async function* withRetry(
   const maxDelay = Math.max(base, policy.maxDelayMs ?? DEFAULT_MAX_DELAY_MS);
   const sleep = policy.sleep ?? abortableSleep;
   const random = policy.random ?? Math.random;
+  const setTimer = policy.setTimer ?? defaultSetTimer;
+  const firstByteTimeoutMs = Math.max(
+    0,
+    policy.firstByteTimeoutMs ?? DEFAULT_FIRST_BYTE_TIMEOUT_MS,
+  );
+  const idleTimeoutMs = Math.max(0, policy.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
   let spent = 0;
   let startSent = false;
 
   for (let n = 1; ; n++) {
     const meta: AttemptMeta = {};
+    const controller = new AbortController();
+    const signal = AbortSignal.any([ctx.signal, controller.signal]);
+    const timers = attemptTimers(firstByteTimeoutMs, idleTimeoutMs, setTimer, (reason) =>
+      controller.abort(reason),
+    );
     let emitted = false;
     let failure: ModelError | undefined;
-    for await (const event of attempt(meta)) {
-      if (event.type === "start") {
-        if (startSent) continue;
-        startSent = true;
-      } else if (EMITTED.has(event.type)) {
-        emitted = true;
-      }
-      if (event.type === "error" && !emitted && !ctx.cancelled) {
-        const transient = meta.retryable ?? isTransientError(event.error);
-        const delay = transient && n <= maxRetries ? nextDelay(n, meta.retryAfterMs ?? null) : null;
-        if (delay !== null) {
-          failure = event.error;
-          spent += delay;
-          safely(() =>
-            policy.onRetry?.({
-              provider: b.provider,
-              model: b.model,
-              attempt: n,
-              delayMs: delay,
-              error: event.error,
-            }),
-          );
-          await sleep(delay, ctx.signal);
-          break;
+    try {
+      for await (const event of attempt(meta, signal)) {
+        if (event.type === "start") {
+          if (startSent) continue;
+          startSent = true;
+        } else if (EMITTED.has(event.type)) {
+          emitted = true;
+          timers.onData();
         }
+        if (event.type === "error" && !emitted && !ctx.cancelled) {
+          const transient = meta.retryable ?? isTransientError(event.error);
+          const delay =
+            transient && n <= maxRetries ? nextDelay(n, meta.retryAfterMs ?? null) : null;
+          if (delay !== null) {
+            failure = event.error;
+            spent += delay;
+            safely(() =>
+              policy.onRetry?.({
+                provider: b.provider,
+                model: b.model,
+                attempt: n,
+                delayMs: delay,
+                error: event.error,
+              }),
+            );
+            timers.clear();
+            await sleep(delay, ctx.signal);
+            break;
+          }
+        }
+        yield event;
+        if (event.type === "done" || event.type === "error") return;
       }
-      yield event;
-      if (event.type === "done" || event.type === "error") return;
+    } finally {
+      timers.clear();
     }
     if (failure === undefined) return; // attempt ended without a terminal event; ModelStream reports it
     if (ctx.cancelled) {
@@ -136,6 +199,54 @@ export async function* withRetry(
     const delay = hinted ?? Math.max(1, Math.round(computed * (0.5 + random() * 0.5)));
     return spent + delay > budget ? null : delay;
   }
+}
+
+const defaultSetTimer: SetTimer = (ms, callback) => {
+  const handle = setTimeout(callback, ms);
+  return () => clearTimeout(handle);
+};
+
+/**
+ * The timers for one attempt. The first-byte timer is cleared by the first
+ * data event; the idle timer is armed then and reset on every data event. A
+ * timer fires `abort` with a {@link ModelTimeoutError}.
+ */
+function attemptTimers(
+  firstByteMs: number,
+  idleMs: number,
+  setTimer: SetTimer,
+  abort: (reason: unknown) => void,
+): { onData: () => void; clear: () => void } {
+  let firstByte: (() => void) | undefined;
+  let idle: (() => void) | undefined;
+  let started = false;
+
+  const resetIdle = (): void => {
+    idle?.();
+    idle =
+      idleMs > 0 ? setTimer(idleMs, () => abort(new ModelTimeoutError("idle", idleMs))) : undefined;
+  };
+  if (firstByteMs > 0) {
+    firstByte = setTimer(firstByteMs, () =>
+      abort(new ModelTimeoutError("first_byte", firstByteMs)),
+    );
+  }
+  return {
+    onData(): void {
+      if (!started) {
+        started = true;
+        firstByte?.();
+        firstByte = undefined;
+      }
+      resetIdle();
+    },
+    clear(): void {
+      firstByte?.();
+      firstByte = undefined;
+      idle?.();
+      idle = undefined;
+    },
+  };
 }
 
 /** Abortable wait: resolves when the time is up or `signal` aborts. */

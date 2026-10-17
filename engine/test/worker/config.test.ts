@@ -35,6 +35,8 @@ describe("workerConfigFromEnv", () => {
       subagentTool: null,
       subagentTools: [],
       shutdownTimeoutMs: DEFAULT_SHUTDOWN_TIMEOUT_MS,
+      modelFirstByteTimeoutMs: 120_000,
+      modelIdleTimeoutMs: 120_000,
       db: {
         connectTimeoutMs: 5_000,
         statementTimeoutMs: 10_000,
@@ -93,6 +95,21 @@ describe("workerConfigFromEnv", () => {
     expect(() => workerConfigFromEnv({ ...BASE, ENGINE_SHUTDOWN_TIMEOUT_MS: "x" })).toThrow(
       WorkerConfigError,
     );
+  });
+
+  it("reads model request timeouts and rejects non-positive values", () => {
+    const c = workerConfigFromEnv({
+      ...BASE,
+      ENGINE_MODEL_FIRST_BYTE_TIMEOUT_MS: "1000",
+      ENGINE_MODEL_IDLE_TIMEOUT_MS: "2500",
+    });
+    expect(c.modelFirstByteTimeoutMs).toBe(1000);
+    expect(c.modelIdleTimeoutMs).toBe(2500);
+    for (const name of ["ENGINE_MODEL_FIRST_BYTE_TIMEOUT_MS", "ENGINE_MODEL_IDLE_TIMEOUT_MS"]) {
+      expect(() => workerConfigFromEnv({ ...BASE, [name]: "0" })).toThrow(WorkerConfigError);
+      expect(() => workerConfigFromEnv({ ...BASE, [name]: "-1" })).toThrow(WorkerConfigError);
+      expect(() => workerConfigFromEnv({ ...BASE, [name]: "abc" })).toThrow(WorkerConfigError);
+    }
   });
 
   it("requires the database, session and token", () => {
