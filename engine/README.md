@@ -206,6 +206,20 @@ request:
   honoring `Retry-After` on 429/503 within the tool's deadline. Response
   bodies over `maxResponseBytes` (default 1 MiB) are an error.
 
+## Workflow node task
+
+`createWorkflowNodeTask({ gateway, onAbort? })` (`src/workflow/node-task.ts`) is the host task kind `workflow_node`; register it through `HarnessOptions.tasks`. `createNodeGateway(...)` (`src/workflow/node-gateway.ts`) is its HTTP client for the backend node gateway (`/internal/workflows/runs/{runId}/nodes/{nodeId}/prepare|finish`, `/runs/{runId}/finalize`, `GET /invocations/{key}`). The payload shapes are the committed schemas in `contracts/workflow-nodes/`; the contract the backend must reproduce is specified by `test/support/fake-workflow-backend.ts` (`[clause:]` tags).
+
+Input: `{ version: 1, runId, runAttempt, nodeId, nodeType, policy: { maxRetries, backoffMs, timeoutMs, onError }, gateTaskId? }`. Every backend call carries `Idempotency-Key: {runId}:{nodeId}:r{runAttempt}:a{nodeAttempt}:{prepare|finish}`; a key with a stored outcome is answered without running again, so a retry (`nodeAttempt + 1`) or a run retry (`runAttempt + 1`) gets a new key. Phases:
+
+| Phase | What happens |
+|---|---|
+| `prepare` | Ask the backend. `final` ends the node; `llm` creates one child conversation owned by the node (`requestId = node:{taskId}`) and waits in `awaitChild`; `wait` parks in `awaitWake` (`durationMs` is relative to the engine clock; a signal key and `slaUntilEpochMs` are honored); `fanout` stores the request digest, signals the gate task (`gateTaskId`, key `parked`) and parks in `awaitFanout` for the `fanout-result` signal. |
+| `awaitChild`, `awaitWake`, `awaitFanout` | Gather the child's answer, the signal payload or deadline wake, or the counts-only fan-out summary and stage it for `finish`. |
+| `finish` | The node calls the backend `finish` itself under its own `...:finish` key and settles on the `final` it returns. The run task never calls `finish`. |
+
+Settling: `failed` retries while `policy.maxRetries` allows (a deadline wait of `backoffMs`); a fan-out node and an interrupted call never retry. Then `onError: "continue"` ends the task `done` with `{ status: "failed", continued: true }`, and `stop` faults it (so the run's `failFast` sees it). `timeoutMs` bounds each backend call of an attempt and ends it as `failed` with `error.code = "timeout"`. After a restart a `finish` is asked again only when the backend declared the call `replaySafe`; otherwise the engine reads the outcome stored under the key and, with none, settles the node `interrupted` (`failed`, `error.code = "interrupted"`). Checkpoints carry `version`; the previous version is upgraded in memory and a newer one faults the task with `unsupported_checkpoint_version`.
+
 ## Commands
 
 ```sh
