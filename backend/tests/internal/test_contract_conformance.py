@@ -396,6 +396,18 @@ async def test_usage_repeat_false(client, test_db):
     assert third.json() == {"recorded": True}
 
 
+@clause("usage-outbox-redelivery")
+async def test_usage_outbox_redelivery(client, test_db):
+    t = await tp.make_tenant(test_db)
+    payload = _usage(t)
+    first = await client.post("/internal/models/usage", json=payload, headers=tp.AUTH)
+    # A worker restart re-sends the same parked report (same requestId).
+    redelivered = await client.post("/internal/models/usage", json=payload, headers=tp.AUTH)
+    assert first.json() == {"recorded": True}
+    assert redelivered.json() == {"recorded": False}
+    assert len(await _rows(test_db, t)) == 1
+
+
 @clause("usage-invalid-422")
 async def test_usage_invalid_422(client, test_db):
     t = await tp.make_tenant(test_db)

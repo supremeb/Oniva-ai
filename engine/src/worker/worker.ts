@@ -261,8 +261,13 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       })
     : null;
   const usageReporter = options.backendPolicy
-    ? new UsageReporter({ ...options.backendPolicy, log })
+    ? new UsageReporter({
+        ...options.backendPolicy,
+        outbox: new PostgresStorageProvider(pool),
+        log,
+      })
     : null;
+  usageReporter?.startFlushing();
 
   const currentOwner = async (): Promise<string | null> => {
     const lease = await leases.current(sessionId);
