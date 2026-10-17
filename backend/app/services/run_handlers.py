@@ -26,7 +26,11 @@ HOOKS = ("on_finished", "start_missing", "find_stuck", "fail")
 
 # Modules that register hooks. Each later unit adds its module here (U7 fleet_engine, U9
 # fleet_run_sync, U16 workflow_run_sync, U18 workflow_batch_engine, U19 scheduled_run_hooks).
-BOOTSTRAP_MODULES: tuple[str, ...] = ("app.services.fleet_engine", "app.services.fleet_run_sync")
+BOOTSTRAP_MODULES: tuple[str, ...] = (
+    "app.services.fleet_engine",
+    "app.services.fleet_run_sync",
+    "app.services.workflow_engine_runs",  # U15: start_missing, find_stuck, fail (U16 adds on_finished)
+)
 
 
 @dataclass(frozen=True)

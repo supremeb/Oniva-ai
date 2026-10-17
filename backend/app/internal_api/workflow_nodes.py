@@ -44,7 +44,13 @@ from app.models.workflow import WorkflowExecution
 from app.node_executors import NodeExecutionContext, NodeExecutionResult, get_executor
 from app.node_executors.adornments import CacheAdornment
 from app.schemas.classification import DataClassification
-from app.services.workflow_compiler import UNEXECUTED_TYPES, compile_workflow, resolve_spec
+from app.services.workflow_compiler import (
+    UNEXECUTED_TYPES,
+    compile_workflow,
+    find_entry,
+    resolve_spec,
+    subgraph_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +61,8 @@ TenantSessionFactory = Callable[[str], AsyncContextManager[Any]]
 KEY_RE = re.compile(r"^(?P<run>[^:\s]+):(?P<node>[^:\s]+):r(?P<r>\d+):a(?P<a>\d+):(?P<phase>prepare|finish)$")
 SCOPE_KEYS = ("tenantId", "projectId", "conversationId", "classification", "nodeType")
 PHASE_TOOL = {"prepare": "workflow_prepare", "finish": "workflow_finish"}
+SPEC_KEY = "__spec"  # the frozen spec a run started with, kept in its input_data (U15)
+INPUT_CLASS_KEY = "__classification"  # an iteration item's inherited input classification (U15)
 INTERRUPTED_FINAL: Dict[str, Any] = {
     "contractVersion": wc.CONTRACT_VERSION,
     "kind": "final",
@@ -184,6 +192,10 @@ def _parse_class(value: Optional[str]) -> DataClassification:
         raise _bad("unknown classification")
 
 
+def _hint(scope: "Scope") -> Optional[DataClassification]:
+    return None if scope.classification is None else _parse_class(scope.classification)
+
+
 async def _read_body(request: Request) -> Dict[str, Any]:
     try:
         raw = await request.json()
@@ -255,6 +267,13 @@ async def bind_run(factory: SessionFactory, run: uuid.UUID, claimed: BodyScope) 
 # --- run data ------------------------------------------------------------------------------------
 
 
+def _stored_class(value: Any) -> Optional[DataClassification]:
+    try:
+        return DataClassification(value) if value is not None else None
+    except ValueError:
+        return DataClassification.CONFIDENTIAL  # an unreadable stored level fails closed
+
+
 class RunView:
     """Everything the effect needs, loaded once under the tenant session."""
 
@@ -264,10 +283,35 @@ class RunView:
         self.user_id = execution.user_id
         self.tenant_id: uuid.UUID = execution.tenant_id
         self.trigger = execution.trigger
-        self.variables: Dict[str, Any] = dict(execution.input_data or {})
+        self.variables: Dict[str, Any] = {k: v for k, v in (execution.input_data or {}).items() if k != SPEC_KEY}
+        self.inherited_classification = _stored_class(self.variables.get(INPUT_CLASS_KEY))
         self.trace: List[Dict[str, Any]] = list(execution.execution_trace or [])
         self.spec = spec
         self.node = node
+
+
+async def _run_spec(db: Any, tenant: uuid.UUID, execution: WorkflowExecution, depth: int = 0) -> Optional[Dict[str, Any]]:
+    """The spec ``execution`` runs: its own frozen snapshot, else (for an iteration item) its parent's,
+    else the pinned version or the workflow's current spec."""
+    data = execution.input_data or {}
+    snapshot = data.get(SPEC_KEY)
+    if isinstance(snapshot, dict):
+        return snapshot
+    parent = data.get("__parent_run_id")
+    if parent and data.get("__fanout") == "iteration" and depth < 8:
+        parent_row = (
+            await db.execute(
+                select(WorkflowExecution).where(
+                    WorkflowExecution.id == uuid.UUID(str(parent)), WorkflowExecution.tenant_id == tenant
+                )
+            )
+        ).scalar_one_or_none()
+        if parent_row is not None:
+            return await _run_spec(db, tenant, parent_row, depth + 1)
+    if execution.workflow_id is None:
+        return None
+    pinned = data.get("workflow_version_id")
+    return await resolve_spec(db, tenant, execution.workflow_id, uuid.UUID(pinned) if pinned else None)
 
 
 async def load_run(
@@ -281,10 +325,7 @@ async def load_run(
         ).scalar_one_or_none()
         if execution is None:
             raise GatewayError(404, {"error": "run_not_found"})
-        pinned = (execution.input_data or {}).get("workflow_version_id")
-        spec = None
-        if execution.workflow_id is not None:
-            spec = await resolve_spec(db, tenant, execution.workflow_id, uuid.UUID(pinned) if pinned else None)
+        spec = await _run_spec(db, tenant, execution)
         if spec is None:
             raise GatewayError(404, {"error": "workflow_not_found"})
         node = next((n for n in spec.get("nodes", []) if n.get("id") == node_id), None)
@@ -296,13 +337,37 @@ async def load_run(
 def predecessor_inputs(view: RunView, run_attempt: int) -> Dict[str, Any]:
     """Outputs of this node's live in-edge sources, from the stored trace (never the engine)."""
     compiled = compile_workflow(view.spec, validate=False)
-    entry = next((n for n in compiled["nodes"] if n["id"] == view.node["id"]), None)
+    entry = find_entry(compiled, view.node["id"])
     sources = {d["from"] for d in (entry["deps"] if entry else [])}
     inputs: Dict[str, Any] = {}
     for step in view.trace:
         if step.get("node_id") in sources and step.get("status") == "success" and step.get("run_attempt", 0) <= run_attempt:
             inputs[step["node_id"]] = step.get("output")  # trace order: later attempts overwrite earlier
     return inputs
+
+
+def input_classification(view: RunView, run_attempt: int, hint: Optional[DataClassification] = None) -> DataClassification:
+    """The high-water mark of what flows into this node, computed from the stored trace (U15).
+
+    The max of the classification recorded on every live in-edge source's steps (``internal`` for a step
+    that recorded none, and when no step is stored yet); an entry node takes the level its fan-out item
+    inherited, else ``internal``. The request body's ``classification`` is only a hint that can raise the
+    level, never lower it.
+    """
+    entry = find_entry(compile_workflow(view.spec, validate=False), view.node["id"])
+    sources = {d["from"] for d in (entry["deps"] if entry else [])}
+    if sources:
+        seen = [
+            _stored_class(s.get("classification")) or DataClassification.INTERNAL
+            for s in view.trace
+            if s.get("node_id") in sources and s.get("run_attempt", 0) <= run_attempt
+        ]
+        level = max(seen, default=DataClassification.INTERNAL)
+    else:
+        level = view.inherited_classification or DataClassification.INTERNAL
+    if hint is not None and hint > level:
+        level = hint
+    return level
 
 
 async def record_trace(
@@ -345,9 +410,14 @@ def item_id(run: uuid.UUID, node_id: str, index: int) -> uuid.UUID:
 
 
 async def _prepare_fanout(
-    tenants: TenantSessionFactory, view: RunView, context: NodeExecutionContext, kind: str
+    tenants: TenantSessionFactory,
+    view: RunView,
+    context: NodeExecutionContext,
+    kind: str,
+    input_class: DataClassification = DataClassification.INTERNAL,
 ) -> Dict[str, Any]:
     data = view.node.get("data") or {}
+    item_workflow_id = view.workflow_id
     if kind == "iteration":
         executor = get_executor("iteration")
         items = executor._get_array_value(data.get("inputArray", ""), context)  # type: ignore[union-attr]
@@ -357,11 +427,10 @@ async def _prepare_fanout(
                 None,
                 error=f"Input array size ({len(items)}) exceeds maximum allowed ({wc.MAX_FANOUT_ITEMS})",
             )
-        compiled = compile_workflow(view.spec, validate=False)
-        sub = compiled["subgraphs"].get(view.node["id"])
-        if sub is None:
+        name = subgraph_name(view.node["id"])
+        if not _has_subgraph(compile_workflow(view.spec, validate=False), name):
             return _final("failed", None, error="iteration has no target node")
-        target: Dict[str, Any] = {"subgraph": sub["subgraph"]}
+        target: Dict[str, Any] = {"subgraph": name}
         parallel = max(1, min(int(data.get("maxParallel", 10)), wc.MAX_PARALLEL)) if data.get("parallel") else 1
         fail_fast = data.get("errorHandling", "terminate") == "terminate"
     else:
@@ -370,6 +439,10 @@ async def _prepare_fanout(
             return _final("failed", None, error="workflowId is required")
         items = [None]
         target = {"workflowId": str(workflow_id)}
+        try:
+            item_workflow_id = uuid.UUID(str(workflow_id))  # the item run's nodes belong to the child workflow
+        except ValueError:
+            return _final("failed", None, error="workflowId is not a workflow id")
         parallel, fail_fast = 1, True
 
     if items:
@@ -377,7 +450,7 @@ async def _prepare_fanout(
             rows = [
                 {
                     "id": item_id(view.execution_id, view.node["id"], i),
-                    "workflow_id": view.workflow_id,
+                    "workflow_id": item_workflow_id,
                     "user_id": view.user_id,
                     "tenant_id": view.tenant_id,
                     "status": "pending",
@@ -386,6 +459,8 @@ async def _prepare_fanout(
                         "__parent_run_id": str(view.execution_id),
                         "__parent_node_id": view.node["id"],
                         "__index": i,
+                        "__fanout": kind,
+                        INPUT_CLASS_KEY: input_class.value,
                         "item": _json_safe(item),
                     },
                     "results": {},
@@ -411,6 +486,16 @@ async def _prepare_fanout(
     return wc.validate_prepare_response(body).model_dump(exclude_unset=True)
 
 
+def _has_subgraph(compiled: Dict[str, Any], name: str) -> bool:
+    graphs = [compiled]
+    while graphs:
+        graph = graphs.pop()
+        if name in (graph.get("subgraphs") or {}):
+            return True
+        graphs.extend((graph.get("subgraphs") or {}).values())
+    return False
+
+
 def _context(view: RunView, inputs: Dict[str, Any], scope: Scope, run_id: str, db: Any) -> NodeExecutionContext:
     return NodeExecutionContext(
         node_id=view.node["id"],
@@ -433,7 +518,7 @@ async def run_prepare(
     tenants: TenantSessionFactory, view: RunView, scope: Scope, run_id: str, run_attempt: int
 ) -> Dict[str, Any]:
     node_type = str(view.node.get("type", "")).lower()
-    input_class = _parse_class(scope.classification)
+    input_class = input_classification(view, run_attempt, _hint(scope))
     if node_type in UNEXECUTED_TYPES:
         return _final(
             "skipped",
@@ -454,7 +539,7 @@ async def run_prepare(
                 return _result_to_final(blocked, input_class)
             fanout = node_spec_for(node_type).fanout
             if fanout:
-                return await _prepare_fanout(tenants, view, context, fanout)
+                return await _prepare_fanout(tenants, view, context, fanout, input_class)
 
             async def base() -> Any:
                 return await executor.prepare(context, db)
@@ -486,7 +571,7 @@ async def run_finish(
     tenants: TenantSessionFactory, view: RunView, scope: Scope, run_id: str, run_attempt: int, fin: wc.FinishInput
 ) -> Dict[str, Any]:
     node_type = str(view.node.get("type", "")).lower()
-    input_class = _parse_class(scope.classification)
+    input_class = input_classification(view, run_attempt, _hint(scope))
     if fin.kind == "fanout":
         summary = fin.fanout
         if summary is None:

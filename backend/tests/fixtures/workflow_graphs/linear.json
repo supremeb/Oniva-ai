@@ -1,0 +1,54 @@
+{
+  "errorMode": "stop",
+  "graph": {
+    "nodes": [
+      {
+        "deps": [],
+        "id": "s",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "start"
+      },
+      {
+        "deps": [
+          {
+            "from": "s",
+            "handle": null
+          }
+        ],
+        "id": "t",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "template"
+      },
+      {
+        "deps": [
+          {
+            "from": "t",
+            "handle": null
+          }
+        ],
+        "id": "o",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "output"
+      }
+    ]
+  },
+  "runAttempt": 0,
+  "runId": "00000000-0000-4000-8000-000000000001",
+  "variables": {},
+  "version": 1
+}
