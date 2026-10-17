@@ -8,7 +8,7 @@ import { TextEncoder, TextDecoder } from 'util';
 Object.assign(globalThis, { TextEncoder, TextDecoder });
 
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { makeBody, sseFrame } from '@/lib/engine/__fixtures__/stream';
 import type { ConversationView, EngineConversationClient, EntryRecord } from '@/lib/engine';
 import type { ConversationCost } from '@/lib/engine/cost';
@@ -113,7 +113,7 @@ describe('ApprovalCard', () => {
 
 describe('toDecisionError', () => {
     it('maps statuses to messages and retryability', () => {
-        expect(toDecisionError({ status: 403 })).toMatchObject({ message: 'You cannot decide this.', retryable: false });
+        expect(toDecisionError({ status: 403 })).toMatchObject({ message: 'You cannot decide this. Ask an admin.', retryable: false });
         expect(toDecisionError({ status: 409 })).toMatchObject({ retryable: false });
         expect(toDecisionError({ status: 503 })).toMatchObject({ retryable: true });
         expect(toDecisionError(new Error('network'))).toMatchObject({ retryable: true });
@@ -216,15 +216,98 @@ describe('approval cards in engine chat (AE6)', () => {
         expect(f.raw.decide).toHaveBeenCalledWith('c1', 'task1', 'deny', undefined);
     });
 
-    it('a 403 keeps the card with an inline "You cannot decide this."', async () => {
+    const apiErr = (status: number, detail?: string) =>
+        Object.assign(new Error('failed'), { status, data: detail ? { detail } : undefined });
+    const clickApprove = async () => act(async () => fireEvent.click(await screen.findByRole('button', { name: /Approve/ })));
+    const approveBtn = () => screen.getByRole('button', { name: /Approve/ }) as HTMLButtonElement;
+
+    it('403 not_authorized locks the card with the not-allowed copy and never retries', async () => {
         const f = fakeClient();
-        f.raw.decide.mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { status: 403 }));
+        f.raw.decide.mockRejectedValue(apiErr(403, 'not_authorized'));
         await mount(f);
         await snapshot(f, viewWith([approval()]));
-        await act(async () => fireEvent.click(await screen.findByRole('button', { name: /Approve/ })));
-        expect((await screen.findByRole('alert')).textContent).toBe('You cannot decide this.');
+        await clickApprove();
+        expect((await screen.findByRole('alert')).textContent).toBe('You cannot decide this. Ask an admin.');
         expect(screen.getByText('Allow save_report?')).toBeTruthy();
-        expect((screen.getByRole('button', { name: /Approve/ }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.getByText('report.md')).toBeTruthy(); // arguments stay visible
+        expect(approveBtn().disabled).toBe(true);
+        expect((screen.getByRole('button', { name: /Reject/ }) as HTMLButtonElement).disabled).toBe(true);
+        fireEvent.click(approveBtn());
+        expect(f.raw.decide).toHaveBeenCalledTimes(1);
+    });
+
+    it('403 self_approval_forbidden shows the separate-approver copy and locks', async () => {
+        const f = fakeClient();
+        f.raw.decide.mockRejectedValue(apiErr(403, 'self_approval_forbidden'));
+        await mount(f);
+        await snapshot(f, viewWith([approval()]));
+        await clickApprove();
+        expect((await screen.findByRole('alert')).textContent).toBe('Another admin must approve this.');
+        expect(approveBtn().disabled).toBe(true);
+    });
+
+    it('409 and 410 show already-decided and lock', async () => {
+        for (const status of [409, 410]) {
+            const f = fakeClient();
+            f.raw.decide.mockRejectedValue(apiErr(status, 'already_decided'));
+            await mount(f);
+            await snapshot(f, viewWith([approval()]));
+            await clickApprove();
+            expect((await screen.findByRole('alert')).textContent).toBe('This request was already decided or has expired.');
+            expect(approveBtn().disabled).toBe(true);
+            cleanup();
+        }
+    });
+
+    it('409 decision_in_progress and 5xx stay retryable', async () => {
+        const f = fakeClient();
+        f.raw.decide.mockRejectedValueOnce(apiErr(409, 'decision_in_progress')).mockRejectedValueOnce(apiErr(503));
+        await mount(f);
+        await snapshot(f, viewWith([approval()]));
+        await clickApprove();
+        expect((await screen.findByRole('alert')).textContent).toContain('Try again in a moment');
+        expect(approveBtn().disabled).toBe(false);
+        await clickApprove();
+        await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Could not send your decision. Try again.'));
+        expect(approveBtn().disabled).toBe(false);
+        await clickApprove();
+        expect(f.raw.decide).toHaveBeenCalledTimes(3);
+    });
+
+    it('renders the reason on the card for a Rule-of-Two approval and a requires_approval one', async () => {
+        const f = fakeClient();
+        await mount(f);
+        await snapshot(f, viewWith([approval({ reason: 'This run read untrusted content' })]));
+        expect(await screen.findByText('This run read untrusted content')).toBeTruthy();
+        await snapshot(f, viewWith([approval({ reason: 'Requires admin approval' })]));
+        expect(await screen.findByText('Requires admin approval')).toBeTruthy();
+    });
+
+    it('stays pending after the call resolves until the view item changes (approve and deny each call decide once)', async () => {
+        const f = fakeClient();
+        await mount(f);
+        await snapshot(f, viewWith([approval()]));
+        await clickApprove();
+        expect(f.raw.decide).toHaveBeenCalledTimes(1);
+        expect(approveBtn().disabled).toBe(true);
+        expect(screen.queryByTestId('approval-resolved')).toBeNull();
+        await snapshot(f, viewWith([approval({ status: 'denied', closedAt: 5, decision: { decision: 'deny', principal: 'u2', note: null, decidedAt: 5 } })]));
+        expect(screen.getByTestId('approval-resolved').textContent).toBe('Denied: save_report');
+    });
+
+    it('an "awaiting approval" banner links to the inbox only while an item is pending', async () => {
+        const f = fakeClient();
+        await mount(f);
+        await snapshot(f, viewWith([]));
+        expect(screen.queryByTestId('approval-banner')).toBeNull();
+        await snapshot(f, viewWith([approval()]));
+        const banner = await screen.findByTestId('approval-banner');
+        expect(banner.textContent).toMatch(/awaiting approval/i);
+        expect(banner.querySelector('a')?.getAttribute('href')).toBe('/inbox');
+        await snapshot(f, viewWith([approval({ status: 'approved', closedAt: 5 })]));
+        expect(screen.queryByTestId('approval-banner')).toBeNull();
+        await snapshot(f, viewWith([approval({ status: 'expired', closedAt: 5 })]));
+        expect(screen.queryByTestId('approval-banner')).toBeNull();
     });
 
     it('an expired approval renders the resolved expired line', async () => {
