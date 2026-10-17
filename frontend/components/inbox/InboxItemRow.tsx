@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import type { InboxItem, InboxKind } from '@/lib/api/inbox';
@@ -22,13 +23,17 @@ interface Props {
   item: InboxItem;
   state?: RowState;
   onDecide: (item: InboxItem, decision: 'approve' | 'deny') => void;
+  /** Answer a question row with free text. */
+  onAnswer?: (item: InboxItem, text: string) => void;
 }
 
 const DISABLED_COPY: Record<string, string> = {
   self_approval_forbidden: 'Another admin must approve this.',
 };
 
-export function InboxItemRow({ item, state, onDecide }: Props) {
+export function InboxItemRow({ item, state, onDecide, onAnswer }: Props) {
+  const [text, setText] = useState('');
+  const answer = item.kind === 'question' ? item.actions.find((a) => a.type === 'answer' && a.allowed) : undefined;
   const decide = item.actions.find((a) => a.type === 'decide');
   const linkLabel = item.kind === 'question' ? 'Answer in chat' : 'Open';
   const disabled = decide && !decide.allowed;
@@ -53,6 +58,22 @@ export function InboxItemRow({ item, state, onDecide }: Props) {
         )}
       </div>
       <div role="group" aria-label={`Actions for ${item.title}`} className="flex shrink-0 items-center gap-2">
+        {answer && onAnswer && (
+          <>
+            <input
+              type="text"
+              aria-label={`Answer for ${item.title}`}
+              placeholder="Your answer..."
+              value={text}
+              disabled={state?.pending}
+              onChange={(e) => setText(e.target.value)}
+              className="w-48 rounded-md border border-input bg-background px-2 py-1 text-sm"
+            />
+            <Button size="sm" disabled={!text.trim() || state?.pending} onClick={() => onAnswer(item, text.trim())}>
+              Send answer
+            </Button>
+          </>
+        )}
         {decide && (
           <>
             <Button

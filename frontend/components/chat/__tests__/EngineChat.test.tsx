@@ -68,6 +68,7 @@ const viewOf = (over: Partial<ConversationView> = {}): ConversationView => ({
     live: { runId: null, taskId: null, message: null },
     inbox: { queue: [], placed: [] },
     approvals: { items: [] },
+    questions: { items: [] },
     usage,
     agent: {},
     toolOutput: {},

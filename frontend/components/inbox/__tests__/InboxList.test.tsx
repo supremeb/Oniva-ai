@@ -3,8 +3,12 @@ import { InboxList } from '../InboxList';
 import type { InboxItem } from '@/lib/api/inbox';
 
 const decide = jest.fn();
+const answer = jest.fn();
 jest.mock('@/lib/engine/client', () => ({
-  EngineConversationClient: jest.fn().mockImplementation(() => ({ decide: (...a: unknown[]) => decide(...a) })),
+  EngineConversationClient: jest.fn().mockImplementation(() => ({
+    decide: (...a: unknown[]) => decide(...a),
+    answer: (...a: unknown[]) => answer(...a),
+  })),
 }));
 
 const approval = (id: string, extra: Partial<InboxItem> = {}): InboxItem => ({
@@ -79,4 +83,51 @@ test('filtering by kind narrows the list', () => {
 test('empty state', () => {
   render(<InboxList items={[]} />);
   expect(screen.getByText('Nothing needs your attention.')).toBeInTheDocument();
+});
+
+describe('inline question answering (U12)', () => {
+  const q = (extra: Partial<InboxItem> = {}): InboxItem => ({
+    id: 'question:1', kind: 'question', title: 'Question', summary: 'Which env?', severity: 'medium',
+    source: { type: 'tool_approval', id: '1' }, href: '/chat/c9',
+    actions: [{ type: 'answer', endpoint: '/api/v1/engine/conversations/c-9/questions/t-9/answer', allowed: true }],
+    ...extra,
+  });
+  beforeEach(() => answer.mockReset());
+  const load = () => InboxList;
+
+  test('answers inline with the typed text and the row disappears', async () => {
+    answer.mockResolvedValue({});
+    const List = load();
+    const onDecided = jest.fn();
+    render(<List items={[q(), fleet]} onDecided={onDecided} />);
+    expect(screen.getByRole('link', { name: 'Answer in chat' })).toHaveAttribute('href', '/chat/c9');
+    const send = screen.getByRole('button', { name: 'Send answer' });
+    expect(send).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Answer for Question'), { target: { value: ' staging ' } });
+    fireEvent.click(send);
+    await waitFor(() => expect(screen.queryByText('Which env?')).not.toBeInTheDocument());
+    expect(answer).toHaveBeenCalledWith('c-9', 't-9', { text: 'staging' });
+    expect(answer).toHaveBeenCalledTimes(1);
+    expect(onDecided).toHaveBeenCalled();
+    expect(screen.getByText('Run failed')).toBeInTheDocument();
+  });
+
+  test('errors map like approvals and stay on that row; 5xx can be retried', async () => {
+    const List = load();
+    answer.mockRejectedValueOnce({ status: 403, data: { detail: 'not_authorized' } }).mockRejectedValueOnce({ status: 502 });
+    render(<List items={[q()]} />);
+    fireEvent.change(screen.getByLabelText('Answer for Question'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('You cannot decide this. Ask an admin.');
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not send your decision. Try again.'));
+    expect(screen.getByText('Which env?')).toBeInTheDocument();
+  });
+
+  test('a question without an allowed answer action only links to the chat', () => {
+    const List = load();
+    render(<List items={[q({ actions: [] })]} />);
+    expect(screen.queryByRole('button', { name: 'Send answer' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Answer in chat' })).toBeInTheDocument();
+  });
 });

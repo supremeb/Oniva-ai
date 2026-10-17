@@ -88,7 +88,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
     const client = useMemo(() => clientProp ?? new EngineConversationClient(), [clientProp]);
     const [conversationId, setConversationId] = useState<string | null>(initialConversationId);
     const conv = useEngineConversation(conversationId, { client, watcher: watcherOptions });
-    const { view, connection, pending, error, submit, retry, abort, decide, cancelSubmission } = conv;
+    const { view, connection, pending, error, submit, retry, abort, decide, answerQuestion, cancelSubmission } = conv;
     const { cost, active: costActive, liveTokens, refresh: refreshCost } = useConversationCost(conversationId, view, costFetcher);
 
     const draftKey = conversationId ?? NEW_DRAFT_KEY;
@@ -176,8 +176,13 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         () => ({
             onApprove: (toolTaskId: string) => decide(toolTaskId, 'approve').catch((e) => { throw toDecisionError(e); }),
             onReject: (toolTaskId: string) => decide(toolTaskId, 'deny').catch((e) => { throw toDecisionError(e); }),
+            // Same lifecycle for questions: the card stays disabled until the questions document changes.
+            onQuestionAnswer: (toolTaskId: string, a: { optionIds: string[]; otherValue?: string }) =>
+                answerQuestion(toolTaskId, { optionIds: a.optionIds, ...(a.otherValue !== undefined ? { text: a.otherValue } : {}) }).catch((e) => {
+                    throw toDecisionError(e);
+                }),
         }),
-        [decide]
+        [decide, answerQuestion]
     );
 
     // Per-turn cost under the last assistant message of each run.

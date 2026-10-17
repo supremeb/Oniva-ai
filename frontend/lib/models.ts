@@ -184,6 +184,16 @@ export type MessagePart =
           timeout?: number;
           defaultOptionId?: string;
           includeOther?: boolean;
+          /** Engine `ask_user` questions: the tool task the answer route is keyed by (equals `id`). */
+          toolTaskId?: string;
+          status?: 'pending' | 'answered' | 'expired';
+          allowFreeText?: boolean;
+          /** The recorded answer, once answered. */
+          answer?: { optionIds: string[]; text: string | null } | null;
+          /** UI hint only (owner or admin); the server decides. */
+          canDecide?: boolean;
+          /** Epoch ms after which a pending question is expired. */
+          expiresAt?: number | null;
       }
     | {
           type: 'approval';

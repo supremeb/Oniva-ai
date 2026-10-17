@@ -6,6 +6,7 @@
  * asserted explicitly below.
  */
 import chatViews from '../__fixtures__/chat_views.json';
+import questionViews from '../__fixtures__/question_views.json';
 import legacyText from '../../sse/__fixtures__/chat_text.json';
 import legacyToolCall from '../../sse/__fixtures__/chat_tool_call.json';
 import legacyError from '../../sse/__fixtures__/chat_error.json';
@@ -116,7 +117,7 @@ describe('tool result statuses', () => {
   const cases: [string, 'success' | 'error'][] = [
     ['ok', 'success'], ['error', 'error'], ['blocked', 'error'], ['invalid_arguments', 'error'],
     ['unknown_tool', 'error'], ['limit_exceeded', 'error'], ['interrupted', 'error'], ['aborted', 'error'],
-    ['denied', 'error'], ['approval_expired', 'error'], ['timeout', 'error'], ['lease_lost', 'error'],
+    ['denied', 'error'], ['approval_expired', 'error'], ['question_expired', 'error'], ['timeout', 'error'], ['lease_lost', 'error'],
   ];
   it.each(cases)('%s -> %s', (status, expected) => {
     const v = viewOf([
@@ -447,5 +448,72 @@ describe('partial assistant entries (failed runs)', () => {
     expect(got.map((p) => p.type)).toEqual(['text', 'error']);
     expect(msgs[1].runId).toBe('run');
     expect(msgs[1].isStreaming).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ask_user questions (approvals plan U12). Oracle: question_views.json, produced
+// by the real engine (recorder: engine/test/watch/question-fixtures.test.ts).
+// ---------------------------------------------------------------------------
+
+describe('questions', () => {
+  const qviews = questionViews as unknown as Record<string, ConversationView>;
+  const tail = (v: ConversationView) => parts(viewToMessages(v).find((m) => m.role === 'assistant'));
+
+  it('a pending question is a pending call plus a question card keyed by the tool task', () => {
+    const v = qviews.question_pending;
+    const item = v.questions.items[0];
+    const ps = tail(v);
+    expect(ps.find((p) => p.type === 'tool_call')).toMatchObject({ toolName: 'ask_user', status: 'pending' });
+    const q = ps.find((p) => p.type === 'question');
+    expect(q).toMatchObject({
+      id: item.toolTaskId, toolTaskId: item.toolTaskId, question: item.question, status: 'pending',
+      multiSelect: true, allowFreeText: true, canDecide: true, expiresAt: item.expiresAt,
+    });
+    expect(q.options).toEqual([{ id: 'staging', label: 'Staging' }, { id: 'prod', label: 'Production', description: 'customer facing' }]);
+  });
+
+  it('canDecide follows the adapter option', () => {
+    const q = parts(createViewAdapter({ canDecide: false })(qviews.question_pending).find((m) => m.role === 'assistant')).find((p) => p.type === 'question');
+    expect(q.canDecide).toBe(false);
+  });
+
+  it('an answered question keeps the card read-only with the answer; the call succeeded', () => {
+    const ps = tail(qviews.question_answered);
+    expect(ps.find((p) => p.type === 'tool_call')).toMatchObject({ status: 'success' });
+    expect(ps.find((p) => p.type === 'question')).toMatchObject({
+      status: 'answered', answer: { optionIds: ['staging'], text: 'and the canary' },
+    });
+  });
+
+  it('an expired question maps the question_expired result to an error line and an expired card', () => {
+    const ps = tail(qviews.question_expired);
+    expect(ps.find((p) => p.type === 'tool_call')).toMatchObject({ status: 'error', error: expect.stringContaining('expired') });
+    expect(ps.find((p) => p.type === 'question')).toMatchObject({ status: 'expired' });
+  });
+
+  it('a cancelled question renders no card', () => {
+    const v = clone(qviews.question_pending);
+    v.questions.items[0].status = 'cancelled';
+    expect(tail(v).some((p) => p.type === 'question')).toBe(false);
+  });
+
+  it('a view without `questions` (older engine) still adapts', () => {
+    const v = clone(views.chat_tool_call) as any;
+    delete v.questions;
+    expect(() => viewToMessages(v)).not.toThrow();
+  });
+
+  it('a patch answering the question yields a new message with the answered card', () => {
+    const adapt = createViewAdapter();
+    const v1 = qviews.question_pending;
+    const m1 = adapt(v1);
+    const v2 = applyJsonPatch(v1 as unknown as JsonValue, [
+      { op: 'replace', path: '/questions/items/0/status', value: 'answered' },
+      { op: 'replace', path: '/questions/items/0/answer', value: { optionIds: ['prod'], text: null, principal: 'u', answeredAt: 1 } },
+    ]) as unknown as ConversationView;
+    const m2 = adapt(v2);
+    expect(m2[0]).toBe(m1[0]);
+    expect(parts(m2[m2.length - 1]).find((p) => p.type === 'question').status).toBe('answered');
   });
 });
