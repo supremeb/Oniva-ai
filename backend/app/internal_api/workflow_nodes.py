@@ -23,7 +23,7 @@ from typing import Any, AsyncContextManager, Callable, Dict, List, Optional
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -71,10 +71,25 @@ def get_tenant_session_factory() -> TenantSessionFactory:
 
 
 class Scope(BaseModel):
+    """The run's binding. Tenant, project and conversation are derived from the run (KTD4); a body that
+    names them must agree with the run. ``classification`` and ``nodeType`` are optional hints."""
+
     model_config = ConfigDict(extra="forbid")
 
     tenantId: str
     projectId: str
+    conversationId: Optional[str] = None
+    classification: Optional[str] = None
+    nodeType: Optional[str] = None
+
+
+class BodyScope(BaseModel):
+    """Scope keys as the body may carry them: all optional, none trusted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tenantId: Optional[str] = None
+    projectId: Optional[str] = None
     conversationId: Optional[str] = None
     classification: Optional[str] = None
     nodeType: Optional[str] = None
@@ -150,7 +165,13 @@ def parse_key(request: Request, run_id: str, node_id: str, phase: str) -> re.Mat
     key = request.headers.get("idempotency-key") or ""
     m = KEY_RE.match(key)
     if not m or len(key) > 255 or m["phase"] != phase or m["run"] != run_id or m["node"] != node_id:
-        raise _bad("Idempotency-Key must be {runId}:{nodeId}:r{runAttempt}:a{nodeAttempt}:{phase}")
+        raise GatewayError(
+            400,
+            {
+                "error": "invalid_idempotency_key",
+                "message": f"expected {{runId}}:{{nodeId}}:r{{n}}:a{{n}}:{phase}",
+            },
+        )
     return m
 
 
@@ -173,12 +194,62 @@ async def _read_body(request: Request) -> Dict[str, Any]:
     return raw
 
 
-def _split_scope(raw: Dict[str, Any]) -> tuple[Scope, Dict[str, Any]]:
+def _split_scope(raw: Dict[str, Any]) -> tuple[BodyScope, Dict[str, Any]]:
     try:
-        scope = Scope(**{k: raw[k] for k in SCOPE_KEYS if k in raw})
+        scope = BodyScope(**{k: raw[k] for k in SCOPE_KEYS if k in raw})
     except ValidationError:
-        raise _bad("tenantId and projectId are required")
+        raise _bad("scope fields must be strings")
     return scope, {k: v for k, v in raw.items() if k not in SCOPE_KEYS}
+
+
+async def bind_run(factory: SessionFactory, run: uuid.UUID, claimed: BodyScope) -> Scope:
+    """The tenant, project and conversation of ``run``, from the run itself (KTD4).
+
+    The body's tenantId/projectId/conversationId are never trusted: when present they must equal what the
+    run says, else the run is not found for that caller (404). A run with no conversation takes its
+    project from the body, verified against the tenant by ``resolve_binding``.
+    """
+    async with factory() as db:
+        execution = (
+            await db.execute(
+                select(WorkflowExecution.tenant_id, WorkflowExecution.engine_conversation_id).where(
+                    WorkflowExecution.id == run
+                )
+            )
+        ).first()
+        if execution is None:
+            raise GatewayError(404, {"error": "run_not_found"})
+        conv = (
+            await db.execute(
+                select(EngineConversation.conversation_id, EngineConversation.project_id)
+                .where(
+                    EngineConversation.tenant_id == execution.tenant_id,
+                    or_(
+                        EngineConversation.conversation_id == execution.engine_conversation_id,
+                        (EngineConversation.run_kind == "workflow") & (EngineConversation.run_ref_id == run),
+                    ),
+                )
+                .limit(1)
+            )
+        ).first()
+    tenant = str(execution.tenant_id)
+    conversation = str(conv.conversation_id) if conv is not None else None
+    project = str(conv.project_id) if conv is not None else claimed.projectId
+    if claimed.tenantId is not None and claimed.tenantId != tenant:
+        raise GatewayError(404, {"error": "run_not_found"})
+    if claimed.projectId is not None and project is not None and claimed.projectId != project:
+        raise GatewayError(404, {"error": "run_not_found"})
+    if claimed.conversationId is not None and claimed.conversationId != conversation:
+        raise GatewayError(404, {"error": "run_not_found"})
+    if project is None:
+        raise GatewayError(404, {"error": "conversation_not_found"})
+    return Scope(
+        tenantId=tenant,
+        projectId=project,
+        conversationId=conversation,
+        classification=claimed.classification,
+        nodeType=claimed.nodeType,
+    )
 
 
 # --- run data ------------------------------------------------------------------------------------
@@ -545,18 +616,25 @@ async def _handle(
     run_attempt, attempt = int(m["r"]), int(m["a"])
     run = _uuid(run_id, "runId")
     raw = await _read_body(request)
-    scope, rest = _split_scope(raw)
+    claimed, rest = _split_scope(raw)
     fin: Optional[wc.FinishInput] = None
     if phase == "finish":
         try:
             fin = wc.validate_finish_input(rest)
-        except wc.ContractError as exc:
-            raise GatewayError(400, {"error": exc.code})
+        except wc.ContractError:
+            raise GatewayError(422, {"error": "invalid_request"})
     else:
-        extra = set(rest) - {"contractVersion"}
+        extra = set(rest) - {"contractVersion", "runAttempt", "nodeAttempt"}
         if extra or rest.get("contractVersion", wc.CONTRACT_VERSION) != wc.CONTRACT_VERSION:
             raise _bad("unexpected fields in prepare body")
-    _parse_class(scope.classification)
+        # The body's attempt counters, when sent, must be the key's (the key is the call's identity).
+        for field, got in (("runAttempt", m["r"]), ("nodeAttempt", m["a"])):
+            if field in rest and (type(rest[field]) is not int or rest[field] != int(got)):
+                raise GatewayError(
+                    400, {"error": "invalid_idempotency_key", "message": f"{field} does not match the key"}
+                )
+    _parse_class(claimed.classification)
+    scope = await bind_run(factory, run, claimed)
     tenant = _uuid(scope.tenantId, "tenantId")
 
     token, header_session = fence_headers(request)
@@ -629,3 +707,21 @@ async def finish_node(
     tenants: TenantSessionFactory = Depends(get_tenant_session_factory),
 ) -> JSONResponse:
     return await _handle(request, run_id, node_id, "finish", factory, tenants)
+
+
+@router.get("/invocations/{key}")
+async def get_invocation(
+    key: str, request: Request, factory: SessionFactory = Depends(get_session_factory)
+) -> JSONResponse:
+    """Reconcile read: the stored outcome of a completed call, else 404 ``not_found`` (also while in flight).
+
+    Fenced like the other routes: a token raises the high-water mark even on this read, and waits for an
+    older owner's in-flight write, so the 404 is final (KTD4).
+    """
+    token, session = fence_headers(request)
+    if token is not None and session is not None:
+        await admit_fence(factory, session, token)
+    stored = await invocations.completed_outcome(factory, key, session)
+    if stored is None:
+        raise GatewayError(404, {"error": "not_found"})
+    return _no_store(stored)

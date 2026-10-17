@@ -381,10 +381,10 @@ async def test_finish_for_a_node_with_no_finish_step_is_400(wf):
 
 @pytest.mark.parametrize("name,code", [("finish.unknown-kind.invalid.json", "invalid_body"),
                                        ("finish.fanout.missing-completed.invalid.json", "invalid_body")])
-async def test_invalid_finish_fixtures_are_400_with_the_contract_code(wf, name, code):
+async def test_invalid_finish_fixtures_are_422_invalid_request(wf, name, code):
     fixture = json.loads((FIXTURES / name).read_text())
     r = await call(wf, "t", "finish", body={**scope(wf), **fixture})
-    assert r.status_code == 400 and r.json() == {"error": code}
+    assert r.status_code == 422 and r.json() == {"error": "invalid_request"}
 
 
 async def test_valid_finish_fixture_is_accepted_by_the_gateway(wf):
@@ -403,3 +403,53 @@ async def test_prepare_rejects_unexpected_body_fields(wf):
 async def test_every_prepare_response_validates_against_the_contract(wf):
     for node in ("t", "cached", "d"):
         wc.validate_prepare_response((await call(wf, node)).json())
+
+
+# ---- KTD4: the scope comes from the run, not the body --------------------------------------------
+
+ENGINE_BODY = {"contractVersion": 1, "runAttempt": 0, "nodeAttempt": 0, "nodeType": "template"}
+
+
+async def test_engine_shaped_prepare_body_without_tenant_or_project_runs_the_node(wf):
+    r = await call(wf, "t", body=ENGINE_BODY)
+    assert r.status_code == 200 and r.json()["status"] == "success"
+    assert wf.counts["template"] == 1
+
+
+async def test_engine_shaped_finish_body_without_scope_is_accepted(wf):
+    await call(wf, "it", body=ENGINE_BODY | {"nodeType": "iteration"})
+    fixture = json.loads((FIXTURES / "finish.fanout.valid.json").read_text())
+    assert (await call(wf, "it", "finish", body=fixture)).status_code == 200
+
+
+async def test_body_scope_that_disagrees_with_the_run_is_404(wf):
+    for extra in ({"tenantId": str(wf.tenant_b)}, {"projectId": str(wf.project_b)}, {"conversationId": str(wf.conv_b)}):
+        assert (await call(wf, "t", body=ENGINE_BODY | extra)).status_code == 404
+    assert wf.counts["template"] == 0
+
+
+async def test_unknown_run_is_404_without_a_body_scope(wf):
+    other = str(uuid.uuid4())
+    assert (await call(wf, "t", run=other, body=ENGINE_BODY)).status_code == 404
+
+
+@pytest.mark.parametrize("patch", [{"runAttempt": 1}, {"nodeAttempt": 1}, {"runAttempt": "0"}])
+async def test_body_attempts_must_agree_with_the_key(wf, patch):
+    r = await call(wf, "t", body=ENGINE_BODY | patch)
+    assert r.status_code == 400 and r.json()["error"] == "invalid_idempotency_key"
+    assert wf.counts["template"] == 0
+
+
+async def test_lookup_returns_the_stored_outcome_and_404s_otherwise(wf):
+    first = await call(wf, "t", body=ENGINE_BODY)
+    key = f"{wf.run}:t:r0:a0:prepare"
+    hdr = {**AUTH, "X-Engine-Session": SESSION}
+    found = await wf.client.get(f"/internal/workflows/invocations/{key}", headers=hdr)
+    assert found.status_code == 200 and found.json() == first.json()
+    gone = await wf.client.get(f"/internal/workflows/invocations/{wf.run}:t:r9:a0:prepare", headers=hdr)
+    assert gone.status_code == 404 and gone.json() == {"error": "not_found"}
+    other_session = await wf.client.get(
+        f"/internal/workflows/invocations/{key}", headers={**AUTH, "X-Engine-Session": "someone-else"}
+    )
+    assert other_session.status_code == 404
+    assert (await wf.client.get(f"/internal/workflows/invocations/{key}")).status_code == 401
