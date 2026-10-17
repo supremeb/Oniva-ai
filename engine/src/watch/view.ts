@@ -30,6 +30,7 @@ import {
   type SubmissionRecord,
   type TaskRecord,
 } from "../storage/types.js";
+import { type TaskDefinition, type TaskRegistry, taskState } from "../tasks/define.js";
 import { diffJson, escapePointerToken, type JsonPatchOp } from "./patch.js";
 
 export interface ConversationView {
@@ -50,7 +51,87 @@ export interface ConversationView {
    * (KTD2). Present once the child exists; `{}` for a conversation with none.
    */
   subagents: { [toolTaskId: string]: SubagentView };
+  /**
+   * Host tasks by task id, for kinds whose definition supplies a `view`
+   * (workflow runs and their nodes); `{}` for a plain chat. Built-in kinds
+   * (generation, tool, compaction) never appear.
+   */
+  tasks: { [taskId: string]: TaskView };
 }
+
+/** One host task as a client sees it. */
+export interface TaskView {
+  kind: string;
+  /** The owning task, or null for a root task of the conversation. */
+  parentId: string | null;
+  status: "pending" | "running" | "waiting" | "done" | "aborted" | "faulted";
+  phase: string;
+  label?: string;
+  attempt?: number;
+  /** ISO deadline of a `waiting` task that has one. */
+  waitUntil?: string;
+  /** ISO time the task was created. */
+  startedAt: string;
+  /** ISO time the task finished. Only once terminal. */
+  endedAt?: string;
+  /** The abort reason or fault message of an `aborted` / `faulted` task. */
+  error?: string;
+}
+
+function taskStatus(task: TaskRecord): TaskView["status"] {
+  switch (task.status) {
+    case "pending":
+      return "pending";
+    case "waiting":
+      return "waiting";
+    case "terminal":
+      return task.outcome?.type === "aborted"
+        ? "aborted"
+        : task.outcome?.type === "faulted"
+          ? "faulted"
+          : "done";
+    default:
+      // `running` and `completing` (finishing its owned work) are both in progress.
+      return "running";
+  }
+}
+
+/** The view of a host task, or null when its kind has no `view`. A throwing `view` shows no details. */
+function taskView(task: TaskRecord, def: TaskDefinition | undefined): TaskView | null {
+  if (!def?.view) return null;
+  let info: ReturnType<NonNullable<TaskDefinition["view"]>> = {};
+  try {
+    info = def.view(taskState(task) as never) ?? {};
+  } catch {
+    info = {};
+  }
+  const outcome = task.outcome;
+  const error =
+    outcome?.type === "aborted"
+      ? outcome.reason
+      : outcome?.type === "faulted"
+        ? outcome.message
+        : undefined;
+  return {
+    kind: task.kind,
+    parentId: task.parentTaskId,
+    status: taskStatus(task),
+    phase: task.phase,
+    ...(info.label === undefined ? {} : { label: info.label }),
+    ...(info.attempt === undefined ? {} : { attempt: info.attempt }),
+    ...(task.status === "waiting" && task.waiting?.until != null
+      ? { waitUntil: new Date(task.waiting.until).toISOString() }
+      : {}),
+    startedAt: new Date(task.createdAt).toISOString(),
+    ...(task.status === "terminal" ? { endedAt: new Date(task.updatedAt).toISOString() } : {}),
+    ...(error === undefined ? {} : { error }),
+  };
+}
+
+/** What the view reads of a session: itself, or a harness / hub source that also knows the task registry. */
+export type ViewSource =
+  | Session
+  | { readonly session: Session; readonly runtime?: { readonly registry: TaskRegistry } };
 
 /** A subagent child as the parent's view shows it: progress and recent activity, not its transcript. */
 export interface SubagentView {
@@ -270,6 +351,8 @@ export interface ViewState {
   runTasks: Map<string, RunTaskInfo>;
   /** Subagent children, by child conversation id. */
   subagents: Map<string, SubagentInfo>;
+  /** The registry that says which kinds appear in `view.tasks`, if the source had one. */
+  registry: TaskRegistry | null;
 }
 
 function entryOf(e: EntryRecord): EntryRecord {
@@ -284,7 +367,12 @@ function entryOf(e: EntryRecord): EntryRecord {
 }
 
 /** Read a conversation's view from committed state. */
-export async function loadViewState(session: Session, conversationId: string): Promise<ViewState> {
+export async function loadViewState(
+  source: ViewSource,
+  conversationId: string,
+): Promise<ViewState> {
+  const session = "session" in source ? source.session : source;
+  const registry = ("session" in source ? source.runtime?.registry : undefined) ?? null;
   const reader = session.reader;
   if (!(await reader.getConversation(conversationId))) {
     throw new UnknownConversation(conversationId);
@@ -299,6 +387,7 @@ export async function loadViewState(session: Session, conversationId: string): P
   const toolTasks = new Set<string>();
   const compactionTasks = new Map<string, CompactionTaskInfo>();
   const runTasks = new Map<string, RunTaskInfo>();
+  const hostTasks: ConversationView["tasks"] = {};
   const toolOutput: ConversationView["toolOutput"] = {};
   const links: Array<{ taskId: string; conversationId: string; submissionId: string }> = [];
   for (let cursor: string | null = null; ; ) {
@@ -314,6 +403,8 @@ export async function loadViewState(session: Session, conversationId: string): P
         runTasks.set(t.id, { startedAt: t.createdAt, terminal: t.status === "terminal" });
       }
       if (t.kind === COMPACTION_TASK_KIND) compactionTasks.set(t.id, compactionInfo(t));
+      const hosted = taskView(t, registry?.get(t.kind));
+      if (hosted) hostTasks[t.id] = hosted;
     }
     const docs = ids.length === 0 ? [] : await reader.getDocuments(toolOutputDoc.kind, ids);
     ids.forEach((id, i) => {
@@ -363,16 +454,17 @@ export async function loadViewState(session: Session, conversationId: string): P
     ),
     run: runView(runTasks),
     subagents: Object.fromEntries([...subagents.values()].map((i) => [i.taskId, subagentView(i)])),
+    tasks: hostTasks,
   };
-  return { view, toolTasks, compactionTasks, runTasks, subagents };
+  return { view, toolTasks, compactionTasks, runTasks, subagents, registry };
 }
 
 /** Read a conversation's view from committed state. Throws `UnknownConversation`. */
 export async function loadConversationView(
-  session: Session,
+  source: ViewSource,
   conversationId: string,
 ): Promise<ConversationView> {
-  return (await loadViewState(session, conversationId)).view;
+  return (await loadViewState(source, conversationId)).view;
 }
 
 /**
@@ -385,7 +477,7 @@ export function applyCommitToView(
   conversationId: string,
   event: CommitEvent,
 ): JsonPatchOp[] {
-  const { view, toolTasks, compactionTasks, runTasks, subagents } = state;
+  const { view, toolTasks, compactionTasks, runTasks, subagents, registry } = state;
   const ops: JsonPatchOp[] = [];
   const touched = new Set<SubagentInfo>();
   for (const task of event.batch.createTasks ?? []) {
@@ -426,6 +518,24 @@ export function applyCommitToView(
       applySubmission(info, sub);
       touched.add(info);
     }
+  }
+  for (const task of [...(event.batch.createTasks ?? []), ...(event.batch.replaceTasks ?? [])]) {
+    if (task.conversationId !== conversationId) continue;
+    const next = taskView(task, registry?.get(task.kind));
+    if (!next) continue;
+    const path = `/tasks/${escapePointerToken(task.id)}`;
+    if (Object.hasOwn(view.tasks, task.id)) {
+      ops.push(
+        ...diffJson(
+          view.tasks[task.id] as unknown as JsonValue,
+          next as unknown as JsonValue,
+          path,
+        ),
+      );
+    } else {
+      ops.push({ op: "add", path, value: structuredClone(next) as unknown as JsonValue });
+    }
+    view.tasks[task.id] = next;
   }
   let runChanged = false;
   for (const task of event.batch.createTasks ?? []) {
