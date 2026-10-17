@@ -105,6 +105,23 @@ export interface SubagentView {
   usage: UsageTally;
 }
 
+/** A host task as the view shows it (engine/src/watch/view.ts `TaskView`): workflow runs and their nodes. */
+export interface TaskView {
+  kind: string;
+  /** The owning task, or null for a root task of the conversation. */
+  parentId: string | null;
+  status: 'pending' | 'running' | 'waiting' | 'done' | 'aborted' | 'faulted';
+  phase: string;
+  label?: string;
+  attempt?: number;
+  /** ISO deadline of a waiting task that has one. */
+  waitUntil?: string;
+  startedAt: string;
+  endedAt?: string;
+  /** The abort reason or fault message of an aborted or faulted task. */
+  error?: string;
+}
+
 export interface ConversationView {
   entries: EntryRecord[];
   live: LiveState;
@@ -117,6 +134,8 @@ export interface ConversationView {
   run?: RunView;
   /** Subagent children by the parent's tool task id. Absent on older engines. */
   subagents?: { [toolTaskId: string]: SubagentView };
+  /** Host tasks by task id (workflow runs and nodes). Absent on older engines. */
+  tasks?: { [taskId: string]: TaskView };
 }
 
 export interface RunView {
@@ -194,6 +213,9 @@ export function parseConversationView(raw: unknown): ConversationView {
   if (!isObj(toolOutput) || !isJson(toolOutput)) throw new WireError('view.toolOutput');
   if ('subagents' in raw && raw.subagents !== undefined && (!isObj(raw.subagents) || !isJson(raw.subagents))) {
     throw new WireError('view.subagents');
+  }
+  if ('tasks' in raw && raw.tasks !== undefined && (!isObj(raw.tasks) || !isJson(raw.tasks))) {
+    throw new WireError('view.tasks');
   }
   // Skeleton verified above; the engine's zod schemas own the leaves.
   return raw as unknown as ConversationView;
