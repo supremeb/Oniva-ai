@@ -29,6 +29,7 @@ HOOKS = ("on_finished", "start_missing", "find_stuck", "fail")
 BOOTSTRAP_MODULES: tuple[str, ...] = (
     "app.services.fleet_engine",
     "app.services.fleet_run_sync",
+    "app.services.workflow_batch_engine",  # U18: batch on_finished, start_missing, find_stuck, fail
     "app.services.workflow_engine_runs",  # U15: start_missing, find_stuck, fail
     "app.services.workflow_run_sync",  # U16: on_finished
 )

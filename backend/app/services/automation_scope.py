@@ -21,7 +21,7 @@ from app.services.engine_client import get_engine_client
 RUN_NAMESPACE = uuid.UUID("6f0c6d52-3b1e-5a64-9d0e-0a7a1d6c2f40")
 AUTOMATION_SETTINGS = {"system": "automations"}
 AUTOMATION_PROJECT_NAME = "Automations"
-RUN_KINDS = ("fleet", "workflow")
+RUN_KINDS = ("fleet", "workflow", "batch")
 
 
 def run_conversation_id(kind: str, ref_id: Any) -> UUID:

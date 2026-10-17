@@ -42,6 +42,7 @@ from app.internal_api.node_specs import node_spec_for
 from app.internal_api.tools import _detach
 from app.models.engine import EngineConversation
 from app.models.workflow import WorkflowExecution
+from app.models.workflow_batch import WorkflowBatch, WorkflowBatchItem
 from app.node_executors import NodeExecutionContext, NodeExecutionResult, get_executor
 from app.node_executors.adornments import CacheAdornment
 from app.schemas.classification import DataClassification
@@ -436,6 +437,34 @@ async def _prepare_fanout(
         target: Dict[str, Any] = {"subgraph": name}
         parallel = max(1, min(int(data.get("maxParallel", 10)), wc.MAX_PARALLEL)) if data.get("parallel") else 1
         fail_fast = data.get("errorHandling", "terminate") == "terminate"
+    elif kind == "batch":
+        # U18: a batch is one run whose single fanout node runs the workflow once per batch item. The item
+        # inputs are read from workflow_batch_items here and copied into the item execution rows; they never
+        # travel in the response (KTD17).
+        try:
+            batch_id = uuid.UUID(str(data.get("batchId")))
+            item_workflow_id = uuid.UUID(str(data.get("workflowId")))
+        except ValueError:
+            return _final("failed", None, error="batch node needs batchId and workflowId")
+        async with tenants(str(view.tenant_id)) as db:
+            batch_rows = (
+                await db.execute(
+                    select(WorkflowBatchItem.id, WorkflowBatchItem.inputs)
+                    .join(WorkflowBatch, WorkflowBatch.id == WorkflowBatchItem.batch_id)
+                    .where(WorkflowBatch.id == batch_id, WorkflowBatch.tenant_id == view.tenant_id)
+                    .order_by(WorkflowBatchItem.sequence)
+                )
+            ).all()
+        if len(batch_rows) > wc.MAX_FANOUT_ITEMS:
+            return _final(
+                "failed", None,
+                error=f"Input array size ({len(batch_rows)}) exceeds maximum allowed ({wc.MAX_FANOUT_ITEMS})",
+            )
+        items = [dict(r.inputs or {}) for r in batch_rows]
+        batch_item_ids = [str(r.id) for r in batch_rows]
+        target = {"workflowId": str(item_workflow_id)}
+        parallel = max(1, min(int(data.get("parallel", 10)), wc.MAX_PARALLEL))
+        fail_fast = False
     else:
         workflow_id = data.get("workflowId")
         if not workflow_id:
@@ -459,12 +488,13 @@ async def _prepare_fanout(
                     "status": "pending",
                     "trigger": view.trigger or "manual",
                     "input_data": {
+                        **(_json_safe(item) if kind == "batch" and isinstance(item, dict) else {}),
                         "__parent_run_id": str(view.execution_id),
                         "__parent_node_id": view.node["id"],
                         "__index": i,
                         "__fanout": kind,
                         INPUT_CLASS_KEY: input_class.value,
-                        "item": _json_safe(item),
+                        **({"__batch_item_id": batch_item_ids[i]} if kind == "batch" else {"item": _json_safe(item)}),
                     },
                     "results": {},
                     "execution_trace": [],
@@ -579,6 +609,15 @@ async def run_finish(
         summary = fin.fanout
         if summary is None:
             raise _bad("fanout summary is required")
+        if node_type == "batch":
+            # Counts only: item results live in workflow_batch_items, never in the engine (KTD17). Item
+            # failures never fail the batch node (failFast is off); the batch row records them.
+            return _final(
+                "success",
+                {"count": summary.count, "success_count": summary.completed,
+                 "error_count": summary.failed + summary.cancelled},
+                classification=input_class,
+            )
         ids = [item_id(view.execution_id, view.node["id"], i) for i in range(summary.count)]
         items: List[Dict[str, Any]] = []
         async with tenants(str(view.tenant_id)) as db:

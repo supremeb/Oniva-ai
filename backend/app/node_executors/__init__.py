@@ -432,6 +432,7 @@ from app.node_executors.ocr_executor import OCRExecutor
 from app.node_executors.notification_executor import NotificationExecutor
 from app.node_executors.webhook_trigger_executor import WebhookTriggerExecutor
 from app.node_executors.subworkflow_executor import SubWorkflowExecutor
+from app.node_executors.batch_executor import BatchExecutor
 from app.node_executors.human_in_loop_executor import HumanInLoopExecutor
 
 # Phase 3 Extension: Spreadsheet processing
@@ -472,6 +473,7 @@ register_executor(OCRExecutor())
 register_executor(NotificationExecutor())
 register_executor(WebhookTriggerExecutor())
 register_executor(SubWorkflowExecutor())
+register_executor(BatchExecutor())
 register_executor(HumanInLoopExecutor())
 register_executor(SpreadsheetExecutor())
 
