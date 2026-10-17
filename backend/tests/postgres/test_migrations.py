@@ -240,3 +240,11 @@ def test_memory_rls_is_user_scoped(pg_migrated_url):
             engine.dispose()
     assert visible_as(U1) == 2
     assert visible_as(U2) == 1  # only the shared one
+
+
+def test_tier_refuses_to_drop_protected_databases(pg_server):
+    import pytest as _pytest
+
+    for name in ("oniva", "oniva_engine", "postgres"):
+        with _pytest.raises(RuntimeError, match="protected"):
+            pg_server.recreate_db(name)
