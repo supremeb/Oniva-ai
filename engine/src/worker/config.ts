@@ -16,7 +16,7 @@
  * | `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` under `ENGINE_POLICY=backend` | backend origin serving `/internal/models/{policy,usage}`; authenticated with the gateway token |
  * | `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
  * | `ENGINE_POLICY_RETRY_MS` | `60000` | total time a transient policy or usage failure is retried; `0` for none |
- * | `ENGINE_APPROVAL_TTL_MS` | `86400000` | approval expiry; `0` for none |
+ * | `ENGINE_APPROVAL_TTL_MS` | `86400000` | local-mode approval expiry only (no `ENGINE_POLICY=backend`); `0` for none. Under `backend` the expiry comes from the backend's `approvalTtlMs` and this value is ignored |
  * | `ENGINE_MODEL` / `ENGINE_SUMMARY_MODEL` | Anthropic defaults | model ids |
  * | `ENGINE_MODEL_FIRST_BYTE_TIMEOUT_MS` | `120000` | abort an OpenRouter attempt with no data event by then (retried as `network`) |
  * | `ENGINE_MODEL_IDLE_TIMEOUT_MS` | `120000` | abort an OpenRouter attempt silent for this long between data events (retryable, partial kept) |

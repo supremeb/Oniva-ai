@@ -136,12 +136,7 @@
             "description": "Worker ids of this round that failed without saving learnings."
           }
         },
-        "required": [
-          "round",
-          "score",
-          "gaps",
-          "should_continue"
-        ],
+        "required": ["round", "score", "gaps", "should_continue"],
         "type": "object"
       },
       "sideEffect": "write",
@@ -169,10 +164,7 @@
             "type": "array"
           }
         },
-        "required": [
-          "worker_id",
-          "learnings"
-        ],
+        "required": ["worker_id", "learnings"],
         "type": "object"
       },
       "sideEffect": "write",
@@ -200,10 +192,7 @@
             "type": "array"
           }
         },
-        "required": [
-          "round",
-          "workers"
-        ],
+        "required": ["round", "workers"],
         "type": "object"
       },
       "sideEffect": "write",
@@ -227,10 +216,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "heading",
-          "markdown"
-        ],
+        "required": ["heading", "markdown"],
         "type": "object"
       },
       "sideEffect": "write",

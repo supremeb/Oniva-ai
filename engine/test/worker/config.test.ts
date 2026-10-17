@@ -215,6 +215,18 @@ describe("workerHostPolicy", () => {
     expect(policy.authorizeTool({ ...req, toolName: "safe" })).toEqual({ decision: "allow" });
   });
 
+  it("local mode (no backend) makes no HTTP call and keeps the local rule for native tools", () => {
+    const policy = workerHostPolicy({
+      modelDefaults: defaults,
+      gateway: { requiresApproval: () => false },
+      approvalTtlMs: 500,
+      clock: new ManualClock(),
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: only the tool name is read locally
+    const req = { toolName: "mystery", toolSource: "native" } as any;
+    expect(policy.authorizeTool(req)).toEqual({ decision: "allow" });
+  });
+
   it("routes models by purpose and denies without a key", () => {
     const policy = workerHostPolicy({
       modelDefaults: defaults,

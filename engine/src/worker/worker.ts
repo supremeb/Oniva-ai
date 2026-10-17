@@ -150,16 +150,21 @@ export interface WorkerHandle {
 }
 
 /**
- * The host policy a worker runs with: the model defaults decide every model
- * request, and a gateway tool that asks for approval requires one.
+ * The host policy a worker runs with. Without a backend the model defaults
+ * decide every model request and a gateway tool that asks for approval
+ * requires one (local development, `approvalTtlMs` applies). With a backend,
+ * model requests and every tool call that is not a manifest read or an
+ * internal native tool are decided by Python.
  */
 export function workerHostPolicy(options: {
   modelDefaults: WorkerModelDefaults;
-  gateway: Pick<GatewayToolset, "requiresApproval"> | null;
+  gateway:
+    | (Pick<GatewayToolset, "requiresApproval"> & Partial<Pick<GatewayToolset, "describe">>)
+    | null;
   approvalTtlMs: number | null;
   clock: Clock;
   /** Resolves model requests instead of `modelDefaults`; no local fallback. */
-  backend?: Pick<BackendPolicyClient, "resolveModelRequest"> | null;
+  backend?: Pick<BackendPolicyClient, "resolveModelRequest" | "authorizeTool"> | null;
 }): HostPolicy {
   const { modelDefaults: d, gateway, approvalTtlMs, clock, backend } = options;
   return {
@@ -176,6 +181,10 @@ export function workerHostPolicy(options: {
       };
     },
     authorizeTool(request) {
+      // With a backend the worker holds no tool policy: Python decides, the
+      // manifest only spares the round trip for reads. `approvalTtlMs` is the
+      // local-mode value; the backend's TTL applies otherwise.
+      if (backend) return backend.authorizeTool(request, gateway);
       if (gateway?.requiresApproval(request.toolName)) {
         return {
           decision: "requireApproval",
@@ -257,6 +266,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
     ? new BackendPolicyClient({
         ...options.backendPolicy,
         supportedProviders: () => options.models.names(),
+        clock,
         log,
       })
     : null;
