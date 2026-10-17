@@ -50,6 +50,8 @@ import type { StorageProvider } from "../storage/types.js";
 import type { TaskDefinition } from "../tasks/define.js";
 import { createGatewayTools, type GatewayToolset } from "../tools/gateway.js";
 import type { ToolDefinition } from "../tools/registry.js";
+import { createNodeGateway } from "../workflow/node-gateway.js";
+import { createWorkflowTasks } from "../workflow/tasks.js";
 import { BackendPolicyClient, UsageReporter } from "./backend-policy.js";
 import { RunNotifier } from "./run-notifier.js";
 
@@ -78,6 +80,13 @@ export interface WorkerBackendPolicyOptions {
 }
 
 export interface WorkerGatewayOptions {
+  baseUrl: string;
+  serviceToken: string;
+  fetch?: typeof fetch;
+}
+
+/** The backend serving the workflow node gateway (U35). */
+export interface WorkerWorkflowOptions {
   baseUrl: string;
   serviceToken: string;
   fetch?: typeof fetch;
@@ -116,6 +125,12 @@ export interface WorkerOptions {
   tools?: ToolDefinition<any>[];
   /** Host task kinds registered after the harness's built-ins (KTD3). */
   hostTasks?: readonly TaskDefinition[];
+  /**
+   * Register `workflow_run`, `workflow_node`, `workflow_fanout_lane` and
+   * `workflow_gate` (U35). Their node gateway client carries the lease fence, so
+   * a rejected token fences the worker like a rejected tool call does.
+   */
+  workflow?: WorkerWorkflowOptions | null;
   /** Engine clock (approval expiry, deadlines, throttling). Leases use the database clock. */
   clock?: Clock;
   settings?: Partial<AgentSettings>;
@@ -429,6 +444,25 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
         ]),
       ].map((name) => createSubagentTool({ name })),
     ];
+    const tasks: TaskDefinition[] = [...(options.hostTasks ?? [])];
+    if (options.workflow) {
+      tasks.push(
+        ...createWorkflowTasks(
+          createNodeGateway({
+            baseUrl: options.workflow.baseUrl,
+            serviceToken: options.workflow.serviceToken,
+            fence: k.fence,
+            sessionId,
+            clock,
+            ...(options.workflow.fetch ? { fetch: options.workflow.fetch } : {}),
+            onFenceRejected: (rejection) => {
+              log("fence_rejected", { tool: "workflow", token: String(rejection.token) });
+              k.fenceNow("the workflow node gateway rejected this worker's fence token");
+            },
+          }),
+        ),
+      );
+    }
     const base = new PostgresStorageProvider(pool);
     const storage = options.wrapStorage ? options.wrapStorage(base) : base;
     const h = await Harness.open(storage, {
@@ -445,7 +479,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       clock,
       fence: k.fence,
       signal: k.signal,
-      ...(options.hostTasks ? { tasks: options.hostTasks } : {}),
+      ...(tasks.length > 0 ? { tasks } : {}),
       ...(options.settings ? { settings: options.settings } : {}),
       ...(options.redact ? { redact: options.redact } : {}),
       ...(options.hooks || usageReporter

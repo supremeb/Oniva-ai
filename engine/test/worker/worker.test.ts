@@ -151,4 +151,29 @@ describe("startWorker", () => {
     expect(events.filter((e) => e === "gateway_unavailable")).toHaveLength(2);
     expect(events).not.toContain("failed");
   });
+
+  it("registers the workflow task kinds and advertises them in /v1/health taskKinds (U35)", async () => {
+    const sessionId = `sess-${uuidv7()}`;
+    const w = await startWorker(
+      options(sessionId, [], {
+        workflow: { baseUrl: "http://workflow.invalid", serviceToken: "w" },
+        hostTasks: [],
+      }),
+    );
+    workers.push(w);
+    await w.serving;
+    const res = await fetch(`${w.url}/v1/health`);
+    const body = (await res.json()) as { taskKinds: string[] };
+    for (const kind of ["workflow_run", "workflow_node", "workflow_fanout_lane", "workflow_gate"]) {
+      expect(body.taskKinds).toContain(kind);
+    }
+  });
+
+  it("registers no workflow kinds without a workflow backend", async () => {
+    const w = await startWorker(options(`sess-${uuidv7()}`, []));
+    workers.push(w);
+    await w.serving;
+    const body = (await (await fetch(`${w.url}/v1/health`)).json()) as { taskKinds: string[] };
+    expect(body.taskKinds.some((k) => k.startsWith("workflow_"))).toBe(false);
+  });
 });

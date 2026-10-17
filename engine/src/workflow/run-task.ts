@@ -45,6 +45,20 @@
  * the run cannot serve (count over the limit, a target the graph lacks) is
  * answered with a failure summary and no lanes.
  *
+ * Retry and deadline (U35). `retry: { max, delayMs }` retries the run as a
+ * whole: a run that ends `failed` with attempts left does not finalize. It
+ * enters `waiting({ until: clock.now() + delayMs })` and then goes back to
+ * `start` with a fresh checkpoint and `attempt + 1` (the checkpoint's `attempt`,
+ * which starts at the input's `runAttempt`). Node and lane task ids and every
+ * node key carry `r{attempt}` (KTD4), so the retry re-executes nodes that failed
+ * earlier instead of replaying their stored failure, and a fan-out starts
+ * afresh. `finalize` is called once, after the last attempt, with `attempts`.
+ * A retry that would wake at or after the deadline is not taken. `deadlineMs`
+ * (absolute engine-clock epoch ms) bounds every wait of the run. When it is
+ * reached the run aborts its live children (reason `run_deadline`, recorded as
+ * `skipped`) and ends `failed` with `deadline_exceeded`; a deadline failure
+ * never retries.
+ *
  * Abort. The run owns its node children, so the runtime aborts them first
  * (bottom-up); `onAbort` then calls `finalize` once with `cancelled`. The key
  * makes a repeat after a crash harmless.
@@ -115,11 +129,20 @@ export const WORKFLOW_RUN_KIND = "workflow_run";
 export interface WorkflowRunInput {
   version: 1;
   runId: string;
-  /** The run-level retry counter (U35); part of every node key. */
+  /** The first run-level attempt (U35); part of every node key. The checkpoint's `attempt` advances it. */
   runAttempt: number;
+  /** Retry the whole run on failure: up to `max` more attempts, `delayMs` apart (engine clock). */
+  retry?: RunRetry | undefined;
+  /** Absolute engine-clock epoch ms after which the run ends `failed` with `deadline_exceeded`. */
+  deadlineMs?: number | undefined;
   graph: WorkflowGraph;
   variables: JsonValue;
   errorMode: ErrorMode;
+}
+
+export interface RunRetry {
+  max: number;
+  delayMs: number;
 }
 
 export interface RunFailure {
@@ -138,6 +161,10 @@ export interface WorkflowRunCheckpoint {
   fan: Record<string, { lanes: number; count: number }>;
   /** The first failure nobody caught. */
   failure?: RunFailure;
+  /** The current run attempt; absent means the input's `runAttempt`. */
+  attempt?: number;
+  /** The run hit its deadline; it finalizes `failed` and never retries. */
+  expired?: boolean;
 }
 
 /** The `done` value of a run task. */
@@ -177,6 +204,15 @@ const PHASE_JOIN = "join";
 const PHASE_FAN = "fan";
 const PHASE_FINALIZE = "finalize";
 const SIBLING_FAILED = "sibling_failed";
+const RUN_DEADLINE = "run_deadline";
+const DEADLINE_ERROR: JsonValue = {
+  code: "deadline_exceeded",
+  message: "the run passed its deadline",
+};
+
+/** The run attempt in force: the checkpoint's, else the input's. */
+const attemptOf = (task: State, cp: WorkflowRunCheckpoint | null | undefined): number =>
+  cp?.attempt ?? task.input.runAttempt;
 
 /**
  * Check a run input. Returns the typed input, or throws {@link GraphError} /
@@ -202,6 +238,33 @@ export function parseRunInput(raw: unknown): WorkflowRunInput {
   if (input.errorMode !== "stop" && input.errorMode !== "continue") {
     throw new WorkflowRunError("invalid_input", 'errorMode must be "stop" or "continue"');
   }
+  let retry: RunRetry | undefined;
+  if (input.retry !== undefined) {
+    const r = input.retry as JsonObject | null;
+    if (
+      r === null ||
+      typeof r !== "object" ||
+      Array.isArray(r) ||
+      typeof r.max !== "number" ||
+      !Number.isInteger(r.max) ||
+      r.max < 0 ||
+      typeof r.delayMs !== "number" ||
+      !Number.isFinite(r.delayMs) ||
+      r.delayMs < 0
+    ) {
+      throw new WorkflowRunError(
+        "invalid_input",
+        "retry must be { max: non-negative integer, delayMs: non-negative number }",
+      );
+    }
+    retry = { max: r.max, delayMs: r.delayMs };
+  }
+  if (
+    input.deadlineMs !== undefined &&
+    (typeof input.deadlineMs !== "number" || !Number.isFinite(input.deadlineMs))
+  ) {
+    throw new WorkflowRunError("invalid_input", "deadlineMs must be a finite epoch ms number");
+  }
   const graph = validateGraph(input.graph);
   return {
     version: 1,
@@ -210,6 +273,8 @@ export function parseRunInput(raw: unknown): WorkflowRunInput {
     graph,
     variables: input.variables ?? null,
     errorMode: input.errorMode,
+    ...(retry === undefined ? {} : { retry }),
+    ...(input.deadlineMs === undefined ? {} : { deadlineMs: input.deadlineMs }),
   };
 }
 
@@ -279,7 +344,7 @@ function finalizeInput(task: State, cp: WorkflowRunCheckpoint, status: RunStatus
     status,
     nodeSummaries: summaries(cp.nodes),
     ...(status === "failed" && cp.failure ? { error: cp.failure.error } : {}),
-    attempts: task.input.runAttempt + 1,
+    attempts: attemptOf(task, cp) + 1,
   };
 }
 
@@ -319,7 +384,10 @@ function collect(
       }
       continue;
     }
-    if (outcome.type === "aborted" && outcome.reason === SIBLING_FAILED) {
+    if (
+      outcome.type === "aborted" &&
+      (outcome.reason === SIBLING_FAILED || outcome.reason === RUN_DEADLINE)
+    ) {
       nodes[nodeId] = { status: "skipped" };
       continue;
     }
@@ -351,7 +419,8 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
     cp: WorkflowRunCheckpoint,
     nodes: NodeStates,
   ): Next {
-    const { graph, errorMode, runId, runAttempt } = task.input;
+    const { graph, errorMode, runId } = task.input;
+    const runAttempt = attemptOf(task, cp);
     const { states, ready } = resolveGraph(graph, nodes);
     const stopped = errorMode === "stop" && cp.failure !== undefined;
     if (stopped || ready.length === 0) {
@@ -405,14 +474,54 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
     return waiting({
       on: awaited,
       policy: waitPolicy(task),
+      ...untilDeadline(task),
       phase: PHASE_JOIN,
       checkpoint: { ...cp, nodes: states, wave, gates, fan: {} },
     });
   }
 
-  const start = async (task: State, rt: Scope): Promise<Committed> => {
+  /** The deadline as a wait bound, so a parked run wakes when it is reached. */
+  function untilDeadline(task: State): { until?: number } {
+    return task.input.deadlineMs === undefined ? {} : { until: task.input.deadlineMs };
+  }
+
+  const passed = (task: State, ctx: Context): boolean =>
+    task.input.deadlineMs !== undefined && ctx.clock.now() >= task.input.deadlineMs;
+
+  /**
+   * The deadline is reached: abort whatever is live (nodes, gates, lanes) and
+   * wait for it to stop, then settle what ran and go to `finalize` as `expired`.
+   */
+  function expire(task: State, rt: Scope, ops: TaskOps, cp: WorkflowRunCheckpoint): Next {
+    const attempt = attemptOf(task, cp);
+    const lanes = Object.entries(cp.fan).flatMap(([nodeId, f]) =>
+      Array.from({ length: f.lanes }, (_, lane) => laneTaskId(task.id, attempt, nodeId, lane)),
+    );
+    const live = [...Object.values(cp.wave), ...Object.values(cp.gates), ...lanes].filter(
+      (id) => rt.task(id) !== null && rt.task(id)?.status !== "terminal",
+    );
+    if (live.length > 0) {
+      for (const id of live) ops.abort(id, RUN_DEADLINE);
+      return waiting({ on: live, phase: task.phase, checkpoint: { ...cp, expired: true } });
+    }
+    const failure: RunFailure = { nodeId: "", error: DEADLINE_ERROR };
+    const settled = collect({ ...cp, failure }, rt);
+    return next(PHASE_FINALIZE, {
+      ...cp,
+      nodes: settled?.nodes ?? cp.nodes,
+      wave: {},
+      gates: {},
+      fan: {},
+      failure,
+      expired: true,
+    });
+  }
+
+  const start = async (task: State, rt: Scope, ctx: Context): Promise<Committed> => {
     const cp = load(task);
-    return rt.commit((_tx, ops) => advance(task, rt, ops, cp, cp.nodes));
+    return rt.commit((_tx, ops) =>
+      passed(task, ctx) ? expire(task, rt, ops, cp) : advance(task, rt, ops, cp, cp.nodes),
+    );
   };
 
   /** The digest a parked fan-out node left in its checkpoint. */
@@ -443,7 +552,8 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
     const laneDef = rt.runtime.registry.get(WORKFLOW_FANOUT_LANE_KIND) as unknown as
       | TaskDefinition<WorkflowFanoutLaneInput, FanoutLaneCheckpoint | null>
       | undefined;
-    const { runId, runAttempt, graph, errorMode } = task.input;
+    const { runId, graph, errorMode } = task.input;
+    const runAttempt = attemptOf(task, cp);
     const fan: Record<string, { lanes: number; count: number }> = {};
     const laneIds: string[] = [];
     for (const nodeId of parked) {
@@ -505,12 +615,14 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
       return waiting({
         on: Object.values(cp.wave),
         policy: waitPolicy(task),
+        ...untilDeadline(task),
         phase: PHASE_JOIN,
         checkpoint: { ...cp, gates: {}, fan: {} },
       });
     }
     return waiting({
       on: laneIds,
+      ...untilDeadline(task),
       phase: PHASE_FAN,
       checkpoint: { ...cp, fan },
     });
@@ -526,6 +638,7 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
   /** The counts of a fan-out, from its lanes' committed state. */
   function summarize(
     task: State,
+    cp: WorkflowRunCheckpoint,
     rt: Scope,
     nodeId: string,
     f: { lanes: number; count: number },
@@ -534,7 +647,7 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
     let failed = 0;
     let firstError: JsonValue | undefined;
     for (let lane = 0; lane < f.lanes; lane++) {
-      const rec = rt.task(laneTaskId(task.id, task.input.runAttempt, nodeId, lane));
+      const rec = rt.task(laneTaskId(task.id, attemptOf(task, cp), nodeId, lane));
       const outcome = rec?.outcome;
       const part =
         outcome?.type === "done"
@@ -554,10 +667,12 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
     };
   }
 
-  const join = async (task: State, rt: Scope): Promise<Committed> => {
+  const join = async (task: State, rt: Scope, ctx: Context): Promise<Committed> => {
     const cp = load(task);
     return rt.commit((_tx, ops) => {
+      if (passed(task, ctx)) return expire(task, rt, ops, cp);
       const policy = waitPolicy(task);
+      const bound = untilDeadline(task);
       const parked: string[] = [];
       const live: string[] = [];
       const liveNodes: string[] = [];
@@ -581,15 +696,16 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
           (id) => rt.task(id)?.status !== "terminal",
         );
         for (const id of victims) ops.abort(id, SIBLING_FAILED);
-        return waiting({ on: victims, phase: PHASE_JOIN });
+        return waiting({ on: victims, ...bound, phase: PHASE_JOIN });
       }
-      if (live.length > 0) return waiting({ on: live, policy, phase: PHASE_JOIN });
+      if (live.length > 0) return waiting({ on: live, policy, ...bound, phase: PHASE_JOIN });
       if (parked.length > 0) return startFan(task, rt, ops, cp, parked);
       const settled = collect(cp, rt);
       if (!settled) {
         return waiting({
           on: Object.values(cp.wave).filter((id) => rt.task(id)?.status !== "terminal"),
           policy,
+          ...bound,
           phase: PHASE_JOIN,
         });
       }
@@ -604,24 +720,26 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
     });
   };
 
-  const fan = async (task: State, rt: Scope): Promise<Committed> => {
+  const fan = async (task: State, rt: Scope, ctx: Context): Promise<Committed> => {
     const cp = load(task);
     return rt.commit((_tx, ops) => {
+      if (passed(task, ctx)) return expire(task, rt, ops, cp);
       const laneIds: string[] = [];
       for (const [nodeId, f] of Object.entries(cp.fan)) {
         for (let lane = 0; lane < f.lanes; lane++) {
-          laneIds.push(laneTaskId(task.id, task.input.runAttempt, nodeId, lane));
+          laneIds.push(laneTaskId(task.id, attemptOf(task, cp), nodeId, lane));
         }
       }
       const open = laneIds.filter((id) => rt.task(id)?.status !== "terminal");
-      if (open.length > 0) return waiting({ on: open, phase: PHASE_FAN });
+      if (open.length > 0) return waiting({ on: open, ...untilDeadline(task), phase: PHASE_FAN });
       for (const [nodeId, f] of Object.entries(cp.fan)) {
-        deliver(rt, ops, cp.wave[nodeId] as string, summarize(task, rt, nodeId, f));
+        deliver(rt, ops, cp.wave[nodeId] as string, summarize(task, cp, rt, nodeId, f));
       }
       // Only the fan-out nodes are still live; their `finish` now runs.
       return waiting({
         on: Object.values(cp.wave),
         policy: waitPolicy(task),
+        ...untilDeadline(task),
         phase: PHASE_JOIN,
         checkpoint: { ...cp, gates: {}, fan: {} },
       });
@@ -631,13 +749,38 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
   const finalize = async (task: State, rt: Scope, ctx: Context): Promise<Committed> => {
     const cp = load(task);
     const status: RunStatus = cp.failure ? "failed" : "completed";
+    const attempt = attemptOf(task, cp);
+    const { retry } = task.input;
+    if (
+      status === "failed" &&
+      cp.expired !== true &&
+      retry &&
+      attempt - task.input.runAttempt < retry.max
+    ) {
+      const until = ctx.clock.now() + retry.delayMs;
+      const deadline = task.input.deadlineMs;
+      if (deadline === undefined || until < deadline) {
+        // Wait out the delay, then run the whole graph again as the next attempt.
+        return rt.commit(() =>
+          waiting({
+            until,
+            phase: "start",
+            checkpoint: {
+              version: CHECKPOINT_VERSION,
+              nodes: initialStates(task.input.graph),
+              wave: {},
+              gates: {},
+              fan: {},
+              attempt: attempt + 1,
+            },
+          }),
+        );
+      }
+    }
     const body = finalizeInput(task, cp, status);
-    await deps.gateway.finalize(
-      task.input.runId,
-      finalizeKey(task.input.runId, task.input.runAttempt),
-      body,
-      { signal: ctx.signal },
-    );
+    await deps.gateway.finalize(task.input.runId, finalizeKey(task.input.runId, attempt), body, {
+      signal: ctx.signal,
+    });
     const value: WorkflowRunValue = {
       status,
       nodes: body.nodeSummaries,
@@ -655,7 +798,7 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
       const cp = load(task);
       await deps.gateway.finalize(
         task.input.runId,
-        finalizeKey(task.input.runId, task.input.runAttempt),
+        finalizeKey(task.input.runId, attemptOf(task, cp)),
         finalizeInput(task, cp, "cancelled"),
         { signal: ctx.signal },
       );
@@ -665,7 +808,7 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
       const states = task.checkpoint?.nodes;
       return {
         label: task.input.runId,
-        attempt: task.input.runAttempt + 1,
+        attempt: attemptOf(task, task.checkpoint) + 1,
         ...(states ? { nodes: summariesView(states) } : {}),
       };
     },
