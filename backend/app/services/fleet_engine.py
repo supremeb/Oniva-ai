@@ -9,9 +9,15 @@ A start that cannot reach the engine leaves the job ``pending`` with ``error`` s
 ``start_attempts`` counter in ``input_data``; the ``fleet`` ``start_missing`` hook re-runs the start
 and the registry (``run_handlers``) owns the bound and the backoff.
 
+Steer and cancel (U8): an intervene is an engine submission with ``whenBusy: "steer"`` and a stable
+key; a cancel is an engine ``abort``. When the abort cannot reach the engine the job is still marked
+cancelled and ``input_data["abort_pending"]`` is set; ``find_stuck`` returns such rows and
+``start_missing`` retries the abort.
+
 Registers the ``fleet`` ``start_missing``, ``find_stuck`` and ``fail`` hooks (``on_finished`` is U9).
 """
 import functools
+import hashlib
 import json
 import logging
 import time
@@ -19,11 +25,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, select
 
 from app.core.database import get_db_for_tenant
 from app.models.background_job import BackgroundJob, JobStatus, JobType
 from app.models.custom_agent import CustomAgent
+from app.models.engine import EngineConversation
 from app.models.tenant import Tenant
 from app.services import run_handlers
 from app.services.automation_scope import bind_run_conversation
@@ -39,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 KIND = "fleet"
 ENGINE_MARK = "oniva-engine"  # background_jobs.input_data["engine"] for jobs that run on the engine
-_ENGINE_KEYS = ("engine", "start_attempts")
+_ENGINE_KEYS = ("engine", "start_attempts", "abort_pending")
 STUCK_BATCH = 200
 
 
@@ -161,6 +168,75 @@ async def start_fleet_run(factory: Callable, job_id: Any, *, engine: Any = None,
     return run_handlers.StartResult.started(task_id)
 
 
+def is_engine_job(job: Any) -> bool:
+    data = getattr(job, "input_data", None)
+    return isinstance(data, dict) and data.get("engine") == ENGINE_MARK
+
+
+def steer_request_id(job_id: Any, message: str) -> str:
+    """Stable per (job, text): a repeated intervene with the same text is deduplicated by the engine."""
+    return f"steer:{job_id}:{hashlib.sha256(message.encode()).hexdigest()[:16]}"
+
+
+async def _binding(db, job: BackgroundJob) -> Optional[tuple[str, Any]]:
+    """``(session_id, project_id)`` of the job's engine conversation, None when it never started."""
+    if job.conversation_id is None:
+        return None
+    row = (await db.execute(
+        select(EngineConversation.session_id, EngineConversation.project_id)
+        .where(EngineConversation.conversation_id == job.conversation_id)
+    )).first()
+    return (row.session_id, row.project_id) if row is not None else None
+
+
+async def steer_run(db, job: BackgroundJob, message: str, *, engine: Any = None) -> bool:
+    """Queue ``message`` as a steer on the running engine job. False when there is no conversation.
+
+    Raises ``EngineError`` / ``OSError`` / ``TimeoutError`` when the engine cannot be reached.
+    """
+    bound = await _binding(db, job)
+    if bound is None:
+        return False
+    session_id, project_id = bound
+    key = steer_request_id(job.id, message)
+    await (engine or get_engine_client()).submit(
+        session_id, job.tenant_id, project_id, job.conversation_id,
+        {"text": message, "whenBusy": "steer", "requestId": key}, key)
+    return True
+
+
+async def abort_run(db, job: BackgroundJob, reason: Optional[str] = None, *, engine: Any = None) -> bool:
+    """Abort the job's engine run. True when settled (aborted, or nothing to abort); False on an outage.
+
+    A 404/409 from the engine means the run is gone or already settled, which is the goal state.
+    """
+    bound = await _binding(db, job)
+    if bound is None:
+        return True
+    session_id, project_id = bound
+    try:
+        await (engine or get_engine_client()).abort(
+            session_id, job.tenant_id, project_id, job.conversation_id, reason)
+    except EngineError as e:
+        if e.status in (404, 409):
+            return True
+        logger.warning("fleet job %s: engine abort failed: %s", job.id, e)
+        return False
+    except (OSError, TimeoutError) as e:
+        logger.warning("fleet job %s: engine abort failed: %s", job.id, e)
+        return False
+    return True
+
+
+def set_abort_pending(job: BackgroundJob, pending: bool) -> None:
+    data = dict(job.input_data or {})
+    if pending:
+        data["abort_pending"] = True
+    else:
+        data.pop("abort_pending", None)
+    job.input_data = data
+
+
 async def start_after_commit(tenant_id: Any, job_id: Any, *, factory: Optional[Callable] = None) -> None:
     """Dispatch-site helper: start the engine run of a just-committed job; nothing escapes."""
     try:
@@ -188,12 +264,40 @@ async def find_stuck(session, older_than: timedelta) -> list:
             BackgroundJob.created_at < cutoff,
         ).order_by(BackgroundJob.created_at).limit(STUCK_BATCH)
     )).scalars().all()
-    return [_ref(j) for j in rows if (j.input_data or {}).get("engine") == ENGINE_MARK]
+    refs = [_ref(j) for j in rows if (j.input_data or {}).get("engine") == ENGINE_MARK]
+    # Cancelled jobs whose engine abort never got through.
+    aborting = (await session.execute(
+        select(BackgroundJob).where(
+            BackgroundJob.status == JobStatus.CANCELLED.value,
+            BackgroundJob.job_type == JobType.BACKGROUND_AGENT.value,
+            BackgroundJob.conversation_id.is_not(None),
+            BackgroundJob.completed_at < cutoff,
+            cast(BackgroundJob.input_data, String).like("%abort_pending%"),
+        ).order_by(BackgroundJob.completed_at).limit(STUCK_BATCH)
+    )).scalars().all()
+    return refs + [_ref(j) for j in aborting if (j.input_data or {}).get("abort_pending")]
+
+
+async def _retry_abort(ref: run_handlers.RunRef) -> run_handlers.StartResult:
+    async with tenant_factory(ref.tenant_id)() as db:
+        job = await db.get(BackgroundJob, ref.ref_id)
+        if job is None or not (job.input_data or {}).get("abort_pending"):
+            return run_handlers.StartResult.already_started()
+        if not await abort_run(db, job, job.error):
+            return run_handlers.StartResult.failed("abort_unavailable")
+        set_abort_pending(job, False)
+    return run_handlers.StartResult.already_started()
 
 
 async def start_missing(ref: run_handlers.RunRef) -> run_handlers.StartResult:
     if ref.tenant_id is None:
         return run_handlers.StartResult.failed("tenant_unknown")
+    async with tenant_factory(ref.tenant_id)() as db:
+        job = await db.get(BackgroundJob, ref.ref_id)
+        retry_abort = (job is not None and job.status == JobStatus.CANCELLED.value
+                       and bool((job.input_data or {}).get("abort_pending")))
+    if retry_abort:
+        return await _retry_abort(ref)
     return await start_fleet_run(tenant_factory(ref.tenant_id), ref.ref_id)
 
 

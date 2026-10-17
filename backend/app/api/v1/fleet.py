@@ -5,6 +5,7 @@ within a tenant. Feature-gated by ENABLE_FLEET_DASHBOARD.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -19,6 +20,8 @@ from app.auth.providers.base import AuthUser
 from app.core.database import get_db
 from app.models.background_job import BackgroundJob, JobType
 from app.models.custom_agent import CustomAgent
+from app.services import fleet_engine
+from app.services.engine_client import EngineError
 from app.services.intervention import send_intervention
 
 logger = logging.getLogger(__name__)
@@ -189,6 +192,17 @@ async def intervene_in_agent(
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(404, "Job not found or not running")
+
+    if fleet_engine.is_engine_job(job):
+        try:
+            sent = await fleet_engine.steer_run(db, job, body.message)
+        except (EngineError, OSError, TimeoutError):
+            raise HTTPException(503, "Intervention service temporarily unavailable")
+        if not sent:
+            raise HTTPException(404, "Job not found or not running")
+        return InterventionResponse(
+            message=body.message, sender=user.email,
+            timestamp=datetime.now(timezone.utc).isoformat())
 
     try:
         intervention = await send_intervention(
