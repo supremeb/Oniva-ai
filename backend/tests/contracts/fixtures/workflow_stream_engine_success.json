@@ -1,0 +1,82 @@
+{
+  "events": [
+    {
+      "type": "progress",
+      "node_id": "start-1",
+      "status": "running"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "start-1",
+      "result": {
+        "status": "success",
+        "output": {
+          "query": ""
+        },
+        "error": null
+      }
+    },
+    {
+      "type": "progress",
+      "node_id": "tmpl-1",
+      "status": "running"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "tmpl-1",
+      "result": {
+        "status": "success",
+        "output": {
+          "output": "Hello Oniva"
+        },
+        "error": null
+      }
+    },
+    {
+      "type": "progress",
+      "node_id": "out-1",
+      "status": "running"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "out-1",
+      "result": {
+        "status": "success",
+        "output": {
+          "content": "Hello Oniva"
+        },
+        "error": null
+      }
+    },
+    {
+      "type": "complete",
+      "status": "completed",
+      "results": {
+        "start-1": {
+          "status": "success",
+          "output": {
+            "query": ""
+          },
+          "error": null
+        },
+        "tmpl-1": {
+          "status": "success",
+          "output": {
+            "output": "Hello Oniva"
+          },
+          "error": null
+        },
+        "out-1": {
+          "status": "success",
+          "output": {
+            "content": "Hello Oniva"
+          },
+          "error": null
+        }
+      },
+      "executed_nodes": 3,
+      "total_nodes": 3,
+      "execution_id": "<id-1>"
+    }
+  ]
+}

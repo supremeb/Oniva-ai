@@ -22,8 +22,10 @@ from app.models.workflow import Workflow, WorkflowExecution
 from app.services import run_handlers as rh
 from app.services import run_reconciler as rr
 from app.services import workflow_engine_runs as wer
+from app.services import workflow_stream_adapter as wsa
 from app.services.automation_scope import run_conversation_id
 from app.services.engine_client import EngineError
+from tests.contracts.streams import ScriptedWatch, run_view, snapshot_frames
 from tests.internal.test_invoke import factory, maker  # noqa: F401  (fixtures)
 
 SPEC = {
@@ -50,6 +52,8 @@ class FakeEngine:
         self.abort_down = False
         self.task = {"status": "terminal", "outcome": DONE}
         self.on_terminal = None
+        self.watches = []
+        self.resumes = []
 
     async def start_run(self, session, tenant, project, body, key):
         self.starts.append({"body": body, "key": key})
@@ -63,6 +67,22 @@ class FakeEngine:
             raise EngineError(502, "engine_unreachable")
         self.aborts.append((conversation, reason))
         return {"aborted": True}
+
+    async def watch_stream(self, session, tenant, project, conversation, last_event_id=None, cursor=None):
+        """The scripted response, or the default successful s -> t -> o run (its trace written first)."""
+        self.resumes.append(last_event_id)
+        if self.down:
+            raise EngineError(502, "engine_unreachable")
+        if self.watches:
+            return self.watches.pop(0)
+        if self.on_terminal is not None:
+            await self.on_terminal(conversation)
+        return ScriptedWatch(snapshot_frames([
+            run_view({"s": "pending", "t": "pending", "o": "pending"}, running=("s",)),
+            run_view({"s": "success", "t": "pending", "o": "pending"}, running=("t",)),
+            run_view({"s": "success", "t": "success", "o": "pending"}, running=("o",)),
+            run_view({"s": "success", "t": "success", "o": "success"}, status="done"),
+        ]))
 
     async def get_task(self, session, tenant, project, conversation, task_id):
         if self.task.get("status") == "terminal" and self.on_terminal is not None:
@@ -88,6 +108,8 @@ async def w(maker, factory, monkeypatch):  # noqa: F811
     world.engine = FakeEngine(maker)
     monkeypatch.setattr(wer, "get_engine_client", lambda: world.engine)
     monkeypatch.setattr(wer, "tenant_factory", lambda tenant_id: factory)
+    monkeypatch.setattr(wsa, "get_engine_client", lambda: world.engine)
+    monkeypatch.setattr(wsa, "RECONNECT_DELAY_S", 0.0)
     monkeypatch.setattr(wer, "POLL_INTERVAL_S", 0.01)
     monkeypatch.setattr(wer, "SYNC_WAIT_S", 0.3)
     monkeypatch.setattr(wer, "engine_workflows_enabled",
@@ -481,24 +503,6 @@ async def test_compliance_engine_outage_is_a_502(w):
 
 
 # ---- the shared event stream (agent chat, compliance) ----------------------------------------------------
-
-
-async def test_execution_events_stream_trace_steps_then_complete_and_time_out_when_stuck(w):
-    async with client_for(make_app(w)) as c:
-        w.engine.task = {"status": "running"}
-        r = await c.post("/api/v1/workflows/execute", json={**EXECUTE, "workflow_id": str(w.wf)})
-    execution_id = uuid.UUID(r.json()["execution_id"])
-    await write_trace(w.maker, execution_id, [{"node_id": "s", "status": "success", "output": {}}])
-    seen = []
-    with pytest.raises(Exception) as timeout:
-        async for event in wer.execution_events(w.factory, execution_id, "task-1", engine=w.engine,
-                                                timeout_s=0.1, poll_s=0.01):
-            seen.append(event)
-    assert type(timeout.value).__name__ == "TimeoutError"
-    assert [e["type"] for e in seen] == ["progress", "node_complete"]  # each step exactly once across polls
-    w.engine.task = {"status": "terminal", "outcome": {"type": "aborted", "reason": "x"}}
-    events = [e async for e in wer.execution_events(w.factory, execution_id, "task-1", engine=w.engine, poll_s=0.01)]
-    assert events[-1]["type"] == "complete" and events[-1]["status"] == "cancelled"
 
 
 def test_outcome_status_maps_the_run_task_outcome():
