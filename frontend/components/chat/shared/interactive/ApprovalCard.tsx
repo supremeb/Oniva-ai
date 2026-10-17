@@ -6,7 +6,6 @@ import { Check, X, Warning, ShieldCheck, Clock } from '@phosphor-icons/react';
 import { SpringCard } from '../primitives/SpringCard';
 import { FadeSlide } from '../primitives/FadeSlide';
 import { ActionButton } from './ActionButton';
-import { transitions } from '@/lib/animation-utils';
 
 export interface ApprovalCardProps {
   /** Unique identifier */
@@ -23,6 +22,8 @@ export interface ApprovalCardProps {
     value: string;
     sensitive?: boolean;
   }>;
+  /** Short hash of the canonical arguments. */
+  argumentsHash?: string;
   /** Whether approval is required before continuing */
   blocking?: boolean;
   /** Timeout in seconds (optional) */
@@ -96,6 +97,7 @@ export const ApprovalCard = memo(function ApprovalCard({
   description,
   riskLevel = 'medium',
   items,
+  argumentsHash,
   blocking = true,
   timeout,
   status: statusProp = 'pending',
@@ -114,7 +116,6 @@ export const ApprovalCard = memo(function ApprovalCard({
   const [locked, setLocked] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const inFlight = useRef(false);
-  const [showAllItems, setShowAllItems] = useState(false);
 
   const expired = statusProp === 'pending' && expiresAt != null && now >= expiresAt;
   const status = expired ? 'expired' : statusProp;
@@ -131,8 +132,8 @@ export const ApprovalCard = memo(function ApprovalCard({
 
   const risk = riskConfig[riskLevel];
   const isPending = status === 'pending';
-  const displayItems = showAllItems ? items : items?.slice(0, 3);
-  const hasMoreItems = items && items.length > 3;
+  // Every argument is shown in full: an approver must never decide on a truncated view.
+  const displayItems = items;
 
   const decide = useCallback(async (kind: 'approve' | 'reject', fn: (() => void | Promise<void>) | undefined) => {
     if (!fn || inFlight.current) return; // a second click while a decision is in flight is ignored
@@ -246,35 +247,34 @@ export const ApprovalCard = memo(function ApprovalCard({
             <div className="text-xs font-medium text-muted-foreground mb-2">
               Items requiring approval
             </div>
-            <div className="space-y-1.5">
+            <div
+              data-testid="approval-arguments"
+              className="space-y-1.5 max-h-80 overflow-auto"
+              tabIndex={0}
+              role="group"
+              aria-label="Full arguments"
+            >
               {displayItems.map((item, index) => (
                 <div
                   key={index}
-                  className="flex items-center justify-between py-1.5 px-2 rounded bg-muted/50 text-sm"
+                  className="flex flex-col gap-0.5 py-1.5 px-2 rounded bg-muted/50 text-sm"
                 >
                   <span className="text-muted-foreground">{item.label}</span>
-                  <span
+                  <pre
                     className={cn(
-                      'font-mono text-xs',
+                      'font-mono text-xs whitespace-pre-wrap break-all m-0',
                       item.sensitive && 'blur-sm hover:blur-none transition-all'
                     )}
                   >
                     {item.value}
-                  </span>
+                  </pre>
                 </div>
               ))}
             </div>
-
-            {hasMoreItems && !showAllItems && (
-              <button
-                onClick={() => setShowAllItems(true)}
-                className={cn(
-                  'text-xs text-muted-foreground hover:text-foreground',
-                  transitions.colors
-                )}
-              >
-                Show {items!.length - 3} more items...
-              </button>
+            {argumentsHash && (
+              <div className="text-xs text-muted-foreground">
+                Arguments hash: <code className="font-mono">{argumentsHash}</code>
+              </div>
             )}
           </div>
         )}

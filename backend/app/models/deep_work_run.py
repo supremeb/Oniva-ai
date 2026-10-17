@@ -43,6 +43,9 @@ class DeepWorkRun(Base):
     reflections = Column(JSONB, nullable=False, server_default=text("'[]'"), default=list)
     artifacts = Column(JSONB, nullable=False, server_default=text("'[]'"), default=list)
     job_id = Column(UUID(as_uuid=True), ForeignKey("background_jobs.id", ondelete="SET NULL"), nullable=True)
+    # The intake clarification the user still has to answer (``IntakeResult`` dump); cleared by the plan route.
+    # Read by the inbox ("Deep Work runs waiting on the user"), Approvals & Policy plan U7.
+    awaiting_input = Column(JSONB(none_as_null=True), nullable=True)
     is_engine = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

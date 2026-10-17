@@ -28,6 +28,7 @@ from app.models.compliance_audit_log import (
     WorkflowStateLog,
     HumanReviewTicket,
     AuditAction,
+    AuditChainHead,
 )
 from app.models.workflow_checkpoint import WorkflowCheckpoint
 from app.models.episodic_memory import EpisodicMemory
@@ -61,6 +62,7 @@ from app.models.routing_policy import RoutingPolicy
 from app.models.run_event import RunEvent
 from app.models.engine import ToolInvocation, EngineFence, EngineConversation
 from app.models.deep_work_run import DeepWorkRun
+from app.models.tool_approval import ToolApproval
 
 __all__ = [
     'Base',
@@ -97,6 +99,7 @@ __all__ = [
     'WorkflowStateLog',
     'HumanReviewTicket',
     'AuditAction',
+    'AuditChainHead',
     'WorkflowCheckpoint',
     'EpisodicMemory',
     'UserPreferences',

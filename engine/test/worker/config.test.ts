@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_QUESTION_TTL_MS } from "../../src/agent/questions.js";
 import { ManualClock } from "../../src/core/clock.js";
 import {
   assertNotTestHarnessInProduction,
@@ -30,6 +31,7 @@ describe("workerConfigFromEnv", () => {
       leaseRetryMs: null,
       gatewayUrl: null,
       approvalTtlMs: DEFAULT_APPROVAL_TTL_MS,
+      questionTtlMs: DEFAULT_QUESTION_TTL_MS,
       progressIntervalMs: 100,
       dbSchema: null,
       subagentTool: null,
@@ -127,6 +129,13 @@ describe("workerConfigFromEnv", () => {
       /identifier/,
     );
     expect(workerConfigFromEnv({ ...BASE, ENGINE_APPROVAL_TTL_MS: "0" }).approvalTtlMs).toBeNull();
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_QUESTION_TTL_MS: "0" }).questionTtlMs).toBeNull();
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_QUESTION_TTL_MS: "5000" }).questionTtlMs).toBe(
+      5000,
+    );
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_QUESTION_TTL_MS: "-1" })).toThrow(
+      WorkerConfigError,
+    );
   });
 
   it("refuses the test harness flag in production only", () => {
@@ -199,6 +208,9 @@ describe("workerHostPolicy", () => {
       conversation: { id: "c", tenantId: "t", projectId: "p" },
       runId: "r",
       toolCallId: "x",
+      toolTaskId: "task-x",
+      toolSource: "gateway" as const,
+      taint: { tainted: false, total: 0, sources: [] },
       arguments: {},
       replay: "unsafe" as const,
       // biome-ignore lint/suspicious/noExplicitAny: agent config is not consulted
@@ -210,6 +222,18 @@ describe("workerHostPolicy", () => {
       expiresAt: 1500,
     });
     expect(policy.authorizeTool({ ...req, toolName: "safe" })).toEqual({ decision: "allow" });
+  });
+
+  it("local mode (no backend) makes no HTTP call and keeps the local rule for native tools", () => {
+    const policy = workerHostPolicy({
+      modelDefaults: defaults,
+      gateway: { requiresApproval: () => false },
+      approvalTtlMs: 500,
+      clock: new ManualClock(),
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: only the tool name is read locally
+    const req = { toolName: "mystery", toolSource: "native" } as any;
+    expect(policy.authorizeTool(req)).toEqual({ decision: "allow" });
   });
 
   it("routes models by purpose and denies without a key", () => {

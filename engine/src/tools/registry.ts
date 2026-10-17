@@ -22,6 +22,28 @@ import type { TextContent, ToolSpec } from "../models/types.js";
 
 export type ReplayPolicy = "safe" | "unsafe";
 
+/**
+ * Where a tool comes from: `"gateway"` for Oniva's backend tools loaded from
+ * the manifest (`tools/gateway.ts`), `"native"` (the default) for tools defined
+ * in the engine or by a host. It decides whether a call's result taints the
+ * conversation (see `agent/taint.ts`): a gateway tool taints only when the
+ * manifest marks it `untrustedOutput`, while a native tool taints unless it is
+ * flagged `internal` or is one of the internal engine tools.
+ */
+export type ToolSource = "gateway" | "native";
+
+/**
+ * Engine-native tools the model may call that are not output-bearing and so
+ * never taint a conversation. Mirrored by the backend (`tool_policy.py`); the
+ * shared fixture `test/support/internal-native-tools.json` keeps them in step.
+ */
+export const INTERNAL_NATIVE_TOOLS: readonly string[] = Object.freeze([
+  "ask_user",
+  "complete_task",
+  "present_plan",
+  "update_todo",
+]);
+
 /** What a tool returns. Strings and text parts reach the model as-is. */
 export interface ToolResult {
   content: string | TextContent[];
@@ -103,6 +125,18 @@ export interface ToolDefinition<A = unknown> {
   readonly parameters: z.ZodType<A>;
   readonly replay: ReplayPolicy;
   readonly sequential: boolean;
+  /** Where the tool comes from; `"native"` by default. */
+  readonly source: ToolSource;
+  /** An engine-internal tool (never taints, e.g. the subagent spawn tool). */
+  readonly internal: boolean;
+  /** Whether the tool's result is untrusted input for the conversation. */
+  readonly untrustedOutput: boolean;
+  /**
+   * The tool asks a person instead of executing: its arguments must match
+   * `questionSpecSchema` (`agent/questions.ts`), the tool task parks on a
+   * durable question and the answer becomes the result. `execute` is not called.
+   */
+  readonly humanInput: boolean;
   execute(args: A, api: ToolApi): ToolResult | Promise<ToolResult>;
   /**
    * After a restart that interrupted an `unsafe` call between intent and
@@ -118,6 +152,14 @@ export interface ToolDefinitionInput<A> {
   parameters: z.ZodType<A>;
   replay?: ReplayPolicy;
   sequential?: boolean;
+  /** Where the tool comes from; `"native"` by default. */
+  source?: ToolSource;
+  /** Mark an engine-internal tool so its result never taints the conversation. */
+  internal?: boolean;
+  /** Mark the tool's result as untrusted input for the conversation. */
+  untrustedOutput?: boolean;
+  /** Mark a tool that asks a person; see {@link ToolDefinition.humanInput}. */
+  humanInput?: boolean;
   execute(args: A, api: ToolApi): ToolResult | Promise<ToolResult>;
   reconcile?(args: A, api: ToolReconcileApi): ToolResult | null | Promise<ToolResult | null>;
 }
@@ -131,6 +173,9 @@ export function defineTool<A>(input: ToolDefinitionInput<A>): ToolDefinition<A> 
   if (input.replay !== undefined && input.replay !== "safe" && input.replay !== "unsafe") {
     throw new TypeError(`tool ${input.name}: replay must be "safe" or "unsafe"`);
   }
+  if (input.source !== undefined && input.source !== "gateway" && input.source !== "native") {
+    throw new TypeError(`tool ${input.name}: source must be "gateway" or "native"`);
+  }
   if (typeof input.execute !== "function") {
     throw new TypeError(`tool ${input.name}: execute must be a function`);
   }
@@ -140,6 +185,10 @@ export function defineTool<A>(input: ToolDefinitionInput<A>): ToolDefinition<A> 
     parameters: input.parameters,
     replay: input.replay ?? "unsafe",
     sequential: input.sequential ?? false,
+    source: input.source ?? "native",
+    internal: input.internal ?? false,
+    untrustedOutput: input.untrustedOutput ?? false,
+    humanInput: input.humanInput ?? false,
     execute: input.execute,
     ...(input.reconcile ? { reconcile: input.reconcile } : {}),
   });

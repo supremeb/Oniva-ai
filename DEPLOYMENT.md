@@ -339,6 +339,43 @@ engine routes).
 
 **Smoke test**: `ONIVA_E2E=1 uv run pytest -m e2e tests/e2e/test_engine_smoke.py` (needs Node 22, `initdb`/`pg_ctl`).
 
+## Approvals and audit
+
+A tool call that needs a human is decided by the Python control plane under RBAC; the engine only parks the
+call and waits. Nothing here needs a new service, but a few settings and one runbook step matter. The three tenant
+settings are read and changed with `GET`/`PUT /api/v1/tenant/approvals`.
+
+| Setting | Where | Meaning |
+|---------|-------|---------|
+| `approvals.ttl_hours` | tenant settings | How long an approval waits (default `168`, 7 days; `0` never expires). The backend's answer sets the engine item's expiry, so `ENGINE_APPROVAL_TTL_MS` is ignored under `ENGINE_POLICY=backend` |
+| `approvals.require_separate_approver` | tenant settings | `true` forbids deciding your own request everywhere. Admin-level tools (`execute_python`, connector writes) already need a second admin or owner whenever the tenant has two or more |
+| `approvals.rule_of_two` | tenant settings (owner only) | Default `true`: once a run has read untrusted content, an outside-world write needs approval (or is blocked when no user owns the run) |
+| `AUDIT_KMS_BACKEND` | backend | Signer for the audit chain. `local` (RSA keys under `SESSION_BASE_PATH/.audit_keys`) is refused when `ENVIRONMENT=production`; configure a real KMS backend there |
+| `APPROVALS_LEGACY_CUTOFF` | backend | ISO timestamp. Approvals the engine created before the ledger existed have no ledger row; the owner or a tenant admin may still decide them if they were requested before this time. Unset disables that fallback |
+
+**Runbook, upgrading the engine to the approvals release.**
+
+1. Deploy the backend first. Migrations `110` to `113` run as the schema owner (see "Database roles").
+2. Note the time the new engine image will start (the U5 deploy time) and set `APPROVALS_LEGACY_CUTOFF` to it on the backend.
+   Approvals requested before then stay decidable; anything newer without a ledger row is refused with `409 approval_not_indexed`.
+3. Roll the engine. One release later, remove `APPROVALS_LEGACY_CUTOFF` (the fallback is deleted in code at the same time).
+
+**The audit log is append-only at the database.** `compliance_audit_logs` has `UPDATE`, `DELETE` and `TRUNCATE`
+revoked from `oniva_app`, and a trigger rejects them for every role except two guarded purges, which run only as
+`oniva_system` inside a transaction that sets a local GUC:
+
+- `SET LOCAL oniva.audit_purge = 'retention'` deletes rows past `retention_until`;
+- `SET LOCAL oniva.audit_purge = 'tenant_delete'` plus `oniva.audit_purge_tenant = '<tenant uuid>'` deletes one tenant's rows
+  (the `ON DELETE CASCADE` from `tenants`).
+
+Run retention jobs and tenant deletion as `oniva_system`; as `oniva_app` they fail by design. Deleting a user is allowed
+(`user_id` is set to `NULL`); the entry keeps the `actor_email` and `actor_name` snapshot. Check a tenant's chain with
+`GET /api/v1/audit/chain/verify`.
+
+**Proof.** `ONIVA_E2E=1 uv run pytest -m e2e tests/e2e/test_approval_restart.py` kills the worker and the backend with an
+approval pending, shows only an authorised admin can decide it, and verifies the signed chain afterwards.
+`cd frontend && ONIVA_E2E_BROWSER=1 npx playwright test approval-recovery` does the same through the browser.
+
 ## Local development
 
 Run the full stack (Postgres, Redis, backend, engine worker, frontend) on one machine, with engine

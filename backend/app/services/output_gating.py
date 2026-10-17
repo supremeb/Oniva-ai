@@ -2,7 +2,7 @@
 
 Evaluates background agent output using the existing AgentEvaluatorService
 (LLM-as-judge) before delivering results. Failed evaluations are routed
-to the review queue for human approval.
+to the approval ledger (kind='review') for human approval.
 
 Wire this at the end of background agent execution:
     await evaluate_and_deliver(job, agent, result_text, db)
@@ -128,27 +128,27 @@ async def _route_to_review(
 ):
     """Route failed evaluation to the existing review queue."""
     try:
-        from app.services.review_queue import ReviewQueueService
-        review_service = ReviewQueueService(db)
+        from app.services.approval_service import ApprovalService
 
-        await review_service.create_review_item(
-            tenant_id=tenant_id,
-            entity_type="background_agent_output",
-            entity_id=str(job_id),
-            title=f"{agent_name}: Output below quality threshold",
-            description=(
+        title = f"{agent_name}: Output below quality threshold"
+        await ApprovalService(db).record_pending(
+            tenant_id=tenant_id, conversation_id=None, kind="review", tool_name=title,
+            reason=(
                 f"Evaluator scored this output {score}/100 "
                 f"(threshold: {threshold}). Review and approve or reject."
             ),
-            data={
+            arguments={
+                "entity_type": "background_agent_output",
+                "entity_id": str(job_id),
                 "agent_id": str(agent_id),
                 "agent_name": agent_name,
                 "result_preview": result_text[:500],
                 "score": score,
                 "threshold": threshold,
             },
-            risk_level="medium",
+            approver_role="admin",
         )
+        await db.commit()
         logger.info(f"Background agent {agent_name} output routed to review queue (score={score})")
     except Exception as e:
         logger.error(f"Failed to route to review queue: {e}")

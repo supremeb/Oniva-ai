@@ -209,6 +209,7 @@ async function main(): Promise<number> {
           }
         : null,
     approvalTtlMs: config.approvalTtlMs,
+    questionTtlMs: config.questionTtlMs,
     subagentTool: config.subagentTool,
     subagentTools: config.subagentTools,
     clock,

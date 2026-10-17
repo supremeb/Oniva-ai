@@ -29,10 +29,10 @@ Everything is exported from the package root (`src/index.ts`).
 
 | Area | Main exports |
 | --- | --- |
-| Harness | `Harness.open(storage, options)`, `harness.createConversation`, `harness.conversation(id)`, `harness.submission(id)`, `harness.decideApproval`, `harness.approvals`, `harness.waitForIdle`, `harness.close` |
+| Harness | `Harness.open(storage, options)`, `harness.createConversation`, `harness.conversation(id)`, `harness.submission(id)`, `harness.decideApproval`, `harness.approvals`, `harness.answerQuestion`, `harness.questions`, `harness.waitForIdle`, `harness.close` |
 | Conversations | `conversation.submit({ text, requestId?, whenBusy?: "followUp" \| "steer" \| "reject", type? })` → `Submission` (`wait()`, `record()`), `conversation.abort(reason?)`, `conversation.cancelSubmission(submissionId)` → `"cancelled" \| "not_queued" \| "unknown"`, `entries()`, `live()`, `usage()` |
 | Policy & hooks | `HostPolicy` (`resolveModelRequest`, `authorizeTool` → `allow` / `block` / `requireApproval`), `AgentHooks` |
-| Tools | `defineTool`, `ToolRegistry`, `createGatewayTools`, `createSubagentTool` |
+| Tools | `defineTool`, `ToolRegistry`, `createGatewayTools`, `createSubagentTool`, `askUserTool` |
 | Models | `ModelRegistry`, `AnthropicProvider`, `OpenAICompatibleProvider` / `openRouterProvider`, `FakeProvider` (`fakeText`, `fakeToolCall`, ...) |
 | Storage | `PostgresStorageProvider`, `MemoryStorageProvider`, `migrate`, `PostgresLeases`, `LeaseKeeper`, `defineStorageConformanceSuite` |
 | HTTP & watch | `createEngineServer`, `WatchHub`, `loadConversationView` |
@@ -68,14 +68,23 @@ routes also need `X-Oniva-Tenant` / `X-Oniva-Project` matching the conversation.
 | --- | --- |
 | `GET /v1/health` | `{ status, sessionId, ownerId, owner }` (no auth) |
 | `POST /v1/conversations` | create (`{ id?, agent? }`) → 201 |
-| `POST /v1/conversations/:id/submissions` | submit (`{ text \| content, requestId?, whenBusy?, type? }`; `Idempotency-Key` header works too) → 202 |
+| `POST /v1/conversations/:id/submissions` | submit (`{ text \| content, requestId?, whenBusy?, type?, untrusted? }`; `Idempotency-Key` header works too) → 202 |
 | `PUT /v1/conversations/:id/agent` | partial agent config (`systemPrompt`, `tools`, `model`, `thinking`, `depth`, `metadata`, `compaction`, `maxRounds`, `deadlineMs`); unknown or mistyped fields → 400 and nothing committed; applies from the next model request and arrives at watchers as a patch to `/agent` → 200 `{ conversationId, agent }` |
 | `GET /v1/conversations/:id/watch` | SSE watch stream (`id:` is the cursor; resume with `Last-Event-ID` or `?cursor=`) |
 | `DELETE /v1/conversations/:id/submissions/:submissionId` | cancel a still-queued input; it settles `unanswered(withdrawn)` → 200 `{ conversationId, submissionId, cancelled: true }`; 404 unknown submission, 409 `not_queued` if it already started, was placed into a run or settled |
 | `POST /v1/conversations/:id/abort` | abort queued and running work; answers once the run is idle |
+| `GET /v1/conversations/:id/approvals` | `{ conversationId, approvals: ApprovalItem[] }`: the conversation's approvals document plus those of its subagent descendants, oldest first; the decision route also finds a child's item through the root id |
 | `POST /v1/conversations/:id/approvals/:toolTaskId/decision` | `{ decision: "approve" \| "deny", note? }`, principal in `X-Oniva-Principal` |
+| `GET /v1/conversations/:id/questions` | `{ conversationId, questions: QuestionItem[] }`: the conversation's `agent.questions` document items, oldest first |
+| `POST /v1/conversations/:id/questions/:toolTaskId/answer` | `{ answer: { optionIds?: string[], text?: string } }`, principal in `X-Oniva-Principal` → 200 `{ question }`. Rejections are `{ error: "question_rejected", reason, question? }`: `invalid` 400, `not_owned` 404, `already_answered` and `not_waiting` 409, `expired` 410 |
+
+The watch view has a `questions` member, `{ items: QuestionItem[] }`, beside `approvals`; it is `{ items: [] }` when the conversation has no questions document, and changes arrive as patches under `/questions/items/<n>` when a question opens and when it is answered. The worker always registers the native `ask_user` tool; a conversation can call it only when its agent `tools` list it.
 
 Each watch-view `inbox.queue` item is `{ submissionId, mode, preview?, requestId? }`: `preview` is the first 200 characters of the queued text and `requestId` the caller's id (both absent on items queued by older engines); `inbox.placed` is unchanged.
+
+A rejected decision (409 `approval_rejected`, `reason` `already_decided`, `expired` or `not_waiting`) carries `approval`, a snapshot of the item with its recorded decision and principal, so a caller can finalise its own record from what the engine did.
+
+Taint: the document `agent.taint` on the ROOT conversation (a subagent's reads taint the run that owns it) is `{ tainted, total, sources }`, where `sources` keeps the first 20 events `{ kind: "tool_result" \| "input", name, ref, at }` and `total` counts all of them. It is set in the same commit that stores a tool result or places an input, and is sticky. A result taints when the tool is a gateway tool whose manifest says `untrustedOutput: true`, or a non-gateway tool that is not `internal` and not in `INTERNAL_NATIVE_TOOLS` (`ask_user`, `complete_task`, `present_plan`, `update_todo`; subagent spawn tools are `internal`). A submission sent with `untrusted: true` (boolean, else 400) taints with `kind: "input"`. `HostPolicy.authorizeTool` receives `toolTaskId`, `toolSource` (`"gateway" \| "native"`) and `taint: { tainted, total, sources }` as a copy it cannot mutate.
 
 A `user` entry's payload carries `requestId` (the caller's id, or the submission id when none was given) next to `submissionId`, so a client can match its optimistic message to the entry.
 
@@ -97,6 +106,15 @@ When a generation fails after streaming text (a model error), that text is kept 
 
 A worker that does not hold the session lease answers `409 { error: "not_owner", ownerId }`.
 
+## Questions (`ask_user`)
+
+The native `ask_user` tool (`askUserTool`, flagged `internal` and `humanInput`) lets the model ask a person a question and wait for the answer as durably as an approval. Arguments: `{ question, options?: [{ id, label, description? }], multiSelect?, allowFreeText? }`. Free text is always allowed when there are no options.
+
+- **Document.** `agent.questions` (per conversation): `{ items: QuestionItem[] }`, one item per tool task: `id` (`ques_...`), `toolTaskId`, `runId`, `toolCallId`, `question`, `options`, `multiSelect`, `allowFreeText`, `requestedAt`, `expiresAt`, `status` (`pending` / `answered` / `expired` / `cancelled`), `answer` (`{ optionIds, text, principal, answeredAt }`), `closedAt`.
+- **Tool phase.** A call still goes through `HostPolicy.authorizeTool` first (an approval, if required, comes before the question). On `allow` the tool task commits the item together with `waiting({ signal: "answer", until: expiresAt })` and holds no running task. The answer commits an `ok` result whose text is the chosen option labels (comma separated) and any free text as given; the deadline commits a `question_expired` result and the run continues. An abort closes the item `cancelled`. An answered question never taints the conversation.
+- **Harness API.** `harness.answerQuestion({ conversationId, toolTaskId, answer: { optionIds?, text? }, principal })` and `harness.questions(conversationId)`. A rejected answer throws `QuestionRejected` and writes nothing; `reason` is `not_owned`, `already_answered`, `expired`, `not_waiting` or `invalid` (unknown or repeated option, several options without `multiSelect`, text where not allowed, nothing chosen, an answer over 16 KiB, bad shape).
+- **Expiry.** `HarnessOptions.questionTtlMs` (default 7 days; `0` or `null` for none). The worker setting `ENGINE_QUESTION_TTL_MS` and the HTTP, watch and worker wiring come with the follow-up unit.
+
 ## Running a worker
 
 One worker process serves one session (KTD4). Start it with `npm run worker`
@@ -116,12 +134,15 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_LEASE_TTL_MS` | `15000` | lease TTL; heartbeat every TTL/3 |
 | `ENGINE_LEASE_RETRY_MS` | TTL/3 | standby retry interval |
 | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
-| `ENGINE_APPROVAL_TTL_MS` | `86400000` | approval expiry (`0`: none) |
+| `ENGINE_APPROVAL_TTL_MS` | `86400000` | local-mode approval expiry only (`0`: none); under `ENGINE_POLICY=backend` the backend's `approvalTtlMs` decides and this is ignored |
+| `ENGINE_QUESTION_TTL_MS` | `604800000` | how long an `ask_user` question waits for an answer (`0`: none) |
 | `ANTHROPIC_API_KEY` | none | model key (read per request; unused under `ENGINE_POLICY=backend`) |
 | `ENGINE_POLICY` | `backend` if `ENGINE_POLICY_URL` is set, else `local` | `backend`: the backend resolves each model request (provider, model, tenant key, token budget, quota) and records usage; a definitive refusal denies the request, an outage is retried (`ENGINE_POLICY_RETRY_MS`) and then fails it as a retryable `policy_unavailable`; there is never a fallback to a local key |
 | `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` when `ENGINE_POLICY=backend` | backend origin for `/internal/models/policy` and `/internal/models/usage`; uses `ENGINE_GATEWAY_TOKEN` |
 | `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
 | `ENGINE_POLICY_RETRY_MS` | `60000` | total time a transient policy or usage failure is retried (`0`: never); see below |
+
+**Tool policy.** Under `ENGINE_POLICY=backend` the worker's `HostPolicy.authorizeTool` holds no policy of its own: every tool call is decided by `POST /internal/tools/authorize` (same bearer token). Two cases never leave the process: a gateway tool whose manifest says `sideEffect: "none"` (a read) and a native tool in `INTERNAL_NATIVE_TOOLS` other than `ask_user` (which is sent so the question is indexed). Everything else sends `{ requestId: runId:toolCallId, tenantId, projectId, conversationId (root), engineConversationId, agentRole?, runId, toolCallId, toolTaskId, toolName, toolSource, arguments, argumentsHash, sideEffect?, replay, taint }`. `arguments` are redacted by `src/worker/redact.ts`; `argumentsHash` is the sha256 of the canonical JSON (sorted keys, `src/worker/args-hash.ts`, shared vectors in `test/support/args-hash-vectors.json`) of the unredacted final arguments, which is what an approval is bound to. The answer maps to `allow`, `block` (the backend's reason) or `requireApproval`, whose `expiresAt` is the injected clock plus the backend's `approvalTtlMs` (`null`: never expires). Transient failures retry like model policy (same `requestId`, `policy_retry`, `ENGINE_POLICY_RETRY_MS`); once the budget is spent, or at once on a 401/403/other 4xx or a malformed body, the call is blocked with reason `policy_unavailable` and the tool does not run. There is no local fallback. Arguments and response bodies are never logged. Without a backend (local development) the old rule applies: a gateway tool whose manifest sets `requiresApproval` requires approval with `ENGINE_APPROVAL_TTL_MS`.
 
 **Backend outages.** Under `ENGINE_POLICY=backend` a backend restart or blip must not fail a long run. Both `/internal/models/policy` and `/internal/models/usage` retry network errors, timeouts, `408`, `429` and `5xx` with exponential backoff (250 ms doubling, capped at 5 s, jitter 50-100%) for up to `ENGINE_POLICY_RETRY_MS` in total. `Retry-After` on `429`/`503` replaces the computed delay (a value longer than the remaining budget ends the retrying). A policy retry reuses the request id and body, and a run abort stops it at once. Each retry logs `policy_retry` / `usage_retry`. A definitive answer is never retried: a `200 { ok: false }` denial, `401`, `403`, `422` and other `4xx`, or a malformed `200`. When the budget is spent the policy request fails the run with `run_error { kind: "network", code: "policy_unavailable", retryable: true }` (a denial stays `kind: "denied"`, `retryable: false`). A spent usage report logs `usage_failed`. The budget is checked between attempts, so one in-flight attempt may run up to `ENGINE_POLICY_TIMEOUT_MS` past it.
 
@@ -175,7 +196,8 @@ request:
 
 - `GET /internal/tools/manifest` → `{ tools: [{ name, description, parameters
   (JSON Schema), sideEffect: "none" | "write", idempotent?, timeoutMs,
-  requiresApproval? }] }`. Reads and idempotent writes are replay-safe.
+  requiresApproval?, untrustedOutput? }] }`. Reads and idempotent writes are replay-safe.
+  `untrustedOutput` (boolean, default `false`; any other type is rejected) marks a tool whose result taints the conversation.
 - `POST /internal/tools/{name}/invoke` with `{ args, runId, toolCallId,
   tenantId, projectId }` and `Idempotency-Key: runId:toolCallId`. A key with
   a stored outcome returns it without re-running. A started effect runs to

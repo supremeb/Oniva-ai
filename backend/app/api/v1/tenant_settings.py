@@ -6,7 +6,7 @@ Two tiers of access:
 """
 
 import logging
-from typing import Dict
+from typing import Dict, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,7 +20,10 @@ from app.auth.dependencies import (
 )
 from app.auth.providers.base import AuthUser
 from app.core.database import get_db, get_db_no_tenant
+from app.models.compliance_audit_log import AuditAction
 from app.models.tenant import Tenant
+from app.services.audit_chain import AuditChain
+from app.services.tool_policy import TenantPolicy
 from app.services.feature_flags import (
     FLAG_METADATA,
     get_feature,
@@ -130,6 +133,91 @@ async def toggle_my_tenant_feature(
 
     logger.info(f"Tenant {tenant.slug} feature '{flag_name}' set to {body.enabled} by {user.email}")
     return FeatureMapResponse(features=get_tenant_features(tenant))
+
+
+# ========================================
+# Approval policy (Approvals & Policy plan, U3)
+# ========================================
+
+class ApprovalSettings(BaseModel):
+    ttl_hours: int = Field(..., ge=0, le=24 * 365)  # 0 = never expires
+    require_separate_approver: bool
+    rule_of_two: bool
+
+
+class ApprovalSettingsUpdate(BaseModel):
+    ttl_hours: Optional[int] = Field(None, ge=0, le=24 * 365)
+    require_separate_approver: Optional[bool] = None
+    rule_of_two: Optional[bool] = None
+
+
+def _approval_settings(tenant: Tenant) -> ApprovalSettings:
+    p = TenantPolicy.from_settings(tenant.settings)
+    return ApprovalSettings(ttl_hours=p.ttl_hours, require_separate_approver=p.require_separate_approver,
+                            rule_of_two=p.rule_of_two)
+
+
+def get_audit_chain(db: AsyncSession) -> AuditChain:
+    """Seam for tests: the real chain needs Postgres."""
+    return AuditChain(db)
+
+
+@router.get("/tenant/approvals", response_model=ApprovalSettings, summary="Approval policy for the current tenant")
+async def get_approval_settings(
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    tenant = await _get_tenant(db, UUID(user.tenant_id))
+    if not tenant:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
+    return _approval_settings(tenant)
+
+
+@router.put("/tenant/approvals", response_model=ApprovalSettings, summary="Update the approval policy")
+async def update_approval_settings(
+    body: ApprovalSettingsUpdate,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admins change TTL and separate-approver; only an owner changes the Rule of Two (audited)."""
+    if user.role not in ("owner", "admin"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires owner or admin role")
+    if body.rule_of_two is not None and user.role != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Changing the Rule of Two requires the owner role")
+
+    tenant = await _get_tenant(db, UUID(user.tenant_id))
+    if not tenant:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
+
+    before = _approval_settings(tenant)
+    settings = dict(tenant.settings or {})
+    approvals = dict(settings.get("approvals") or {})
+    for key, value in body.model_dump(exclude_none=True).items():
+        approvals[key] = value
+    settings["approvals"] = approvals
+    tenant.settings = settings
+    await db.flush()
+
+    after = _approval_settings(tenant)
+    if after.rule_of_two != before.rule_of_two:
+        await get_audit_chain(db).append(
+            tenant_id=tenant.id, agent_id="approvals", action=AuditAction.RULE_OF_TWO_CHANGED,
+            decision="enabled" if after.rule_of_two else "disabled",
+            rationale=f"Rule of Two {'enabled' if after.rule_of_two else 'disabled'} by {user.email}",
+            user_id=UUID(user.id), actor_email=user.email, actor_name=getattr(user, "name", None),
+            extra_metadata={"actor_id": user.id, "actor_role": user.role,
+                            "previous": before.rule_of_two, "current": after.rule_of_two})
+    for key in ("ttl_hours", "require_separate_approver"):
+        previous, current = getattr(before, key), getattr(after, key)
+        if previous != current:
+            await get_audit_chain(db).append(
+                tenant_id=tenant.id, agent_id="approvals", action=AuditAction.APPROVAL_SETTINGS_CHANGED,
+                decision="changed", rationale=f"Approval setting {key} changed by {user.email}",
+                user_id=UUID(user.id), actor_email=user.email, actor_name=getattr(user, "name", None),
+                extra_metadata={"actor_id": user.id, "actor_role": user.role, "setting": key,
+                                "previous": previous, "current": current})
+    logger.info(f"Tenant {tenant.slug} approval settings updated by {user.email}")
+    return after
 
 
 # ========================================

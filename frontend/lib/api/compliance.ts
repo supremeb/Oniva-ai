@@ -18,32 +18,6 @@ export interface ComplianceAuditLog {
   signature?: string;
 }
 
-export interface ReviewTicket {
-  id: string;
-  tenant_id: string;
-  workflow_id?: string;
-  session_id?: string;
-  agent_id: string;
-  requested_by?: string;
-  title: string;
-  description: string;
-  risk_level: string;
-  priority: string;
-  review_type: string;
-  review_data: Record<string, any>;
-  status: string;
-  assigned_to?: string;
-  assigned_at?: string;
-  reviewed_by?: string;
-  reviewed_at?: string;
-  decision?: string;
-  review_notes?: string;
-  due_at?: string;
-  sla_breached: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface WorkflowReplay {
   workflow_id: string;
   states: Array<{
@@ -96,12 +70,7 @@ export interface ComplianceStats {
     last_verified: string;
     issues_found: number;
   };
-  risk_distribution: {
-    low: number;
-    medium: number;
-    high: number;
-    critical: number;
-  };
+  risk_distribution?: Record<string, number>;
   recent_activity: {
     last_24h: number;
     last_7d: number;
@@ -195,63 +164,5 @@ export async function verifyWorkflowChain(
   return apiFetch<ChainVerificationResult>(
     `/api/v1/audit/replay/${workflowId}/verify-chain`,
     { method: 'POST' }
-  );
-}
-
-export async function getReviewTickets(filters?: {
-  status?: ReviewTicket['status'];
-  priority?: ReviewTicket['priority'];
-  assigned_to?: string;
-  limit?: number;
-  offset?: number;
-}): Promise<ReviewTicket[]> {
-  const queryParams = new URLSearchParams();
-  if (filters?.status) queryParams.append('status', filters.status);
-  if (filters?.priority) queryParams.append('priority', filters.priority);
-  if (filters?.assigned_to) queryParams.append('assigned_to', filters.assigned_to);
-  if (filters?.limit !== undefined) queryParams.append('limit', String(filters.limit));
-  if (filters?.offset !== undefined) queryParams.append('offset', String(filters.offset));
-
-  const url = `/api/v1/audit/reviews${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
-  return apiFetch<ReviewTicket[]>(url);
-}
-
-export async function getReviewTicket(id: string): Promise<ReviewTicket> {
-  return apiFetch<ReviewTicket>(`/api/v1/audit/reviews/${id}`);
-}
-
-export async function assignReviewer(
-  ticketId: string,
-  reviewerId: string
-): Promise<ReviewTicket> {
-  return apiFetch<ReviewTicket>(
-    `/api/v1/audit/reviews/${ticketId}/assign?assignee_id=${encodeURIComponent(reviewerId)}`,
-    { method: 'POST' }
-  );
-}
-
-export async function approveReview(
-  ticketId: string,
-  reason: string
-): Promise<ReviewTicket> {
-  return apiFetch<ReviewTicket>(
-    `/api/v1/audit/reviews/${ticketId}/decision`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ decision: 'approved', notes: reason }),
-    }
-  );
-}
-
-export async function rejectReview(
-  ticketId: string,
-  reason: string
-): Promise<ReviewTicket> {
-  return apiFetch<ReviewTicket>(
-    `/api/v1/audit/reviews/${ticketId}/decision`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ decision: 'rejected', notes: reason }),
-    }
   );
 }

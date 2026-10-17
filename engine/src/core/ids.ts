@@ -15,6 +15,7 @@ export const ID_PREFIXES = Object.freeze({
   task: "task_",
   submission: "subm_",
   approval: "appr_",
+  question: "ques_",
 } as const);
 
 export type IdKind = keyof typeof ID_PREFIXES;

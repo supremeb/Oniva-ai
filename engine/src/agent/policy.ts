@@ -13,8 +13,9 @@
 import type { Context } from "../core/context.js";
 import type { JsonObject } from "../core/json.js";
 import type { ModelResolution } from "../models/types.js";
-import type { ReplayPolicy, ToolConversation } from "../tools/registry.js";
+import type { ReplayPolicy, ToolConversation, ToolSource } from "../tools/registry.js";
 import type { AgentConfig } from "./prompt.js";
+import type { TaintState } from "./taint.js";
 
 /**
  * Why a model request is being made: `generation` answers the conversation,
@@ -43,6 +44,14 @@ export interface ToolAuthorizationRequest {
   runId: string;
   toolCallId: string;
   toolName: string;
+  /** The tool task handling the call; the id an approval decision names. */
+  toolTaskId: string;
+  /** Where the tool comes from, so policy can treat gateway tools differently. */
+  toolSource: ToolSource;
+  /** The tool is flagged `internal` (ask_user, subagent spawn): side-effect free, never a taint source. */
+  toolInternal?: boolean;
+  /** The conversation's taint state, so policy can react to untrusted input. */
+  taint: TaintState;
   /** The final arguments, after every `beforeTool` hook. */
   arguments: JsonObject;
   replay: ReplayPolicy;

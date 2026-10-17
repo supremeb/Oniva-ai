@@ -19,6 +19,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { ApprovalRejected } from "../agent/approvals.js";
 import type { Harness } from "../agent/harness.js";
+import { QuestionRejected } from "../agent/questions.js";
 import {
   ConversationBusy,
   LeaseLost,
@@ -147,7 +148,21 @@ function mapError(err: unknown): HttpError | null {
   if (err instanceof UnknownConversation) return new HttpError(404, "not_found", "conversation");
   if (err instanceof ConversationBusy) return new HttpError(409, "conversation_busy");
   if (err instanceof ApprovalRejected) {
-    return new HttpError(err.reason === "invalid" ? 400 : 409, "approval_rejected", err.reason);
+    return new HttpError(
+      err.reason === "invalid" ? 400 : 409,
+      "approval_rejected",
+      err.reason,
+      err.item === null ? {} : { approval: err.item as unknown as JsonObject },
+    );
+  }
+  if (err instanceof QuestionRejected) {
+    const status = { not_owned: 404, expired: 410, invalid: 400 }[err.reason as string] ?? 409;
+    return new HttpError(
+      status,
+      "question_rejected",
+      err.reason,
+      err.item === null ? {} : { question: err.item as unknown as JsonObject },
+    );
   }
   if (err instanceof NotOwner) {
     return new HttpError(409, "not_owner", undefined, { ownerId: err.ownerId ?? null });

@@ -81,6 +81,8 @@ export type ToolResultStatus =
   | "denied"
   /** The approval the call required expired before a decision. */
   | "approval_expired"
+  /** The question the call asked a human expired before an answer. */
+  | "question_expired"
   /** The call ran past its time limit. */
   | "timeout"
   /** The process running the call lost the session lease before it reported. */

@@ -1,200 +1,136 @@
 """
-Unit tests for execute_python skill (E2B sandbox version).
+Unit tests for the execute_python skill (E2B sandbox version).
 
-Tests cover:
-- E2B path: ReviewTicketCreate construction matches actual interface
-- E2B path: successful review ticket creation
-- E2B path: missing session_id returns error
-- E2B path: ReviewQueueService failure handled gracefully
-- Refusal when ENABLE_SANDBOX=False
-- Refusal when E2B_API_KEY is empty
-- Empty code rejection
+U6: the skill no longer creates review tickets. Through the tool gateway (the engine already waited
+for approval and `execute_tool` bound the call) it runs the code in the sandbox; anywhere else it
+refuses and creates nothing.
 """
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.agents.skills.context import SkillContext
-from app.skills.execute_python.tool import execute_python
+from app.skills.execute_python import tool as ep
+from app.skills.execute_python.tool import NEEDS_APPROVAL_REFUSAL, execute_python
+
+
+class FakeSandbox:
+    def __init__(self, success=True):
+        self.success = success
+        self.runs = []
+        self.uploads = []
+        self.torn_down = []
+
+    async def get_or_create(self, session_id, worker_id=None, **kw):
+        return self
+
+    async def upload_files(self, files):
+        self.uploads.append(files)
+
+    async def execute_code(self, code, timeout=60):
+        self.runs.append((code, timeout))
+        return SimpleNamespace(success=self.success, stdout="out", stderr="" if self.success else "boom",
+                               error=None if self.success else "boom", output_files=["output.png"],
+                               duration_seconds=0.5)
+
+    async def teardown(self, session_id, worker_id=None):
+        self.torn_down.append((session_id, worker_id))
 
 
 @pytest.fixture
-def skill_ctx():
-    """Create a SkillContext with all required fields for E2B path."""
-    return SkillContext(
-        user_id="user-123",
-        tenant_id="tenant-456",
-        session_id="session-789",
-        metadata={"agent_id": "analysis-agent"},
-        db=MagicMock(),
-    )
+def gateway_ctx():
+    return SkillContext.for_gateway(tenant_id="tenant-456", user_id="user-123", project_id="p",
+                                    conversation_id="c", run_id="run-1", tool_call_id="call-1")
 
 
 @pytest.fixture
-def skill_ctx_no_session():
-    """SkillContext without session_id."""
-    return SkillContext(
-        user_id="user-123",
-        tenant_id="tenant-456",
-    )
+def plain_ctx():
+    return SkillContext(user_id="user-123", tenant_id="tenant-456", session_id="session-789",
+                        metadata={"agent_id": "analysis-agent"}, db=MagicMock())
 
 
 @pytest.fixture
-def mock_e2b_settings():
-    """Mock settings with E2B sandbox enabled."""
+def e2b_on():
     with patch("app.skills.execute_python.tool.get_settings") as mock:
-        settings = MagicMock()
-        settings.ENABLE_SANDBOX = True
-        settings.E2B_API_KEY = "test-e2b-key"
-        mock.return_value = settings
-        yield settings
+        mock.return_value = MagicMock(ENABLE_SANDBOX=True, E2B_API_KEY="test-e2b-key")
+        yield
 
 
 @pytest.fixture
-def mock_disabled_settings():
-    """Mock settings with sandbox disabled (refusal)."""
-    with patch("app.skills.execute_python.tool.get_settings") as mock:
-        settings = MagicMock()
-        settings.ENABLE_SANDBOX = False
-        settings.E2B_API_KEY = ""
-        mock.return_value = settings
-        yield settings
+def sandbox(monkeypatch):
+    box = FakeSandbox()
+    monkeypatch.setattr(ep, "_executor", lambda: box)
+    return box
+
+
+class TestGatewayRun:
+    @pytest.mark.asyncio
+    async def test_runs_code_in_sandbox_and_returns_output(self, gateway_ctx, e2b_on, sandbox):
+        result = await execute_python(gateway_ctx, "print('hi')")
+        assert result["success"] is True
+        assert result["stdout"] == "out"
+        assert result["output_files"] == ["output.png"]
+        assert sandbox.runs == [("print('hi')", 60)]
+        assert sandbox.torn_down == [("run-1", "exec-call-1")]
+        assert "ticket_id" not in result and result.get("status") != "pending_review"
+
+    @pytest.mark.asyncio
+    async def test_timeout_is_clamped(self, gateway_ctx, e2b_on, sandbox):
+        await execute_python(gateway_ctx, "x", timeout=600)
+        assert sandbox.runs[0][1] == 60
+
+    @pytest.mark.asyncio
+    async def test_failed_code_reports_failure(self, gateway_ctx, e2b_on, monkeypatch):
+        box = FakeSandbox(success=False)
+        monkeypatch.setattr(ep, "_executor", lambda: box)
+        result = await execute_python(gateway_ctx, "1/0")
+        assert result["success"] is False and result["stderr"] == "boom"
+        assert box.torn_down  # torn down even when the code failed
+
+    @pytest.mark.asyncio
+    async def test_sandbox_unavailable_is_an_error_not_a_crash(self, gateway_ctx, e2b_on, monkeypatch):
+        class Broken:
+            async def get_or_create(self, *a, **k):
+                raise RuntimeError("SANDBOX_PROXY_URL is not set")
+
+        monkeypatch.setattr(ep, "_executor", lambda: Broken())
+        result = await execute_python(gateway_ctx, "print(1)")
+        assert result.is_error and "SANDBOX_PROXY_URL" in result.content
+
+
+class TestOutsideGateway:
+    @pytest.mark.asyncio
+    async def test_refuses_and_creates_nothing(self, plain_ctx, e2b_on, sandbox):
+        result = await execute_python(plain_ctx, "print('hello')")
+        assert result == {"success": False, "error": NEEDS_APPROVAL_REFUSAL}
+        assert sandbox.runs == []
 
 
 class TestEmptyCode:
-    """Tests for empty code rejection."""
-
     @pytest.mark.asyncio
-    async def test_empty_string(self, skill_ctx, mock_e2b_settings):
-        result = await execute_python(skill_ctx, "")
+    async def test_empty_code_rejected(self, gateway_ctx):
+        result = await execute_python(gateway_ctx, "   ")
         assert not result["success"]
-        assert "No code" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_whitespace_only(self, skill_ctx, mock_e2b_settings):
-        result = await execute_python(skill_ctx, "   \n  ")
-        assert not result["success"]
-        assert "No code" in result["error"]
-
-
-class TestE2BPath:
-    """Tests for E2B sandbox execution path."""
-
-    @pytest.mark.asyncio
-    async def test_creates_review_ticket(self, skill_ctx, mock_e2b_settings):
-        """Review ticket is created with correct fields matching ReviewTicketCreate interface."""
-        mock_ticket = MagicMock()
-        mock_ticket.id = "ticket-abc"
-
-        mock_service = AsyncMock()
-        mock_service.create_ticket.return_value = mock_ticket
-
-        with patch("app.services.review_queue.ReviewQueueService", return_value=mock_service) as MockQueue:
-            with patch("app.services.review_queue.ReviewTicketCreate") as MockCreate:
-                MockCreate.return_value = MagicMock()
-
-                result = await execute_python(skill_ctx, "print('hello')")
-
-                # Verify ReviewTicketCreate was called with correct fields
-                MockCreate.assert_called_once()
-                call_kwargs = MockCreate.call_args[1]
-                assert call_kwargs["risk_level"] == "high"
-                assert call_kwargs["review_type"] == "code_execution"
-                assert call_kwargs["session_id"] == "session-789"
-                assert call_kwargs["agent_id"] == "analysis-agent"
-                assert call_kwargs["review_data"]["code"] == "print('hello')"
-                assert call_kwargs["review_data"]["input_files"] == []
-
-                # Verify create_ticket was called
-                mock_service.create_ticket.assert_called_once_with(
-                    tenant_id="tenant-456",
-                    data=MockCreate.return_value,
-                    requested_by="user-123",
-                )
-
-        assert result["success"]
-        assert result["status"] == "pending_review"
-        assert result["ticket_id"] == "ticket-abc"
-
-    @pytest.mark.asyncio
-    async def test_includes_input_files(self, skill_ctx, mock_e2b_settings):
-        """Input files are passed through to review_data."""
-        mock_ticket = MagicMock()
-        mock_ticket.id = "ticket-xyz"
-
-        mock_service = AsyncMock()
-        mock_service.create_ticket.return_value = mock_ticket
-
-        with patch("app.services.review_queue.ReviewQueueService", return_value=mock_service):
-            with patch("app.services.review_queue.ReviewTicketCreate") as MockCreate:
-                MockCreate.return_value = MagicMock()
-
-                await execute_python(
-                    skill_ctx,
-                    "import pandas",
-                    input_files=["data.csv", "config.json"],
-                )
-
-                call_kwargs = MockCreate.call_args[1]
-                assert call_kwargs["review_data"]["input_files"] == ["data.csv", "config.json"]
-
-    @pytest.mark.asyncio
-    async def test_no_session_returns_error(self, skill_ctx_no_session, mock_e2b_settings):
-        """Missing session_id produces a clear error."""
-        result = await execute_python(skill_ctx_no_session, "print('hello')")
-        assert not result["success"]
-        assert "session" in result["error"].lower()
-
-    @pytest.mark.asyncio
-    async def test_review_queue_failure(self, skill_ctx, mock_e2b_settings):
-        """Exception during ticket creation is caught and returned as error."""
-        with patch(
-            "app.services.review_queue.ReviewQueueService",
-            side_effect=Exception("DB connection failed"),
-        ):
-            result = await execute_python(skill_ctx, "print('hello')")
-
-        assert not result["success"]
-        assert "review" in result["error"].lower()
-
-    @pytest.mark.asyncio
-    async def test_title_truncates_long_code(self, skill_ctx, mock_e2b_settings):
-        """Title truncates code longer than 80 chars."""
-        long_code = "x = " + "a" * 200
-
-        mock_ticket = MagicMock()
-        mock_ticket.id = "ticket-trunc"
-
-        mock_service = AsyncMock()
-        mock_service.create_ticket.return_value = mock_ticket
-
-        with patch("app.services.review_queue.ReviewQueueService", return_value=mock_service):
-            with patch("app.services.review_queue.ReviewTicketCreate") as MockCreate:
-                MockCreate.return_value = MagicMock()
-
-                await execute_python(skill_ctx, long_code)
-
-                call_kwargs = MockCreate.call_args[1]
-                assert len(call_kwargs["title"]) < len(long_code) + 50
 
 
 class TestSandboxDisabledRefusal:
     """With the sandbox off the skill refuses; there is no in-process fallback."""
 
     @pytest.mark.asyncio
-    async def test_refuses_when_sandbox_disabled(self, skill_ctx, mock_disabled_settings):
-        result = await execute_python(skill_ctx, "print(42)")
-        assert not result["success"]
-        assert "sandbox" in result["error"].lower()
+    async def test_refuses_when_sandbox_disabled(self, gateway_ctx, sandbox):
+        with patch("app.skills.execute_python.tool.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(ENABLE_SANDBOX=False, E2B_API_KEY="")
+            result = await execute_python(gateway_ctx, "print(42)")
+        assert result.is_error
+        assert "sandbox" in result.content.lower()
+        assert sandbox.runs == []
 
     @pytest.mark.asyncio
-    async def test_refuses_when_no_api_key(self, skill_ctx):
+    async def test_refuses_when_no_api_key(self, gateway_ctx, sandbox):
         with patch("app.skills.execute_python.tool.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.ENABLE_SANDBOX = True
-            settings.E2B_API_KEY = ""
-            mock_settings.return_value = settings
-
-            result = await execute_python(skill_ctx, "print('ok')")
-            assert not result["success"]
-            assert "sandbox" in result["error"].lower()
+            mock_settings.return_value = MagicMock(ENABLE_SANDBOX=True, E2B_API_KEY="")
+            result = await execute_python(gateway_ctx, "print('ok')")
+        assert result.is_error
+        assert "sandbox" in result.content.lower()
+        assert sandbox.runs == []

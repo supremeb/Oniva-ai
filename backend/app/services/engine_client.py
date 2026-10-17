@@ -130,6 +130,31 @@ class EngineClient:
             f"/v1/conversations/{conversation_id}/approvals/{tool_task_id}/decision",
             tenant_id=tenant_id, project_id=project_id, json=payload, principal=principal)
 
+    async def approvals(self, session_id, tenant_id, project_id, conversation_id) -> list[dict]:
+        """The root conversation's approval items (engine ``GET .../approvals``, children included)."""
+        body = await self._json(
+            "GET", session_id, f"/v1/conversations/{conversation_id}/approvals",
+            tenant_id=tenant_id, project_id=project_id)
+        items = body.get("approvals")
+        return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+    async def answer(self, session_id, tenant_id, project_id, conversation_id, tool_task_id,
+                     answer: dict, principal: str) -> dict:
+        """Answer an ``ask_user`` question (engine ``POST .../questions/:id/answer``)."""
+        return await self._json(
+            "POST", session_id,
+            f"/v1/conversations/{conversation_id}/questions/{tool_task_id}/answer",
+            tenant_id=tenant_id, project_id=project_id, json={"answer": answer}, principal=principal)
+
+    async def questions(self, session_id, tenant_id, project_id, conversation_id) -> list[dict]:
+        """The conversation's question items (engine ``GET .../questions``)."""
+        body = await self._json(
+            "GET", session_id, f"/v1/conversations/{conversation_id}/questions",
+            tenant_id=tenant_id, project_id=project_id)
+        doc = body.get("questions")
+        items = doc.get("items") if isinstance(doc, dict) else doc
+        return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
     async def watch_stream(self, session_id, tenant_id, project_id, conversation_id,
                            last_event_id: Optional[str] = None,
                            cursor: Optional[str] = None) -> httpx.Response:

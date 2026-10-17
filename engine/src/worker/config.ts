@@ -16,7 +16,8 @@
  * | `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` under `ENGINE_POLICY=backend` | backend origin serving `/internal/models/{policy,usage}`; authenticated with the gateway token |
  * | `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
  * | `ENGINE_POLICY_RETRY_MS` | `60000` | total time a transient policy or usage failure is retried; `0` for none |
- * | `ENGINE_APPROVAL_TTL_MS` | `86400000` | approval expiry; `0` for none |
+ * | `ENGINE_APPROVAL_TTL_MS` | `86400000` | local-mode approval expiry only (no `ENGINE_POLICY=backend`); `0` for none. Under `backend` the expiry comes from the backend's `approvalTtlMs` and this value is ignored |
+ * | `ENGINE_QUESTION_TTL_MS` | `604800000` | how long an `ask_user` question waits for an answer; `0` for none |
  * | `ENGINE_MODEL` / `ENGINE_SUMMARY_MODEL` | Anthropic defaults | model ids |
  * | `ENGINE_MODEL_FIRST_BYTE_TIMEOUT_MS` | `120000` | abort an OpenRouter attempt with no data event by then (retried as `network`) |
  * | `ENGINE_MODEL_IDLE_TIMEOUT_MS` | `120000` | abort an OpenRouter attempt silent for this long between data events (retryable, partial kept) |
@@ -37,6 +38,7 @@
  */
 import pg from "pg";
 import { DEFAULT_PROGRESS_INTERVAL_MS } from "../agent/progress.js";
+import { DEFAULT_QUESTION_TTL_MS } from "../agent/questions.js";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_ANTHROPIC_SUMMARY_MODEL } from "../models/anthropic.js";
 import { DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_IDLE_TIMEOUT_MS } from "../models/retry.js";
 import { DEFAULT_POLICY_TIMEOUT_MS, DEFAULT_RETRY_MS } from "./backend-policy.js";
@@ -63,6 +65,8 @@ export interface WorkerConfig {
   policyRetryMs: number;
   /** Null: approvals never expire. */
   approvalTtlMs: number | null;
+  /** How long an `ask_user` question waits for an answer; null: never expires. */
+  questionTtlMs: number | null;
   model: string;
   summaryModel: string;
   /** Abort an OpenRouter attempt that has produced no data event within this long. */
@@ -161,6 +165,7 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
   const leaseTtlMs = integer(env, "ENGINE_LEASE_TTL_MS", DEFAULT_LEASE_TTL_MS, 1);
   const retry = text(env, "ENGINE_LEASE_RETRY_MS");
   const approval = integer(env, "ENGINE_APPROVAL_TTL_MS", DEFAULT_APPROVAL_TTL_MS, 0);
+  const question = integer(env, "ENGINE_QUESTION_TTL_MS", DEFAULT_QUESTION_TTL_MS, 0);
   const dbDefaults = defaultDbTimeouts(leaseTtlMs);
   const belowTtl = (name: string, fallback: number): number => {
     const v = integer(env, name, fallback, 1);
@@ -219,6 +224,7 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
     policyTimeoutMs: integer(env, "ENGINE_POLICY_TIMEOUT_MS", DEFAULT_POLICY_TIMEOUT_MS, 1),
     policyRetryMs: integer(env, "ENGINE_POLICY_RETRY_MS", DEFAULT_RETRY_MS, 0),
     approvalTtlMs: approval === 0 ? null : approval,
+    questionTtlMs: question === 0 ? null : question,
     model: text(env, "ENGINE_MODEL") ?? DEFAULT_ANTHROPIC_MODEL,
     summaryModel: text(env, "ENGINE_SUMMARY_MODEL") ?? DEFAULT_ANTHROPIC_SUMMARY_MODEL,
     modelFirstByteTimeoutMs: integer(

@@ -131,6 +131,18 @@ export class EngineConversationClient {
     );
   }
 
+  /** Answer an `ask_user` question. `text` is free text; `optionIds` the chosen options. */
+  answer(
+    conversationId: string,
+    toolTaskId: string,
+    answer: { optionIds?: string[]; text?: string }
+  ): Promise<unknown> {
+    return apiFetch<unknown>(
+      `${BASE}/${encodeURIComponent(conversationId)}/questions/${encodeURIComponent(toolTaskId)}/answer`,
+      { method: 'POST', body: JSON.stringify({ answer }) }
+    );
+  }
+
   /**
    * Open the watch stream. `cursor` resumes via Last-Event-ID; null asks for a
    * snapshot. One 401 triggers a token refresh and a single retry.

@@ -14,6 +14,7 @@ from app.api.v1 import memory, preferences, entities
 from app.api.v1 import agent_learnings  # Agent Learning System
 from app.api.v1 import tenant_settings  # Per-tenant feature flags
 from app.api.v1 import fleet  # Fleet dashboard (background agents)
+from app.api.v1 import inbox  # Needs-attention inbox
 from app.api.v1 import saml  # SAML authentication
 from app.api.v1 import users, pending_users, onboarding  # User management & RBAC
 from app.api.v1 import schedules  # Workflow scheduling (Workflow Nodes Expansion Phase 2)
@@ -36,7 +37,7 @@ from app.api.v1 import mentions  # Mention resolution for Hybrid Document Editor
 from app.api.v1 import knowledge_management  # Knowledge Management (Frontier Phase C)
 from app.api.v1 import admin  # Org Admin Dashboard (Frontier Phase D)
 from app.api.v1 import feedback  # Inline Feedback (Frontier Phase E)
-from app.api.v1 import sandbox, workspace  # Deep Work Phase 2: Sandbox + Workspace
+from app.api.v1 import workspace  # Deep Work Phase 2: Sandbox + Workspace
 from app.api.v1 import wide_research  # Deep Work Phase 3: Wide Research Orchestrator
 from app.api.v1 import deep_work  # Deep Work: Autonomous Execution
 from app.api.v1 import projects  # Project Workspaces
@@ -363,11 +364,13 @@ app.include_router(fleet.router, prefix="/api/v1", tags=["fleet"])
 app.include_router(feedback.router, prefix="/api/v1", tags=["feedback"])
 
 # Deep Work Phase 2: Sandbox + Workspace
-app.include_router(sandbox.router, prefix="/api/v1", tags=["sandbox"])
 app.include_router(workspace.router, prefix="/api/v1", tags=["workspace"])
 
 # Deep Work Phase 3: Wide Research Orchestrator
 app.include_router(wide_research.router, prefix="/api/v1", tags=["wide-research"])
+
+# Needs-attention inbox (Approvals & Policy U7)
+app.include_router(inbox.router, prefix="/api/v1", tags=["inbox"])
 
 # Deep Work: Autonomous Execution
 app.include_router(deep_work.router, prefix="/api/v1", tags=["deep-work"])
