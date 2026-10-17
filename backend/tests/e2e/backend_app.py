@@ -9,8 +9,12 @@ test can count real side effects and hold one in flight while the worker is kill
 It also mounts the Deep Work routes (``/api/v1/deep-work``) with the tenant opted in to engine Deep
 Work, and swaps the network pieces for the fakes in ``dw_fakes`` (web search, E2B, proxy tokens, Redis).
 
+It mounts the Fleet routes (``/api/v1/background-jobs``, ``/api/v1/fleet``) with the tenant opted in to engine
+Fleet, bootstraps the run-handler registry (the ``/internal/runs/finished`` push is already part of the internal
+router) and runs the run reconciler. The seeded Fleet agent delivers to ``/e2e/webhook`` on this backend.
+
 Config comes from the environment: E2E_PORT, E2E_DB, E2E_INFO (json written when ready),
-E2E_EFFECTS, E2E_GATE, E2E_TENANT_ID, E2E_USER_ID, E2E_PROJECT_ID, E2E_DW_DIR, ENGINE_*.
+E2E_EFFECTS, E2E_GATE, E2E_TENANT_ID, E2E_USER_ID, E2E_PROJECT_ID, E2E_AGENT_ID, E2E_DW_DIR, ENGINE_*.
 ``E2E_SEED=0`` starts a second backend process on the same database without seeding it.
 """
 import asyncio
@@ -42,8 +46,12 @@ from app.core.encryption import get_encryption_service  # noqa: E402
 from app.internal_api import tools  # noqa: E402
 from app.internal_api.invocations import get_session_factory  # noqa: E402
 from app.internal_api.router import mount_internal_router  # noqa: E402
+from app.services import run_handlers  # noqa: E402
+from app.services.engine_client import get_engine_client  # noqa: E402
+from app.services.run_reconciler import RunReconciler  # noqa: E402
 from app.internal_api.tool_specs import TOOL_SPECS, ToolSpec  # noqa: E402
 from app.models import Base  # noqa: E402
+from app.models.custom_agent import CustomAgent  # noqa: E402
 from app.models.llm_provider import LLMProvider  # noqa: E402
 from app.models.project import Project  # noqa: E402
 from app.models.tenant import Tenant  # noqa: E402
@@ -55,7 +63,8 @@ PORT, DB, INFO = int(E["E2E_PORT"]), E["E2E_DB"], E["E2E_INFO"]
 EFFECTS, GATE = Path(E["E2E_EFFECTS"]), Path(E["E2E_GATE"])
 SEED = E.get("E2E_SEED", "1") == "1"
 DW = dw_fakes.Files(Path(E["E2E_DW_DIR"]))
-TENANT, USER, PROJECT = (uuid.UUID(E[k]) for k in ("E2E_TENANT_ID", "E2E_USER_ID", "E2E_PROJECT_ID"))
+TENANT, USER, PROJECT, AGENT = (uuid.UUID(E[k]) for k in (
+    "E2E_TENANT_ID", "E2E_USER_ID", "E2E_PROJECT_ID", "E2E_AGENT_ID"))
 
 engine = create_async_engine(f"sqlite+aiosqlite:///{DB}", connect_args={"timeout": 30})
 maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -94,19 +103,49 @@ _registry["e2e_hold"] = Skill(name="e2e_hold", description="e2e held write", cat
 TOOL_SPECS["e2e_hold"] = ToolSpec(side_effect="write", idempotent=False, timeout_ms=60_000)
 
 
+# The Fleet browser scenarios' held write (its own name: the Deep Work script has rules on e2e_hold results).
+_registry["e2e_fleet_hold"] = Skill(name="e2e_fleet_hold", description="e2e fleet held write", category="test",
+                                    handler=e2e_write)
+TOOL_SPECS["e2e_fleet_hold"] = ToolSpec(side_effect="write", idempotent=False, timeout_ms=60_000)
+
+
 @asynccontextmanager
 async def lifespan(_app):
     async with engine.begin() as c:
         await c.run_sync(Base.metadata.create_all)
     await tools.ensure_skills_loaded()
     dw_fakes.install(DW)  # after the real skills are loaded: web_search, E2B, tokens, Redis
+    run_handlers.bootstrap()  # the fleet start / settle hooks, as main.py does
+    _serialize_fleet_settle()
+    reconciler = RunReconciler(factory, settings, engine_factory=get_engine_client)
+    reconciler.start()
+    try:
+        await _seed()
+        yield
+    finally:
+        await reconciler.stop()
+
+
+def _serialize_fleet_settle() -> None:
+    """One settle at a time: SQLite ignores ``SELECT ... FOR UPDATE``, which Postgres uses to make the second of
+    two near-simultaneous pushes (a steered run settles two submissions) see the row already terminal."""
+    inner, lock = run_handlers.hook("fleet", "on_finished"), asyncio.Lock()
+
+    async def serialized(ref, snapshot):
+        async with lock:
+            await inner(ref, snapshot)
+
+    run_handlers._registry["fleet"]["on_finished"] = serialized
+
+
+async def _seed():
     if not SEED:
         Path(INFO).write_text(json.dumps({"ready": True}))
-        yield
         return
     async with maker() as db:
         db.add(Tenant(id=TENANT, name="e2e", slug=f"e2e-{TENANT.hex[:6]}", is_active=True,
-                      settings={"features": {"ENABLE_ENGINE_CHAT": True, "ENABLE_ENGINE_DEEP_WORK": True}}))
+                      settings={"features": {"ENABLE_ENGINE_CHAT": True, "ENABLE_ENGINE_DEEP_WORK": True,
+                                             "ENABLE_ENGINE_FLEET": True}}))
         await db.commit()
         db.add(User(id=USER, tenant_id=TENANT, email="e2e@x.io", name="e2e"))
         await db.commit()
@@ -116,15 +155,23 @@ async def lifespan(_app):
             api_key_encrypted=get_encryption_service().encrypt("sk-ant-FAKE-e2e-key-0123456789"),
             default_model="anthropic/claude-sonnet-4-5", priority=0, is_enabled=True))
         await db.commit()
+        # Core insert: explicit NULLs for the ARRAY columns SQLite cannot bind (tools are set in the seam below).
+        await db.execute(CustomAgent.__table__.insert().values(
+            id=AGENT, user_id=USER, tenant_id=TENANT, name="fleet-e2e", system_prompt="Check the vendors.",
+            model="anthropic/claude-sonnet-4-5", skills=None, connector_ids=None, knowledge_base_ids=None,
+            workflow_ids=None, compliance_tags=None,
+            resource_constraints={"max_tool_calls": 12, "timeout_seconds": 600},
+            background_config={"webhook_url": f"http://127.0.0.1:{PORT}/e2e/webhook"}))
+        await db.commit()
     Path(INFO).write_text(json.dumps({"ready": True}))
-    yield
 
 
 settings = Settings(
     _env_file=None, SECRET_KEY=E["E2E_SECRET_KEY"], ENGINE_GATEWAY_TOKEN=E["ENGINE_GATEWAY_TOKEN"],
     ENGINE_SERVICE_TOKEN=E["ENGINE_SERVICE_TOKEN"], ENGINE_URL=E["ENGINE_URL"],
     ENGINE_SESSION_ID=E["ENGINE_SESSION_ID"], ENABLE_ENGINE_API=True,
-    ENABLE_ENGINE_CHAT=True, ENABLE_ENGINE_DEEP_WORK=True)
+    ENABLE_ENGINE_CHAT=True, ENABLE_ENGINE_DEEP_WORK=True, ENABLE_ENGINE_FLEET=True,
+    RUN_RECONCILE_INTERVAL_S=3, RUN_RECONCILE_AFTER_S=10)
 app = FastAPI(lifespan=lifespan)
 mount_internal_router(app, settings)
 assert mount_engine_conversations(app, settings)
@@ -198,11 +245,42 @@ def _compose_with_e2e_hold(inputs, now=None):
 _dw_agent.compose_execute_config = _compose_with_e2e_hold
 
 
+# --- Fleet: the real routes, hooks and engine start on this process's SQLite database ---------------
+import app.services.fleet_engine as _fleet_engine  # noqa: E402
+from app.api.v1 import background_jobs as _background_jobs  # noqa: E402
+from app.api.v1 import fleet as _fleet  # noqa: E402
+
+# Each Fleet session is short and sequential; no process-wide lock (a nested session would deadlock on it).
+_fleet_engine.get_db_for_tenant = lambda _tenant_id: factory()
+
+_build_fleet_config = _fleet_engine.build_fleet_agent_config
+
+
+def _fleet_config_with_e2e_tools(*args, **kwargs):
+    """Test seam (like the chat one): CustomAgent.skills is an ARRAY SQLite cannot hold, so the tools are set here."""
+    built = _build_fleet_config(*args, **kwargs)
+    built.config["tools"] = ["web_search", "e2e_hold", "e2e_fleet_hold"]
+    return built
+
+
+_fleet_engine.build_fleet_agent_config = _fleet_config_with_e2e_tools
+app.include_router(_background_jobs.router, prefix="/api/v1/background-jobs", tags=["background-jobs"])
+app.include_router(_fleet.router, prefix="/api/v1", tags=["fleet"])
+
+
+@app.post("/e2e/webhook")
+async def _webhook(payload: dict):
+    """The agent's delivery target: one line per delivered result."""
+    DW.append(DW.webhook_log, json.dumps(payload))
+    return {"ok": True}
+
+
 @app.get("/api/v1/auth/me")
 async def _me():
     return {"id": str(USER), "email": "e2e@x.io", "name": "e2e", "role": "analyst", "tenant_id": str(TENANT),
             "tenant_slug": "e2e", "groups": [], "is_platform_operator": False,
-            "features": {"ENABLE_ENGINE_CHAT": True, "ENABLE_ENGINE_DEEP_WORK": True}}
+            "features": {"ENABLE_ENGINE_CHAT": True, "ENABLE_ENGINE_DEEP_WORK": True,
+                         "ENABLE_ENGINE_FLEET": True, "ENABLE_FLEET_DASHBOARD": True}}
 
 
 @app.post("/api/v1/auth/refresh")

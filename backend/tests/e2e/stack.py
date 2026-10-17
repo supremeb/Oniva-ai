@@ -7,7 +7,9 @@ Starts Postgres (engine), the backend (backend_app.py) and one worker, writes th
 ``POST /kill-worker`` (SIGKILL), ``POST /start-worker``, ``POST /open-gate`` / ``/close-gate`` (the blocked
 write), ``GET /effects`` (lines the write has appended), ``GET /state``. For Deep Work: ``POST /dw-open-gate`` /
 ``/dw-close-gate`` (a ``web_search`` of a query containing GATED), ``GET /dw-state`` (fake search log, the
-tools currently in flight on the backend, sandbox events). Exits on SIGTERM/SIGINT or stdin EOF.
+tools currently in flight on the backend, sandbox events). For Fleet: ``POST /fleet-seed?script=<recovery|steer|cancel>``
+creates a Fleet job through the backend's ``/api/v1/background-jobs`` and answers ``{jobId, conversationId}``; the run
+holds one write on the same gate as ``/open-gate`` / ``/close-gate`` (``script=probe`` only answers 200). Exits on SIGTERM/SIGINT or stdin EOF.
 """
 import json
 import os
@@ -15,10 +17,15 @@ import signal
 import sqlite3
 import sys
 import threading
+import urllib.parse
+import uuid
+
+import httpx
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from tests.e2e.harness import stack
+from tests.e2e import fleet_script
+from tests.e2e.harness import AUTH, stack
 
 
 def main() -> int:
@@ -68,6 +75,26 @@ def main() -> int:
                             con.close()
                         return self._send(200, {"searches": w.dw.lines(w.dw.search_log),
                                                 "sandbox": w.dw.lines(w.dw.sandbox_log), "inFlight": in_flight})
+                    elif path == "/fleet-seed":
+                        name = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("script", [""])[0]
+                        if name == "probe":
+                            return self._send(200, {"probe": True})
+                        if name not in fleet_script.UI_SCENARIOS:
+                            return self._send(400, {"error": f"unknown script {name!r}"})
+                        r = httpx.post(f"{w.backend_url}/api/v1/background-jobs/", headers=AUTH, timeout=60, json={
+                            "job_type": "background_agent", "agent_id": str(w.agent),
+                            "input_data": {"task": fleet_script.ui_task(name)}})
+                        if r.status_code != 201:
+                            return self._send(500, {"error": r.text})
+                        job_id = r.json()["id"]
+                        con = sqlite3.connect(w.db, timeout=10)
+                        try:
+                            row = con.execute("SELECT conversation_id FROM background_jobs WHERE id = ?",
+                                              (job_id.replace("-", ""),)).fetchone()
+                        finally:
+                            con.close()
+                        return self._send(200, {"jobId": job_id,
+                                                "conversationId": str(uuid.UUID(row[0])) if row and row[0] else None})
                     elif path == "/effects":
                         lines = w.effects.read_text().splitlines() if w.effects.exists() else []
                         return self._send(200, {"effects": lines})

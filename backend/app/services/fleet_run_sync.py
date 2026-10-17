@@ -83,7 +83,31 @@ def final_answer(view: Optional[dict], job_id: Any) -> Optional[str]:
     answer = engine_view.answer_for(view or {}, fe.request_id(job_id))
     if answer and answer[0] == "done":
         return answer[1]
-    return None
+    return _answer_after_steer(view, fe.request_id(job_id))
+
+
+def _answer_after_steer(view: Optional[dict], request_id: str) -> Optional[str]:
+    """The last tool-free assistant message after the task, steers included.
+
+    ``answer_for`` stops at the next user entry, which for a Fleet run is a steer (an intervene), and the
+    answer to a steered run is written after it.
+    """
+    entries = (view or {}).get("entries") or []
+    start = None
+    for i, e in enumerate(entries):
+        p = e.get("payload") or {}
+        if e.get("kind") == "user" and request_id in (p.get("requestId"), p.get("submissionId")):
+            start = i
+    if start is None:
+        return None
+    final = None
+    for e in entries[start + 1:]:
+        p = e.get("payload") or {}
+        msg = p.get("message") or {}
+        if e.get("kind") == "assistant" and msg and not p.get("partial") \
+                and not any(b.get("type") == "tool_call" for b in _blocks(msg)):
+            final = _text(msg)
+    return final
 
 
 def _tokens(usage: Optional[dict]) -> dict:
