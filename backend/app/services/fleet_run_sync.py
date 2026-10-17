@@ -113,20 +113,20 @@ def build_trace(view: Optional[dict], usage: Optional[dict]) -> list:
             continue
         text = _text(msg)
         if text:
-            steps.append({"step_id": f"s{len(steps) + 1}", "node_id": f"text-{len(steps) + 1}",
+            steps.append({"step": len(steps) + 1, "step_id": f"s{len(steps) + 1}", "node_id": f"text-{len(steps) + 1}",
                           "node_type": "text_response", "status": "completed", "type": "text_response",
                           "content_preview": text[:_PREVIEW], "reasoning": None})
         for b in _blocks(msg):
             if b.get("type") != "tool_call":
                 continue
             name = b.get("name") or b.get("toolName") or "tool"
-            steps.append({"step_id": f"s{len(steps) + 1}", "node_id": str(b.get("id") or f"tool-{len(steps) + 1}"),
+            steps.append({"step": len(steps) + 1, "step_id": f"s{len(steps) + 1}", "node_id": str(b.get("id") or f"tool-{len(steps) + 1}"),
                           "node_type": "tool_call", "node_name": name, "status": "completed", "type": "tool_call",
                           "tool_name": name, "tool_args": b.get("input") or b.get("arguments") or {},
                           "tool_result_preview": results.get(b.get("id"), "")})
     tokens = _tokens(usage)
     if tokens["total"]:
-        steps.append({"step_id": f"s{len(steps) + 1}", "node_id": "usage", "node_type": "usage",
+        steps.append({"step": len(steps) + 1, "step_id": f"s{len(steps) + 1}", "node_id": "usage", "node_type": "usage",
                       "status": "completed", "type": "usage", "token_usage": tokens})
     return steps
 
