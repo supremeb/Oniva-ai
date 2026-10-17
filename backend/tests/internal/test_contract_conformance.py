@@ -596,7 +596,6 @@ async def test_wf_finish_invalid_422(wf):
     assert r.status_code == 422 and r.json() == {"error": "invalid_request"}
 
 
-@pytest.mark.xfail(strict=True, reason="U16")
 @wf_clause("finalize-ok")
 async def test_wf_finalize_ok(wf):
     body = {**tw.scope(wf), **json.loads((FIXTURES / "finalize.valid.json").read_text())}
