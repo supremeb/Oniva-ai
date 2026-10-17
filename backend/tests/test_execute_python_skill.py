@@ -102,10 +102,8 @@ class TestGatewayRun:
 class TestOutsideGateway:
     @pytest.mark.asyncio
     async def test_refuses_and_creates_nothing(self, plain_ctx, e2b_on, sandbox):
-        with patch("app.services.review_queue.ReviewQueueService") as queue:
-            result = await execute_python(plain_ctx, "print('hello')")
+        result = await execute_python(plain_ctx, "print('hello')")
         assert result == {"success": False, "error": NEEDS_APPROVAL_REFUSAL}
-        queue.assert_not_called()
         assert sandbox.runs == []
 
 

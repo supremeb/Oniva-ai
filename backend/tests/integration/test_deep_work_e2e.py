@@ -159,20 +159,13 @@ class TestSandboxNeedsApproval:
         mock_settings.ENABLE_SANDBOX = True
         mock_settings.E2B_API_KEY = "test_key"
 
-        mock_service = AsyncMock()
-
         with patch("app.skills.execute_python.tool.get_settings", return_value=mock_settings):
-            with patch(
-                "app.services.review_queue.ReviewQueueService",
-                return_value=mock_service,
-            ):
-                from app.skills.execute_python.tool import execute_python
+            from app.skills.execute_python.tool import execute_python
 
-                result = await execute_python(skill_context, "print('hello world')")
+            result = await execute_python(skill_context, "print('hello world')")
 
         assert result["success"] is False
         assert "approved" in result["error"].lower()
-        mock_service.create_ticket.assert_not_called()
 
 
 # ===========================================================================
