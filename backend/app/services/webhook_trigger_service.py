@@ -6,155 +6,202 @@ Enterprise feature: Process inbound webhooks from external systems
 import logging
 import hmac
 import hashlib
+import math
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
 import jmespath  # For payload mapping
 from simpleeval import EvalWithCompoundTypes  # Safe AST-based expression evaluation
-from sqlalchemy import select, and_
+from sqlalchemy import func, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.webhook_trigger import WebhookTrigger, WebhookDelivery
-from app.models.workflow import WorkflowExecution
+from app.models.webhook_trigger import WebhookTrigger, WebhookDelivery, generate_webhook_token
+from app.models.workflow import Workflow, WorkflowExecution, WorkflowVersion
+from app.services import webhook_secrets
 
 logger = logging.getLogger(__name__)
 
+WINDOW_SECONDS = 86400  # body-hash fallback bucket (KTD8)
+DEFAULT_TIMESTAMP_TOLERANCE_S = 300
+DEFAULT_IDEMPOTENCY_HEADER = "Idempotency-Key"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class TriggerUnowned(ValueError):
+    """A webhook trigger has no ``created_by``; the engine needs a user binding."""
+
 
 class WebhookTriggerService:
-    """Processes inbound webhooks and triggers workflows."""
+    """Processes inbound webhooks and starts workflow or Fleet runs."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    # ---- create ---------------------------------------------------------------------------------
+
+    async def create_trigger(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        created_by: Optional[uuid.UUID],
+        workflow_id: Optional[uuid.UUID] = None,
+        agent_id: Optional[uuid.UUID] = None,
+        auth_method: str = "hmac",
+        auth_config: Optional[dict] = None,
+        allowed_ip_addresses: Optional[list] = None,
+        payload_mapping: Optional[dict] = None,
+        filter_expression: Optional[str] = None,
+        rate_limit_per_hour: int = 100,
+    ) -> tuple[WebhookTrigger, Optional[str]]:
+        """Create a trigger. Returns ``(trigger, secret)``; the secret is shown once and stored encrypted only."""
+        if created_by is None:
+            raise TriggerUnowned("a webhook trigger needs an owner (created_by)")
+        if (workflow_id is None) == (agent_id is None):
+            raise ValueError("exactly one of workflow_id and agent_id is required")
+        config = dict(auth_config or {})
+        revealed: Optional[str] = None
+        if auth_method == "hmac" and not (config.get("secret") or config.get("secret_enc")):
+            config["secret"] = revealed = webhook_secrets.generate_secret()
+        elif auth_method == "hmac" and config.get("secret"):
+            revealed = str(config["secret"])
+        trigger = WebhookTrigger(
+            tenant_id=tenant_id, workflow_id=workflow_id, agent_id=agent_id,
+            url_token=generate_webhook_token(), auth_method=auth_method,
+            auth_config=webhook_secrets.seal_auth_config(config),
+            allowed_ip_addresses=allowed_ip_addresses, payload_mapping=payload_mapping or {},
+            filter_expression=filter_expression, rate_limit_per_hour=rate_limit_per_hour,
+            created_by=created_by,
+        )
+        self.db.add(trigger)
+        await self.db.flush()
+        return trigger, revealed
+
+    # ---- receive --------------------------------------------------------------------------------
+
     async def process_webhook(
         self,
         url_token: str,
-        request_body: dict,
+        raw_body: bytes,
+        request_body: Any,
         request_headers: dict,
-        source_ip: str
+        source_ip: str,
+        *,
+        now: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        """Process inbound webhook and trigger workflow if valid.
+        """Verify and dispatch one delivery. ``raw_body`` is what the HMAC covers; ``request_body`` its parsed JSON.
 
-        Returns dict with status, message, execution_id (if triggered).
+        Returns ``{status, message, ...}``; ``status`` is the HTTP status the route answers with.
         """
-        # Lookup webhook trigger
-        query = select(WebhookTrigger).where(
-            WebhookTrigger.url_token == url_token,
-            WebhookTrigger.is_enabled == True
-        )
-        result = await self.db.execute(query)
+        now = now or _utcnow()
+        result = await self.db.execute(select(WebhookTrigger).where(
+            WebhookTrigger.url_token == url_token, WebhookTrigger.is_enabled == True  # noqa: E712
+        ))
         trigger = result.scalar_one_or_none()
-
         if not trigger:
-            await self._log_delivery(
-                None, source_ip, request_body, 404, "Webhook not found"
-            )
+            await self._log_delivery(None, source_ip, request_body, 404, "Webhook not found")
             return {"status": 404, "message": "Webhook not found"}
 
-        # Check rate limit
-        if not await self._check_rate_limit(trigger):
-            await self._log_delivery(
-                trigger.id, source_ip, request_body, 429,
-                "Rate limit exceeded", tenant_id=trigger.tenant_id
-            )
+        if not await self._check_rate_limit(trigger, now):
+            await self._log_delivery(trigger.id, source_ip, request_body, 429,
+                                     "Rate limit exceeded", tenant_id=trigger.tenant_id)
+            await self.db.commit()
             return {"status": 429, "message": "Rate limit exceeded"}
 
-        # Verify authentication
-        auth_valid = await self._verify_auth(
-            trigger, request_body, request_headers, source_ip
-        )
-        if not auth_valid:
-            await self._log_delivery(
-                trigger.id, source_ip, request_body, 401,
-                "Authentication failed", tenant_id=trigger.tenant_id
-            )
+        if not await self._verify_auth(trigger, raw_body, request_headers, source_ip, now=now):
+            await self._log_delivery(trigger.id, source_ip, request_body, 401,
+                                     "Authentication failed", tenant_id=trigger.tenant_id)
+            await self.db.commit()
             return {"status": 401, "message": "Authentication failed"}
 
-        # Check idempotency
-        idempotency_key = self._extract_idempotency_key(request_body, trigger)
-        if idempotency_key and await self._is_duplicate(trigger.id, idempotency_key):
-            logger.info(f"Duplicate webhook: {idempotency_key}")
-            return {"status": 200, "message": "Already processed (idempotent)"}
+        if trigger.created_by is None:
+            await self._log_delivery(trigger.id, source_ip, request_body, 422,
+                                     "trigger_unowned", tenant_id=trigger.tenant_id)
+            await self.db.commit()
+            return {"status": 422, "message": "trigger_unowned", "error": "trigger_unowned"}
 
-        # Apply filter
-        if trigger.filter_expression:
-            if not self._evaluate_filter(trigger.filter_expression, request_body):
-                await self._log_delivery(
-                    trigger.id, source_ip, request_body, 200,
-                    "Filter no match", tenant_id=trigger.tenant_id,
-                    filter_matched=False
-                )
-                return {"status": 200, "message": "Filter did not match"}
+        key, permanent = self._idempotency_key(trigger, raw_body, request_body, request_headers)
+        run_id = self._run_id(trigger, key, permanent, now)
+        request_id = f"wh:{trigger.id}:{key}"
+        audit_key = request_id if len(request_id) <= 255 else f"wh:{trigger.id}:{hashlib.sha256(key.encode()).hexdigest()}"
 
-        # Map payload to workflow inputs
-        workflow_inputs = self._map_payload(trigger.payload_mapping, request_body)
+        if trigger.filter_expression and not self._evaluate_filter(trigger.filter_expression, request_body):
+            await self._log_delivery(trigger.id, source_ip, request_body, 200, "Filter no match",
+                                     tenant_id=trigger.tenant_id, filter_matched=False)
+            await self.db.commit()
+            return {"status": 200, "message": "Filter did not match"}
 
-        # Atomic: create execution + log delivery in one transaction
-        execution = await self._trigger_workflow(
-            workflow_id=trigger.workflow_id,
-            inputs=workflow_inputs,
-            tenant_id=trigger.tenant_id
-        )
+        inputs = self._map_payload(trigger.payload_mapping or {}, request_body)
+        if trigger.workflow_id is not None:
+            outcome = await self._dispatch_workflow(trigger, run_id, request_id, inputs)
+        elif trigger.agent_id is not None:
+            outcome = await self._dispatch_agent(trigger, run_id, inputs)
+        else:
+            outcome = {"status": 422, "message": "trigger has no target", "error": "trigger_no_target"}
 
+        status = outcome["status"]
+        execution_id = uuid.UUID(outcome["execution_id"]) if outcome.get("execution_id") else None
         await self._log_delivery(
-            trigger.id, source_ip, request_body, 202,
-            f"Triggered execution {execution.id}",
-            tenant_id=trigger.tenant_id,
-            execution_id=execution.id,
-            filter_matched=True,
-            idempotency_key=idempotency_key
-        )
-
+            trigger.id, source_ip, request_body, status, outcome.get("message"),
+            tenant_id=trigger.tenant_id, execution_id=execution_id,
+            filter_matched=True, idempotency_key=audit_key)
         await self.db.commit()
+        return outcome
 
-        return {
-            "status": 202,
-            "message": "Workflow triggered",
-            "execution_id": str(execution.id)
-        }
+    # ---- auth -----------------------------------------------------------------------------------
 
     async def _verify_auth(
         self,
         trigger: WebhookTrigger,
-        body: dict,
+        raw_body: bytes,
         headers: dict,
-        source_ip: str
+        source_ip: str,
+        *,
+        now: Optional[datetime] = None,
     ) -> bool:
-        """Verify webhook authentication."""
+        """Verify webhook authentication over the raw request bytes."""
         auth_method = trigger.auth_method
+        config = trigger.auth_config or {}
 
         if auth_method == 'none':
             return True
 
         if auth_method == 'hmac':
-            # HMAC signature verification
-            secret = trigger.auth_config.get('secret', '')
-            signature_header = trigger.auth_config.get('signature_header', 'X-Signature')
+            secret = webhook_secrets.resolve_secret(config, "secret", "secret_enc")
+            if not secret:
+                return False
+            signature_header = config.get('signature_header', 'X-Signature')
             provided_sig = headers.get(signature_header.lower(), '')
-
-            import json
-            payload = json.dumps(body, separators=(',', ':'))
-            expected_sig = hmac.new(
-                secret.encode('utf-8'),
-                payload.encode('utf-8'),
-                hashlib.sha256
-            ).hexdigest()
-
-            expected_with_prefix = f"sha256={expected_sig}"
-
-            return hmac.compare_digest(provided_sig, expected_with_prefix) or \
-                   hmac.compare_digest(provided_sig, expected_sig)
+            if not provided_sig:
+                return False
+            signed = raw_body
+            ts_header = config.get('timestamp_header')
+            if ts_header:
+                raw_ts = headers.get(ts_header.lower(), '')
+                try:
+                    ts = float(raw_ts)
+                except (TypeError, ValueError):
+                    return False
+                tolerance = config.get('timestamp_tolerance_s', DEFAULT_TIMESTAMP_TOLERANCE_S)
+                if abs((now or _utcnow()).timestamp() - ts) > tolerance:
+                    return False
+                signed = f"{raw_ts}.".encode() + raw_body
+            expected_sig = hmac.new(secret.encode('utf-8'), signed, hashlib.sha256).hexdigest()
+            return hmac.compare_digest(provided_sig, f"sha256={expected_sig}") or \
+                hmac.compare_digest(provided_sig, expected_sig)
 
         elif auth_method == 'api_key':
-            # API key in header
-            api_key_header = trigger.auth_config.get('header', 'X-API-Key')
-            expected_key = trigger.auth_config.get('key', '')
+            api_key_header = config.get('header', 'X-API-Key')
+            expected_key = webhook_secrets.resolve_secret(config, "key", "key_enc") or ''
             provided_key = headers.get(api_key_header.lower(), '')
+            if not expected_key:
+                return False
             return hmac.compare_digest(provided_key, expected_key)
 
         elif auth_method == 'ip_whitelist':
-            # IP whitelist check
             if not trigger.allowed_ip_addresses:
                 return False
 
@@ -195,66 +242,136 @@ class WebhookTriggerService:
             logger.error(f"Filter evaluation failed: {e}")
             return False
 
-    def _extract_idempotency_key(self, payload: dict, trigger: WebhookTrigger) -> Optional[str]:
-        """Extract idempotency key from payload.
-
-        Common patterns:
-        - Stripe: event.id
-        - GitHub: delivery ID in header
-        - Custom: user-specified JMESPath
-        """
-        idempotency_expr = trigger.auth_config.get('idempotency_key_path')
-        if idempotency_expr:
+    def _idempotency_key(self, trigger: WebhookTrigger, raw_body: bytes, payload: Any,
+                         headers: dict) -> tuple[str, bool]:
+        """``(key, permanent)``: configured header, then the JMESPath into the body (both permanent), then the
+        SHA-256 of the raw body (bucketed by 24 h, KTD8)."""
+        config = trigger.auth_config or {}
+        header = (config.get('idempotency_header') or DEFAULT_IDEMPOTENCY_HEADER).lower()
+        value = headers.get(header)
+        if value:
+            return str(value), True
+        expr = config.get('idempotency_key_path')
+        if expr:
             try:
-                return jmespath.search(idempotency_expr, payload)
+                found = jmespath.search(expr, payload)
             except Exception:
-                pass
+                found = None
+            if found not in (None, ""):
+                return str(found), True
+        return hashlib.sha256(raw_body).hexdigest(), False
 
-        # Fallback: hash of entire payload
-        import json
-        payload_str = json.dumps(payload, sort_keys=True)
-        return hashlib.sha256(payload_str.encode()).hexdigest()[:32]
+    @staticmethod
+    def _run_id(trigger: WebhookTrigger, key: str, permanent: bool, now: datetime) -> uuid.UUID:
+        if permanent:
+            return uuid.uuid5(trigger.id, key)
+        bucket = math.floor(now.timestamp() / WINDOW_SECONDS)
+        return uuid.uuid5(trigger.id, f"{key}:{bucket}")
 
-    async def _is_duplicate(self, trigger_id: uuid.UUID, idempotency_key: str) -> bool:
-        """Check if webhook was already processed (24-hour window)."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-
-        query = select(WebhookDelivery).where(
-            and_(
-                WebhookDelivery.webhook_trigger_id == trigger_id,
-                WebhookDelivery.idempotency_key == idempotency_key,
-                WebhookDelivery.received_at > cutoff
-            )
-        )
-        result = await self.db.execute(query)
-        return result.scalar_one_or_none() is not None
-
-    async def _check_rate_limit(self, trigger: WebhookTrigger) -> bool:
-        """Check if webhook is within rate limit."""
-        # Count deliveries in last hour
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
-
-        query = select(WebhookDelivery).where(
-            and_(
+    async def _check_rate_limit(self, trigger: WebhookTrigger, now: Optional[datetime] = None) -> bool:
+        """Within the hourly limit? Counts rows in SQL rather than loading them."""
+        cutoff = (now or _utcnow()) - timedelta(hours=1)
+        count = (await self.db.execute(
+            select(func.count()).select_from(WebhookDelivery).where(and_(
                 WebhookDelivery.webhook_trigger_id == trigger.id,
-                WebhookDelivery.received_at > cutoff
-            )
-        )
-        result = await self.db.execute(query)
-        count = len(result.scalars().all())
-
+                WebhookDelivery.received_at > cutoff,
+            ))
+        )).scalar() or 0
         return count < trigger.rate_limit_per_hour
+
+    # ---- dispatch -------------------------------------------------------------------------------
+
+    async def _dispatch_workflow(self, trigger: WebhookTrigger, run_id: uuid.UUID, request_id: str,
+                                 inputs: dict) -> Dict[str, Any]:
+        from fastapi import HTTPException
+        from app.services import workflow_engine_runs as engine_runs
+
+        existing = await self.db.get(WorkflowExecution, run_id)
+        if existing is not None:
+            return {"status": 202, "message": "Already processed (idempotent)", "execution_id": str(run_id),
+                    "deduplicated": True}
+
+        workflow = (await self.db.execute(select(Workflow).where(
+            Workflow.id == trigger.workflow_id, Workflow.tenant_id == trigger.tenant_id
+        ))).scalar_one_or_none()
+        if workflow is None:
+            return {"status": 404, "message": "Workflow not found", "error": "workflow_not_found"}
+        version = (await self.db.execute(select(WorkflowVersion).where(
+            WorkflowVersion.workflow_id == workflow.id, WorkflowVersion.is_active == True  # noqa: E712
+        ))).scalars().first()
+        spec = (version.spec if version is not None else workflow.spec) or {}
+
+        if await engine_runs.tenant_uses_engine_workflows(self.db, trigger.tenant_id):
+            try:
+                execution, _task = await engine_runs.start_workflow_run(
+                    self.db, workflow, spec, inputs, user_id=trigger.created_by, tenant_id=trigger.tenant_id,
+                    trigger="webhook", request_key=request_id,
+                    version_id=version.id if version is not None else None, execution_id=run_id)
+            except HTTPException as exc:
+                return {"status": exc.status_code, "message": "Workflow could not start",
+                        "error": exc.detail if isinstance(exc.detail, str) else (exc.detail or {}).get("error"),
+                        "execution_id": str(run_id) if exc.status_code == 502 else None}
+            return {"status": 202, "message": "Workflow triggered", "execution_id": str(execution.id),
+                    "deduplicated": False}
+
+        execution = await self._trigger_workflow(
+            workflow_id=trigger.workflow_id, inputs=inputs, tenant_id=trigger.tenant_id,
+            user_id=trigger.created_by, execution_id=run_id)
+        return {"status": 202, "message": "Workflow triggered", "execution_id": str(execution.id),
+                "deduplicated": False}
+
+    async def _dispatch_agent(self, trigger: WebhookTrigger, run_id: uuid.UUID, inputs: dict) -> Dict[str, Any]:
+        from app.models.background_job import BackgroundJob
+        from app.models.custom_agent import CustomAgent
+        from app.services import fleet_engine
+        from app.services.background_dispatch import ConcurrentLimitExceeded, check_and_create_background_job
+
+        if await self.db.get(BackgroundJob, run_id) is not None:
+            return {"status": 202, "message": "Already processed (idempotent)", "job_id": str(run_id),
+                    "deduplicated": True}
+        agent = await self.db.get(CustomAgent, trigger.agent_id)
+        if agent is None or agent.tenant_id != trigger.tenant_id:
+            return {"status": 404, "message": "Agent not found", "error": "agent_not_found"}
+        max_concurrent = (agent.resource_constraints or {}).get("max_concurrent", 1)
+        use_engine = await fleet_engine.tenant_uses_engine_fleet(self.db, trigger.tenant_id)
+        job_input = dict(inputs)
+        if use_engine:
+            job_input = fleet_engine.mark_engine(job_input)
+        try:
+            job = await check_and_create_background_job(
+                db=self.db, tenant_id=trigger.tenant_id, agent_id=trigger.agent_id, user_id=trigger.created_by,
+                max_concurrent=max_concurrent, trigger_type="webhook",
+                trigger_info={"type": "webhook", "trigger_id": str(trigger.id)},
+                input_data=job_input, job_id=run_id)
+        except ConcurrentLimitExceeded:
+            # Documented: the sender gets 202 with queued=false and nothing was started.
+            return {"status": 202, "message": "Agent at its concurrent run limit; delivery not started",
+                    "queued": False, "deduplicated": False}
+        await self.db.commit()
+        if use_engine:
+            await fleet_engine.start_after_commit(trigger.tenant_id, job.id)
+        else:
+            import asyncio
+            from app.services.background_agent_executor import run_background_agent
+            asyncio.create_task(run_background_agent(
+                job_id=job.id, agent_id=trigger.agent_id, tenant_id=trigger.tenant_id,
+                user_id=trigger.created_by, input_data=inputs))
+        return {"status": 202, "message": "Agent triggered", "job_id": str(job.id), "queued": True,
+                "deduplicated": False}
 
     async def _trigger_workflow(
         self,
         workflow_id: uuid.UUID,
         inputs: dict,
-        tenant_id: uuid.UUID
+        tenant_id: uuid.UUID,
+        user_id: Optional[uuid.UUID] = None,
+        execution_id: Optional[uuid.UUID] = None,
     ) -> WorkflowExecution:
-        """Trigger workflow execution asynchronously."""
+        """Legacy path (engine flag off): a ``pending`` execution row for the old orchestrator."""
         execution = WorkflowExecution(
+            id=execution_id or uuid.uuid4(),
             workflow_id=workflow_id,
-            user_id=None,  # System-triggered, no user
+            user_id=user_id,
             tenant_id=tenant_id,
             status='pending',
             trigger='webhook',
@@ -263,7 +380,7 @@ class WebhookTriggerService:
         )
 
         self.db.add(execution)
-        await self.db.flush()  # Get execution.id without committing
+        await self.db.flush()
         logger.info(f"Triggered workflow {workflow_id} via webhook, execution_id={execution.id}")
 
         return execution

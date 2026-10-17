@@ -30,6 +30,7 @@ async def check_and_create_background_job(
     trigger_type: str,
     trigger_info: dict,
     input_data: dict | None = None,
+    job_id: UUID | None = None,
 ) -> BackgroundJob:
     """Atomically check concurrent limit and create a BackgroundJob.
 
@@ -45,6 +46,7 @@ async def check_and_create_background_job(
         trigger_type: "scheduled" | "webhook" | "manual"
         trigger_info: {"type": "scheduler", "schedule_id": "..."} or similar
         input_data: Optional input parameters for the agent run
+        job_id: Optional deterministic job id (webhooks derive it from trigger and idempotency key)
 
     Returns:
         Created BackgroundJob
@@ -80,6 +82,7 @@ async def check_and_create_background_job(
 
     # Create the job in the same transaction (lock prevents races)
     job = BackgroundJob(
+        **({"id": job_id} if job_id is not None else {}),
         tenant_id=tenant_id,
         user_id=user_id,
         agent_id=agent_id,
