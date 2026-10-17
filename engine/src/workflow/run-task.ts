@@ -31,8 +31,19 @@
  * `failed` with everything settled. A failure a node's own `onError:
  * "continue"` caught does not fail the run.
  *
- * Fan-out is not served here yet (U34): a node that parks on `fanout` signals
- * the run (`parked`), and the run aborts it and records `fanout_unsupported`.
+ * Fan-out (U34). A node the graph marks `mayFanOut` gets a `workflow_gate` task
+ * next to it, and the join waits on the gate instead of the node: a wait wakes
+ * only when everything it awaits is terminal, so the gate is what ends when the
+ * node parks. On wake the run reads each such node. A terminal one settles as
+ * usual. A parked one (phase `awaitFanout`, its digest in its checkpoint) is
+ * served here: the run spawns `min(parallel, count, maxParallel)`
+ * `workflow_fanout_lane` children (`fanout-lane-task.ts`), moves to `fan`, and
+ * waits on the lanes. When they are all terminal it sums their counts and
+ * delivers the counts-only `fanout-result` signal to the node task, which then
+ * calls `finish` itself under its own key and ends. The run never calls
+ * `finish`. Results never pass through checkpoints or signals (KTD17). A digest
+ * the run cannot serve (count over the limit, a target the graph lacks) is
+ * answered with a failure summary and no lanes.
  *
  * Abort. The run owns its node children, so the runtime aborts them first
  * (bottom-up); `onAbort` then calls `finalize` once with `cancelled`. The key
@@ -45,6 +56,7 @@
  */
 import type { Context } from "../core/context.js";
 import type { JsonObject, JsonValue } from "../core/json.js";
+import type { TaskRecord } from "../storage/types.js";
 import {
   type AbortHandler,
   type Committed,
@@ -58,7 +70,17 @@ import {
   type Transition,
   waiting,
 } from "../tasks/define.js";
-import { CheckpointError, decodeCheckpoint } from "./contract.js";
+import { CheckpointError, decodeCheckpoint, MAX_FANOUT_ITEMS } from "./contract.js";
+import {
+  countAllowed,
+  type FanoutLaneCheckpoint,
+  type FanoutLaneValue,
+  laneCount,
+  laneTaskId,
+  WORKFLOW_FANOUT_LANE_KIND,
+  type WorkflowFanoutLaneInput,
+} from "./fanout-lane-task.js";
+import { WORKFLOW_GATE_KIND, type WorkflowGateInput } from "./gate-task.js";
 import {
   type ErrorMode,
   GraphError,
@@ -66,12 +88,14 @@ import {
   type NodeRunState,
   type NodeStates,
   resolveGraph,
+  resolveTarget,
   validateGraph,
   type WorkflowGraph,
 } from "./graph.js";
 import { finalizeKey, type NodeGateway } from "./node-gateway.js";
 import {
-  FANOUT_PARKED_SIGNAL,
+  FANOUT_RESULT_SIGNAL,
+  type FanoutDigest,
   WORKFLOW_NODE_KIND,
   type WorkflowNodeCheckpoint,
   type WorkflowNodeInput,
@@ -80,6 +104,7 @@ import {
 import {
   CHECKPOINT_VERSION,
   CONTRACT_VERSION,
+  type FanoutSummary,
   type FinalizeInput,
   type NodeStatus,
   type RunStatus,
@@ -107,8 +132,10 @@ export interface WorkflowRunCheckpoint {
   nodes: NodeStates;
   /** The wave in flight: node id to its task id. */
   wave: Record<string, string>;
-  /** Nodes the run aborted because they parked on an unsupported fan-out. */
-  rejected: string[];
+  /** Gate tasks of the wave: node id to gate task id (only `mayFanOut` nodes). */
+  gates: Record<string, string>;
+  /** Fan-outs being served: node id to its lane count and item count. Counts only. */
+  fan: Record<string, { lanes: number; count: number }>;
   /** The first failure nobody caught. */
   failure?: RunFailure;
 }
@@ -147,8 +174,8 @@ type Scope = TaskScope<WorkflowRunCheckpoint | null>;
 type Next = Transition<WorkflowRunCheckpoint | null>;
 
 const PHASE_JOIN = "join";
+const PHASE_FAN = "fan";
 const PHASE_FINALIZE = "finalize";
-const FANOUT_UNSUPPORTED = "fanout_unsupported";
 const SIBLING_FAILED = "sibling_failed";
 
 /**
@@ -205,7 +232,13 @@ function initialStates(graph: WorkflowGraph): NodeStates {
 function load(task: State): WorkflowRunCheckpoint {
   const { graph } = task.input;
   if (task.checkpoint === null || task.checkpoint === undefined) {
-    return { version: CHECKPOINT_VERSION, nodes: initialStates(graph), wave: {}, rejected: [] };
+    return {
+      version: CHECKPOINT_VERSION,
+      nodes: initialStates(graph),
+      wave: {},
+      gates: {},
+      fan: {},
+    };
   }
   let cp: WorkflowRunCheckpoint;
   try {
@@ -221,7 +254,7 @@ function load(task: State): WorkflowRunCheckpoint {
             }
           }
         }
-        return { nodes, wave: {}, rejected: [] } as unknown as JsonValue;
+        return { nodes, wave: {}, gates: {}, fan: {} } as unknown as JsonValue;
       },
     });
   } catch (err) {
@@ -229,7 +262,7 @@ function load(task: State): WorkflowRunCheckpoint {
     throw err;
   }
   const nodes = { ...initialStates(graph), ...cp.nodes };
-  return { ...cp, nodes, wave: cp.wave ?? {}, rejected: cp.rejected ?? [] };
+  return { ...cp, nodes, wave: cp.wave ?? {}, gates: cp.gates ?? {}, fan: cp.fan ?? {} };
 }
 
 function summaries(states: NodeStates): Record<string, NodeStatus> {
@@ -252,9 +285,6 @@ function finalizeInput(task: State, cp: WorkflowRunCheckpoint, status: RunStatus
 
 /** Split a node task's fault message `code: text` into its parts. */
 function faultError(message: string): JsonValue {
-  if (message.includes("signal already delivered")) {
-    return { code: FANOUT_UNSUPPORTED, message: "fan-out nodes are not supported by this run" };
-  }
   const m = /^([a-z_]+): ([\s\S]*)$/.exec(message);
   return m ? { code: m[1] as string, message: m[2] as string } : { code: "node_failed", message };
 }
@@ -289,14 +319,6 @@ function collect(
       }
       continue;
     }
-    if (outcome.type === "aborted" && cp.rejected.includes(nodeId)) {
-      nodes[nodeId] = { status: "failed" };
-      failure ??= {
-        nodeId,
-        error: { code: FANOUT_UNSUPPORTED, message: "fan-out nodes are not supported by this run" },
-      };
-      continue;
-    }
     if (outcome.type === "aborted" && outcome.reason === SIBLING_FAILED) {
       nodes[nodeId] = { status: "skipped" };
       continue;
@@ -319,6 +341,8 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
 > & {
   validateInput(input: unknown): string | null;
 } {
+  const waitPolicy = (task: State) => (task.input.errorMode === "stop" ? "failFast" : "allSettled");
+
   /** Resolve skips, spawn the ready nodes as the next wave, or move on to `finalize`. */
   function advance(
     task: State,
@@ -331,17 +355,30 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
     const { states, ready } = resolveGraph(graph, nodes);
     const stopped = errorMode === "stop" && cp.failure !== undefined;
     if (stopped || ready.length === 0) {
-      return next(PHASE_FINALIZE, { ...cp, nodes: states, wave: {} });
+      return next(PHASE_FINALIZE, { ...cp, nodes: states, wave: {}, gates: {}, fan: {} });
     }
     const def = rt.runtime.registry.get(WORKFLOW_NODE_KIND) as unknown as
       | TaskDefinition<WorkflowNodeInput, WorkflowNodeCheckpoint | null>
       | undefined;
     if (!def) throw new Error(`the ${WORKFLOW_NODE_KIND} task kind is not registered`);
+    const gateDef = rt.runtime.registry.get(WORKFLOW_GATE_KIND) as unknown as
+      | TaskDefinition<WorkflowGateInput, null>
+      | undefined;
     const wave: Record<string, string> = {};
+    const gates: Record<string, string> = {};
+    const awaited: string[] = [];
     for (const nodeId of ready) {
       const node = graph.nodes.find((n) => n.id === nodeId);
       if (!node) continue;
+      // Deterministic ids: the gate's id derives from the node's, and a run retry
+      // (a new runAttempt) never collides with an earlier attempt's tasks.
+      const nodeTaskId = `${task.id}:r${runAttempt}:${nodeId}`;
+      const gateTaskId = node.mayFanOut === true ? `${nodeTaskId}:gate` : undefined;
+      if (gateTaskId !== undefined && !gateDef) {
+        throw new Error(`the ${WORKFLOW_GATE_KIND} task kind is not registered`);
+      }
       const spawned = ops.spawn(def, {
+        id: nodeTaskId,
         input: {
           version: 1,
           runId,
@@ -349,19 +386,27 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
           nodeId,
           nodeType: node.type,
           policy: node.policy,
-          gateTaskId: task.id,
+          ...(gateTaskId === undefined ? {} : { gateTaskId }),
         },
       });
       wave[nodeId] = spawned.id;
+      if (gateTaskId !== undefined && gateDef) {
+        const gate = ops.spawn(gateDef, {
+          id: gateTaskId,
+          input: { version: 1, nodeTaskId: spawned.id },
+        });
+        gates[nodeId] = gate.id;
+        awaited.push(gate.id);
+      } else {
+        awaited.push(spawned.id);
+      }
       states[nodeId] = { status: "running" };
     }
     return waiting({
-      on: Object.values(wave),
-      policy: errorMode === "stop" ? "failFast" : "allSettled",
-      // The parked signal can be delivered once; after that waiting on it would wake at once.
-      ...(FANOUT_PARKED_SIGNAL in task.signals ? {} : { signal: FANOUT_PARKED_SIGNAL }),
+      on: awaited,
+      policy: waitPolicy(task),
       phase: PHASE_JOIN,
-      checkpoint: { ...cp, nodes: states, wave },
+      checkpoint: { ...cp, nodes: states, wave, gates, fan: {} },
     });
   }
 
@@ -370,45 +415,216 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
     return rt.commit((_tx, ops) => advance(task, rt, ops, cp, cp.nodes));
   };
 
+  /** The digest a parked fan-out node left in its checkpoint. */
+  function digestOf(node: TaskRecord | null): FanoutDigest | undefined {
+    const cp = node?.checkpoint as WorkflowNodeCheckpoint | null | undefined;
+    return cp?.fanout;
+  }
+
+  const failureSummary = (count: number, code: string, message: string): FanoutSummary => ({
+    count,
+    completed: 0,
+    failed: count,
+    cancelled: 0,
+    firstError: { code, message },
+  });
+
+  /**
+   * Serve the parked fan-out nodes: spawn their lanes (or answer at once when
+   * there is nothing to run or the digest cannot be served) and wait for them.
+   */
+  function startFan(
+    task: State,
+    rt: Scope,
+    ops: TaskOps,
+    cp: WorkflowRunCheckpoint,
+    parked: string[],
+  ): Next {
+    const laneDef = rt.runtime.registry.get(WORKFLOW_FANOUT_LANE_KIND) as unknown as
+      | TaskDefinition<WorkflowFanoutLaneInput, FanoutLaneCheckpoint | null>
+      | undefined;
+    const { runId, runAttempt, graph, errorMode } = task.input;
+    const fan: Record<string, { lanes: number; count: number }> = {};
+    const laneIds: string[] = [];
+    for (const nodeId of parked) {
+      const nodeTaskId = cp.wave[nodeId] as string;
+      const digest = digestOf(rt.task(nodeTaskId));
+      if (!digest) {
+        deliver(
+          rt,
+          ops,
+          nodeTaskId,
+          failureSummary(0, "fanout_digest_missing", "the node parked without a request"),
+        );
+        continue;
+      }
+      let immediate: FanoutSummary | undefined;
+      if (!countAllowed(digest.count)) {
+        immediate = failureSummary(
+          Number.isInteger(digest.count) && digest.count > 0 ? digest.count : 0,
+          "fanout_count_invalid",
+          `a fan-out holds at most ${MAX_FANOUT_ITEMS} items`,
+        );
+      } else if (digest.count === 0) {
+        immediate = { count: 0, completed: 0, failed: 0, cancelled: 0 };
+      } else if (!resolveTarget(graph, digest.target)) {
+        immediate = failureSummary(
+          digest.count,
+          "fanout_target_unknown",
+          "the run graph does not hold the fan-out target",
+        );
+      }
+      if (immediate) {
+        deliver(rt, ops, nodeTaskId, immediate);
+        continue;
+      }
+      if (!laneDef) throw new Error(`the ${WORKFLOW_FANOUT_LANE_KIND} task kind is not registered`);
+      const lanes = laneCount(digest.count, digest.parallel);
+      for (let lane = 0; lane < lanes; lane++) {
+        const spawned = ops.spawn(laneDef, {
+          id: laneTaskId(task.id, runAttempt, nodeId, lane),
+          input: {
+            version: 1,
+            runTaskId: task.id,
+            runId,
+            runAttempt,
+            nodeId,
+            lane,
+            lanes,
+            count: digest.count,
+            failFast: digest.failFast,
+            target: digest.target,
+            errorMode,
+          },
+        });
+        laneIds.push(spawned.id);
+      }
+      fan[nodeId] = { lanes, count: digest.count };
+    }
+    if (laneIds.length === 0) {
+      return waiting({
+        on: Object.values(cp.wave),
+        policy: waitPolicy(task),
+        phase: PHASE_JOIN,
+        checkpoint: { ...cp, gates: {}, fan: {} },
+      });
+    }
+    return waiting({
+      on: laneIds,
+      phase: PHASE_FAN,
+      checkpoint: { ...cp, fan },
+    });
+  }
+
+  /** Deliver the counts-only summary to a parked node, once. */
+  function deliver(rt: Scope, ops: TaskOps, nodeTaskId: string, summary: FanoutSummary): void {
+    const node = rt.task(nodeTaskId);
+    if (!node || node.status === "terminal" || FANOUT_RESULT_SIGNAL in node.signals) return;
+    ops.signal(nodeTaskId, FANOUT_RESULT_SIGNAL, summary as unknown as JsonValue);
+  }
+
+  /** The counts of a fan-out, from its lanes' committed state. */
+  function summarize(
+    task: State,
+    rt: Scope,
+    nodeId: string,
+    f: { lanes: number; count: number },
+  ): FanoutSummary {
+    let completed = 0;
+    let failed = 0;
+    let firstError: JsonValue | undefined;
+    for (let lane = 0; lane < f.lanes; lane++) {
+      const rec = rt.task(laneTaskId(task.id, task.input.runAttempt, nodeId, lane));
+      const outcome = rec?.outcome;
+      const part =
+        outcome?.type === "done"
+          ? (outcome.value as unknown as FanoutLaneValue)
+          : (rec?.checkpoint as FanoutLaneCheckpoint | null | undefined);
+      if (!part) continue;
+      completed += part.completed ?? 0;
+      failed += part.failed ?? 0;
+      firstError ??= part.firstError;
+    }
+    return {
+      count: f.count,
+      completed,
+      failed,
+      cancelled: Math.max(0, f.count - completed - failed),
+      ...(firstError === undefined ? {} : { firstError }),
+    };
+  }
+
   const join = async (task: State, rt: Scope): Promise<Committed> => {
     const cp = load(task);
     return rt.commit((_tx, ops) => {
-      const wake = task.wake;
-      if (wake?.reason === "signal" && wake.key === FANOUT_PARKED_SIGNAL) {
-        // U34 serves fan-out; until then a parked node is a failure.
-        const digest = task.signals[FANOUT_PARKED_SIGNAL];
-        const nodeId =
-          digest !== null && typeof digest === "object" && !Array.isArray(digest)
-            ? (digest as JsonObject).nodeId
-            : undefined;
-        const childId = typeof nodeId === "string" ? cp.wave[nodeId] : undefined;
-        const rejected = [...cp.rejected];
-        if (typeof nodeId === "string" && childId !== undefined && !rejected.includes(nodeId)) {
-          ops.abort(childId, FANOUT_UNSUPPORTED);
-          rejected.push(nodeId);
+      const policy = waitPolicy(task);
+      const parked: string[] = [];
+      const live: string[] = [];
+      const liveNodes: string[] = [];
+      let faulted = false;
+      for (const [nodeId, taskId] of Object.entries(cp.wave)) {
+        const node = rt.task(taskId);
+        if (!node || node.status === "terminal") {
+          if (node?.outcome?.type === "faulted") faulted = true;
+          continue;
         }
-        return waiting({
-          on: Object.values(cp.wave),
-          policy: task.input.errorMode === "stop" ? "failFast" : "allSettled",
-          phase: PHASE_JOIN,
-          checkpoint: { ...cp, rejected },
-        });
+        liveNodes.push(taskId);
+        const gateId = cp.gates[nodeId];
+        const gate = gateId === undefined ? undefined : rt.task(gateId);
+        if (gate?.status === "terminal" && node.phase === "awaitFanout") parked.push(nodeId);
+        else live.push(gate && gate.status !== "terminal" ? gate.id : taskId);
       }
+      if (faulted && task.input.errorMode === "stop" && liveNodes.length > 0) {
+        // The node that failed ended its gate too, so failFast saw it; the nodes
+        // behind the other gates are still running and stop with the run.
+        const victims = [...liveNodes, ...Object.values(cp.gates)].filter(
+          (id) => rt.task(id)?.status !== "terminal",
+        );
+        for (const id of victims) ops.abort(id, SIBLING_FAILED);
+        return waiting({ on: victims, phase: PHASE_JOIN });
+      }
+      if (live.length > 0) return waiting({ on: live, policy, phase: PHASE_JOIN });
+      if (parked.length > 0) return startFan(task, rt, ops, cp, parked);
       const settled = collect(cp, rt);
       if (!settled) {
-        const live = Object.values(cp.wave).filter((id) => rt.task(id)?.status !== "terminal");
         return waiting({
-          on: live,
-          policy: task.input.errorMode === "stop" ? "failFast" : "allSettled",
+          on: Object.values(cp.wave).filter((id) => rt.task(id)?.status !== "terminal"),
+          policy,
           phase: PHASE_JOIN,
         });
       }
       const after: WorkflowRunCheckpoint = {
         ...cp,
         wave: {},
+        gates: {},
+        fan: {},
         ...(settled.failure ? { failure: settled.failure } : {}),
       };
       return advance(task, rt, ops, after, settled.nodes);
+    });
+  };
+
+  const fan = async (task: State, rt: Scope): Promise<Committed> => {
+    const cp = load(task);
+    return rt.commit((_tx, ops) => {
+      const laneIds: string[] = [];
+      for (const [nodeId, f] of Object.entries(cp.fan)) {
+        for (let lane = 0; lane < f.lanes; lane++) {
+          laneIds.push(laneTaskId(task.id, task.input.runAttempt, nodeId, lane));
+        }
+      }
+      const open = laneIds.filter((id) => rt.task(id)?.status !== "terminal");
+      if (open.length > 0) return waiting({ on: open, phase: PHASE_FAN });
+      for (const [nodeId, f] of Object.entries(cp.fan)) {
+        deliver(rt, ops, cp.wave[nodeId] as string, summarize(task, rt, nodeId, f));
+      }
+      // Only the fan-out nodes are still live; their `finish` now runs.
+      return waiting({
+        on: Object.values(cp.wave),
+        policy: waitPolicy(task),
+        phase: PHASE_JOIN,
+        checkpoint: { ...cp, gates: {}, fan: {} },
+      });
     });
   };
 
@@ -432,7 +648,7 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
 
   const def = defineTask<WorkflowRunInput, WorkflowRunCheckpoint | null>({
     kind: WORKFLOW_RUN_KIND,
-    phases: { start, [PHASE_JOIN]: join, [PHASE_FINALIZE]: finalize },
+    phases: { start, [PHASE_JOIN]: join, [PHASE_FAN]: fan, [PHASE_FINALIZE]: finalize },
     initialPhase: "start",
     onAbort: async (task, scope, ctx) => {
       // Children have stopped (bottom-up). Report the cancellation once.

@@ -316,19 +316,6 @@ export function defineRunTaskSuite(backend: AgentBackend): void {
       });
     });
 
-    it("a node that returns fanout fails with fanout_unsupported (until U34)", async () => {
-      be.script("b", "prepare", { body: fixture("prepare.fanout.valid") });
-      const w = await open();
-      const run = await startRun(w, graphOf(N("a"), N("b", ["a"]), N("c", ["a"])));
-      const value = runValue(await w.harness.runtime.waitForTask(run.id));
-      expect(value).toMatchObject({
-        status: "failed",
-        nodes: { a: "success", b: "failed" },
-        error: { code: "fanout_unsupported" },
-      });
-      expect(be.calls("finish")).toHaveLength(0);
-    });
-
     it("the golden previous-version run checkpoint decodes and the run completes", async () => {
       const w = await open();
       const golden = fixture("checkpoint.previous-version");
