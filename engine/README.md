@@ -220,6 +220,20 @@ Input: `{ version: 1, runId, runAttempt, nodeId, nodeType, policy: { maxRetries,
 
 Settling: `failed` retries while `policy.maxRetries` allows (a deadline wait of `backoffMs`); a fan-out node and an interrupted call never retry. Then `onError: "continue"` ends the task `done` with `{ status: "failed", continued: true }`, and `stop` faults it (so the run's `failFast` sees it). `timeoutMs` bounds each backend call of an attempt and ends it as `failed` with `error.code = "timeout"`. After a restart a `finish` is asked again only when the backend declared the call `replaySafe`; otherwise the engine reads the outcome stored under the key and, with none, settles the node `interrupted` (`failed`, `error.code = "interrupted"`). Checkpoints carry `version`; the previous version is upgraded in memory and a newer one faults the task with `unsupported_checkpoint_version`.
 
+## Workflow run task
+
+`createWorkflowRunTask({ gateway, onAbort? })` (`src/workflow/run-task.ts`) is the host task kind `workflow_run`: the DAG scheduler of one run. It spawns a `workflow_node` child per ready node and holds no node semantics. Input: `{ version: 1, runId, runAttempt, graph, variables, errorMode: "stop" | "continue" }`, where `graph` is the compiled `{ nodes: [{ id, type, deps: [{ from, handle? }], policy, handles? }] }` (`src/workflow/graph.ts`). `handles` lists what a branch node may select; an edge naming any other handle is invalid.
+
+`POST /v1/runs` rejects a cycle, a duplicate id, an unknown dependency or handle, and more than 95 nodes (`maxNodes` in `contracts/workflow-nodes/limits.json`) with 400 before anything is spawned (the definition's `validateInput`).
+
+| Phase | What happens |
+|---|---|
+| `start` | Resolve skips, spawn every ready node and park in `join`. |
+| `join` | `waiting({ on: wave, policy })`, `failFast` for `stop` and `allSettled` for `continue`. When the whole wave is terminal: update node states from each child's committed outcome, apply `selectedHandles` and skip propagation, then spawn the next wave or move to `finalize`. Dispatch is in waves: a slow branch delays the later nodes of a fast one. |
+| `finalize` | Call the backend `finalize` (key `{runId}:r{runAttempt}:finalize`) with `completed` or `failed`, the node summaries and the first uncaught error, then `done`. |
+
+A node is ready when every in-edge source has settled and at least one edge is live. An edge is dead when its source was skipped or blocked, did not select the edge's handle, or failed without its own `onError: "continue"`; a node with only dead in-edges is `skipped`. Under `stop` the first uncaught failure aborts the siblings in flight (`sibling_failed`, recorded `skipped`) and the run ends `failed` with that error; under `continue` the failure is recorded, its descendants are skipped, and the run ends `failed` once everything has settled. A node that parks on `fanout` is failed with `fanout_unsupported` until fan-out is served (U34). Aborting the conversation aborts the node children first, then `onAbort` calls `finalize` once with `cancelled`. The run's `view` reports `nodes: { nodeId: status }` in `view.tasks`. Checkpoints hold node ids, statuses and task ids only, carry `version`, and follow the same previous-version rule as the node task.
+
 ## Commands
 
 ```sh

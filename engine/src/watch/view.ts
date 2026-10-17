@@ -68,6 +68,8 @@ export interface TaskView {
   phase: string;
   label?: string;
   attempt?: number;
+  /** A compact `{ id: status }` summary of the work's parts (a workflow run's nodes). */
+  nodes?: { [id: string]: string };
   /** ISO deadline of a `waiting` task that has one. */
   waitUntil?: string;
   /** ISO time the task was created. */
@@ -119,6 +121,7 @@ function taskView(task: TaskRecord, def: TaskDefinition | undefined): TaskView |
     phase: task.phase,
     ...(info.label === undefined ? {} : { label: info.label }),
     ...(info.attempt === undefined ? {} : { attempt: info.attempt }),
+    ...(info.nodes === undefined ? {} : { nodes: info.nodes }),
     ...(task.status === "waiting" && task.waiting?.until != null
       ? { waitUntil: new Date(task.waiting.until).toISOString() }
       : {}),
