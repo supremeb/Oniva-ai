@@ -78,4 +78,5 @@ def test_bootstrap_reports_a_kind_without_on_finished(monkeypatch, caplog):
 
 def test_bootstrap_module_list_imports_cleanly_today():
     assert rh.bootstrap() is not None
-    assert rh.missing_on_finished() == []
+    # fleet registers start_missing/find_stuck/fail (U7); its on_finished arrives with U9.
+    assert set(rh.missing_on_finished()) <= {"fleet"}

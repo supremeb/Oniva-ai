@@ -942,6 +942,7 @@ class WorkflowSchedulerDaemon:
             ConcurrentLimitExceeded,
         )
         from app.services.background_agent_executor import run_background_agent
+        from app.services import fleet_engine
 
         async with self._session_factory() as poll_db:
             rows = await poll_db.execute(text("""
@@ -992,6 +993,10 @@ class WorkflowSchedulerDaemon:
 
                 # Create background job via concurrency-safe dispatch
                 try:
+                    use_engine = await fleet_engine.tenant_uses_engine_fleet(poll_db, tenant_id)
+                    job_input = bg_config.get("input_data")
+                    if use_engine:
+                        job_input = fleet_engine.mark_engine(job_input)
                     job = await check_and_create_background_job(
                         db=poll_db,
                         tenant_id=tenant_id,
@@ -1000,11 +1005,18 @@ class WorkflowSchedulerDaemon:
                         max_concurrent=max_concurrent,
                         trigger_type="scheduled",
                         trigger_info={"type": "scheduler", "cron": cron_expr},
-                        input_data=bg_config.get("input_data"),
+                        input_data=job_input,
                     )
 
                     # Commit to release locks before spawning executor
                     await poll_db.commit()
+
+                    if use_engine:
+                        # Engine tenants start an engine run; no asyncio task. A failed start leaves the
+                        # job pending for the reconciler and never escapes this loop (plan 003 U7).
+                        await fleet_engine.start_after_commit(tenant_id, job.id)
+                        logger.info(f"Dispatched engine background agent {agent_id} (job {job.id})")
+                        continue
 
                     # Spawn executor
                     task = asyncio.create_task(

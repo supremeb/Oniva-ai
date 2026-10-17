@@ -175,3 +175,89 @@ async def test_feature_gate_in_poll_loop():
     assert callable(daemon._poll_agents_once)
 
     WorkflowSchedulerDaemon._instance = None
+
+
+# ---- engine tenants (fleet-workflows-on-engine plan, U7) ----------------------------------------
+
+
+def _engine_session(agent_row):
+    mock_session = AsyncMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_rows = MagicMock()
+    mock_rows.fetchall.return_value = [agent_row]
+    mock_session.execute = AsyncMock(side_effect=[mock_rows, MagicMock()])
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
+    return mock_session
+
+
+@pytest.mark.asyncio
+async def test_engine_tenant_dispatch_creates_the_job_and_starts_the_engine(scheduler_daemon):
+    """Concurrency limit still applies via the dispatch helper; no asyncio task, no legacy executor."""
+    scheduler_daemon._session_factory.return_value = _engine_session(_make_agent_row(max_concurrent=3))
+    job = MagicMock()
+    job.id = uuid4()
+    next_run = datetime.now(timezone.utc) + timedelta(hours=24)
+
+    with patch("app.services.background_dispatch.check_and_create_background_job", new_callable=AsyncMock, return_value=job) as dispatch, \
+         patch("app.services.background_agent_executor.run_background_agent", new_callable=AsyncMock) as executor, \
+         patch("app.services.fleet_engine.tenant_uses_engine_fleet", new_callable=AsyncMock, return_value=True), \
+         patch("app.services.fleet_engine.start_fleet_run", new_callable=AsyncMock) as start, \
+         patch("app.services.fleet_engine.tenant_factory", return_value="factory"), \
+         patch("app.services.workflow_scheduler.calculate_next_run", return_value=next_run):
+        await scheduler_daemon._poll_agents_once()
+
+    kwargs = dispatch.call_args.kwargs
+    assert kwargs["max_concurrent"] == 3 and kwargs["trigger_type"] == "scheduled"
+    assert kwargs["input_data"] == {"engine": "oniva-engine"}
+    start.assert_awaited_once_with("factory", job.id)
+    executor.assert_not_called()
+    assert scheduler_daemon._active_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_engine_tenant_at_the_concurrent_limit_starts_nothing(scheduler_daemon):
+    from app.services.background_dispatch import ConcurrentLimitExceeded
+
+    scheduler_daemon._session_factory.return_value = _engine_session(_make_agent_row())
+    next_run = datetime.now(timezone.utc) + timedelta(hours=24)
+    with patch("app.services.background_dispatch.check_and_create_background_job", new_callable=AsyncMock, side_effect=ConcurrentLimitExceeded("full")), \
+         patch("app.services.fleet_engine.tenant_uses_engine_fleet", new_callable=AsyncMock, return_value=True), \
+         patch("app.services.fleet_engine.start_fleet_run", new_callable=AsyncMock) as start, \
+         patch("app.services.workflow_scheduler.calculate_next_run", return_value=next_run):
+        await scheduler_daemon._poll_agents_once()
+    start.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_engine_unreachable_does_not_escape_the_poll(scheduler_daemon):
+    """start_fleet_run reports engine trouble itself; even a surprise exception stays inside."""
+    scheduler_daemon._session_factory.return_value = _engine_session(_make_agent_row())
+    job = MagicMock()
+    job.id = uuid4()
+    next_run = datetime.now(timezone.utc) + timedelta(hours=24)
+    with patch("app.services.background_dispatch.check_and_create_background_job", new_callable=AsyncMock, return_value=job), \
+         patch("app.services.fleet_engine.tenant_uses_engine_fleet", new_callable=AsyncMock, return_value=True), \
+         patch("app.services.fleet_engine.start_fleet_run", new_callable=AsyncMock, side_effect=OSError("engine down")), \
+         patch("app.services.fleet_engine.tenant_factory", return_value="factory"), \
+         patch("app.services.workflow_scheduler.calculate_next_run", return_value=next_run):
+        await scheduler_daemon._poll_agents_once()
+
+
+@pytest.mark.asyncio
+async def test_flag_off_keeps_the_legacy_executor_task(scheduler_daemon):
+    scheduler_daemon._session_factory.return_value = _engine_session(_make_agent_row())
+    job = MagicMock()
+    job.id = uuid4()
+    next_run = datetime.now(timezone.utc) + timedelta(hours=24)
+    with patch("app.services.background_dispatch.check_and_create_background_job", new_callable=AsyncMock, return_value=job) as dispatch, \
+         patch("app.services.background_agent_executor.run_background_agent", new_callable=AsyncMock) as executor, \
+         patch("app.services.fleet_engine.tenant_uses_engine_fleet", new_callable=AsyncMock, return_value=False), \
+         patch("app.services.fleet_engine.start_fleet_run", new_callable=AsyncMock) as start, \
+         patch("app.services.workflow_scheduler.calculate_next_run", return_value=next_run):
+        await scheduler_daemon._poll_agents_once()
+        await asyncio.gather(*scheduler_daemon._active_tasks)
+    assert dispatch.call_args.kwargs["input_data"] is None
+    start.assert_not_called()
+    executor.assert_called_once()
