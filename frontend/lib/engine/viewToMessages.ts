@@ -14,6 +14,8 @@
  * assistant message; `view.toolOutput` feeds the running tool's progress step;
  * `view.approvals` marks calls that wait for a human as `pending` and adds an
  * `approval` part per request (a card while pending, a resolved line after).
+ * `view.questions` does the same for `ask_user`: a pending question is a card the
+ * viewer answers, an answered or expired one a read-only card, a cancelled one nothing.
  * `partial: true` assistant entries (text streamed before a failed generation)
  * render their text; their tool calls were never run and are skipped.
  *
@@ -30,7 +32,7 @@ import {
   deriveSourceParts,
   parseToolResultContent,
 } from '@/lib/chat/parts';
-import type { ApprovalItem, ConversationView, EntryRecord, JsonValue } from './types';
+import type { ApprovalItem, ConversationView, EntryRecord, JsonValue, QuestionItem } from './types';
 import { summarizeArguments } from './approval';
 
 export interface EngineMessage {
@@ -136,6 +138,7 @@ function groupEntries(entries: readonly EntryRecord[]): Group[] {
 interface Ctx {
   results: Map<string, ToolResult>;
   approvalByCall: Map<string, ApprovalItem>;
+  questionByCall: Map<string, QuestionItem>;
   view: ConversationView;
   /** tool task ids already tied to a call (by result entry or approval). */
   linkedTasks: Set<string>;
@@ -162,7 +165,12 @@ function buildCtx(view: ConversationView, canDecide: boolean): Ctx {
     approvalByCall.set(a.toolCallId, a);
     linkedTasks.add(a.toolTaskId);
   }
-  return { results, approvalByCall, view, linkedTasks, canDecide };
+  const questionByCall = new Map<string, QuestionItem>();
+  for (const q of view.questions?.items ?? []) {
+    questionByCall.set(q.toolCallId, q);
+    linkedTasks.add(q.toolTaskId);
+  }
+  return { results, approvalByCall, questionByCall, view, linkedTasks, canDecide };
 }
 
 /** The status text the engine's non-ok results carry, for an error line. */
@@ -205,7 +213,7 @@ function toolCallParts(call: CallInfo, ctx: Ctx, outputFor: (callId: string) => 
   }
 
   const approval = ctx.approvalByCall.get(call.id);
-  if (approval?.status === 'pending') {
+  if (approval?.status === 'pending' || ctx.questionByCall.get(call.id)?.status === 'pending') {
     return [buildToolCallPart({ id: call.id, toolName: call.name, status: 'pending', args: call.args })];
   }
   if (call.superseded) {
@@ -268,6 +276,25 @@ function approvalPart(a: ApprovalItem, canDecide: boolean): MessagePart | null {
     canDecide,
     expiresAt: a.expiresAt,
     ...(note !== null ? { note } : {}),
+  };
+}
+
+/** A pending question is a card; an answered or expired one a read-only card; a cancelled one nothing. */
+function questionPart(q: QuestionItem, canDecide: boolean): MessagePart | null {
+  if (q.status === 'cancelled') return null;
+  return {
+    type: 'question',
+    id: q.toolTaskId,
+    toolTaskId: q.toolTaskId,
+    header: 'Question',
+    question: q.question,
+    options: q.options.map((o) => ({ id: o.id, label: o.label, ...(o.description ? { description: o.description } : {}) })),
+    multiSelect: q.multiSelect,
+    allowFreeText: q.allowFreeText,
+    status: q.status,
+    answer: q.answer ? { optionIds: q.answer.optionIds, text: q.answer.text } : null,
+    canDecide,
+    expiresAt: q.expiresAt,
   };
 }
 
@@ -362,6 +389,11 @@ function buildAssistant(group: Group, ctx: Ctx, live: JsonValue | null): EngineM
   for (const a of ctx.view.approvals.items) {
     if (!callIds.has(a.toolCallId)) continue;
     const part = approvalPart(a, ctx.canDecide);
+    if (part) parts.push(part);
+  }
+  for (const q of ctx.view.questions?.items ?? []) {
+    if (!callIds.has(q.toolCallId)) continue;
+    const part = questionPart(q, ctx.canDecide);
     if (part) parts.push(part);
   }
 
@@ -463,10 +495,10 @@ export function createViewAdapter(options: AdapterOptions = {}): (view: Conversa
         const live_ = g.trailing && live !== null;
         const deps: unknown[] = [(g.trailing && unresolved) || live_, ...g.entries];
         for (const callId of callIds) {
-          deps.push(ctx.results.get(callId)?.entry, ctx.approvalByCall.get(callId));
+          deps.push(ctx.results.get(callId)?.entry, ctx.approvalByCall.get(callId), ctx.questionByCall.get(callId));
         }
         if (live_) deps.push(live);
-        if (g.trailing && unresolved) deps.push(view.toolOutput, view.approvals);
+        if (g.trailing && unresolved) deps.push(view.toolOutput, view.approvals, view.questions);
         emit(g.id, deps, () => buildAssistant(g, ctx, g.trailing ? live : null));
       }
     }
@@ -476,7 +508,7 @@ export function createViewAdapter(options: AdapterOptions = {}): (view: Conversa
     if (live !== null && (tail === undefined || tail.kind !== 'assistant')) {
       const id = `${tail?.kind === 'user' ? tail.id : 'live'}:assistant`;
       const synthetic: Group = { id, kind: 'assistant', entries: [], trailing: true };
-      emit(id, ['live', live, view.toolOutput, view.approvals], () => buildAssistant(synthetic, ctx, live));
+      emit(id, ['live', live, view.toolOutput, view.approvals, view.questions], () => buildAssistant(synthetic, ctx, live));
     }
     cache = next;
     return out;

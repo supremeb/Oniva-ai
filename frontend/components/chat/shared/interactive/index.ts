@@ -12,6 +12,7 @@ export { OtherInput, type OtherInputProps } from './OtherInput';
 export { QuestionProgress, type QuestionProgressProps } from './QuestionProgress';
 export { AgentQuestion, type AgentQuestionProps, type AgentQuestionOption } from './AgentQuestion';
 export { AgentQuestionGroup, type AgentQuestionGroupProps, type QuestionData } from './AgentQuestionGroup';
+export { QuestionCard, type QuestionCardProps, type QuestionCardOption } from './QuestionCard';
 export { QuestionPrompt, type QuestionPromptProps } from './QuestionPrompt';
 export { FormCard, type FormCardProps, type FormField } from './FormCard';
 export { OAuthCard, type OAuthCardProps } from './OAuthCard';

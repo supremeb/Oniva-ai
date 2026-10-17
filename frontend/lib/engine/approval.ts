@@ -42,6 +42,9 @@ export function toDecisionError(e: unknown): DecisionError {
   if (status === 404 || status === 409 || status === 410) {
     return new DecisionError('This request was already decided or has expired.', false, status);
   }
+  if (status === 400 || status === 422) {
+    return new DecisionError('That answer was not accepted. Check it and try again.', true, status);
+  }
   return new DecisionError('Could not send your decision. Try again.', true, status);
 }
 

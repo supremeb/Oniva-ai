@@ -89,7 +89,7 @@ describe('useEngineConversation', () => {
     await send(f.bodies[1], f4);
     await send(f.bodies[1], f5);
     expect(result.current.connection).toBe('live');
-    expect(result.current.view).toEqual(fixture.final);
+    expect(result.current.view).toEqual({ ...fixture.final, questions: { items: [] } }); // parser default for the pre-questions fixture
     expect(result.current.cursor).toBe(f5.cursor);
   });
 
@@ -127,7 +127,7 @@ describe('useEngineConversation', () => {
     });
     expect(f.calls).toEqual([null, null]);
     await send(f.bodies[1], { cursor: 120, snapshot: fixture.final } as never, 'snapshot');
-    expect(result.current.view).toEqual(fixture.final);
+    expect(result.current.view).toEqual({ ...fixture.final, questions: { items: [] } }); // parser default for the pre-questions fixture
     expect(result.current.cursor).toBe(120);
   });
 

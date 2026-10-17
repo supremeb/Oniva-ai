@@ -10,8 +10,10 @@ const client = new EngineConversationClient();
 
 const DECIDE_PATH = /\/conversations\/([^/]+)\/approvals\/([^/]+)\/decision$/;
 
-function parseDecide(endpoint?: string): { conversationId: string; toolTaskId: string } | null {
-  const m = endpoint ? DECIDE_PATH.exec(endpoint) : null;
+const ANSWER_PATH = /\/conversations\/([^/]+)\/questions\/([^/]+)\/answer$/;
+
+function parseDecide(endpoint?: string, path: RegExp = DECIDE_PATH): { conversationId: string; toolTaskId: string } | null {
+  const m = endpoint ? path.exec(endpoint) : null;
   return m ? { conversationId: decodeURIComponent(m[1]), toolTaskId: decodeURIComponent(m[2]) } : null;
 }
 
@@ -38,6 +40,19 @@ export function InboxList({ items, onDecided }: Props) {
     setRow(item.id, { pending: true });
     try {
       await client.decide(target.conversationId, target.toolTaskId, decision);
+      setRemoved((s) => new Set(s).add(item.id));
+      onDecided?.();
+    } catch (e) {
+      setRow(item.id, { error: toDecisionError(e).message });
+    }
+  };
+
+  const onAnswer = async (item: InboxItem, text: string) => {
+    const target = parseDecide(item.actions.find((a) => a.type === 'answer')?.endpoint, ANSWER_PATH);
+    if (!target) return;
+    setRow(item.id, { pending: true });
+    try {
+      await client.answer(target.conversationId, target.toolTaskId, { text });
       setRemoved((s) => new Set(s).add(item.id));
       onDecided?.();
     } catch (e) {
@@ -75,7 +90,7 @@ export function InboxList({ items, onDecided }: Props) {
       ) : (
         <ul aria-label="Needs attention">
           {shown.map((item) => (
-            <InboxItemRow key={item.id} item={item} state={rows[item.id]} onDecide={onDecide} />
+            <InboxItemRow key={item.id} item={item} state={rows[item.id]} onDecide={onDecide} onAnswer={onAnswer} />
           ))}
         </ul>
       )}
