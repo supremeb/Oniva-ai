@@ -81,6 +81,39 @@ describe("node gateway client", () => {
     expect(be.total("n1", "prepare")).toBe(0);
   });
 
+  it("the prepare body names no tenant or project: the backend derives them from the run (KTD4)", async () => {
+    await gateway().prepare(REF, KEY, BODY);
+    const body = be.calls("prepare")[0]?.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual([
+      "contractVersion",
+      "nodeAttempt",
+      "nodeType",
+      "runAttempt",
+    ]);
+  });
+
+  it("a body whose attempts disagree with the key is invalid_idempotency_key", async () => {
+    const err = await gateway()
+      .prepare(REF, KEY, { ...BODY, runAttempt: 1 })
+      .catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: "gateway_error", status: 400 });
+    expect(be.executions(KEY)).toBe(0);
+  });
+
+  it("the backend's answer to a finish body the schema rejects is 422 invalid_request", async () => {
+    const res = await fetch(`${be.baseUrl}/internal/workflows/runs/run-1/nodes/n1/finish`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${be.serviceToken}`,
+        "idempotency-key": "run-1:n1:r0:a0:finish",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ contractVersion: 1, kind: "nope" }),
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "invalid_request" });
+  });
+
   it("the same key replays the stored outcome without running again", async () => {
     be.script("n1", "prepare", { body: fixture("prepare.final.failed.valid") });
     const gw = gateway();

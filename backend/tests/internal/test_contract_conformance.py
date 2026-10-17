@@ -537,10 +537,6 @@ async def test_wf_fence_409(wf):
     assert [s["node_id"] for s in await tw.trace(wf)] == ["t"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the lookup route GET /internal/workflows/invocations/{key} does not exist yet (no workflow reconcile read)",
-)
 @wf_clause("fence-raise-on-read")
 async def test_wf_fence_raise_on_read(wf):
     r = await wf.client.get(
@@ -576,8 +572,7 @@ async def test_wf_prepare_response_shape(wf):
 @wf_clause("run-binding")
 async def test_wf_run_binding(wf):
     # The run's tenant and project decide everything: another tenant's identity cannot reach the run.
-    # (The backend takes the scope from the body and checks it against the run; the fake ignores the body.
-    # Either way a body naming another tenant or project never executes the run's node.)
+    # (The backend derives the scope from the run and 404s a body that names another; the fake ignores the body.)
     other = {"tenantId": str(wf.tenant_b), "projectId": str(wf.project_b), "conversationId": str(wf.conv_b),
              "contractVersion": 1}
     assert (await tw.call(wf, "t", body=other)).status_code == 404
@@ -594,10 +589,6 @@ async def test_wf_finish_returns_final(wf):
     assert wc.validate_prepare_response(r.json()).kind == "final"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a finish body the schema rejects is 400 {error: invalid_body}; the fake specifies 422 {error: invalid_request}",
-)
 @wf_clause("finish-invalid-422")
 async def test_wf_finish_invalid_422(wf):
     bad = json.loads((FIXTURES / "finish.unknown-kind.invalid.json").read_text())
@@ -605,7 +596,7 @@ async def test_wf_finish_invalid_422(wf):
     assert r.status_code == 422 and r.json() == {"error": "invalid_request"}
 
 
-@pytest.mark.xfail(strict=True, reason="the finalize route (U16) does not exist yet")
+@pytest.mark.xfail(strict=True, reason="U16")
 @wf_clause("finalize-ok")
 async def test_wf_finalize_ok(wf):
     body = {**tw.scope(wf), **json.loads((FIXTURES / "finalize.valid.json").read_text())}
@@ -619,14 +610,13 @@ async def test_wf_finalize_ok(wf):
 
 @wf_clause("idempotency-key-format")
 async def test_wf_idempotency_key_format(wf):
-    # The status is the contract (a definitive 400 that runs nothing); the body code differs from the fake's.
     for key in ("{run}:t:a0:prepare", "{run}:t:r0:prepare", "{run}:other:r0:a0:prepare", "{run}:t:r0:a0:finish", "x"):
         r = await tw.call(wf, "t", key=key.format(run=wf.run))
-        assert r.status_code == 400, key
+        assert r.status_code == 400 and r.json()["error"] == "invalid_idempotency_key", key
     missing = await wf.client.post(
         f"/internal/workflows/runs/{wf.run}/nodes/t/prepare", json=tw.scope(wf), headers=tw.AUTH
     )
-    assert missing.status_code == 400
+    assert missing.status_code == 400 and missing.json()["error"] == "invalid_idempotency_key"
     assert wf.counts["template"] == 0
 
 
@@ -673,7 +663,6 @@ async def test_wf_call_survives_disconnect(wf, monkeypatch):
     assert wf.counts["template"] == 1
 
 
-@pytest.mark.xfail(strict=True, reason="the lookup route GET /internal/workflows/invocations/{key} does not exist yet")
 @wf_clause("lookup-found")
 async def test_wf_lookup_found(wf):
     r = await tw.call(wf, "t", token=6)
@@ -684,7 +673,6 @@ async def test_wf_lookup_found(wf):
     assert rec.status_code == 200 and rec.json() == r.json()
 
 
-@pytest.mark.xfail(strict=True, reason="the lookup route GET /internal/workflows/invocations/{key} does not exist yet")
 @wf_clause("lookup-not-found")
 async def test_wf_lookup_not_found(wf):
     rec = await wf.client.get(
