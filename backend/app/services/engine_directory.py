@@ -13,3 +13,6 @@ class EngineDirectory:
 
     def url_for(self, session_id: str) -> str:  # seam for a per-session map
         return self._url
+
+    def session_for(self, tenant_id, run_kind: str) -> str:  # seam for per-tenant / per-kind sessions
+        return self._session_id
