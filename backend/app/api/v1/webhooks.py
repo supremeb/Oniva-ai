@@ -13,7 +13,10 @@ import logging
 import uuid
 from typing import List, Optional
 
+import json
+
 from fastapi import APIRouter, HTTPException, Depends, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +25,7 @@ from app.core.database import get_db, get_db_no_tenant
 from app.auth.dependencies import get_current_user, get_current_tenant_id
 from app.auth.providers.base import AuthUser
 from app.models.webhook_trigger import WebhookTrigger, generate_webhook_token
-from app.services.webhook_trigger_service import WebhookTriggerService
+from app.services.webhook_trigger_service import TriggerUnowned, WebhookTriggerService
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +56,7 @@ class WebhookTriggerUpdate(BaseModel):
 class WebhookTriggerResponse(BaseModel):
     """Webhook trigger response."""
     id: uuid.UUID
-    workflow_id: uuid.UUID
+    workflow_id: Optional[uuid.UUID] = None
     url: str  # Full webhook URL
     auth_method: str
     is_enabled: bool
@@ -63,6 +66,11 @@ class WebhookTriggerResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class WebhookTriggerCreated(WebhookTriggerResponse):
+    """Create response: the only place the HMAC secret is ever shown."""
+    secret: Optional[str] = None
 
 
 # --- Public Webhook Receiver ---
@@ -86,29 +94,30 @@ async def receive_webhook(
     if forwarded:
         source_ip = forwarded.split(",")[0].strip()
 
-    # Parse body
+    # Verification runs over the raw bytes; the parsed JSON is only for filter, mapping and the key path.
+    raw = await request.body()
     try:
-        body = await request.json()
-    except Exception as e:
-        return {"status": 400, "message": f"Invalid JSON: {str(e)}"}
+        body = json.loads(raw) if raw else {}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"status": 400, "message": f"Invalid JSON: {str(e)}"})
 
     headers = {k.lower(): v for k, v in dict(request.headers).items()}
 
-    # Process webhook
     webhook_service = WebhookTriggerService(db)
     result = await webhook_service.process_webhook(
         url_token=url_token,
+        raw_body=raw,
         request_body=body,
         request_headers=headers,
         source_ip=source_ip
     )
 
-    return result
+    return JSONResponse(status_code=result.get("status", 200), content=result)
 
 
 # --- Webhook Management (Authenticated) ---
 
-@router.post("/workflows/{workflow_id}/webhooks", response_model=WebhookTriggerResponse)
+@router.post("/workflows/{workflow_id}/webhooks", response_model=WebhookTriggerCreated)
 async def create_webhook_trigger(
     workflow_id: uuid.UUID,
     request: WebhookTriggerCreate,
@@ -136,36 +145,33 @@ async def create_webhook_trigger(
     if str(workflow.user_id) != user.id and user.role not in ["admin", "owner"]:
         raise HTTPException(403, "Only workflow owner or admins can create webhooks")
 
-    # Create webhook trigger
-    trigger = WebhookTrigger(
-        tenant_id=tenant_id,
-        workflow_id=workflow_id,
-        url_token=generate_webhook_token(),
-        auth_method=request.auth_method,
-        auth_config=request.auth_config,
-        allowed_ip_addresses=request.allowed_ip_addresses,
-        payload_mapping=request.payload_mapping,
-        filter_expression=request.filter_expression,
-        rate_limit_per_hour=request.rate_limit_per_hour,
-        created_by=uuid.UUID(user.id)
-    )
-
-    db.add(trigger)
+    try:
+        trigger, secret = await WebhookTriggerService(db).create_trigger(
+            tenant_id=tenant_id,
+            workflow_id=workflow_id,
+            created_by=uuid.UUID(user.id),
+            auth_method=request.auth_method,
+            auth_config=request.auth_config,
+            allowed_ip_addresses=request.allowed_ip_addresses,
+            payload_mapping=request.payload_mapping,
+            filter_expression=request.filter_expression,
+            rate_limit_per_hour=request.rate_limit_per_hour,
+        )
+    except TriggerUnowned as e:
+        raise HTTPException(422, str(e))
     await db.commit()
     await db.refresh(trigger)
 
-    # Generate full URL
-    webhook_url = f"https://api.oniva.ai/api/v1/webhooks/{trigger.url_token}"
-
-    return WebhookTriggerResponse(
+    return WebhookTriggerCreated(
         id=trigger.id,
         workflow_id=trigger.workflow_id,
-        url=webhook_url,
+        url=f"https://api.oniva.ai/api/v1/webhooks/{trigger.url_token}",
         auth_method=trigger.auth_method,
         is_enabled=trigger.is_enabled,
         rate_limit_per_hour=trigger.rate_limit_per_hour,
         delivery_count=0,
-        created_at=trigger.created_at.isoformat()
+        created_at=trigger.created_at.isoformat(),
+        secret=secret,
     )
 
 
@@ -228,3 +234,27 @@ async def delete_webhook_trigger(
 
     await db.delete(trigger)
     await db.commit()
+
+
+@router.get("/webhooks/{webhook_id}", response_model=WebhookTriggerResponse)
+async def get_webhook_trigger(
+    webhook_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id)
+):
+    """Get one webhook trigger. The secret is never returned after creation."""
+    trigger = (await db.execute(select(WebhookTrigger).where(
+        WebhookTrigger.id == webhook_id, WebhookTrigger.tenant_id == tenant_id
+    ))).scalar_one_or_none()
+    if not trigger:
+        raise HTTPException(404, "Webhook not found")
+    return WebhookTriggerResponse(
+        id=trigger.id,
+        workflow_id=trigger.workflow_id,
+        url=f"https://api.oniva.ai/api/v1/webhooks/{trigger.url_token}",
+        auth_method=trigger.auth_method,
+        is_enabled=trigger.is_enabled,
+        rate_limit_per_hour=trigger.rate_limit_per_hour,
+        delivery_count=0,
+        created_at=trigger.created_at.isoformat(),
+    )

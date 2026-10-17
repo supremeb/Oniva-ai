@@ -179,6 +179,7 @@ async def start_workflow_run(
     deadline_ms: Optional[int] = None,
     retry: Optional[Dict[str, int]] = None,
     settle_on_failure: bool = True,
+    execution_id: Any = None,
 ) -> tuple[WorkflowExecution, Optional[str]]:
     """Create the execution (``queued``), bind its conversation and start the engine run.
 
@@ -193,7 +194,8 @@ async def start_workflow_run(
     workflow_id = getattr(workflow, "id", workflow)  # a workflow row, its id, or None (ad-hoc spec)
     await _compile(db, tenant_id, spec, workflow_id)  # refuse an invalid workflow before any row exists
 
-    execution_id = execution_id_for(tenant_id, workflow_id, request_key)
+    # ``execution_id`` lets a caller own the deterministic id (a webhook derives it from trigger and key).
+    execution_id = _uuid(execution_id) if execution_id is not None else execution_id_for(tenant_id, workflow_id, request_key)
     existing = (await db.execute(
         select(WorkflowExecution).where(WorkflowExecution.id == execution_id,
                                         WorkflowExecution.tenant_id == tenant_id)
