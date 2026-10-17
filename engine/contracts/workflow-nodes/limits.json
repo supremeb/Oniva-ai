@@ -1,0 +1,6 @@
+{
+  "maxNodes": 95,
+  "maxParallel": 50,
+  "maxFanoutItems": 1000,
+  "maxSubworkflowDepth": 3
+}

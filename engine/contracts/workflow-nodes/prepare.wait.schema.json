@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prepare.wait.schema.json",
+  "title": "Workflow node prepare result: wait",
+  "description": "The node parks. Exactly one of durationMs or untilEpochMs is given; a signal key and an SLA deadline are optional.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "kind"],
+  "properties": {
+    "contractVersion": { "const": 1 },
+    "kind": { "const": "wait" },
+    "durationMs": { "type": "integer", "minimum": 1 },
+    "untilEpochMs": { "type": "integer", "minimum": 1 },
+    "signal": { "type": "string" },
+    "slaUntilEpochMs": { "type": "integer", "minimum": 1 }
+  },
+  "oneOf": [
+    { "required": ["durationMs"], "not": { "required": ["untilEpochMs"] } },
+    { "required": ["untilEpochMs"], "not": { "required": ["durationMs"] } }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "contractVersion": 1,
+  "status": "running",
+  "nodeSummaries": { "n1": "success" },
+  "attempts": 1
+}

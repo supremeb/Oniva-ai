@@ -1,0 +1,11 @@
+{
+  "contractVersion": 1,
+  "kind": "llm",
+  "system": "You classify.",
+  "prompt": "Is this urgent? {\"text\":\"hello\"}",
+  "tier": "mid",
+  "tools": ["web_search"],
+  "maxRounds": 3,
+  "responseFormat": "json",
+  "replaySafe": false
+}
