@@ -312,3 +312,27 @@ describe('DeepWorkCard dispatch', () => {
     expect(screen.getByTestId('deep-work-engine-card')).toBeInTheDocument();
   });
 });
+
+describe('DeepWorkEngineCard run nodes (U24)', () => {
+  it('tags workers with the shared run status', () => {
+    setHook();
+    render(<DeepWorkEngineCard session={SESSION} />);
+    const rows = screen.getAllByTestId('worker-row');
+    expect(rows.map((r) => r.getAttribute('data-run-status'))).toEqual(['running', 'completed']);
+  });
+
+  it('toRunTree projects workers and the reflector under one run node', () => {
+    const { toRunTree } = jest.requireActual('@/lib/engine/deepWork');
+    const tree = toRunTree(state({ reflections: [{ round: 1, score: 0.8, gaps: [], continuing: false }] }));
+    expect(tree).toHaveLength(1);
+    expect(tree[0].kind).toBe('run');
+    expect(tree[0].children.map((c: { id: string }) => c.id)).toEqual(['call_1', 'call_2', 'reflector_1']);
+    expect(tree[0].children[0].status).toBe('completed');
+  });
+
+  it('renders the reflector as a run-tree row', () => {
+    setHook({ deepWork: state({ reflections: [{ round: 1, score: 0.8, gaps: [], continuing: false }] }) });
+    render(<DeepWorkEngineCard session={SESSION} />);
+    expect(screen.getByRole('treeitem', { name: /Reflection, round 1/ })).toBeInTheDocument();
+  });
+});

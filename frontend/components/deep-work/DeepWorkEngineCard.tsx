@@ -12,6 +12,8 @@ import { useConversationCost } from '@/lib/engine/cost';
 import { CostPopover } from './CostPopover';
 import { WorkerActivityCard } from './WorkerActivityCard';
 import { WorkerTranscript } from './WorkerTranscript';
+import { RunTree } from '@/components/run/RunTree';
+import { toRunTree } from '@/lib/engine/deepWork';
 import { useEngineSessionStore, type EngineDeepWorkSession } from './engineSession';
 
 const PHASE_TEXT: Record<string, string> = {
@@ -197,6 +199,12 @@ export const DeepWorkEngineCard = memo(function DeepWorkEngineCard({ session }: 
                     renderDetail={w.childConversationId ? () => <WorkerTranscript sessionId={sessionId} childConversationId={w.childConversationId as string} /> : undefined}
                   />
                 ))}
+              </div>
+            )}
+
+            {deepWork.reflections.length > 0 && (
+              <div className="px-5 pb-3" data-testid="reflector-tree">
+                <RunTree aria-label="Reflections" nodes={toRunTree(deepWork)[0].children.filter((n) => n.kind === 'worker' && n.id.startsWith('reflector_'))} />
               </div>
             )}
 

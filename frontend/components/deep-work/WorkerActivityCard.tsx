@@ -13,9 +13,10 @@ import {
 } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 import type { EngineWorkerState } from '@/lib/types/deep-work';
+import { workerToRunNode, type DeepWorkWorker } from '@/lib/engine/deepWork';
 
 interface WorkerActivityCardProps {
-  worker: EngineWorkerState;
+  worker: EngineWorkerState | DeepWorkWorker;
   /** Extra expanded content (the engine card's read-only transcript). Called only while expanded. */
   renderDetail?: () => ReactNode;
 }
@@ -34,6 +35,8 @@ export const WorkerActivityCard = memo(function WorkerActivityCard({
   const [expanded, setExpanded] = useState(false);
   const toggleExpand = useCallback(() => setExpanded((v) => !v), []);
 
+  // The worker is a RunNode (plan 003, U24); the shared status enum drives the row.
+  const runStatus = 'key' in worker ? workerToRunNode(worker).status : ({ idle: 'queued', researching: 'running', complete: 'completed', error: 'failed' } as const)[worker.status];
   const isActive = worker.status === 'researching';
   const isComplete = worker.status === 'complete';
   const isError = worker.status === 'error';
@@ -54,6 +57,7 @@ export const WorkerActivityCard = memo(function WorkerActivityCard({
     <div
       data-testid="worker-row"
       data-status={worker.status}
+      data-run-status={runStatus}
       className={cn(
         'rounded-lg border transition-colors',
         isError
