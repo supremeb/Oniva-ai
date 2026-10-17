@@ -78,6 +78,13 @@ def mark_engine(input_data: Optional[dict]) -> dict:
     return {**(input_data or {}), "engine": ENGINE_MARK}
 
 
+def public_input_data(input_data: Optional[dict]) -> Optional[dict]:
+    """``input_data`` without the engine bookkeeping keys, for API responses."""
+    if not isinstance(input_data, dict):
+        return input_data
+    return {k: v for k, v in input_data.items() if k not in _ENGINE_KEYS}
+
+
 def task_text(input_data: Optional[dict]) -> str:
     """The task the agent is asked to do (same rule as the legacy executor)."""
     data = {k: v for k, v in (input_data or {}).items() if k not in _ENGINE_KEYS}
@@ -187,6 +194,9 @@ async def _binding(db, job: BackgroundJob) -> Optional[tuple[str, Any]]:
         .where(EngineConversation.conversation_id == job.conversation_id)
     )).first()
     return (row.session_id, row.project_id) if row is not None else None
+
+
+binding = _binding  # public name for the stream proxy
 
 
 async def steer_run(db, job: BackgroundJob, message: str, *, engine: Any = None) -> bool:

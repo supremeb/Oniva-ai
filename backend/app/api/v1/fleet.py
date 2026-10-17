@@ -43,6 +43,7 @@ class FleetRunItem(BaseModel):
     trigger: str
     triggered_by: Optional[dict] = None
     progress: int
+    conversation_id: Optional[str] = None
     input_data: Optional[dict] = None
     result: Optional[dict] = None
     error: Optional[str] = None
@@ -120,6 +121,7 @@ async def list_fleet_runs(
     items = []
     for job in jobs:
         agent_info = agent_map.get(str(job.agent_id), {})
+        engine_job = fleet_engine.is_engine_job(job)
         items.append(FleetRunItem(
             id=str(job.id),
             agent_id=str(job.agent_id) if job.agent_id else None,
@@ -130,7 +132,8 @@ async def list_fleet_runs(
             trigger=job.trigger,
             triggered_by=job.triggered_by,
             progress=job.progress,
-            input_data=job.input_data,
+            conversation_id=str(job.conversation_id) if engine_job and job.conversation_id else None,
+            input_data=fleet_engine.public_input_data(job.input_data) if engine_job else job.input_data,
             result=job.result,
             error=job.error,
             started_at=job.started_at.isoformat() if job.started_at else None,
