@@ -64,10 +64,46 @@ def _with_deep_work_rules(script: dict) -> dict:
     return {**script, "rules": [*script["rules"], *dw_script.build()["rules"]]}
 
 
+_FLOOR = 20000
+_handed_out: set[int] = set()
+
+
+def ephemeral_range() -> tuple[int, int]:
+    """The OS range outgoing connections take their local ports from (Linux, macOS; IANA default otherwise)."""
+    with contextlib.suppress(OSError, ValueError):
+        low, high = Path("/proc/sys/net/ipv4/ip_local_port_range").read_text().split()
+        return int(low), int(high)
+    with contextlib.suppress(OSError, ValueError, subprocess.SubprocessError):
+        out = subprocess.run(["sysctl", "-n", "net.inet.ip.portrange.first", "net.inet.ip.portrange.last"],
+                             capture_output=True, text=True, timeout=5, check=True).stdout.split()
+        return int(out[0]), int(out[1])
+    return 49152, 65535
+
+
+def _candidate(low: int) -> int:
+    return _FLOOR + int.from_bytes(os.urandom(2), "big") % max(1, low - _FLOOR)
+
+
 def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    """A bindable port below the ephemeral range, never handed out twice in one run.
+
+    Binding to 0 would return an ephemeral port that is free only until the child binds it: an outgoing
+    connection opened meanwhile (the backend's, say) can take that very port, and the engine then fails
+    with EADDRINUSE. Ports below the range are never used for outgoing connections.
+    """
+    low, _ = ephemeral_range()
+    for _ in range(200):
+        port = _candidate(low)
+        if port in _handed_out:
+            continue
+        with socket.socket() as s:
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+        _handed_out.add(port)
+        return port
+    raise RuntimeError(f"no free port between {_FLOOR} and {low}")
 
 
 def wait_for(fn, what: str, timeout: float = 60.0, every: float = 0.2):

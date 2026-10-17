@@ -18,7 +18,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from tests.e2e.harness import free_port, stack
+from tests.e2e.harness import stack
 
 
 def main() -> int:
@@ -80,7 +80,7 @@ def main() -> int:
 
             do_GET = do_POST = _handle
 
-        server = ThreadingHTTPServer(("127.0.0.1", free_port()), Handler)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)  # in-process: bind 0, read the port back
         threading.Thread(target=server.serve_forever, daemon=True).start()
         info_path.write_text(json.dumps({
             "backendUrl": w.backend_url, "controlUrl": f"http://127.0.0.1:{server.server_port}",
