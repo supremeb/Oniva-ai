@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GenerativeO } from '@/components/ui/GenerativeO';
 import { ChatError } from './shared';
@@ -205,6 +206,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
     );
 
     const running = isRunActive(view);
+    const hasPendingApproval = view?.approvals.items.some((a) => a.status === 'pending') ?? false;
     const awaitingApproval = running && (view?.approvals.items.some((a) => a.status === 'pending') ?? false);
     const runState: EngineRunState = awaitingApproval ? 'awaiting_approval' : running ? 'running' : 'idle';
     useEffect(() => {
@@ -447,6 +449,18 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                 <div className="px-6 pb-5 pt-3">
                     {createError && <ChatError message={createError} onDismiss={() => setCreateError(null)} className="mb-3 max-w-[680px] mx-auto" />}
                     <ConnectionBanner connection={connection} error={error} stalledAfterSeconds={Math.round((watcherOptions?.stalledAfterMs ?? 45_000) / 1000)} />
+                    {hasPendingApproval && (
+                        <div
+                            data-testid="approval-banner"
+                            role="status"
+                            className="mb-3 max-w-[680px] mx-auto flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-neutral-800"
+                        >
+                            <span>Awaiting approval before the agent continues.</span>
+                            <Link href="/inbox" className="font-medium underline underline-offset-2">
+                                Open inbox
+                            </Link>
+                        </div>
+                    )}
                     {composer}
                 </div>
             }
