@@ -73,6 +73,9 @@ class WorkflowExecution(Base):
     # DBOS workflow UUID for tracking
     dbos_workflow_uuid = Column(UUID(as_uuid=True), unique=True, nullable=True)
 
+    # Engine conversation that runs this execution (plan 003 U1); null for legacy runs.
+    engine_conversation_id = Column(UUID(as_uuid=True), nullable=True)
+
     # Execution details
     status = Column(String(50), default='pending', index=True)  # 'pending', 'running', 'completed', 'failed', 'cancelled'
     trigger = Column(String(50), default='manual')  # 'manual', 'api', 'scheduled'
