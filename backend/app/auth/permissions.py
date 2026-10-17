@@ -48,6 +48,8 @@ ROLE_PERMISSIONS: dict[str, Set[str]] = {
         # API Keys
         "api_keys:read",
         "api_keys:manage",
+        # Approvals: decide any tool-call approval in the tenant
+        "approvals:decide",
     },
     "member": {
         # Workflow permissions
@@ -69,6 +71,8 @@ ROLE_PERMISSIONS: dict[str, Set[str]] = {
         # Limited API key access
         "api_keys:read",
         "api_keys:manage_own",
+        # Approvals: decide only approvals the member requested, on member-level tools
+        "approvals:decide_own",
     },
     "viewer": {
         # Read-only access

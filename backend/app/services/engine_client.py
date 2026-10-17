@@ -130,6 +130,14 @@ class EngineClient:
             f"/v1/conversations/{conversation_id}/approvals/{tool_task_id}/decision",
             tenant_id=tenant_id, project_id=project_id, json=payload, principal=principal)
 
+    async def approvals(self, session_id, tenant_id, project_id, conversation_id) -> list[dict]:
+        """The root conversation's approval items (engine ``GET .../approvals``, children included)."""
+        body = await self._json(
+            "GET", session_id, f"/v1/conversations/{conversation_id}/approvals",
+            tenant_id=tenant_id, project_id=project_id)
+        items = body.get("approvals")
+        return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
     async def watch_stream(self, session_id, tenant_id, project_id, conversation_id,
                            last_event_id: Optional[str] = None,
                            cursor: Optional[str] = None) -> httpx.Response:
