@@ -485,7 +485,7 @@ async def test_agent_node_exits_loop_when_no_new_tool_calls():
     with patch(f"{module}.get_redis_service", AsyncMock()), \
          patch(f"{module}.AgentCircuitBreaker", return_value=SimpleNamespace(check_health=AsyncMock())), \
          patch(f"{module}.resolve_key_with_fallback", AsyncMock(return_value=("key", "openai/gpt-4o-mini"))), \
-         patch(f"{module}.create_litellm_model", return_value=object()), \
+         patch(f"{module}.create_model", return_value=object()), \
          patch(f"{module}.PydanticAgent", FakePydanticAgent), \
          patch(f"{module}.patch_dangling_tool_calls", side_effect=lambda m: m), \
          patch(f"{module}.SkillRegistry.get_skill", return_value=skill), \

@@ -505,17 +505,17 @@ async def resolve_model_and_key(
     return effective_model, api_key, provider_type
 
 
-def create_litellm_model(
+def create_model(
     model_id: str,
     api_key: str,
     api_base: Optional[str] = None,
     enable_thinking: bool = False,
 ):
     """
-    Create a pydantic-ai compatible model that routes through LiteLLM.
+    Create a pydantic-ai native model for a ``provider/model`` id (no LiteLLM).
 
-    For pydantic-ai agents, we create an OpenAIModel with LiteLLM-compatible
-    parameters. LiteLLM handles provider routing via the model prefix.
+    The provider prefix picks the pydantic-ai provider (Anthropic, OpenRouter, Google, or an
+    OpenAI-compatible endpoint).
 
     Args:
         model_id: Model in LiteLLM format (e.g., "openai/gpt-4o", "anthropic/claude-3-5-sonnet")
@@ -575,6 +575,10 @@ def create_litellm_model(
             **({"base_url": api_base} if api_base else {}),
         )
         return OpenAIChatModel(model_name, provider=OpenAIProvider(openai_client=client))
+
+
+#: Old name, kept for callers outside plan 003 U14 until their units rename it (KTD13).
+create_litellm_model = create_model
 
 
 def normalize_model_id(model_id: str) -> str:
