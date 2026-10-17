@@ -104,24 +104,9 @@ class BaseNodeExecutor(ABC):
         Returns:
             NodeExecutionResult with classification field set
         """
-        from app.config import get_settings
-        settings = get_settings()
-
-        if self.makes_external_calls and settings.USE_DATA_CLASSIFICATION:
-            if not input_classification.can_export_to_external():
-                # Log violation asynchronously (non-blocking)
-                await self._log_export_violation_async(context, input_classification)
-
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="blocked",
-                    error=(
-                        f"Export Control: {input_classification.display_name} data "
-                        f"cannot be sent to external APIs. Node type '{self.node_type}' "
-                        f"makes external calls and requires PUBLIC or INTERNAL data."
-                    ),
-                    classification=input_classification,
-                )
+        blocked = await self.export_block(context, input_classification)
+        if blocked is not None:
+            return blocked
 
         # Execute the node
         result = await self.execute(context, db)
@@ -132,6 +117,54 @@ class BaseNodeExecutor(ABC):
             result.classification = input_classification
 
         return result
+
+    async def export_block(
+        self,
+        context: NodeExecutionContext,
+        input_classification: DataClassification,
+    ) -> Optional[NodeExecutionResult]:
+        """A ``blocked`` result (and an audit entry) when this node may not receive the data, else None."""
+        from app.config import get_settings
+
+        if self.makes_external_calls and get_settings().USE_DATA_CLASSIFICATION:
+            if not input_classification.can_export_to_external():
+                await self._log_export_violation_async(context, input_classification)
+                return NodeExecutionResult(
+                    node_id=context.node_id,
+                    status="blocked",
+                    error=(
+                        f"Export Control: {input_classification.display_name} data "
+                        f"cannot be sent to external APIs. Node type '{self.node_type}' "
+                        f"makes external calls and requires PUBLIC or INTERNAL data."
+                    ),
+                    classification=input_classification,
+                )
+        return None
+
+    async def prepare(
+        self,
+        context: NodeExecutionContext,
+        db: AsyncSession,
+    ) -> Any:
+        """Node gateway ``prepare`` hook (plan 003 U13, KTD4).
+
+        Returns a ``NodeExecutionResult`` (wrapped as ``final`` by the gateway) or a U33 prepare body
+        (``llm``/``wait``/``fanout`` dict). The default wraps ``execute``; export control and
+        adornments are applied by the gateway around this call.
+        """
+        return await self.execute(context, db)
+
+    async def finish(
+        self,
+        context: NodeExecutionContext,
+        db: AsyncSession,
+        finish_input: Any,
+    ) -> NodeExecutionResult:
+        """Node gateway ``finish`` hook: turn a generation answer / wake / fan-out summary into a result.
+
+        Executors whose ``prepare`` can return ``llm`` or ``wait`` override this (U14, U15).
+        """
+        raise NotImplementedError(f"node type '{self.node_type}' has no finish step")
 
     async def _log_export_violation_async(
         self,

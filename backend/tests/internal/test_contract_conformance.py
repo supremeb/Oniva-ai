@@ -464,3 +464,9 @@ async def test_models_no_retry_definitive(client, test_db):
     t = await tp.make_tenant(test_db)  # no provider key configured
     r = await client.post("/internal/models/policy", json=tp.body(t), headers=tp.AUTH)
     assert r.status_code == 200 and r.json()["ok"] is False and r.json()["code"] == "no_key"
+
+
+# TODO(U11): when `engine/test/support/fake-workflow-backend.ts` merges, add a `@clause` test here for
+# every `[clause:]` tag in its TSDoc, run against the /internal/workflows gateway (see
+# tests/internal/test_workflow_nodes.py, which already covers the U33 fixtures, key format and
+# idempotency), and add the matching drift guard.
