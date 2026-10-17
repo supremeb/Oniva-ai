@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 KIND = "workflow"
 TASK_KIND = "workflow_run"
 SPEC_KEY = "__spec"
+#: Run-level options frozen at the first start (``retry`` and an absolute ``deadlineMs``), so a restarted start repeats them.
+RUN_OPTIONS_KEY = "__run_options"
 STUCK_BATCH = 200
 TERMINAL = ("completed", "failed", "cancelled")
 #: A sync run waits this long for the engine, polling every POLL_INTERVAL_S (module constants: tests shrink them).
@@ -112,7 +114,8 @@ async def _compile(db, tenant_id: Any, spec: dict, workflow_id: Any) -> dict:
 
 
 async def start_engine_run(factory: Callable, execution_id: Any, *, engine: Any = None,
-                           deadline_ms: Optional[int] = None, recover: bool = False) -> run_handlers.StartResult:
+                           deadline_ms: Optional[int] = None, retry: Optional[Dict[str, int]] = None,
+                           recover: bool = False) -> run_handlers.StartResult:
     """Start (or idempotently re-start) the engine run of a ``queued`` execution. Never raises for engine trouble.
 
     ``recover`` also accepts a ``running`` execution and only asks the engine for its task id (the start is
@@ -129,6 +132,9 @@ async def start_engine_run(factory: Callable, execution_id: Any, *, engine: Any 
         spec = (execution.input_data or {}).get(SPEC_KEY)
         if not isinstance(spec, dict):
             return run_handlers.StartResult.failed("spec_missing")
+        options = (execution.input_data or {}).get(RUN_OPTIONS_KEY) or {}
+        retry = retry if retry is not None else options.get("retry")
+        deadline_ms = deadline_ms if deadline_ms is not None else options.get("deadlineMs")
         try:
             compiled = await compile_for_run(db, tenant_id, spec, workflow_id=workflow_id)
         except ValueError as exc:
@@ -139,7 +145,7 @@ async def start_engine_run(factory: Callable, execution_id: Any, *, engine: Any 
     try:
         conversation_id, project_id, session_id = await bind_run_conversation(
             factory, KIND, execution_id, tenant_id, user_id)
-        body = run_start_body(TASK_KIND, conversation_id, build_run_input(execution_id, compiled, deadline_ms=deadline_ms),
+        body = run_start_body(TASK_KIND, conversation_id, build_run_input(execution_id, compiled, retry=retry, deadline_ms=deadline_ms),
                               agent=_agent_tag(execution_id))
         started = await engine.start_run(session_id, tenant_id, project_id, body, key)
     except (EngineError, OSError, TimeoutError) as exc:
@@ -171,12 +177,17 @@ async def start_workflow_run(
     factory: Optional[Callable] = None,
     engine: Any = None,
     deadline_ms: Optional[int] = None,
+    retry: Optional[Dict[str, int]] = None,
+    settle_on_failure: bool = True,
 ) -> tuple[WorkflowExecution, Optional[str]]:
     """Create the execution (``queued``), bind its conversation and start the engine run.
 
     Returns ``(execution, task_id)``; ``task_id`` is None for a replay of an already-settled start.
     Raises ``HTTPException`` 400 for an invalid workflow and 502 when the engine cannot start it; in that
     case the execution is committed ``failed`` with the code (never a dangling ``queued``).
+    ``settle_on_failure=False`` (the scheduler) leaves it ``queued`` instead: the reconciler re-starts it with
+    bounded retries and ``fail`` ends it. ``retry`` (``{max, delayMs}``) and ``deadline_ms`` (absolute epoch ms)
+    are run-level (U35) and are kept with the execution.
     """
     tenant_id, user_id = _uuid(tenant_id), _uuid(user_id)
     workflow_id = getattr(workflow, "id", workflow)  # a workflow row, its id, or None (ad-hoc spec)
@@ -192,6 +203,8 @@ async def start_workflow_run(
         variables[SPEC_KEY] = spec
         if version_id is not None:
             variables["workflow_version_id"] = str(version_id)
+        if retry is not None or deadline_ms is not None:
+            variables[RUN_OPTIONS_KEY] = {k: v for k, v in (("retry", retry), ("deadlineMs", deadline_ms)) if v is not None}
         existing = WorkflowExecution(
             id=execution_id, workflow_id=workflow_id, user_id=user_id, tenant_id=tenant_id,
             engine_conversation_id=run_conversation_id(KIND, execution_id),
@@ -210,11 +223,11 @@ async def start_workflow_run(
         return existing, None  # settled
 
     result = await start_engine_run(factory or tenant_factory(tenant_id), execution_id,
-                                    engine=engine, deadline_ms=deadline_ms)
+                                    engine=engine, deadline_ms=deadline_ms, retry=retry)
     if result.status == "failed":
         error = result.error or "engine_unreachable"
         await db.refresh(existing)
-        if existing.status == "queued":
+        if existing.status == "queued" and settle_on_failure:
             settle(existing, "failed", error=error)
             await db.commit()
         raise HTTPException(status_code=502, detail={"error": error, "execution_id": str(execution_id)})
@@ -395,8 +408,9 @@ async def fail(ref: run_handlers.RunRef, code: str) -> None:
         return
     async with tenant_factory(ref.tenant_id)() as db:
         execution = await db.get(WorkflowExecution, ref.ref_id)
-        if execution is not None:
-            settle(execution, "failed", error=code)
+        if execution is not None and settle(execution, "failed", error=code) and execution.trigger == "scheduled":
+            from app.services import workflow_run_sync  # lazy: it imports this module
+            await workflow_run_sync.finish_scheduled(db, execution, "failed")
 
 
 def register_hooks() -> None:

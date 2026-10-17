@@ -398,7 +398,20 @@ class WorkflowSchedulerService:
         await self._db.flush()
         await self._db.refresh(execution)
 
-        # Dispatch to daemon for immediate execution
+        from app.services import workflow_engine_runs as wer
+        if await wer.tenant_uses_engine_workflows(self._db, schedule.tenant_id):
+            # Engine tenants: the same start as the poll loop, in the request (no background task). A start
+            # that does not get through leaves the execution for the reconciler.
+            from app.services import scheduled_run_hooks
+            try:
+                await scheduled_run_hooks.start_scheduled(self._db, execution.id)
+            except Exception:
+                logger.exception(f"Engine start failed for manual trigger of schedule {schedule_id}")
+            await self._db.refresh(execution)
+            logger.info(f"Manually triggered schedule: {schedule.name} ({schedule_id})")
+            return execution
+
+        # Dispatch to daemon for immediate execution (legacy path)
         try:
             daemon = get_scheduler_daemon()
             if daemon.is_running:
@@ -756,12 +769,39 @@ class WorkflowSchedulerDaemon:
 
         # Dispatch executions AFTER locks are released
         for item in dispatch_list:
+            if await self._uses_engine(item["tenant_id"]):
+                # Engine tenants: start the run and return; no semaphore, no task (plan 003 U19)
+                try:
+                    await self._start_on_engine(item)
+                except Exception:
+                    logger.exception(f"Engine start failed for schedule {item['schedule_id']}")
+                continue
             await self._semaphore.acquire()
             task = asyncio.create_task(
                 self._execute_with_release(item)
             )
             self._active_tasks.add(task)
             task.add_done_callback(self._active_tasks.discard)
+
+    async def _uses_engine(self, tenant_id) -> bool:
+        from app.services import workflow_engine_runs as wer
+        async with self._session_factory() as db:
+            return await wer.tenant_uses_engine_workflows(db, tenant_id)
+
+    async def _start_on_engine(self, item: dict) -> None:
+        """Start the engine run of a claimed execution. Retries, timeout and the end state belong to the run."""
+        from app.core.database import get_db_for_tenant
+        from app.services import scheduled_run_hooks
+
+        async with get_db_for_tenant(str(item["tenant_id"])) as db:
+            if db.bind is not None and db.bind.dialect.name == "postgresql":
+                await db.execute(
+                    text("SELECT set_config('app.current_user_id', :uid, true)"), {"uid": str(item["user_id"])})
+                await db.execute(text("SELECT set_config('app.client_ip', 'scheduler-daemon', true)"))
+                await db.execute(
+                    text("SELECT set_config('app.user_agent', :ua, true)"),
+                    {"ua": f"WorkflowSchedulerDaemon/1.0 schedule_id={item['schedule_id']}"})
+            await scheduled_run_hooks.start_scheduled(db, item["execution_id"])
 
     async def _execute_with_release(self, item: dict) -> None:
         """Execute a workflow and release the semaphore when done."""
@@ -1074,6 +1114,9 @@ class WorkflowSchedulerDaemon:
             "retry_delay_seconds": schedule.retry_delay_seconds or 60,
             "name": schedule.name,
         }
+        if await self._uses_engine(schedule.tenant_id):
+            await self._start_on_engine(item)
+            return
         await self._semaphore.acquire()
         task = asyncio.create_task(self._execute_with_release(item))
         self._active_tasks.add(task)
@@ -1099,6 +1142,10 @@ class WorkflowSchedulerDaemon:
                     JOIN scheduled_workflows sw ON e.schedule_id = sw.id
                     WHERE e.status = 'running'
                       AND e.started_at + (sw.timeout_seconds || ' seconds')::interval < NOW()
+                      AND NOT EXISTS (
+                          SELECT 1 FROM workflow_executions we
+                          WHERE we.id = e.workflow_execution_id AND we.engine_conversation_id IS NOT NULL
+                      )
                 """))
                 scheduled_orphans = result.fetchall()
 
@@ -1107,6 +1154,7 @@ class WorkflowSchedulerDaemon:
                     SELECT id, tenant_id
                     FROM workflow_executions
                     WHERE status = 'running'
+                      AND engine_conversation_id IS NULL
                       AND started_at + (:timeout || ' seconds')::interval < NOW()
                 """), {"timeout": self._MANUAL_EXECUTION_TIMEOUT_SECONDS})
                 manual_orphans = result2.fetchall()

@@ -65,6 +65,7 @@ FINALIZE_KEY_RE = re.compile(r"^(?P<run>[^:\s]+):r(?P<r>\d+):finalize$")
 KEY_RE = re.compile(r"^(?P<run>[^:\s]+):(?P<node>[^:\s]+):r(?P<r>\d+):a(?P<a>\d+):(?P<phase>prepare|finish)$")
 SCOPE_KEYS = ("tenantId", "projectId", "conversationId", "classification", "nodeType")
 PHASE_TOOL = {"prepare": "workflow_prepare", "finish": "workflow_finish"}
+RUN_OPTIONS_KEY = "__run_options"  # retry and deadline a run started with (U19); never a node variable
 SPEC_KEY = "__spec"  # the frozen spec a run started with, kept in its input_data (U15)
 INPUT_CLASS_KEY = "__classification"  # an iteration item's inherited input classification (U15)
 INTERRUPTED_FINAL: Dict[str, Any] = {
@@ -287,7 +288,7 @@ class RunView:
         self.user_id = execution.user_id
         self.tenant_id: uuid.UUID = execution.tenant_id
         self.trigger = execution.trigger
-        self.variables: Dict[str, Any] = {k: v for k, v in (execution.input_data or {}).items() if k != SPEC_KEY}
+        self.variables: Dict[str, Any] = {k: v for k, v in (execution.input_data or {}).items() if k not in (SPEC_KEY, RUN_OPTIONS_KEY)}
         self.inherited_classification = _stored_class(self.variables.get(INPUT_CLASS_KEY))
         self.trace: List[Dict[str, Any]] = list(execution.execution_trace or [])
         self.spec = spec
