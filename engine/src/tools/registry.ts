@@ -131,6 +131,12 @@ export interface ToolDefinition<A = unknown> {
   readonly internal: boolean;
   /** Whether the tool's result is untrusted input for the conversation. */
   readonly untrustedOutput: boolean;
+  /**
+   * The tool asks a person instead of executing: its arguments must match
+   * `questionSpecSchema` (`agent/questions.ts`), the tool task parks on a
+   * durable question and the answer becomes the result. `execute` is not called.
+   */
+  readonly humanInput: boolean;
   execute(args: A, api: ToolApi): ToolResult | Promise<ToolResult>;
   /**
    * After a restart that interrupted an `unsafe` call between intent and
@@ -152,6 +158,8 @@ export interface ToolDefinitionInput<A> {
   internal?: boolean;
   /** Mark the tool's result as untrusted input for the conversation. */
   untrustedOutput?: boolean;
+  /** Mark a tool that asks a person; see {@link ToolDefinition.humanInput}. */
+  humanInput?: boolean;
   execute(args: A, api: ToolApi): ToolResult | Promise<ToolResult>;
   reconcile?(args: A, api: ToolReconcileApi): ToolResult | null | Promise<ToolResult | null>;
 }
@@ -180,6 +188,7 @@ export function defineTool<A>(input: ToolDefinitionInput<A>): ToolDefinition<A> 
     source: input.source ?? "native",
     internal: input.internal ?? false,
     untrustedOutput: input.untrustedOutput ?? false,
+    humanInput: input.humanInput ?? false,
     execute: input.execute,
     ...(input.reconcile ? { reconcile: input.reconcile } : {}),
   });

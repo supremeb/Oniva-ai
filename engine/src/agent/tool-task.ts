@@ -28,6 +28,12 @@
  * happened and carries the output committed so far. The tool is not run
  * again.
  *
+ * - `answered` (U10, R10): a tool flagged `humanInput` (`ask_user`) never
+ *   executes. After authorization it commits a question together with
+ *   `waiting({ signal: "answer", until: expiresAt })`; the answer commits an
+ *   `ok` result whose content is the answer text, the deadline a
+ *   `question_expired` result. An abort closes the question `cancelled`.
+ *
  * A subagent tool (`subagents.ts`) leaves `start` / `approved` for the
  * `subagent` phase instead of `execute`: it runs a child conversation the
  * task owns and waits for its answer without a running invocation.
@@ -91,6 +97,15 @@ import {
   toolOutputIntervalMs,
 } from "./progress.js";
 import { type AgentConfig, agentConfigDoc } from "./prompt.js";
+import {
+  ANSWER_SIGNAL,
+  answerText,
+  closeQuestion,
+  isAnswerSignal,
+  questionSpecSchema,
+  questionsDoc,
+  requestQuestion,
+} from "./questions.js";
 import { isSubagentTool, SUBAGENT_PHASE, type SubagentLink, subagentPhase } from "./subagents.js";
 import { markTainted, rootConversationId, taintOf, taintSummary, toolTaints } from "./taint.js";
 
@@ -113,6 +128,8 @@ export interface AgentDeps {
    * empty, which is how `execute` recognises an interrupted call.
    */
   freshIntents: Set<string>;
+  /** Expiry of an `ask_user` question in ms after it is asked; null for none. */
+  questionTtlMs: number | null;
 }
 
 export type ToolCallInput = {
@@ -377,6 +394,39 @@ export function toolTaskDefinition(
       return writeToolResult(tx, task, status, capped, attempts);
     });
 
+  /**
+   * Ask a person (a `humanInput` tool): commit the question together with the
+   * wait for its answer, to resume in `answered`.
+   */
+  const askQuestion = async (task: State, rt: Scope, args: JsonObject): Promise<Committed> => {
+    const spec = questionSpecSchema.safeParse(args);
+    if (!spec.success) {
+      return fail(
+        task,
+        rt,
+        "invalid_arguments",
+        `Invalid arguments for ${task.input.call.name}: ${issuesText(spec.error.issues)}`,
+      );
+    }
+    return rt.commit(async (tx) => {
+      const expiresAt = deps.questionTtlMs === null ? null : tx.now + deps.questionTtlMs;
+      await requestQuestion(tx, {
+        conversationId: task.conversationId,
+        toolTaskId: task.id,
+        runId: task.input.runId,
+        toolCallId: task.input.call.id,
+        spec: spec.data,
+        expiresAt,
+      });
+      return waiting({
+        signal: ANSWER_SIGNAL,
+        until: expiresAt,
+        phase: "answered",
+        checkpoint: { arguments: args },
+      });
+    });
+  };
+
   const fail = (task: State, rt: Scope, status: ToolResultStatus, message: string) =>
     finish(task, rt, status, { content: message, isError: true }, 0);
 
@@ -472,6 +522,7 @@ export function toolTaskDefinition(
             if (isSubagentTool(tool)) {
               return rt.commit(() => next(SUBAGENT_PHASE, { arguments: args }));
             }
+            if (tool.humanInput) return askQuestion(task, rt, args);
             const intent = await rt.commit(() => next("execute", { arguments: args }));
             deps.freshIntents.add(task.id);
             return intent;
@@ -520,12 +571,59 @@ export function toolTaskDefinition(
           );
         }
         const approvedArgs = task.checkpoint?.arguments ?? {};
-        if (isSubagentTool(deps.tools.get(task.input.call.name))) {
+        const approvedTool = deps.tools.get(task.input.call.name);
+        if (isSubagentTool(approvedTool)) {
           return rt.commit(() => next(SUBAGENT_PHASE, { arguments: approvedArgs }));
         }
+        if (approvedTool?.humanInput) return askQuestion(task, rt, approvedArgs);
         const intent = await rt.commit(() => next("execute", { arguments: approvedArgs }));
         deps.freshIntents.add(task.id);
         return intent;
+      },
+
+      answered: async (task, rt) => {
+        const item = (await deps.session.document(questionsDoc, task.conversationId)).items.find(
+          (i) => i.toolTaskId === task.id,
+        );
+        if (
+          item?.status === "answered" &&
+          item.answer !== null &&
+          isAnswerSignal(task.signals[ANSWER_SIGNAL])
+        ) {
+          return finish(
+            task,
+            rt,
+            "ok",
+            {
+              content: answerText(item),
+              details: {
+                questionId: item.id,
+                optionIds: item.answer.optionIds,
+                text: item.answer.text,
+                principal: item.answer.principal,
+                answeredAt: item.answer.answeredAt,
+              },
+            },
+            0,
+          );
+        }
+        if (task.wake?.reason !== "deadline") {
+          // Woken without an answer or deadline: keep waiting.
+          return rt.commit(() =>
+            waiting({ signal: ANSWER_SIGNAL, until: item?.expiresAt ?? null, phase: "answered" }),
+          );
+        }
+        return finish(
+          task,
+          rt,
+          "question_expired",
+          {
+            content: "The question expired before the user answered. Continue without an answer.",
+            isError: true,
+          },
+          0,
+          { prepare: (tx) => closeQuestion(tx, task.conversationId, task.id, "expired") },
+        );
       },
 
       execute: async (task, rt, ctx) => {
@@ -566,10 +664,15 @@ export function toolTaskDefinition(
       [SUBAGENT_PHASE]: (task, rt) => subagentPhase(deps, task, rt, writeToolResult),
     },
     onAbort: async (task, scope) => {
-      if (task.phase !== "approved") return;
-      await scope.commit(async (tx) => {
-        await closeApproval(tx, task.conversationId, task.id, "cancelled");
-      });
+      if (task.phase === "approved") {
+        await scope.commit(async (tx) => {
+          await closeApproval(tx, task.conversationId, task.id, "cancelled");
+        });
+      } else if (task.phase === "answered") {
+        await scope.commit(async (tx) => {
+          await closeQuestion(tx, task.conversationId, task.id, "cancelled");
+        });
+      }
     },
   });
 

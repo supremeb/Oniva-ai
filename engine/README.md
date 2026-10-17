@@ -29,10 +29,10 @@ Everything is exported from the package root (`src/index.ts`).
 
 | Area | Main exports |
 | --- | --- |
-| Harness | `Harness.open(storage, options)`, `harness.createConversation`, `harness.conversation(id)`, `harness.submission(id)`, `harness.decideApproval`, `harness.approvals`, `harness.waitForIdle`, `harness.close` |
+| Harness | `Harness.open(storage, options)`, `harness.createConversation`, `harness.conversation(id)`, `harness.submission(id)`, `harness.decideApproval`, `harness.approvals`, `harness.answerQuestion`, `harness.questions`, `harness.waitForIdle`, `harness.close` |
 | Conversations | `conversation.submit({ text, requestId?, whenBusy?: "followUp" \| "steer" \| "reject", type? })` → `Submission` (`wait()`, `record()`), `conversation.abort(reason?)`, `conversation.cancelSubmission(submissionId)` → `"cancelled" \| "not_queued" \| "unknown"`, `entries()`, `live()`, `usage()` |
 | Policy & hooks | `HostPolicy` (`resolveModelRequest`, `authorizeTool` → `allow` / `block` / `requireApproval`), `AgentHooks` |
-| Tools | `defineTool`, `ToolRegistry`, `createGatewayTools`, `createSubagentTool` |
+| Tools | `defineTool`, `ToolRegistry`, `createGatewayTools`, `createSubagentTool`, `askUserTool` |
 | Models | `ModelRegistry`, `AnthropicProvider`, `OpenAICompatibleProvider` / `openRouterProvider`, `FakeProvider` (`fakeText`, `fakeToolCall`, ...) |
 | Storage | `PostgresStorageProvider`, `MemoryStorageProvider`, `migrate`, `PostgresLeases`, `LeaseKeeper`, `defineStorageConformanceSuite` |
 | HTTP & watch | `createEngineServer`, `WatchHub`, `loadConversationView` |
@@ -101,6 +101,15 @@ When the worker restarts with a task of a run in flight (the run's own generatio
 When a generation fails after streaming text (a model error), that text is kept as an `assistant` entry with `partial: true` and `message.stopReason: "error"`, written just before the `run_error` entry; its blocks are as streamed (a tool call may be incomplete and is never run). On the next turn the model sees only the partial entry's text blocks. A failure before any text (including a policy denial) writes only `run_error`.
 
 A worker that does not hold the session lease answers `409 { error: "not_owner", ownerId }`.
+
+## Questions (`ask_user`)
+
+The native `ask_user` tool (`askUserTool`, flagged `internal` and `humanInput`) lets the model ask a person a question and wait for the answer as durably as an approval. Arguments: `{ question, options?: [{ id, label, description? }], multiSelect?, allowFreeText? }`. Free text is always allowed when there are no options.
+
+- **Document.** `agent.questions` (per conversation): `{ items: QuestionItem[] }`, one item per tool task: `id` (`ques_...`), `toolTaskId`, `runId`, `toolCallId`, `question`, `options`, `multiSelect`, `allowFreeText`, `requestedAt`, `expiresAt`, `status` (`pending` / `answered` / `expired` / `cancelled`), `answer` (`{ optionIds, text, principal, answeredAt }`), `closedAt`.
+- **Tool phase.** A call still goes through `HostPolicy.authorizeTool` first (an approval, if required, comes before the question). On `allow` the tool task commits the item together with `waiting({ signal: "answer", until: expiresAt })` and holds no running task. The answer commits an `ok` result whose text is the chosen option labels (comma separated) and any free text as given; the deadline commits a `question_expired` result and the run continues. An abort closes the item `cancelled`. An answered question never taints the conversation.
+- **Harness API.** `harness.answerQuestion({ conversationId, toolTaskId, answer: { optionIds?, text? }, principal })` and `harness.questions(conversationId)`. A rejected answer throws `QuestionRejected` and writes nothing; `reason` is `not_owned`, `already_answered`, `expired`, `not_waiting` or `invalid` (unknown or repeated option, several options without `multiSelect`, text where not allowed, nothing chosen, an answer over 16 KiB, bad shape).
+- **Expiry.** `HarnessOptions.questionTtlMs` (default 7 days; `0` or `null` for none). The worker setting `ENGINE_QUESTION_TTL_MS` and the HTTP, watch and worker wiring come with the follow-up unit.
 
 ## Running a worker
 
