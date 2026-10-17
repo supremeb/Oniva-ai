@@ -1,0 +1,29 @@
+{
+  "statuses": ["queued", "running", "waiting", "resuming", "completed", "failed", "cancelled", "skipped", "interrupted"],
+  "legacy": {
+    "pending": "queued",
+    "queued": "queued",
+    "running": "running",
+    "waiting": "waiting",
+    "resuming": "resuming",
+    "completed": "completed",
+    "success": "completed",
+    "failed": "failed",
+    "error": "failed",
+    "cancelled": "cancelled",
+    "skipped": "skipped",
+    "interrupted": "interrupted"
+  },
+  "engine_task": {
+    "pending": "queued",
+    "running": "running",
+    "completing": "running",
+    "waiting": "waiting"
+  },
+  "engine_outcome": {
+    "done": "completed",
+    "aborted": "cancelled",
+    "faulted": "failed"
+  },
+  "unknown": "failed"
+}

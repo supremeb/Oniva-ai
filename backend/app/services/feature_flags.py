@@ -19,6 +19,11 @@ from cachetools import TTLCache
 
 from app.config import get_settings
 from app.models.tenant import Tenant
+from app.services.engine_client import (
+    FLEET_TASK_KINDS,
+    WORKFLOW_TASK_KINDS,
+    engine_has_capability,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +112,18 @@ FLAG_METADATA: dict[str, FlagMeta] = {
         operator_only=True,
     ),
 
+    "ENABLE_ENGINE_FLEET": FlagMeta(
+        group="Core",
+        description="Run Fleet background agents on the engine (needs global flag + ENABLE_ENGINE_API + engine capability)",
+        operator_only=True,
+    ),
+
+    "ENABLE_ENGINE_WORKFLOWS": FlagMeta(
+        group="Core",
+        description="Run workflows on the engine (needs global flag + ENABLE_ENGINE_API + engine capability)",
+        operator_only=True,
+    ),
+
     # Infrastructure (operator-only — cost/security implications)
     "ENABLE_SANDBOX": FlagMeta(
         group="Infrastructure",
@@ -155,6 +172,10 @@ def get_feature(tenant: Tenant, flag_name: str) -> bool:
         return engine_chat_enabled(tenant)
     if flag_name == ENGINE_DEEP_WORK_FLAG:
         return engine_deep_work_enabled(tenant)
+    if flag_name == ENGINE_FLEET_FLAG:
+        return engine_fleet_enabled(tenant)
+    if flag_name == ENGINE_WORKFLOWS_FLAG:
+        return engine_workflows_enabled(tenant)
 
     tenant_features = (tenant.settings or {}).get("features", {})
     tenant_val = tenant_features.get(flag_name)
@@ -170,6 +191,8 @@ def get_feature(tenant: Tenant, flag_name: str) -> bool:
 
 ENGINE_CHAT_FLAG = "ENABLE_ENGINE_CHAT"
 ENGINE_DEEP_WORK_FLAG = "ENABLE_ENGINE_DEEP_WORK"
+ENGINE_FLEET_FLAG = "ENABLE_ENGINE_FLEET"
+ENGINE_WORKFLOWS_FLAG = "ENABLE_ENGINE_WORKFLOWS"
 
 
 def _engine_tenant_flag(tenant: Tenant, flag: str, global_on: bool, settings) -> bool:
@@ -194,6 +217,20 @@ def engine_deep_work_enabled(tenant: Tenant, settings=None) -> bool:
     """Engine Deep Work for a tenant; same ceiling semantics as engine_chat_enabled."""
     s = settings if settings is not None else get_settings()
     return _engine_tenant_flag(tenant, ENGINE_DEEP_WORK_FLAG, s.ENABLE_ENGINE_DEEP_WORK, s)
+
+
+def engine_fleet_enabled(tenant: Tenant, settings=None) -> bool:
+    """Engine Fleet runs: Deep Work semantics plus the engine capability gate (KTD16)."""
+    s = settings if settings is not None else get_settings()
+    return (_engine_tenant_flag(tenant, ENGINE_FLEET_FLAG, s.ENABLE_ENGINE_FLEET, s)
+            and engine_has_capability(s, FLEET_TASK_KINDS))
+
+
+def engine_workflows_enabled(tenant: Tenant, settings=None) -> bool:
+    """Engine workflow runs: Deep Work semantics plus the engine capability gate (KTD16)."""
+    s = settings if settings is not None else get_settings()
+    return (_engine_tenant_flag(tenant, ENGINE_WORKFLOWS_FLAG, s.ENABLE_ENGINE_WORKFLOWS, s)
+            and engine_has_capability(s, WORKFLOW_TASK_KINDS))
 
 
 def get_tenant_features(tenant: Tenant) -> dict[str, bool]:
@@ -236,6 +273,8 @@ def _resolve_all_features(tenant: Tenant) -> dict[str, bool]:
 
     all_flags[ENGINE_CHAT_FLAG] = engine_chat_enabled(tenant, global_settings)
     all_flags[ENGINE_DEEP_WORK_FLAG] = engine_deep_work_enabled(tenant, global_settings)
+    all_flags[ENGINE_FLEET_FLAG] = engine_fleet_enabled(tenant, global_settings)
+    all_flags[ENGINE_WORKFLOWS_FLAG] = engine_workflows_enabled(tenant, global_settings)
     return all_flags
 
 
