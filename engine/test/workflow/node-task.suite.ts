@@ -184,6 +184,13 @@ export function defineNodeTaskSuite(backend: AgentBackend): void {
       expect(be.calls("prepare")[0]?.headers.authorization).toBe(`Bearer ${be.serviceToken}`);
     });
 
+    it("the prepare body carries the node task's own id so a backend can signal it (U21)", async () => {
+      const w = await open();
+      const a = await spawn(w, { runAttempt: 0 });
+      await w.harness.runtime.waitForTask(a.id);
+      expect(be.calls("prepare")[0]?.body).toMatchObject({ nodeTaskId: a.id });
+    });
+
     it("an llm prepare spawns one child conversation whose answer reaches finish", async () => {
       be.script("n1", "prepare", { body: llm() });
       be.script("n1", "finish", { body: fixture("prepare.final.valid") });

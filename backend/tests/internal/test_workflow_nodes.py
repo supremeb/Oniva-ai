@@ -422,6 +422,27 @@ async def test_engine_shaped_finish_body_without_scope_is_accepted(wf):
     assert (await call(wf, "it", "finish", body=fixture)).status_code == 200
 
 
+async def test_prepare_passes_the_node_task_id_to_the_executor_context(wf, monkeypatch):
+    from app.internal_api import workflow_nodes as wn
+
+    seen = []
+    real = wn._context
+
+    def spy(view, inputs, scope, run_id, db, node_task_id=None, run_attempt=None):
+        seen.append((node_task_id, run_attempt))
+        return real(view, inputs, scope, run_id, db, node_task_id, run_attempt)
+
+    monkeypatch.setattr(wn, "_context", spy)
+    r = await call(wf, "t", body=ENGINE_BODY | {"nodeTaskId": "run-task:r0:t"})
+    assert r.status_code == 200 and seen == [("run-task:r0:t", 0)]
+
+
+@pytest.mark.parametrize("bad", [7, "", "x" * 513])
+async def test_a_malformed_node_task_id_is_400(wf, bad):
+    r = await call(wf, "t", body=ENGINE_BODY | {"nodeTaskId": bad})
+    assert r.status_code == 400 and wf.counts["template"] == 0
+
+
 async def test_body_scope_that_disagrees_with_the_run_is_404(wf):
     for extra in ({"tenantId": str(wf.tenant_b)}, {"projectId": str(wf.project_b)}, {"conversationId": str(wf.conv_b)}):
         assert (await call(wf, "t", body=ENGINE_BODY | extra)).status_code == 404

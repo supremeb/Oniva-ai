@@ -2363,6 +2363,51 @@ async def cancel_batch(
 # Execution Cancellation Endpoint (Enterprise)
 # ============================================
 
+@router.get("/executions/{execution_id}/waiting-nodes")
+async def list_waiting_nodes(
+    execution_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
+) -> Dict[str, Any]:
+    """Nodes of a run parked on a human decision (plan 003 U21), for the canvas.
+
+    Each has the node id, the wake time (the SLA, or null when open-ended), the approval ledger id and the
+    ids the decision route needs (``POST /engine/conversations/{conversationId}/approvals/{taskId}/decision``).
+    The run's owner and anyone who may decide approvals see them; another tenant's run is a 404.
+    """
+    from app.auth.permissions import has_permission
+    from app.models.tool_approval import OPEN_STATUSES, ToolApproval
+
+    execution = (await db.execute(select(WorkflowExecution).where(
+        WorkflowExecution.id == execution_id, WorkflowExecution.tenant_id == tenant_id))).scalar_one_or_none()
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    if str(execution.user_id) != str(user.id) and not has_permission(user.role, "approvals:decide"):
+        raise HTTPException(status_code=403, detail="You don't have access to this execution")
+    rows = (await db.execute(
+        select(ToolApproval).where(
+            ToolApproval.tenant_id == tenant_id, ToolApproval.run_id == str(execution_id),
+            ToolApproval.kind == "review", ToolApproval.status.in_(OPEN_STATUSES),
+        ).order_by(ToolApproval.created_at, ToolApproval.id))).scalars().all()
+    return {
+        "executionId": str(execution_id),
+        "nodes": [
+            {
+                "nodeId": (row.arguments_preview or {}).get("nodeId"),
+                "kind": "human_in_loop",
+                "title": row.tool_name,
+                "status": row.status,
+                "wakeAt": row.expires_at.isoformat() if row.expires_at else None,
+                "approvalId": str(row.id),
+                "conversationId": str(row.conversation_id) if row.conversation_id else None,
+                "taskId": row.tool_task_id,
+            }
+            for row in rows
+        ],
+    }
+
+
 @router.post("/{execution_id}/cancel")
 async def cancel_execution(
     execution_id: uuid.UUID,

@@ -411,7 +411,13 @@ export function createWorkflowNodeTask(
       result = await deps.gateway.prepare(
         { runId, nodeId },
         keyFor(task, cp, "prepare"),
-        { contractVersion: CONTRACT_VERSION, runAttempt, nodeAttempt: cp.nodeAttempt, nodeType },
+        {
+          contractVersion: CONTRACT_VERSION,
+          runAttempt,
+          nodeAttempt: cp.nodeAttempt,
+          nodeType,
+          nodeTaskId: task.id,
+        },
         callOptions(task, ctx),
       );
     } catch (err) {

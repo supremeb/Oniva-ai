@@ -75,6 +75,8 @@ export interface PrepareRequest {
   runAttempt: number;
   nodeAttempt: number;
   nodeType: string;
+  /** The node task's own id: a backend that parks the node on a human decision signals this task (U21). */
+  nodeTaskId?: string;
 }
 
 export interface NodeFenceRejection {

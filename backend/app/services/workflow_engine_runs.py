@@ -291,7 +291,17 @@ async def cancel_workflow_run(db, execution: WorkflowExecution, reason: Optional
     settled = await abort_run(db, execution, reason, engine=engine)
     set_abort_pending(execution, not settled)
     settle(execution, "cancelled", error=reason or "Execution cancelled by user")
+    # A node parked on a human decision has nothing left to wait for (plan 003 U21).
+    await close_wait_approvals(db, execution, "run cancelled")
     return True
+
+
+async def close_wait_approvals(db, execution: WorkflowExecution, reason: str) -> int:
+    """Close the run's open approval-ledger rows (human-in-loop waits). The caller commits."""
+    from app.services.approval_service import ApprovalService
+
+    return await ApprovalService(db).mark_closed(
+        execution.tenant_id, run_id=str(execution.id), reason=reason, commit=False)
 
 
 # ---- waiting for a sync run ---------------------------------------------------------------------
