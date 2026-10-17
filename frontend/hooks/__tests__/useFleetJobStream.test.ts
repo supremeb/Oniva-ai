@@ -68,7 +68,7 @@ describe('useFleetJobStream', () => {
     expect(result.current.loading).toBe(true);
     expect(result.current.parts).toEqual([]);
     expect(result.current.isLive).toBe(false);
-    expect(result.current.status).toBe('pending');
+    expect(result.current.status).toBe('queued');
     expect(result.current.job).toBeNull();
     expect(result.current.error).toBeNull();
   });
