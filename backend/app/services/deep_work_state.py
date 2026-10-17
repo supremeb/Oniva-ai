@@ -70,6 +70,7 @@ class RunSnapshot:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     chat_id: Optional[uuid.UUID] = None
+    awaiting_input: Optional[Any] = None
 
     @classmethod
     def of(cls, r: DeepWorkRun) -> "RunSnapshot":
@@ -80,11 +81,27 @@ class RunSnapshot:
             rounds=copy.deepcopy(r.rounds or []), reflections=copy.deepcopy(r.reflections or []),
             artifacts=copy.deepcopy(r.artifacts or []), job_id=r.job_id, is_engine=bool(r.is_engine),
             created_at=r.created_at, updated_at=r.updated_at, chat_id=r.chat_id,
+            awaiting_input=copy.deepcopy(r.awaiting_input),
         )
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _approvals(db: Any):
+    from app.services.approval_service import ApprovalService  # lazy: the service imports half the app
+
+    return ApprovalService(db)
+
+
+async def _close_run_approvals(factory: SessionFactory, tenant_id: Any, conversation_id: Any, status: str) -> None:
+    """A run reaching a terminal state closes its pending approvals (KTD11). Never fails the transition."""
+    try:
+        async with factory() as db:
+            await _approvals(db).mark_closed(tenant_id, conversation_id=conversation_id, reason=f"run {status}")
+    except Exception:
+        logger.warning("Could not close approvals of run %s", conversation_id, exc_info=True)
 
 
 def _uuid(value: Any) -> uuid.UUID:
@@ -218,7 +235,10 @@ async def update_run(
         _advance(row, phase=phase, round=round, status=status, plan=plan, enriched_query=enriched_query,
                  reflection=reflection, artifact=artifact)
         await db.flush()
-        return RunSnapshot.of(row)
+        snap = RunSnapshot.of(row)
+    if snap.status in TERMINAL_STATUSES:
+        await _close_run_approvals(factory, tenant_id, conversation_id, snap.status)
+    return snap
 
 
 async def save_worker_learnings(
@@ -276,14 +296,20 @@ class LockedRun:
 @asynccontextmanager
 async def run_lock(factory: SessionFactory, tenant_id: Any, conversation_id: Any) -> AsyncIterator[Optional[LockedRun]]:
     """Hold the run row locked for the body; yields ``None`` when the run does not exist."""
+    ended: Optional[str] = None
     async with factory() as db:
         row = await _locked(db, tenant_id, conversation_id)
         if row is None:
             yield None
             return
+        was_terminal = row.status in TERMINAL_STATUSES
         locked = LockedRun(row)
         yield locked
         await db.flush()
+        if not was_terminal and row.status in TERMINAL_STATUSES:
+            ended = row.status
+    if ended is not None:
+        await _close_run_approvals(factory, tenant_id, conversation_id, ended)
 
 
 async def _mutate(
@@ -396,7 +422,26 @@ async def reconcile(
                     job.error = state.error or "The engine run ended before the report was produced."
         await db.flush()
         logger.info("Deep Work run %s reconciled to %s", row.id, status)
-        return RunSnapshot.of(row)
+        snap = RunSnapshot.of(row)
+    await _close_run_approvals(factory, tenant_id, conversation_id, status)
+    return snap
+
+
+async def set_awaiting_input(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any, payload: Any,
+) -> Optional[RunSnapshot]:
+    """Persist the intake clarification the user has to answer (inbox source); a terminal run is left alone."""
+    def fn(row: DeepWorkRun) -> None:
+        row.awaiting_input = copy.deepcopy(payload)
+    return await _mutate(factory, tenant_id, conversation_id, fn)
+
+
+async def clear_awaiting_input(
+    factory: SessionFactory, tenant_id: Any, conversation_id: Any,
+) -> Optional[RunSnapshot]:
+    def fn(row: DeepWorkRun) -> None:
+        row.awaiting_input = None
+    return await _mutate(factory, tenant_id, conversation_id, fn)
 
 
 async def load_run_by_id(factory: SessionFactory, tenant_id: Any, run_id: Any) -> Optional[RunSnapshot]:
