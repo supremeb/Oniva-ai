@@ -1,11 +1,69 @@
 import { describe, expect, it } from "vitest";
 import { Context } from "../../src/core/context.js";
 import { OpenAICompatibleProvider } from "../../src/models/openai-compatible.js";
-import { describeError, type RetryInfo, rateLimitResetMs } from "../../src/models/retry.js";
+import {
+  describeError,
+  type RetryInfo,
+  type RetryPolicy,
+  rateLimitResetMs,
+  type SetTimer,
+} from "../../src/models/retry.js";
 import { ModelRegistry } from "../../src/models/stream.js";
 import type { ModelCall, StreamEvent, TerminalEvent } from "../../src/models/types.js";
 
-type Step = () => Response | Promise<Response>;
+type Step = (url?: string | URL | Request, init?: RequestInit) => Response | Promise<Response>;
+
+/** Distinct first-byte and idle deadlines so a test can tell which timer fired. */
+const FIRST_BYTE_MS = 500;
+const IDLE_MS = 900;
+
+/** A settable attempt-timer scheduler: fire live timers on demand, or await one being armed. */
+class FakeTimers {
+  readonly firedMs: number[] = [];
+  readonly #armed: Array<{ ms: number; cb: () => void; cancelled: boolean; fired: boolean }> = [];
+  readonly #waiting: Array<{ ms: number; resolve: () => void }> = [];
+
+  readonly setTimer: SetTimer = (ms, cb) => {
+    const entry = { ms, cb, cancelled: false, fired: false };
+    this.#armed.push(entry);
+    for (let i = this.#waiting.length - 1; i >= 0; i--) {
+      if (this.#waiting[i]?.ms === ms) {
+        this.#waiting[i]?.resolve();
+        this.#waiting.splice(i, 1);
+      }
+    }
+    return () => {
+      entry.cancelled = true;
+    };
+  };
+
+  /** Resolves once a live timer for `ms` has been armed. */
+  armed(ms: number): Promise<void> {
+    return new Promise((resolve) => this.#waiting.push({ ms, resolve }));
+  }
+
+  /** Fire the newest live timer for `ms`. */
+  fire(ms: number): void {
+    this.#fire((entry) => entry.ms === ms);
+  }
+
+  /** Fire the newest live timer, whatever its delay. */
+  fireLatest(): void {
+    this.#fire(() => true);
+  }
+
+  #fire(match: (entry: { ms: number; cancelled: boolean; fired: boolean }) => boolean): void {
+    for (let i = this.#armed.length - 1; i >= 0; i--) {
+      const entry = this.#armed[i];
+      if (entry && !entry.cancelled && !entry.fired && match(entry)) {
+        entry.fired = true;
+        this.firedMs.push(entry.ms);
+        entry.cb();
+        return;
+      }
+    }
+  }
+}
 
 const frames = (items: Array<Record<string, unknown> | "[DONE]">): string =>
   items.map((f) => `data: ${f === "[DONE]" ? f : JSON.stringify(f)}\n\n`).join("");
@@ -54,16 +112,85 @@ const brokenStream =
     return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
   };
 
-function setup(steps: Step[], retry: { maxRetries?: number; budgetMs?: number } = {}) {
+/** A request that never receives response headers; the first-byte timer is fired on call. */
+const stallBeforeHeaders =
+  (t: FakeTimers): Step =>
+  (_url, init) =>
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      t.fireLatest();
+    });
+
+/** A 200 that emits one text delta, then goes silent and fires the idle timer. */
+const stallAfterDelta =
+  (t: FakeTimers): Step =>
+  (_url, init) => {
+    const enc = new TextEncoder();
+    const signal = init?.signal;
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        signal?.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      },
+      pull(controller) {
+        pulls++;
+        if (pulls === 1) {
+          controller.enqueue(enc.encode(frames([chunk({ content: "Par" })])));
+          return;
+        }
+        // Only once the first delta has cleared the first-byte timer and armed
+        // the idle timer does the stall "take" the idle timeout.
+        void t.armed(IDLE_MS).then(() => t.fire(IDLE_MS));
+      },
+    });
+    return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+/** A 200 that sends only a keepalive comment, then stalls and fires the first-byte timer. */
+const commentThenStall =
+  (t: FakeTimers): Step =>
+  (_url, init) => {
+    const enc = new TextEncoder();
+    const signal = init?.signal;
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        signal?.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      },
+      pull(controller) {
+        pulls++;
+        if (pulls === 1) controller.enqueue(enc.encode(": keepalive\n\n"));
+        else t.fireLatest();
+      },
+    });
+    return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+/** A 200 whose text arrives in several deltas, then finishes. */
+const okChunks =
+  (...texts: string[]): Step =>
+  () =>
+    new Response(
+      frames([...texts.map((t) => chunk({ content: t })), chunk({}, "stop"), "[DONE]"]),
+      {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      },
+    );
+
+type TestRetry = Omit<RetryPolicy, "sleep" | "random" | "onRetry">;
+
+function setup(steps: Step[], retry: TestRetry = {}) {
   let calls = 0;
   const sleeps: number[] = [];
   const retries: RetryInfo[] = [];
   const provider = new OpenAICompatibleProvider({
     name: "p",
     baseURL: "https://example.test/v1",
-    fetch: async () => {
+    fetch: async (url, init) => {
       const step = steps[Math.min(calls++, steps.length - 1)] as Step;
-      return step();
+      return step(url, init);
     },
     retry: {
       ...retry,
@@ -226,6 +353,87 @@ describe("OpenAI-compatible retries", () => {
     if (terminal.type !== "error") throw new Error("expected error");
     expect(terminal.error.message).toBe("fetch failed (UND_ERR_SOCKET: other side closed)");
     expect(JSON.stringify(terminal)).not.toContain("sk-secret");
+  });
+});
+
+describe("OpenAI-compatible request timeouts", () => {
+  it("retries a request that produces no data before the first-byte timeout", async () => {
+    const t = new FakeTimers();
+    const s = setup([stallBeforeHeaders(t), ok("Hello")], {
+      firstByteTimeoutMs: FIRST_BYTE_MS,
+      idleTimeoutMs: IDLE_MS,
+      setTimer: t.setTimer,
+    });
+    const { events, terminal } = await run(s.registry);
+    expect(s.calls()).toBe(2);
+    expect(text(terminal)).toBe("Hello");
+    expect(events.filter((e) => e.type === "start")).toHaveLength(1);
+    expect(s.retries).toHaveLength(1);
+    expect(s.retries[0]?.error).toMatchObject({ kind: "network", retryable: true });
+    expect(t.firedMs).toEqual([FIRST_BYTE_MS]);
+  });
+
+  it("ends a stall after the first delta as a retryable network error, partial kept, no retry", async () => {
+    const t = new FakeTimers();
+    const s = setup([stallAfterDelta(t)], {
+      firstByteTimeoutMs: FIRST_BYTE_MS,
+      idleTimeoutMs: IDLE_MS,
+      setTimer: t.setTimer,
+    });
+    const { events, terminal } = await run(s.registry);
+    expect(s.calls()).toBe(1);
+    expect(s.sleeps).toEqual([]);
+    if (terminal.type !== "error") throw new Error("expected error");
+    expect(terminal.error).toMatchObject({ kind: "network", retryable: true });
+    expect(terminal.partial.blocks).toEqual([{ type: "text", text: "Par" }]);
+    expect(events.filter((e) => e.type === "block_delta")).toHaveLength(1);
+    expect(t.firedMs).toEqual([IDLE_MS]);
+  });
+
+  it("keeps the stream alive when its chunks arrive before the idle timeout", async () => {
+    const t = new FakeTimers();
+    const s = setup([okChunks("a", "b", "c")], {
+      firstByteTimeoutMs: FIRST_BYTE_MS,
+      idleTimeoutMs: IDLE_MS,
+      setTimer: t.setTimer,
+    });
+    const { terminal } = await run(s.registry);
+    expect(text(terminal)).toBe("abc");
+    expect(t.firedMs).toEqual([]);
+  });
+
+  it("does not let a keepalive comment clear the first-byte timer", async () => {
+    const t = new FakeTimers();
+    const s = setup([commentThenStall(t)], {
+      firstByteTimeoutMs: FIRST_BYTE_MS,
+      idleTimeoutMs: IDLE_MS,
+      setTimer: t.setTimer,
+      maxRetries: 0,
+    });
+    const { terminal } = await run(s.registry);
+    expect(s.calls()).toBe(1);
+    if (terminal.type !== "error") throw new Error("expected error");
+    expect(terminal.error).toMatchObject({ kind: "network", retryable: true });
+    expect(t.firedMs).toEqual([FIRST_BYTE_MS]);
+  });
+
+  it("reports aborted, not a timeout, when the run is cancelled during the wait", async () => {
+    const ctx = Context.background();
+    const t = new FakeTimers();
+    const s = setup(
+      [
+        (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal;
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+            ctx.cancel(new Error("user stop"));
+          }),
+      ],
+      { firstByteTimeoutMs: FIRST_BYTE_MS, idleTimeoutMs: IDLE_MS, setTimer: t.setTimer },
+    );
+    const { terminal } = await run(s.registry, ctx);
+    expect(terminal).toMatchObject({ type: "error", error: { kind: "aborted", retryable: false } });
+    expect(t.firedMs).toEqual([]);
   });
 });
 
