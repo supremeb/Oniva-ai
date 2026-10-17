@@ -15,13 +15,13 @@ Features:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from uuid import UUID, uuid4
 from enum import Enum
 
 from pydantic import BaseModel
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -177,40 +177,11 @@ class ReviewQueueService:
         Returns:
             Created review ticket
         """
-        from app.models.compliance_audit_log import HumanReviewTicket
+        from fastapi import HTTPException
 
-        # Calculate due date based on SLA
-        sla_hours = data.sla_hours or DEFAULT_SLA_HOURS.get(data.risk_level, 24)
-        due_at = datetime.utcnow() + timedelta(hours=sla_hours)
-
-        ticket = HumanReviewTicket(
-            id=uuid4(),
-            tenant_id=UUID(tenant_id),
-            workflow_id=UUID(data.workflow_id) if data.workflow_id else None,
-            session_id=UUID(data.session_id) if data.session_id else None,
-            agent_id=data.agent_id,
-            requested_by=UUID(requested_by) if requested_by else None,
-            title=data.title,
-            description=data.description,
-            risk_level=data.risk_level,
-            priority=data.priority,
-            review_type=data.review_type,
-            review_data=data.review_data,
-            audit_log_id=UUID(data.audit_log_id) if data.audit_log_id else None,
-            status=ReviewStatus.PENDING.value,
-            due_at=due_at,
-        )
-
-        self.db.add(ticket)
-        await self.db.commit()
-        await self.db.refresh(ticket)
-
-        logger.info(
-            f"Created review ticket: id={ticket.id}, title={data.title}, "
-            f"risk={data.risk_level}, priority={data.priority}"
-        )
-
-        return self._to_response(ticket)
+        # Review tickets are retired (Approvals & Policy plan, U6): new reviews are ledger rows
+        # (ApprovalService.record_pending, kind='review').
+        raise HTTPException(status_code=410, detail="review_tickets_retired")
 
     async def get_ticket(
         self,
@@ -445,6 +416,7 @@ class ReviewQueueService:
         ticket.review_notes = decision.notes
         ticket.status = ReviewStatus(decision.decision).value
 
+        await self._close_ledger_copy(ticket, reviewer_id, decision)
         await self.db.commit()
         await self.db.refresh(ticket)
 
@@ -457,6 +429,24 @@ class ReviewQueueService:
         # await self._trigger_workflow_transition(ticket, decision)
 
         return self._to_response(ticket)
+
+    async def _close_ledger_copy(self, ticket, reviewer_id: str, decision) -> None:
+        """Close the ledger copy of a legacy ticket (U6) so the old and new UI cannot double-decide."""
+        outcome = {ReviewStatus.APPROVED.value: ("approved", "approve"),
+                   ReviewStatus.REJECTED.value: ("denied", "deny")}.get(ticket.status)
+        if outcome is None:  # escalated stays open in the ledger
+            return
+        from app.models.tool_approval import OPEN_STATUSES, ToolApproval
+
+        now = datetime.now(timezone.utc)
+        await self.db.execute(
+            update(ToolApproval)
+            .where(ToolApproval.tenant_id == ticket.tenant_id,
+                   ToolApproval.legacy_ticket_id == ticket.id,
+                   ToolApproval.status.in_(OPEN_STATUSES))
+            .values(status=outcome[0], decision=outcome[1], decided_by=UUID(reviewer_id),
+                    note=decision.notes, decided_at=now, updated_at=now)
+            .execution_options(synchronize_session=False))
 
     async def check_sla_breaches(
         self,

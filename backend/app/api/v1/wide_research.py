@@ -43,35 +43,32 @@ async def execute_wide_research(
     Start wide research execution.
 
     Processes items in parallel through a templated agent task.
-    For batches > approval threshold, creates a human review ticket.
+    For batches > approval threshold, records a review item in the approval ledger.
     """
     if len(request.items) > _APPROVAL_THRESHOLD:
-        # Create human review ticket for large batches
+        # Record a review item in the approval ledger for large batches
         try:
-            from app.services.review_queue import ReviewQueueService, ReviewTicketCreate
-            review_queue = ReviewQueueService()
-            ticket_data = ReviewTicketCreate(
-                title=f"Wide research: {len(request.items)} items",
-                description="Batch processing requires human approval",
-                risk_level="medium",
-                review_type="wide_research",
-                review_data={
+            from app.services.approval_service import ApprovalService
+
+            await ApprovalService(db).record_pending(
+                tenant_id=tenant_id, conversation_id=None, kind="review", tool_name="Wide research batch",
+                reason=f"Wide research: {len(request.items)} items. Batch processing requires human approval.",
+                arguments={
                     "item_count": len(request.items),
                     "agent_id": request.agent_id,
+                    "session_id": str(request.session_id) if request.session_id else None,
                     "task_template_preview": request.task_template[:200],
                 },
-                session_id=request.session_id,
-                agent_id=request.agent_id,
+                requested_by=user_id, approver_role="admin",
             )
-            # Note: In production, this would return pending_review status
-            # and the node executor would poll for approval.
-            # For now, log the ticket and proceed.
+            await db.commit()
+            # The batch proceeds; the review item is advisory until output review resumes workflows.
             logger.info(
                 f"Wide research batch ({len(request.items)} items) "
                 f"exceeds approval threshold ({_APPROVAL_THRESHOLD})"
             )
         except Exception as e:
-            logger.warning(f"Failed to create review ticket: {e}")
+            logger.warning(f"Failed to record wide research review: {e}")
 
     orchestrator = WideResearchOrchestrator(db)
 

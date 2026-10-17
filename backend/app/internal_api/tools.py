@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.agents.skills.registry import SkillRegistry, _manifests, _registry
 from app.internal_api import invocations
-from app.internal_api.execution import ToolRateLimited, execute_tool
+from app.internal_api.execution import ToolApprovalRefused, ToolRateLimited, execute_tool
 from app.internal_api.fence import (
     FenceBusy,
     FenceRejected,
@@ -210,7 +210,7 @@ async def _perform(
             if not await invocations.store_outcome(factory, key, body.tenantId, stored):
                 logger.warning("Outcome for %s was not stored: the claim is no longer in flight", key)
             return stored
-    except (FenceRejected, FenceBusy, ToolRateLimited):
+    except (FenceRejected, FenceBusy, ToolRateLimited, ToolApprovalRefused):
         await invocations.release_claim(factory, key, body.tenantId)  # nothing ran
         raise
     except Exception:

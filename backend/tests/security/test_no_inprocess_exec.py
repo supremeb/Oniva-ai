@@ -82,8 +82,8 @@ async def test_execute_python_skill_refuses_without_legacy_fallback(no_spawn, sa
     from app.skills.execute_python.tool import execute_python
 
     result = await execute_python(skill_ctx, ESCAPE_CODE)
-    assert result["success"] is False
-    assert "sandbox" in result["error"].lower()
+    assert result.is_error
+    assert "sandbox" in result.content.lower()
     no_spawn[0].assert_not_called()
     no_spawn[1].assert_not_called()
 
