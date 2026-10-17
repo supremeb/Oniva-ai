@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -39,6 +39,17 @@ SENSITIVE_KEY = re.compile(
     r"pass(word|wd)?|secret|token|api[-_]?key|authorization|credential|cookie|private[-_]?key|bearer|session",
     re.I,
 )
+RECONCILE_MIN_INTERVAL = timedelta(seconds=30)  # per tenant, in-process (KTD11)
+RECONCILE_MAX_CONVERSATIONS = 20  # engine conversations read per pass
+ORPHAN_GRACE = timedelta(seconds=120)  # authorize-then-engine-commit gap
+DECIDING_STALE = timedelta(seconds=60)
+_last_reconcile: dict[str, datetime] = {}
+
+
+def reset_reconcile_throttle() -> None:
+    _last_reconcile.clear()
+
+
 # Engine rejection reasons that mean "this call is not decidable here" rather than "unknown".
 _NON_DEFINITIVE_REJECTIONS = {"not_owned", "invalid"}
 
@@ -353,8 +364,13 @@ class ApprovalService:
         if commit:
             await self._commit(row.tenant_id)
 
-    async def expire_overdue(self, tenant_id, now: Optional[datetime] = None) -> int:
-        """Mark ``pending`` rows past ``expires_at`` as ``expired`` (one audit entry each)."""
+    async def expire_overdue(self, tenant_id, now: Optional[datetime] = None,
+                             engine: Optional[EngineClient] = None) -> int:
+        """Mark ``pending`` rows past ``expires_at`` as ``expired`` (one audit entry each).
+
+        With an ``engine``, ``deciding`` rows older than 60 s are also settled against the engine item
+        (KTD5/KTD11) instead of being guessed at.
+        """
         now = now or _now()
         res = await self.db.execute(select(ToolApproval).where(
             ToolApproval.tenant_id == _uuid(tenant_id), ToolApproval.status == "pending",
@@ -367,6 +383,80 @@ class ApprovalService:
                               rationale="approval not decided before its expiry")
         if rows:
             await self._commit(tenant_id)
+        if engine is not None:
+            stale = await self._open_rows(tenant_id, status="deciding", older_than=now - DECIDING_STALE)
+            await self._reconcile_rows(tenant_id, stale, engine, now)
+        return len(rows)
+
+    # --- reconcile (KTD11) ----------------------------------------------------
+
+    async def _open_rows(self, tenant_id, *, status: Optional[str] = None,
+                         older_than: Optional[datetime] = None) -> list[ToolApproval]:
+        q = select(ToolApproval).where(
+            ToolApproval.tenant_id == _uuid(tenant_id), ToolApproval.kind == "tool_call",
+            ToolApproval.conversation_id.is_not(None), ToolApproval.tool_task_id.is_not(None),
+            ToolApproval.status.in_((status,) if status else OPEN_STATUSES)
+        ).order_by(ToolApproval.created_at, ToolApproval.id)
+        rows = list((await self.db.execute(q)).scalars().all())
+        if older_than is not None:
+            rows = [r for r in rows if (_aware(r.updated_at) or _now()) < older_than]
+        return rows
+
+    async def reconcile(self, tenant_id, engine: EngineClient, now: Optional[datetime] = None,
+                        force: bool = False) -> int:
+        """Close or finalise open rows whose engine item says otherwise. Returns rows changed.
+
+        Rate limited to once per tenant per 30 s (in-process) unless ``force``; reads at most 20
+        engine conversations per pass; a no-op when the engine is unreachable.
+        """
+        now = now or _now()
+        key = str(_uuid(tenant_id))
+        last = _last_reconcile.get(key)
+        if not force and last is not None and now - last < RECONCILE_MIN_INTERVAL:
+            return 0
+        _last_reconcile[key] = now
+        return await self._reconcile_rows(tenant_id, await self._open_rows(tenant_id), engine, now)
+
+    async def _reconcile_rows(self, tenant_id, rows: list[ToolApproval], engine: EngineClient,
+                              now: datetime) -> int:
+        by_conv: dict[UUID, list[ToolApproval]] = {}
+        for row in rows:
+            by_conv.setdefault(row.conversation_id, []).append(row)
+        changed = 0
+        for conv_id in list(by_conv)[:RECONCILE_MAX_CONVERSATIONS]:
+            conv_rows = by_conv[conv_id]
+            conv = await self.db.get(EngineConversation, conv_id)
+            if conv is None:
+                changed += await self._close_all(conv_rows, "conversation no longer exists")
+                continue
+            try:
+                items = await engine.approvals(conv.session_id, conv.tenant_id, conv.project_id,
+                                               conv.conversation_id)
+            except EngineError as e:
+                if e.status == 404:
+                    changed += await self._close_all(conv_rows, "engine conversation not found")
+                continue  # unreachable or failing: change nothing
+            except Exception:
+                logger.warning("approval reconcile: engine read failed", exc_info=True)
+                continue
+            by_task = {i.get("toolTaskId"): i for i in items}
+            for row in conv_rows:
+                item = by_task.get(row.tool_task_id)
+                if item is not None:
+                    if item.get("status") in ("approved", "denied", "expired", "cancelled"):
+                        await self.finalize_from_engine(row, item)
+                        changed += 1
+                elif (_aware(row.created_at) or now) < now - ORPHAN_GRACE:
+                    await self._close(row, "cancelled", AuditAction.APPROVAL_CANCELLED,
+                                      "engine item missing", commit=False)
+                    changed += 1
+        if changed:
+            await self._commit(tenant_id)
+        return changed
+
+    async def _close_all(self, rows: list[ToolApproval], why: str) -> int:
+        for row in rows:
+            await self._close(row, "cancelled", AuditAction.APPROVAL_CANCELLED, why, commit=False)
         return len(rows)
 
     async def mark_closed(self, tenant_id, *, conversation_id=None, run_id: Optional[str] = None,
