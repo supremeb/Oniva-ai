@@ -95,6 +95,18 @@ class DecisionBody(BaseModel):
     note: Optional[str] = None
 
 
+class AnswerPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    optionIds: Optional[list[str]] = None
+    text: Optional[str] = None
+
+
+class AnswerBody(BaseModel):
+    # Extra keys (e.g. a client-supplied principal) are ignored on purpose (R16).
+    model_config = ConfigDict(extra="ignore")
+    answer: AnswerPayload
+
+
 def _is_admin(user: AuthUser) -> bool:
     return user.role == "admin"
 
@@ -360,6 +372,35 @@ async def decide_approval(
             return await svc.decide(user=user, conv=conv, row=row, decision=body.decision,
                                     note=body.note, engine=engine)
         return await _decide_legacy(request, conv, user, tool_task_id, body, engine)
+    except ApprovalError as e:
+        raise HTTPException(e.status, e.code) from None
+    except EngineError as e:
+        raise _engine_http_error(e) from None
+
+
+@router.post("/{conversation_id}/questions/{tool_task_id}/answer")
+async def answer_question(
+    conversation_id: UUID,
+    tool_task_id: str,
+    body: AnswerBody,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    engine: EngineClient = Depends(get_engine_client),
+):
+    """Answer an ``ask_user`` question. The conversation's owner or a tenant admin or owner may; the
+    ledger row carries the protocol state and the audit entry (U11)."""
+    conv = await db.get(EngineConversation, conversation_id)
+    if conv is None or str(conv.tenant_id) != str(user.tenant_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if await ProjectService(db).get_user_role(conv.project_id, UUID(str(user.id)), conv.tenant_id) is None:
+        raise HTTPException(status_code=403, detail="Not allowed on this conversation")
+    svc = ApprovalService(db)
+    row = await svc.get_by_task(conv.tenant_id, conv.conversation_id, tool_task_id)
+    try:
+        if row is None:
+            raise ApprovalError(404, "question_not_found")
+        return await svc.answer(user=user, conv=conv, row=row,
+                                answer=body.answer.model_dump(exclude_none=True), engine=engine)
     except ApprovalError as e:
         raise HTTPException(e.status, e.code) from None
     except EngineError as e:

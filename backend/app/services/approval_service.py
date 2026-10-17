@@ -7,6 +7,7 @@ The engine item stays the source of truth for whether a call runs. This service 
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
@@ -329,6 +330,98 @@ class ApprovalService:
             raise ApprovalError(409, "already_decided")
         return None
 
+    # --- answer (U11) ---------------------------------------------------------
+
+    @staticmethod
+    def can_answer(user: AuthUser, conv: EngineConversation) -> bool:
+        """The conversation's owner, or a tenant admin or owner. Looser than approvals on purpose:
+        answering a question grants no power."""
+        return str(conv.user_id) == str(user.id) or user.role in ("admin", "owner")
+
+    async def answer(self, *, user: AuthUser, conv: EngineConversation, row: ToolApproval,
+                     answer: dict, engine: EngineClient) -> dict:
+        """Answer an ``ask_user`` question through the engine (KTD5 protocol, ``pending -> deciding
+        -> answered``). Returns the engine's response body."""
+        if row.kind != "question" or str(row.tenant_id) != str(user.tenant_id):
+            raise ApprovalError(404, "not_found")
+        if not self.can_answer(user, conv):
+            raise ApprovalError(403, "not_authorized")
+        uid = _uuid(user.id)
+
+        if row.status == "deciding":
+            if row.decided_by != uid:
+                raise ApprovalError(409, "decision_in_progress")
+            try:  # a retry repeats the same inputs
+                answer = json.loads(row.note) if row.note else answer
+            except ValueError:
+                pass
+        elif row.status == "pending":
+            if not await self._claim(row, uid, "answer", json.dumps(answer, sort_keys=True), False):
+                await self.db.refresh(row)
+                raise ApprovalError(409, "decision_in_progress" if row.status == "deciding" else "already_answered")
+        elif row.status == "answered" and row.decided_by == uid:
+            pass  # idempotent re-send by the answerer: the engine says whether it took
+        elif row.status == "expired":
+            raise ApprovalError(410, "approval_expired")
+        elif row.status == "cancelled":
+            raise ApprovalError(409, "not_waiting")
+        else:
+            raise ApprovalError(409, "already_answered")
+
+        try:
+            result = await engine.answer(conv.session_id, conv.tenant_id, conv.project_id,
+                                         conv.conversation_id, row.tool_task_id, answer, principal=str(user.id))
+        except EngineError as e:
+            done = await self._on_answer_error(row, user, e)
+            if done is not None:
+                return done
+            raise
+        await self._finalize_answered(row, user, answer)
+        return result
+
+    async def _finalize_answered(self, row: ToolApproval, user: AuthUser, answer: dict) -> None:
+        if row.status not in OPEN_STATUSES:
+            return
+        row.status, row.decision = "answered", "answer"
+        row.decided_by = _uuid(user.id)
+        row.decided_at = _now()
+        row.updated_at = _now()
+        actor = await self._actor(user)
+        await self._audit(row, AuditAction.QUESTION_ANSWERED, "answer", actor,
+                          rationale="question answered", extra=self._answer_meta(answer))
+        await self._commit(row.tenant_id)
+
+    async def _on_answer_error(self, row: ToolApproval, user: AuthUser, e: EngineError) -> Optional[dict]:
+        if e.error != "question_rejected":
+            return None  # 502/504/timeout: the engine may have taken it, the row stays deciding
+        reason = e.body.get("reason")
+        item = e.body.get("question") if isinstance(e.body.get("question"), dict) else None
+        if reason in _NON_DEFINITIVE_REJECTIONS:
+            # The engine wrote nothing: reopen the row so a valid answer can follow.
+            if row.status == "deciding":
+                row.status, row.decided_by, row.decision, row.note = "pending", None, None, None
+                row.updated_at = _now()
+                await self._commit(row.tenant_id)
+            return None
+        if reason == "expired":
+            await self._close(row, "expired", AuditAction.APPROVAL_EXPIRED, "engine rejected: expired")
+            raise ApprovalError(410, "approval_expired")
+        if reason == "not_waiting":
+            await self._close(row, "cancelled", AuditAction.APPROVAL_CANCELLED, "engine rejected: not waiting")
+            raise ApprovalError(409, "not_waiting")
+        if reason == "already_answered" and item is not None:
+            await self.finalize_from_engine(row, item)
+            await self._commit(row.tenant_id)
+            status = item.get("status")
+            if status == "expired":
+                raise ApprovalError(410, "approval_expired")
+            if status == "cancelled":
+                raise ApprovalError(409, "not_waiting")
+            if str((item.get("answer") or {}).get("principal")) == str(user.id):
+                return {"question": item}
+            raise ApprovalError(409, "already_answered")
+        return None
+
     # --- finalising -----------------------------------------------------------
 
     async def _finalize_decided(self, row: ToolApproval, *, decided_by, decision: str, note: Optional[str],
@@ -377,11 +470,35 @@ class ApprovalService:
             await self._audit(row, AuditAction.APPROVAL_DECIDED, kind, actor,
                               rationale=row.note or f"{row.tool_name or 'tool'} approval: {kind}",
                               extra={"self_approved": row.self_approved, "from_engine": True})
+        elif status == "answered":
+            await self._finalize_answered_from_engine(row, item)
         elif status == "expired":
             await self._close(row, "expired", AuditAction.APPROVAL_EXPIRED, "engine item expired", commit=False)
         elif status == "cancelled":
             await self._close(row, "cancelled", AuditAction.APPROVAL_CANCELLED, "engine item cancelled", commit=False)
         return row
+
+    async def _finalize_answered_from_engine(self, row: ToolApproval, item: dict) -> None:
+        ans = item.get("answer") if isinstance(item.get("answer"), dict) else {}
+        principal = _uuid(ans.get("principal"))
+        actor_user = await self.db.get(User, principal) if principal is not None else None
+        if actor_user is not None and str(actor_user.tenant_id) != str(row.tenant_id):
+            actor_user = None
+        row.status, row.decision = "answered", "answer"
+        row.decided_by = actor_user.id if actor_user is not None else None
+        ms = ans.get("answeredAt")
+        row.decided_at = datetime.fromtimestamp(ms / 1000, timezone.utc) if isinstance(ms, (int, float)) else _now()
+        row.updated_at = _now()
+        actor = await self._actor(actor_user, fallback=str(ans.get("principal")))
+        await self._audit(row, AuditAction.QUESTION_ANSWERED, "answer", actor,
+                          rationale="question answered", extra=self._answer_meta(ans, from_engine=True))
+
+    @staticmethod
+    def _answer_meta(answer: dict, **extra) -> dict:
+        """The answer's shape for the audit entry; free text is never copied into the chain."""
+        text = answer.get("text")
+        return {"option_ids": list(answer.get("optionIds") or []), "has_text": bool(text),
+                "text_length": len(text) if isinstance(text, str) else 0, **extra}
 
     async def _close(self, row: ToolApproval, status: str, action: AuditAction, why: str,
                      commit: bool = True) -> None:
@@ -422,7 +539,7 @@ class ApprovalService:
     async def _open_rows(self, tenant_id, *, status: Optional[str] = None,
                          older_than: Optional[datetime] = None) -> list[ToolApproval]:
         q = select(ToolApproval).where(
-            ToolApproval.tenant_id == _uuid(tenant_id), ToolApproval.kind == "tool_call",
+            ToolApproval.tenant_id == _uuid(tenant_id), ToolApproval.kind.in_(("tool_call", "question")),
             ToolApproval.conversation_id.is_not(None), ToolApproval.tool_task_id.is_not(None),
             ToolApproval.status.in_((status,) if status else OPEN_STATUSES)
         ).order_by(ToolApproval.created_at, ToolApproval.id)
@@ -458,27 +575,30 @@ class ApprovalService:
             if conv is None:
                 changed += await self._close_all(conv_rows, "conversation no longer exists")
                 continue
-            try:
-                items = await engine.approvals(conv.session_id, conv.tenant_id, conv.project_id,
-                                               conv.conversation_id)
-            except EngineError as e:
-                if e.status == 404:
-                    changed += await self._close_all(conv_rows, "engine conversation not found")
-                continue  # unreachable or failing: change nothing
-            except Exception:
-                logger.warning("approval reconcile: engine read failed", exc_info=True)
-                continue
-            by_task = {i.get("toolTaskId"): i for i in items}
-            for row in conv_rows:
-                item = by_task.get(row.tool_task_id)
-                if item is not None:
-                    if item.get("status") in ("approved", "denied", "expired", "cancelled"):
-                        await self.finalize_from_engine(row, item)
+            for kind, reader in (("tool_call", "approvals"), ("question", "questions")):
+                kind_rows = [r for r in conv_rows if r.kind == kind]
+                if not kind_rows:
+                    continue
+                try:
+                    items = await getattr(engine, reader)(conv.session_id, conv.tenant_id, conv.project_id, conv.conversation_id)
+                except EngineError as e:
+                    if e.status == 404:
+                        changed += await self._close_all(kind_rows, "engine conversation not found")
+                    continue  # unreachable or failing: change nothing
+                except Exception:
+                    logger.warning("approval reconcile: engine read failed", exc_info=True)
+                    continue
+                by_task = {i.get("toolTaskId"): i for i in items}
+                for row in kind_rows:
+                    item = by_task.get(row.tool_task_id)
+                    if item is not None:
+                        if item.get("status") in ("approved", "denied", "answered", "expired", "cancelled"):
+                            await self.finalize_from_engine(row, item)
+                            changed += 1
+                    elif (_aware(row.created_at) or now) < now - ORPHAN_GRACE:
+                        await self._close(row, "cancelled", AuditAction.APPROVAL_CANCELLED,
+                                          "engine item missing", commit=False)
                         changed += 1
-                elif (_aware(row.created_at) or now) < now - ORPHAN_GRACE:
-                    await self._close(row, "cancelled", AuditAction.APPROVAL_CANCELLED,
-                                      "engine item missing", commit=False)
-                    changed += 1
         if changed:
             await self._commit(tenant_id)
         return changed
