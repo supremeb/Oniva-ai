@@ -1,6 +1,7 @@
 import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { askUserTool } from "../../src/agent/ask-user-tool.js";
 import type { HostPolicy } from "../../src/agent/policy.js";
 import { createSubagentTool } from "../../src/agent/subagents.js";
 import { fakeText, fakeToolCall } from "../../src/models/fake.js";
@@ -109,6 +110,8 @@ describe("engine HTTP server", () => {
       ["POST", `/v1/conversations/${id}/abort`],
       ["GET", `/v1/conversations/${id}/approvals`],
       ["POST", `/v1/conversations/${id}/approvals/task_x/decision`],
+      ["GET", `/v1/conversations/${id}/questions`],
+      ["POST", `/v1/conversations/${id}/questions/task_x/answer`],
     ];
     for (const [method, path] of routes) {
       const body = method === "POST" ? { body: {} } : {};
@@ -144,6 +147,12 @@ describe("engine HTTP server", () => {
         [
           "POST",
           `/v1/conversations/${id}/approvals/task_x/decision`,
+          { ...headers, "x-oniva-principal": "user:alice" },
+        ],
+        ["GET", `/v1/conversations/${id}/questions`, headers],
+        [
+          "POST",
+          `/v1/conversations/${id}/questions/task_x/answer`,
           { ...headers, "x-oniva-principal": "user:alice" },
         ],
       ];
@@ -466,6 +475,136 @@ describe("engine HTTP server", () => {
     expect(decided.body.approval).toMatchObject({ id: item.id, status: "approved" });
     const settled = await w.harness.submission(sub.body.submissionId).wait();
     expect(settled.status).toBe("done");
+  });
+
+  describe("questions", () => {
+    const PRINCIPAL = { ...AUTH, "x-oniva-principal": "user:alice" };
+    const ASK = {
+      question: "Which colour?",
+      options: [
+        { id: "blue", label: "Blue" },
+        { id: "green", label: "Green" },
+      ],
+    };
+
+    async function asking(workerOptions: Parameters<typeof start>[0] = {}) {
+      const s = await start({ tools: [askUserTool], ...workerOptions });
+      s.fx.provider.enqueue(fakeToolCall("ask_user", ASK, { id: "c1" }), fakeText("done"));
+      const id = await createConv(s.url, { agent: { systemPrompt: "s", tools: ["ask_user"] } });
+      const sub = await call(s.url, "POST", `/v1/conversations/${id}/submissions`, {
+        headers: AUTH,
+        body: { text: "ask" },
+      });
+      await waitFor(async () =>
+        (await s.w.harness.questions(id)).some((i) => i.status === "pending"),
+      );
+      await s.w.harness.waitForIdle();
+      const item = (await s.w.harness.questions(id))[0] as Any;
+      return {
+        ...s,
+        id,
+        item,
+        sub,
+        path: `/v1/conversations/${id}/questions/${item.toolTaskId}/answer`,
+      };
+    }
+
+    it("answers over HTTP: 200, the run resumes with the option label", async () => {
+      const { url, w, sub, path, item } = await asking();
+      const ok = await call(url, "POST", path, {
+        headers: PRINCIPAL,
+        body: { answer: { optionIds: ["blue"] } },
+      });
+      expect(ok.status).toBe(200);
+      expect(ok.body.question).toMatchObject({
+        id: item.id,
+        status: "answered",
+        answer: { optionIds: ["blue"], principal: "user:alice" },
+      });
+      const settled = await w.harness.submission(sub.body.submissionId).wait();
+      expect(settled.status).toBe("done");
+    });
+
+    it("requires a principal (400); an unknown conversation is 404", async () => {
+      const { url, path, item } = await asking();
+      const none = await call(url, "POST", path, {
+        headers: AUTH,
+        body: { answer: { optionIds: ["blue"] } },
+      });
+      expect(none.status).toBe(400);
+      expect(none.body.error).toBe("missing_header");
+      const missing = await call(
+        url,
+        "POST",
+        `/v1/conversations/conv_missing/questions/${item.toolTaskId}/answer`,
+        { headers: PRINCIPAL, body: { answer: { optionIds: ["blue"] } } },
+      );
+      expect(missing.status).toBe(404);
+      const list = await call(url, "GET", "/v1/conversations/conv_missing/questions", {
+        headers: AUTH,
+      });
+      expect(list.status).toBe(404);
+    });
+
+    it("answering twice: the second is 409 already_answered", async () => {
+      const { url, w, sub, path } = await asking();
+      const body = { answer: { optionIds: ["green"] } };
+      expect((await call(url, "POST", path, { headers: PRINCIPAL, body })).status).toBe(200);
+      const again = await call(url, "POST", path, { headers: PRINCIPAL, body });
+      expect(again.status).toBe(409);
+      expect(again.body).toMatchObject({ error: "question_rejected", reason: "already_answered" });
+      expect(again.body.question).toMatchObject({ status: "answered" });
+      await w.harness.submission(sub.body.submissionId).wait();
+    });
+
+    it("rejects an invalid or oversized answer with 400 and commits nothing", async () => {
+      const { url, w, id, path } = await asking();
+      const bodies = [
+        { answer: { optionIds: ["red"] } },
+        { answer: { optionIds: ["blue", "green"] } },
+        { answer: "blue" },
+        { answer: { text: "x".repeat(20_000) } },
+        {},
+      ];
+      for (const body of bodies) {
+        const res = await call(url, "POST", path, { headers: PRINCIPAL, body });
+        expect(res.status, JSON.stringify(body).slice(0, 40)).toBe(400);
+        expect(res.body).toMatchObject({ error: "question_rejected", reason: "invalid" });
+      }
+      expect((await w.harness.questions(id))[0]).toMatchObject({ status: "pending", answer: null });
+    });
+
+    it("maps an unknown task to 404 not_owned and an expired question to 410", async () => {
+      const { url, id, path, fx, w, sub } = await asking({ questionTtlMs: 60_000 });
+      const other = await call(url, "POST", `/v1/conversations/${id}/questions/task_nope/answer`, {
+        headers: PRINCIPAL,
+        body: { answer: { optionIds: ["blue"] } },
+      });
+      expect(other.status).toBe(404);
+      expect(other.body).toMatchObject({ error: "question_rejected", reason: "not_owned" });
+      await fx.clock.advanceAsync(61_000);
+      await w.harness.submission(sub.body.submissionId).wait();
+      const late = await call(url, "POST", path, {
+        headers: PRINCIPAL,
+        body: { answer: { optionIds: ["blue"] } },
+      });
+      expect(late.status).toBe(410);
+      expect(late.body).toMatchObject({ error: "question_rejected", reason: "expired" });
+    });
+
+    it("lists the conversation's questions, scoped to that conversation", async () => {
+      const { url, id, item } = await asking();
+      const res = await call(url, "GET", `/v1/conversations/${id}/questions`, { headers: AUTH });
+      expect(res.status).toBe(200);
+      expect(res.body.conversationId).toBe(id);
+      expect(res.body.questions).toHaveLength(1);
+      expect(res.body.questions[0]).toMatchObject({ id: item.id, status: "pending" });
+      const otherId = await createConv(url);
+      const empty = await call(url, "GET", `/v1/conversations/${otherId}/questions`, {
+        headers: AUTH,
+      });
+      expect(empty.body.questions).toEqual([]);
+    });
   });
 
   it("streams a mid-run watch over SSE: snapshot, then patches that reproduce the final view", async () => {

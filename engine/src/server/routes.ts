@@ -21,6 +21,12 @@
  * - `POST /v1/conversations/:id/approvals/:toolTaskId/decision` decides an
  *   approval. Body: `{ decision: "approve" | "deny", note? }`; the principal
  *   comes from `X-Oniva-Principal`. → 200
+ * - `GET /v1/conversations/:id/questions` → 200 `{ conversationId, questions }`,
+ *   the conversation's questions document items.
+ * - `POST /v1/conversations/:id/questions/:toolTaskId/answer` answers an
+ *   `ask_user` question. Body: `{ answer: { optionIds?, text? } }`; principal
+ *   from `X-Oniva-Principal`. → 200 `{ question }`; 400 invalid, 404 not_owned,
+ *   409 already_answered / not_waiting, 410 expired.
  * - `PUT /v1/conversations/:id/agent` updates the agent configuration. Body:
  *   a partial agent config (unknown or mistyped fields → 400, nothing
  *   committed); it applies from the next model request and reaches watchers
@@ -166,6 +172,9 @@ async function approvalOwner(
   const tree = await conversationTree(harness.session, rootId);
   return tree.includes(task.conversationId) ? task.conversationId : rootId;
 }
+
+/** The conversation in `rootId`'s tree that owns `toolTaskId`; `rootId` when unknown (rejected `not_owned`). */
+const questionOwner = approvalOwner;
 
 /** Parse a resume cursor: a non-negative integer, or null when absent. */
 export function parseCursor(raw: string | null): number | null {
@@ -345,6 +354,41 @@ export const ROUTES: readonly Route[] = Object.freeze([
         ...(note === undefined ? {} : { note: note as string | null }),
       });
       return { status: 200, body: { approval: approval as unknown as JsonObject } };
+    },
+  },
+  {
+    method: "GET",
+    pattern: "/v1/conversations/:id/questions",
+    auth: true,
+    async handle(ctx) {
+      const conv = await ctx.conversation();
+      const questions = await ctx.harness.questions(conv.id);
+      return {
+        status: 200,
+        body: { conversationId: conv.id, questions: questions as unknown as JsonObject },
+      };
+    },
+  },
+  {
+    method: "POST",
+    pattern: "/v1/conversations/:id/questions/:toolTaskId/answer",
+    auth: true,
+    async handle(ctx) {
+      const body = await ctx.readJson();
+      const conv = await ctx.conversation();
+      const toolTaskId = ctx.params.toolTaskId;
+      if (toolTaskId === undefined) throw bad("toolTaskId");
+      const principal = headerValue(ctx.req, ONIVA_HEADERS.principal);
+      if (principal === null) {
+        throw new HttpError(400, "missing_header", ONIVA_HEADERS.principal);
+      }
+      const question = await ctx.harness.answerQuestion({
+        conversationId: await questionOwner(ctx.harness, conv.id, toolTaskId),
+        toolTaskId,
+        answer: body.answer as { optionIds?: string[]; text?: string },
+        principal,
+      });
+      return { status: 200, body: { question: question as unknown as JsonObject } };
     },
   },
 ]);

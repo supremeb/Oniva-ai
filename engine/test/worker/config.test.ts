@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_QUESTION_TTL_MS } from "../../src/agent/questions.js";
 import { ManualClock } from "../../src/core/clock.js";
 import {
   assertNotTestHarnessInProduction,
@@ -30,6 +31,7 @@ describe("workerConfigFromEnv", () => {
       leaseRetryMs: null,
       gatewayUrl: null,
       approvalTtlMs: DEFAULT_APPROVAL_TTL_MS,
+      questionTtlMs: DEFAULT_QUESTION_TTL_MS,
       progressIntervalMs: 100,
       dbSchema: null,
       subagentTool: null,
@@ -127,6 +129,13 @@ describe("workerConfigFromEnv", () => {
       /identifier/,
     );
     expect(workerConfigFromEnv({ ...BASE, ENGINE_APPROVAL_TTL_MS: "0" }).approvalTtlMs).toBeNull();
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_QUESTION_TTL_MS: "0" }).questionTtlMs).toBeNull();
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_QUESTION_TTL_MS: "5000" }).questionTtlMs).toBe(
+      5000,
+    );
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_QUESTION_TTL_MS: "-1" })).toThrow(
+      WorkerConfigError,
+    );
   });
 
   it("refuses the test harness flag in production only", () => {

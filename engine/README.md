@@ -75,6 +75,10 @@ routes also need `X-Oniva-Tenant` / `X-Oniva-Project` matching the conversation.
 | `POST /v1/conversations/:id/abort` | abort queued and running work; answers once the run is idle |
 | `GET /v1/conversations/:id/approvals` | `{ conversationId, approvals: ApprovalItem[] }`: the conversation's approvals document plus those of its subagent descendants, oldest first; the decision route also finds a child's item through the root id |
 | `POST /v1/conversations/:id/approvals/:toolTaskId/decision` | `{ decision: "approve" \| "deny", note? }`, principal in `X-Oniva-Principal` |
+| `GET /v1/conversations/:id/questions` | `{ conversationId, questions: QuestionItem[] }`: the conversation's `agent.questions` document items, oldest first |
+| `POST /v1/conversations/:id/questions/:toolTaskId/answer` | `{ answer: { optionIds?: string[], text?: string } }`, principal in `X-Oniva-Principal` → 200 `{ question }`. Rejections are `{ error: "question_rejected", reason, question? }`: `invalid` 400, `not_owned` 404, `already_answered` and `not_waiting` 409, `expired` 410 |
+
+The watch view has a `questions` member, `{ items: QuestionItem[] }`, beside `approvals`; it is `{ items: [] }` when the conversation has no questions document, and changes arrive as patches under `/questions/items/<n>` when a question opens and when it is answered. The worker always registers the native `ask_user` tool; a conversation can call it only when its agent `tools` list it.
 
 Each watch-view `inbox.queue` item is `{ submissionId, mode, preview?, requestId? }`: `preview` is the first 200 characters of the queued text and `requestId` the caller's id (both absent on items queued by older engines); `inbox.placed` is unchanged.
 
@@ -131,6 +135,7 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_LEASE_RETRY_MS` | TTL/3 | standby retry interval |
 | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
 | `ENGINE_APPROVAL_TTL_MS` | `86400000` | local-mode approval expiry only (`0`: none); under `ENGINE_POLICY=backend` the backend's `approvalTtlMs` decides and this is ignored |
+| `ENGINE_QUESTION_TTL_MS` | `604800000` | how long an `ask_user` question waits for an answer (`0`: none) |
 | `ANTHROPIC_API_KEY` | none | model key (read per request; unused under `ENGINE_POLICY=backend`) |
 | `ENGINE_POLICY` | `backend` if `ENGINE_POLICY_URL` is set, else `local` | `backend`: the backend resolves each model request (provider, model, tenant key, token budget, quota) and records usage; a definitive refusal denies the request, an outage is retried (`ENGINE_POLICY_RETRY_MS`) and then fails it as a retryable `policy_unavailable`; there is never a fallback to a local key |
 | `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` when `ENGINE_POLICY=backend` | backend origin for `/internal/models/policy` and `/internal/models/usage`; uses `ENGINE_GATEWAY_TOKEN` |
