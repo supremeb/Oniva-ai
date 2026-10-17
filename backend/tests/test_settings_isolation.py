@@ -17,3 +17,8 @@ def test_env_file_resolution_keeps_production_default_and_override(monkeypatch):
     assert _resolve_env_file() == "/tmp/x.env"
     monkeypatch.setenv("ONIVA_ENV_FILE", "")
     assert _resolve_env_file() is None
+
+
+def test_litellm_does_not_load_dotenv_into_the_environment():
+    # Remove together with the last litellm import (phase 6 U28).
+    assert os.environ["LITELLM_MODE"] == "PRODUCTION"
