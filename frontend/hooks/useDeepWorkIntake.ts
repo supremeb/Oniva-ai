@@ -21,11 +21,13 @@ export function useDeepWorkIntake(projectId?: string) {
   const resolvedProjectId = projectId ?? (projects ?? []).find((p) => !p.is_archived)?.id ?? null;
 
   const startIntake = useCallback(
-    (query: string, chatId: string, kbIds: string[], connectorIds: string[]) => {
+    (query: string, chatId: string, kbIds: string[], connectorIds: string[], projectOverride?: string) => {
       if (mode !== 'engine') {
         return useDeepWorkStore.getState().clarify(query, chatId, kbIds, connectorIds);
       }
-      if (!resolvedProjectId) {
+      // The caller may resolve the project first (the `/chat` default project, KTD1).
+      const targetProjectId = projectOverride ?? resolvedProjectId;
+      if (!targetProjectId) {
         useDeepWorkStore.setState({
           engineMode: true,
           status: 'error',
@@ -37,7 +39,7 @@ export function useDeepWorkIntake(projectId?: string) {
       }
       return useDeepWorkStore
         .getState()
-        .clarify(query, chatId, kbIds, connectorIds, { engine: { projectId: resolvedProjectId } });
+        .clarify(query, chatId, kbIds, connectorIds, { engine: { projectId: targetProjectId } });
     },
     [mode, resolvedProjectId],
   );
