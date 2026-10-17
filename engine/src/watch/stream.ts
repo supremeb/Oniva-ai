@@ -23,6 +23,7 @@
 
 import type { CommitEvent } from "../session/publish.js";
 import type { Session } from "../session/session.js";
+import type { TaskRegistry } from "../tasks/define.js";
 import type { JsonPatchOp } from "./patch.js";
 import { applyCommitToView, type ConversationView, loadViewState, type ViewState } from "./view.js";
 
@@ -58,6 +59,8 @@ export const DEFAULT_WATCH_OPTIONS: Readonly<Required<WatchOptions>> = Object.fr
 /** What a hub watches: anything holding a session (a `Harness`, for one). */
 export interface WatchSource {
   readonly session: Session;
+  /** The task runtime, whose registry says which host task kinds show in the view's `tasks`. */
+  readonly runtime?: { readonly registry: TaskRegistry };
 }
 
 export interface WatchStart {
@@ -202,6 +205,7 @@ export class WatchHub {
   readonly #loading = new Map<string, Promise<Channel>>();
   /** Unwatched channels, oldest first. */
   readonly #idle = new Set<string>();
+  readonly #source: WatchSource;
   readonly #unsubscribe: () => void;
   #closed = false;
 
@@ -212,6 +216,7 @@ export class WatchHub {
       maxLag: checkCount("maxLag", merged.maxLag),
       maxIdleConversations: checkCount("maxIdleConversations", merged.maxIdleConversations),
     });
+    this.#source = source;
     this.session = source.session;
     this.#unsubscribe = this.session.subscribeCommits((event) => this.#onCommit(event));
     void this.session.closed.then(() => this.close());
@@ -275,7 +280,7 @@ export class WatchHub {
       // and registering it, and every earlier commit has been published.
       loading = this.session
         .commit(async () => {
-          const state = await loadViewState(this.session, conversationId);
+          const state = await loadViewState(this.#source, conversationId);
           const channel = new Channel(conversationId, state, this.session.lastSeq);
           if (!this.#closed) {
             this.#channels.set(conversationId, channel);

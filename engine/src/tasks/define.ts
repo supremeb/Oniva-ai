@@ -332,6 +332,14 @@ export type AbortHandler<I, C> = (
   ctx: Context,
 ) => Promise<void> | void;
 
+/** What a task kind shows clients of its tasks in the watch view (see `ConversationView.tasks`). */
+export interface TaskViewInfo {
+  /** A short human label, e.g. the node name. */
+  label?: string;
+  /** Which attempt of the work this task is on (1-based). */
+  attempt?: number;
+}
+
 /**
  * A task kind. `TaskDefinition` without type arguments accepts any definition.
  */
@@ -345,6 +353,11 @@ export interface TaskDefinition<I = never, C = never> {
    * is reported and the task still ends `aborted`.
    */
   readonly onAbort?: AbortHandler<I, C>;
+  /**
+   * Opt in to the watch view: tasks of this kind appear in `view.tasks`, with
+   * these details. Kinds without it stay out of the view.
+   */
+  readonly view?: (task: TaskState<I, C>) => TaskViewInfo;
 }
 
 export interface TaskDefinitionInput<I, C> {
@@ -353,6 +366,7 @@ export interface TaskDefinitionInput<I, C> {
   /** Defaults to the first phase. */
   initialPhase?: string;
   onAbort?: AbortHandler<I, C>;
+  view?: (task: TaskState<I, C>) => TaskViewInfo;
 }
 
 export function defineTask<I, C>(input: TaskDefinitionInput<I, C>): TaskDefinition<I, C> {
@@ -373,6 +387,7 @@ export function defineTask<I, C>(input: TaskDefinitionInput<I, C>): TaskDefiniti
     phases: Object.freeze({ ...input.phases }),
     initialPhase,
     ...(input.onAbort ? { onAbort: input.onAbort } : {}),
+    ...(input.view ? { view: input.view } : {}),
   });
 }
 
