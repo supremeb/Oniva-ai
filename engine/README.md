@@ -68,14 +68,19 @@ routes also need `X-Oniva-Tenant` / `X-Oniva-Project` matching the conversation.
 | --- | --- |
 | `GET /v1/health` | `{ status, sessionId, ownerId, owner }` (no auth) |
 | `POST /v1/conversations` | create (`{ id?, agent? }`) → 201 |
-| `POST /v1/conversations/:id/submissions` | submit (`{ text \| content, requestId?, whenBusy?, type? }`; `Idempotency-Key` header works too) → 202 |
+| `POST /v1/conversations/:id/submissions` | submit (`{ text \| content, requestId?, whenBusy?, type?, untrusted? }`; `Idempotency-Key` header works too) → 202 |
 | `PUT /v1/conversations/:id/agent` | partial agent config (`systemPrompt`, `tools`, `model`, `thinking`, `depth`, `metadata`, `compaction`, `maxRounds`, `deadlineMs`); unknown or mistyped fields → 400 and nothing committed; applies from the next model request and arrives at watchers as a patch to `/agent` → 200 `{ conversationId, agent }` |
 | `GET /v1/conversations/:id/watch` | SSE watch stream (`id:` is the cursor; resume with `Last-Event-ID` or `?cursor=`) |
 | `DELETE /v1/conversations/:id/submissions/:submissionId` | cancel a still-queued input; it settles `unanswered(withdrawn)` → 200 `{ conversationId, submissionId, cancelled: true }`; 404 unknown submission, 409 `not_queued` if it already started, was placed into a run or settled |
 | `POST /v1/conversations/:id/abort` | abort queued and running work; answers once the run is idle |
+| `GET /v1/conversations/:id/approvals` | `{ conversationId, approvals: ApprovalItem[] }`: the conversation's approvals document plus those of its subagent descendants, oldest first; the decision route also finds a child's item through the root id |
 | `POST /v1/conversations/:id/approvals/:toolTaskId/decision` | `{ decision: "approve" \| "deny", note? }`, principal in `X-Oniva-Principal` |
 
 Each watch-view `inbox.queue` item is `{ submissionId, mode, preview?, requestId? }`: `preview` is the first 200 characters of the queued text and `requestId` the caller's id (both absent on items queued by older engines); `inbox.placed` is unchanged.
+
+A rejected decision (409 `approval_rejected`, `reason` `already_decided`, `expired` or `not_waiting`) carries `approval`, a snapshot of the item with its recorded decision and principal, so a caller can finalise its own record from what the engine did.
+
+Taint: the document `agent.taint` on the ROOT conversation (a subagent's reads taint the run that owns it) is `{ tainted, total, sources }`, where `sources` keeps the first 20 events `{ kind: "tool_result" \| "input", name, ref, at }` and `total` counts all of them. It is set in the same commit that stores a tool result or places an input, and is sticky. A result taints when the tool is a gateway tool whose manifest says `untrustedOutput: true`, or a non-gateway tool that is not `internal` and not in `INTERNAL_NATIVE_TOOLS` (`ask_user`, `complete_task`, `present_plan`, `update_todo`; subagent spawn tools are `internal`). A submission sent with `untrusted: true` (boolean, else 400) taints with `kind: "input"`. `HostPolicy.authorizeTool` receives `toolTaskId`, `toolSource` (`"gateway" \| "native"`) and `taint: { tainted, total, sources }` as a copy it cannot mutate.
 
 A `user` entry's payload carries `requestId` (the caller's id, or the submission id when none was given) next to `submissionId`, so a client can match its optimistic message to the entry.
 
@@ -175,7 +180,8 @@ request:
 
 - `GET /internal/tools/manifest` → `{ tools: [{ name, description, parameters
   (JSON Schema), sideEffect: "none" | "write", idempotent?, timeoutMs,
-  requiresApproval? }] }`. Reads and idempotent writes are replay-safe.
+  requiresApproval?, untrustedOutput? }] }`. Reads and idempotent writes are replay-safe.
+  `untrustedOutput` (boolean, default `false`; any other type is rejected) marks a tool whose result taints the conversation.
 - `POST /internal/tools/{name}/invoke` with `{ args, runId, toolCallId,
   tenantId, projectId }` and `Idempotency-Key: runId:toolCallId`. A key with
   a stored outcome returns it without re-running. A started effect runs to

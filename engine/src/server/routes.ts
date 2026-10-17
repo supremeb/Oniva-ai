@@ -28,13 +28,15 @@
  * - `GET /v1/health` (no auth).
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ApprovalDecisionKind } from "../agent/approvals.js";
+import { type ApprovalDecisionKind, type ApprovalItem, approvalsDoc } from "../agent/approvals.js";
 import type { Harness } from "../agent/harness.js";
 import { type AgentConfigInput, parseAgentConfigInput } from "../agent/prompt.js";
 import { normalizeSubmit, type SubmitInput } from "../agent/submission.js";
+import { rootConversationId } from "../agent/taint.js";
 import { StorageRequestError } from "../core/errors.js";
 import type { JsonObject } from "../core/json.js";
-import type { ConversationRecord } from "../storage/types.js";
+import type { Session } from "../session/session.js";
+import { type ConversationRecord, MAX_PAGE_LIMIT } from "../storage/types.js";
 import type { WatchHub } from "../watch/stream.js";
 import { headerValue, ONIVA_HEADERS, type TenantBinding } from "./auth.js";
 
@@ -90,6 +92,13 @@ function optionalString(body: JsonObject, key: string): string | undefined {
   return value;
 }
 
+function optionalBoolean(body: JsonObject, key: string): boolean | undefined {
+  const value = body[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "boolean") throw bad(`${key} must be a boolean`);
+  return value;
+}
+
 function submitInput(ctx: RouteContext, body: JsonObject): SubmitInput {
   const input: SubmitInput = {};
   const text = optionalString(body, "text");
@@ -104,12 +113,58 @@ function submitInput(ctx: RouteContext, body: JsonObject): SubmitInput {
   if (whenBusy !== undefined) input.whenBusy = whenBusy as SubmitInput["whenBusy"] & string;
   const type = optionalString(body, "type");
   if (type !== undefined) input.type = type as SubmitInput["type"] & string;
+  const untrusted = optionalBoolean(body, "untrusted");
+  if (untrusted !== undefined) input.untrusted = untrusted;
   try {
     normalizeSubmit(input);
   } catch (err) {
     throw bad((err as Error).message);
   }
   return input;
+}
+
+/**
+ * The ids of `rootId` and every conversation below it (a subagent's child
+ * conversations), found by walking each conversation's owner chain.
+ */
+async function conversationTree(session: Session, rootId: string): Promise<string[]> {
+  const ids = [rootId];
+  for (let cursor: string | null = null; ; ) {
+    const page = await session.reader.listConversations({ limit: MAX_PAGE_LIMIT, cursor });
+    for (const rec of page.items) {
+      if (rec.id === rootId) continue;
+      if ((await rootConversationId(session.reader, rec)) === rootId) ids.push(rec.id);
+    }
+    cursor = page.nextCursor;
+    if (cursor === null) return ids;
+  }
+}
+
+/** Approval items for a conversation and its subagent descendants, oldest first. */
+async function approvalsForRoot(harness: Harness, rootId: string): Promise<ApprovalItem[]> {
+  const items: ApprovalItem[] = [];
+  for (const id of await conversationTree(harness.session, rootId)) {
+    items.push(...(await harness.session.document(approvalsDoc, id)).items);
+  }
+  items.sort((a, b) => a.requestedAt - b.requestedAt || a.id.localeCompare(b.id));
+  return items;
+}
+
+/**
+ * The conversation in `rootId`'s tree that holds `toolTaskId`'s approval item,
+ * so a decision sent to the root reaches a subagent child's call. Falls back to
+ * `rootId` when the task is unknown or not below it (the decision is then
+ * rejected as `not_owned`).
+ */
+async function approvalOwner(
+  harness: Harness,
+  rootId: string,
+  toolTaskId: string,
+): Promise<string> {
+  const task = harness.runtime.tasks().find((t) => t.id === toolTaskId);
+  if (!task || task.conversationId === rootId) return rootId;
+  const tree = await conversationTree(harness.session, rootId);
+  return tree.includes(task.conversationId) ? task.conversationId : rootId;
 }
 
 /** Parse a resume cursor: a non-negative integer, or null when absent. */
@@ -256,20 +311,35 @@ export const ROUTES: readonly Route[] = Object.freeze([
     },
   },
   {
+    method: "GET",
+    pattern: "/v1/conversations/:id/approvals",
+    auth: true,
+    async handle(ctx) {
+      const conv = await ctx.conversation();
+      const approvals = await approvalsForRoot(ctx.harness, conv.id);
+      return {
+        status: 200,
+        body: { conversationId: conv.id, approvals: approvals as unknown as JsonObject },
+      };
+    },
+  },
+  {
     method: "POST",
     pattern: "/v1/conversations/:id/approvals/:toolTaskId/decision",
     auth: true,
     async handle(ctx) {
       const body = await ctx.readJson();
       const conv = await ctx.conversation();
+      const toolTaskId = ctx.params.toolTaskId;
+      if (toolTaskId === undefined) throw bad("toolTaskId");
       const principal = headerValue(ctx.req, ONIVA_HEADERS.principal);
       if (principal === null) {
         throw new HttpError(400, "missing_header", ONIVA_HEADERS.principal);
       }
       const note = body.note;
       const approval = await ctx.harness.decideApproval({
-        conversationId: conv.id,
-        toolTaskId: ctx.params.toolTaskId as string,
+        conversationId: await approvalOwner(ctx.harness, conv.id, toolTaskId),
+        toolTaskId,
         decision: body.decision as ApprovalDecisionKind,
         principal,
         ...(note === undefined ? {} : { note: note as string | null }),

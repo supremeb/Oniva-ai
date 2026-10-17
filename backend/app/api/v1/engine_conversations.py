@@ -228,6 +228,12 @@ async def submit(
 ):
     conv = await _binding(db, conversation_id, user)
     payload = body.model_dump(exclude_none=True)
+    # Any content part that is not text (e.g. an image) is untrusted input: the
+    # engine taints the conversation so policy can require approval on what follows.
+    if isinstance(body.content, list) and any(
+        not (isinstance(part, dict) and part.get("type") == "text") for part in body.content
+    ):
+        payload["untrusted"] = True
     key = idempotency_key or body.requestId or str(uuid.uuid4())
     payload["requestId"] = body.requestId or key
     try:

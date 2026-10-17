@@ -92,6 +92,7 @@ import {
 } from "./progress.js";
 import { type AgentConfig, agentConfigDoc } from "./prompt.js";
 import { isSubagentTool, SUBAGENT_PHASE, type SubagentLink, subagentPhase } from "./subagents.js";
+import { markTainted, rootConversationId, taintOf, taintSummary, toolTaints } from "./taint.js";
 
 export const TOOL_TASK_KIND = "agent.tool";
 
@@ -169,7 +170,7 @@ export async function loadConversation(
   const rec = await deps.session.reader.getConversation(conversationId);
   if (!rec) throw new Error(`unknown conversation ${conversationId}`);
   const agent = await deps.session.document(agentConfigDoc, conversationId);
-  const rootId = await rootConversationId(deps.session, rec);
+  const rootId = await rootConversationId(deps.session.reader, rec);
   const agentRole =
     rec.ownerTaskId === null ? undefined : await owningToolName(deps.session, rec.ownerTaskId);
   return {
@@ -198,28 +199,9 @@ async function owningToolName(
 }
 
 /**
- * The top-level conversation above `rec`: follow each owning task to its
- * conversation until a conversation has no owner. A broken or cyclic chain
- * stops at the last conversation reached.
+ * Every entry of a conversation, oldest first, following the pages of the
+ * storage reader to the end.
  */
-async function rootConversationId(
-  session: AgentDeps["session"],
-  rec: { id: string; ownerTaskId: string | null },
-): Promise<string> {
-  let id = rec.id;
-  let owner = rec.ownerTaskId;
-  const seen = new Set([id]);
-  while (owner !== null) {
-    const task = await session.reader.getTask(owner);
-    if (!task || seen.has(task.conversationId)) break;
-    id = task.conversationId;
-    seen.add(id);
-    const parent = await session.reader.getConversation(id);
-    owner = parent ? parent.ownerTaskId : null;
-  }
-  return id;
-}
-
 export async function listAllEntries(
   session: Session,
   conversationId: string,
@@ -361,6 +343,9 @@ function issuesText(issues: ReadonlyArray<{ path: PropertyKey[]; message: string
 type Scope = TaskScope<ToolTaskCheckpoint>;
 type State = TaskState<ToolTaskInput, ToolTaskCheckpoint>;
 
+/** The top-level conversation a call's conversation belongs to. */
+const rootOf = (conversation: ToolConversation): string => conversation.rootId ?? conversation.id;
+
 export function toolTaskDefinition(
   deps: AgentDeps,
 ): TaskDefinition<ToolTaskInput, ToolTaskCheckpoint> {
@@ -371,12 +356,23 @@ export function toolTaskDefinition(
     status: ToolResultStatus,
     result: ToolResult,
     attempts: number,
-    output?: ToolOutputState,
-    prepare?: (tx: Transaction) => Promise<unknown>,
+    options: {
+      output?: ToolOutputState | undefined;
+      prepare?: ((tx: Transaction) => Promise<unknown>) | undefined;
+      /** Root conversation to taint when the call ran and its result is untrusted. */
+      taintRoot?: string | undefined;
+    } = {},
   ): Promise<Committed> =>
     rt.commit(async (tx) => {
-      if (prepare) await prepare(tx);
-      if (output) (await tx.doc(toolOutputDoc, task.id)).set(output);
+      if (options.prepare) await options.prepare(tx);
+      if (options.taintRoot !== undefined) {
+        await markTainted(tx, options.taintRoot, {
+          kind: "tool_result",
+          name: task.input.call.name,
+          ref: task.input.call.id,
+        });
+      }
+      if (options.output) (await tx.doc(toolOutputDoc, task.id)).set(options.output);
       const capped = capToolResult(task.input.call, result, deps.limits.maxEntryBytes);
       return writeToolResult(tx, task, status, capped, attempts);
     });
@@ -435,12 +431,16 @@ export function toolTaskDefinition(
           );
         }
         // Host policy: last, on the final arguments, not overridable.
+        const taint = taintSummary(await taintOf(deps.session, rootOf(conversation)));
         const verdict = await authorize(deps.policy, {
           conversation,
           agent,
           runId,
           toolCallId: call.id,
           toolName: call.name,
+          toolTaskId: task.id,
+          toolSource: tool.source,
+          taint,
           arguments: args,
           replay: tool.replay,
         });
@@ -504,8 +504,7 @@ export function toolTaskDefinition(
               isError: true,
             },
             0,
-            undefined,
-            (tx) => closeApproval(tx, task.conversationId, task.id, "expired"),
+            { prepare: (tx) => closeApproval(tx, task.conversationId, task.id, "expired") },
           );
         }
         if (decision.decision === "deny") {
@@ -584,6 +583,7 @@ export function toolTaskDefinition(
     stored: ToolOutputState,
   ): Promise<Committed> {
     const { call, runId } = task.input;
+    const taintRoot = toolTaints(tool) ? rootOf(conversation) : undefined;
     if (tool.reconcile) {
       const api: ToolReconcileApi = {
         ctx,
@@ -597,7 +597,7 @@ export function toolTaskDefinition(
       try {
         const outcome = await tool.reconcile(args, api);
         if (outcome !== null && isToolResult(outcome)) {
-          return finish(task, rt, resultStatus(outcome), outcome, stored.attempt);
+          return finish(task, rt, resultStatus(outcome), outcome, stored.attempt, { taintRoot });
         }
       } catch (err) {
         ctx.throwIfCancelled();
@@ -609,7 +609,9 @@ export function toolTaskDefinition(
       }
     }
     ctx.throwIfCancelled();
-    return finish(task, rt, "interrupted", interruptedResult(stored), stored.attempt);
+    return finish(task, rt, "interrupted", interruptedResult(stored), stored.attempt, {
+      taintRoot,
+    });
   }
 
   async function run(
@@ -700,6 +702,9 @@ export function toolTaskDefinition(
       task.id,
     );
     const status: ToolResultStatus = failed ? "error" : resultStatus(result);
-    return finish(task, rt, status, result, attempt, touched ? output : undefined);
+    return finish(task, rt, status, result, attempt, {
+      output: touched ? output : undefined,
+      taintRoot: toolTaints(tool) ? rootOf(conversation) : undefined,
+    });
   }
 }
