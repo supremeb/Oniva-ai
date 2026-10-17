@@ -530,7 +530,15 @@ def _has_subgraph(compiled: Dict[str, Any], name: str) -> bool:
     return False
 
 
-def _context(view: RunView, inputs: Dict[str, Any], scope: Scope, run_id: str, db: Any) -> NodeExecutionContext:
+def _context(
+    view: RunView,
+    inputs: Dict[str, Any],
+    scope: Scope,
+    run_id: str,
+    db: Any,
+    node_task_id: Optional[str] = None,
+    run_attempt: Optional[int] = None,
+) -> NodeExecutionContext:
     return NodeExecutionContext(
         node_id=view.node["id"],
         node_type=str(view.node.get("type", "")).lower(),
@@ -545,11 +553,18 @@ def _context(view: RunView, inputs: Dict[str, Any], scope: Scope, run_id: str, d
         workflow_id=str(view.workflow_id) if view.workflow_id else None,
         workflow_run_id=run_id,
         db=db,
+        node_task_id=node_task_id,
+        run_attempt=run_attempt,
     )
 
 
 async def run_prepare(
-    tenants: TenantSessionFactory, view: RunView, scope: Scope, run_id: str, run_attempt: int
+    tenants: TenantSessionFactory,
+    view: RunView,
+    scope: Scope,
+    run_id: str,
+    run_attempt: int,
+    node_task_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     node_type = str(view.node.get("type", "")).lower()
     input_class = input_classification(view, run_attempt, _hint(scope))
@@ -567,7 +582,7 @@ async def run_prepare(
     started = time.time()
     try:
         async with tenants(str(view.tenant_id)) as db:
-            context = _context(view, inputs, scope, run_id, db)
+            context = _context(view, inputs, scope, run_id, db, node_task_id, run_attempt)
             blocked = await executor.export_block(context, input_class)
             if blocked is not None:
                 return _result_to_final(blocked, input_class)
@@ -662,7 +677,7 @@ async def run_finish(
     inputs = predecessor_inputs(view, run_attempt)
     try:
         async with tenants(str(view.tenant_id)) as db:
-            context = _context(view, inputs, scope, run_id, db)
+            context = _context(view, inputs, scope, run_id, db, None, run_attempt)
             result = await executor.finish(context, db, fin)
     except NotImplementedError:
         raise _bad(f"node type '{node_type}' has no finish step")
@@ -705,6 +720,7 @@ async def _perform(
     run_attempt: int,
     attempt: int,
     fin: Optional[wc.FinishInput],
+    node_task_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     started = False
     try:
@@ -712,7 +728,7 @@ async def _perform(
         async with guard:
             started = True
             if phase == "prepare":
-                final = await run_prepare(tenants, view, scope, run_id, run_attempt)
+                final = await run_prepare(tenants, view, scope, run_id, run_attempt, node_task_id)
             else:
                 assert fin is not None
                 final = await run_finish(tenants, view, scope, run_id, run_attempt, fin)
@@ -746,15 +762,19 @@ async def _handle(
     raw = await _read_body(request)
     claimed, rest = _split_scope(raw)
     fin: Optional[wc.FinishInput] = None
+    node_task_id: Optional[str] = None
     if phase == "finish":
         try:
             fin = wc.validate_finish_input(rest)
         except wc.ContractError:
             raise GatewayError(422, {"error": "invalid_request"})
     else:
-        extra = set(rest) - {"contractVersion", "runAttempt", "nodeAttempt"}
+        extra = set(rest) - {"contractVersion", "runAttempt", "nodeAttempt", "nodeTaskId"}
         if extra or rest.get("contractVersion", wc.CONTRACT_VERSION) != wc.CONTRACT_VERSION:
             raise _bad("unexpected fields in prepare body")
+        node_task_id = rest.get("nodeTaskId")
+        if node_task_id is not None and (not isinstance(node_task_id, str) or not 0 < len(node_task_id) <= 512):
+            raise _bad("nodeTaskId must be a non-empty string")
         # The body's attempt counters, when sent, must be the key's (the key is the call's identity).
         for field, got in (("runAttempt", m["r"]), ("nodeAttempt", m["a"])):
             if field in rest and (type(rest[field]) is not int or rest[field] != int(got)):
@@ -809,7 +829,7 @@ async def _handle(
     task = _detach(
         _perform(
             factory, tenants, phase=phase, key=key, session_id=session_id, fence_token=token, view=view,
-            scope=scope, run_id=run_id, run_attempt=run_attempt, attempt=attempt, fin=fin,
+            scope=scope, run_id=run_id, run_attempt=run_attempt, attempt=attempt, fin=fin, node_task_id=node_task_id,
         )
     )
     return _no_store(await asyncio.shield(task))

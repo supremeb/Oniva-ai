@@ -143,6 +143,7 @@ async def apply_final(db, execution: WorkflowExecution, status: str, *, summarie
             started = started.replace(tzinfo=timezone.utc)
         execution.duration_ms = max(0, int((now - started).total_seconds() * 1000))
     await finish_scheduled(db, execution, status, attempts=attempts)
+    await wer.close_wait_approvals(db, execution, f"run {status}")  # no node is waiting on a human any more
     return True
 
 

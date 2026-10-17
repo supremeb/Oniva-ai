@@ -17,7 +17,7 @@ from app.models.workflow import WorkflowExecution
 from app.models.workflow_checkpoint import WorkflowCheckpoint
 from app.node_executors import NodeExecutionContext, NodeExecutionResult
 from app.node_executors.agent_executor import AgentExecutor
-from app.node_executors.wait_executor import MAX_IN_PROCESS_WAIT_SECONDS, WaitExecutor
+from app.node_executors.wait_executor import LEGACY_IN_PROCESS_WAIT_SECONDS, WaitExecutor
 from app.services.durable_workflow_engine import DurableWorkflowEngine
 from app.services.workflow_orchestrator import WorkflowOrchestrator
 
@@ -530,7 +530,7 @@ async def test_wait_honours_real_duration_above_the_old_60s_cap():
 async def test_wait_rejects_durations_it_cannot_honour():
     with patch("app.node_executors.wait_executor.asyncio.sleep", new=AsyncMock()) as sleep:
         result = await _wait(waitType="duration", duration=2, durationUnit="hours")
-    assert 7200 > MAX_IN_PROCESS_WAIT_SECONDS
+    assert 7200 > LEGACY_IN_PROCESS_WAIT_SECONDS
     assert result.status == "failed"
     assert "not supported" in result.error
     sleep.assert_not_awaited()

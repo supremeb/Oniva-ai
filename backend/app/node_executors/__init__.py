@@ -37,6 +37,10 @@ class NodeExecutionContext(BaseModel):
     workflow_id: Optional[str] = None  # Workflow definition ID
     workflow_run_id: Optional[str] = None  # Workflow execution run ID
     db: Optional[Any] = None  # AsyncSession for database operations
+    # Engine-run identity (plan 003 U21): the node's own engine task, which a parked node is signalled on,
+    # and the run attempt it belongs to. Absent for the legacy in-process orchestrator.
+    node_task_id: Optional[str] = None
+    run_attempt: Optional[int] = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -307,6 +311,26 @@ class PrepareResult:
             body["maxRounds"] = max_rounds
         if response_format:
             body["responseFormat"] = response_format
+        return body
+
+    @staticmethod
+    def wait(
+        *,
+        duration_ms: Optional[int] = None,
+        until_epoch_ms: Optional[int] = None,
+        signal: Optional[str] = None,
+        sla_until_epoch_ms: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """A ``wait`` body: exactly one of a relative duration or an absolute wake time (KTD7)."""
+        body: Dict[str, Any] = {"contractVersion": 1, "kind": "wait"}
+        if duration_ms is not None:
+            body["durationMs"] = int(duration_ms)
+        if until_epoch_ms is not None:
+            body["untilEpochMs"] = int(until_epoch_ms)
+        if signal is not None:
+            body["signal"] = signal
+        if sla_until_epoch_ms is not None:
+            body["slaUntilEpochMs"] = int(sla_until_epoch_ms)
         return body
 
     @staticmethod
