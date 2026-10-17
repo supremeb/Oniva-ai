@@ -142,12 +142,21 @@ class InboxService:
             except ApprovalError as e:
                 if e.code == "self_approval_forbidden":  # may decide in principle, not this one
                     actions.append({**action, "allowed": False, "disabledReason": e.code})
+        if row.kind == "question" and row.conversation_id and row.tool_task_id:
+            # Owner of the conversation (the row's requester) or a tenant admin or owner may answer.
+            if str(row.requested_by) == str(user.id) or user.role in ("admin", "owner"):
+                actions.append({
+                    "type": "answer",
+                    "endpoint": f"/api/v1/engine/conversations/{row.conversation_id}/questions/{row.tool_task_id}/answer",
+                    "requiresRole": "member", "allowed": True,
+                })
         high = row.approver_role == "admin" or row.rule == "rule_of_two"
         title = row.tool_name or {"review": "Output review", "question": "Question"}.get(row.kind, "Approval")
         return {
             "id": f"{kind}:{row.id}", "kind": kind,
             "title": f"Approve {title}" if row.kind == "tool_call" else str(title),
-            "summary": row.reason or "",
+            "summary": row.reason or (
+                str((row.arguments_preview or {}).get("question") or "") if row.kind == "question" else ""),
             "severity": "high" if high else "medium",
             "createdAt": _iso(row.created_at), "dueAt": _iso(row.expires_at),
             "source": {"type": "tool_approval", "id": str(row.id)},
