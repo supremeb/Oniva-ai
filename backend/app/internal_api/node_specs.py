@@ -19,7 +19,7 @@ class NodeSpec:
     replay_safe: bool = False
     timeout_ms: int = DEFAULT_TIMEOUT_MS
     makes_external_calls: bool = False
-    fanout: Optional[str] = None  # "iteration" | "subworkflow"
+    fanout: Optional[str] = None  # "iteration" | "subworkflow" | "batch"
 
 
 _PURE = NodeSpec(replay_safe=True)
@@ -36,6 +36,7 @@ NODE_SPECS: Dict[str, NodeSpec] = {
     "list_operator": _PURE,
     "iteration": NodeSpec(replay_safe=True, fanout="iteration"),
     "subworkflow": NodeSpec(replay_safe=True, fanout="subworkflow"),
+    "batch": NodeSpec(replay_safe=True, fanout="batch"),  # U18: the single node of a /execute-batch run
     "classifier": NodeSpec(timeout_ms=120_000, makes_external_calls=True),
     "llm": NodeSpec(timeout_ms=120_000, makes_external_calls=True),
     "guardrail": NodeSpec(timeout_ms=120_000, makes_external_calls=True),

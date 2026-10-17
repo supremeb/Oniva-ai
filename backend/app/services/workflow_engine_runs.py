@@ -393,6 +393,7 @@ async def find_stuck(session, older_than: timedelta) -> list:
             WorkflowExecution.status.in_(("queued", "running")),
             WorkflowExecution.engine_conversation_id.is_not(None),
             WorkflowExecution.started_at < cutoff,
+            WorkflowExecution.trigger != "batch",  # U18: a batch run is the ``batch`` kind's, not ours
         ).order_by(WorkflowExecution.started_at).limit(STUCK_BATCH)
     )).scalars().all()
     aborting = (await session.execute(
@@ -400,6 +401,7 @@ async def find_stuck(session, older_than: timedelta) -> list:
             WorkflowExecution.status == "cancelled",
             WorkflowExecution.engine_conversation_id.is_not(None),
             WorkflowExecution.completed_at < cutoff,
+            WorkflowExecution.trigger != "batch",
             cast(WorkflowExecution.input_data, String).like("%abort_pending%"),
         ).order_by(WorkflowExecution.completed_at).limit(STUCK_BATCH)
     )).scalars().all()

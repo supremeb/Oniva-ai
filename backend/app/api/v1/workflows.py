@@ -24,6 +24,7 @@ from app.services.workflow_validator import WorkflowValidator
 from app.services.workflow_orchestrator import WorkflowOrchestrator
 from app.services.durable_workflow_engine import DurableWorkflowEngine
 from app.services import workflow_engine_runs as engine_runs
+from app.services import workflow_batch_engine as batch_engine
 from app.services.webhook_service import (
     WebhookConfig, get_webhook_service
 )
@@ -2021,7 +2022,7 @@ class BatchExecutionInput(BaseModel):
 class BatchExecuteRequest(BaseModel):
     """Request to execute workflows in batch."""
     workflow_id: uuid.UUID = Field(..., description="Workflow to execute")
-    executions: List[BatchExecutionInput] = Field(..., min_length=1, max_length=1000)
+    executions: List[BatchExecutionInput] = Field(..., min_length=1)  # the 1000 cap is a 400 in the handler
     parallel_limit: Optional[int] = Field(10, ge=1, le=50, description="Max parallel executions")
     name: Optional[str] = Field(None, max_length=255, description="Batch name")
     webhook_url: Optional[str] = Field(None, description="Webhook URL for completion notification")
@@ -2079,9 +2080,17 @@ async def execute_batch(
     - Progress tracking and status monitoring
     - Optional webhook notification on completion
 
-    The batch is queued for background processing. Use GET /batches/{id}
+    With the engine workflows flag on, the batch is one engine run: a single fan-out node over the items with
+    ``parallel = parallel_limit`` (clamped to the engine's maximum) and ``failFast`` off. Use GET /batches/{id}
     to monitor progress.
     """
+    # Validate batch size before spending quota on it
+    if len(request.executions) > batch_engine.MAX_ITEMS:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum 1000 executions per batch"
+        )
+
     # Inline quota check — dynamic estimated_usage from batch size
     quota_svc = QuotaService(db)
     await quota_svc.check_and_raise(
@@ -2090,13 +2099,6 @@ async def execute_batch(
         QuotaType.EXECUTIONS,
         estimated_usage=len(request.executions),
     )
-
-    # Validate batch size
-    if len(request.executions) > 1000:
-        raise HTTPException(
-            status_code=400,
-            detail="Maximum 1000 executions per batch"
-        )
 
     # SSRF validation on webhook URL if provided
     if request.webhook_url:
@@ -2123,12 +2125,21 @@ async def execute_batch(
             detail="Workflow not found"
         )
 
+    use_engine = await engine_runs.tenant_uses_engine_workflows(db, tenant_id)
+    if use_engine:
+        try:
+            await batch_engine.compile_batch(db, tenant_id, request.workflow_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    parallel_limit = batch_engine.clamp_parallel(request.parallel_limit or 10)
+
     # Create batch record
     batch = WorkflowBatch(
         tenant_id=tenant_id,
         workflow_id=request.workflow_id,
         name=request.name or f"Batch execution of {workflow.name}",
-        parallel_limit=request.parallel_limit or 10,
+        parallel_limit=parallel_limit,
         total_count=len(request.executions),
         pending_count=len(request.executions),
         status=BatchStatus.QUEUED,
@@ -2148,6 +2159,8 @@ async def execute_batch(
             status=BatchItemStatus.PENDING
         )
         db.add(item)
+    if use_engine:
+        db.add(batch_engine.new_execution(batch, user.id))
 
     await db.commit()
 
@@ -2156,15 +2169,18 @@ async def execute_batch(
         f"for workflow {request.workflow_id}"
     )
 
-    # TODO: Queue background task for batch processing
-    # For now, return immediately with queued status
-    # In production, integrate with Celery/BackgroundJobs
+    status = "queued"
+    if use_engine:
+        # A start the engine could not take stays queued; the reconciler's ``start_missing`` retries it.
+        started = await batch_engine.start_batch_run(engine_runs.tenant_factory(tenant_id), batch.id)
+        if started.status != "failed":
+            status = "running"
 
     return BatchExecuteResponse(
         batch_id=batch.id,
-        status="queued",
+        status=status,
         total_count=len(request.executions),
-        message=f"Batch queued with {len(request.executions)} executions"
+        message=f"Batch {status} with {len(request.executions)} executions"
     )
 
 
@@ -2189,6 +2205,8 @@ async def get_batch_status(
             status_code=404,
             detail="Batch not found"
         )
+
+    await batch_engine.refresh_progress(db, batch)
 
     return BatchStatusResponse(
         id=batch.id,
@@ -2231,6 +2249,8 @@ async def list_batch_items(
             status_code=404,
             detail="Batch not found"
         )
+
+    await batch_engine.refresh_progress(db, batch)
 
     # Query items
     items_query = select(WorkflowBatchItem).where(
@@ -2276,8 +2296,8 @@ async def cancel_batch(
     """
     Cancel a running or queued batch.
 
-    Pending items will be marked as skipped.
-    Running items will complete but no new items will start.
+    Pending items will be marked as skipped. For an engine batch the run is aborted (running items stop
+    too); items that already finished keep their results.
     """
     query = select(WorkflowBatch).where(
         WorkflowBatch.id == batch_id,
@@ -2298,20 +2318,19 @@ async def cancel_batch(
             detail=f"Cannot cancel batch in {batch.status.value} status"
         )
 
-    # Update batch status
-    batch.status = BatchStatus.CANCELLED
-    batch.completed_at = datetime.now(timezone.utc)
-
-    # Mark pending items as skipped
-    from sqlalchemy import update
-    await db.execute(
-        update(WorkflowBatchItem)
-        .where(
-            WorkflowBatchItem.batch_id == batch_id,
-            WorkflowBatchItem.status == BatchItemStatus.PENDING
+    if not await batch_engine.cancel_batch_run(db, batch):
+        # No engine run (created with the flag off): nothing is running, so skip the pending items.
+        batch.status = BatchStatus.CANCELLED
+        batch.completed_at = datetime.now(timezone.utc)
+        from sqlalchemy import update
+        await db.execute(
+            update(WorkflowBatchItem)
+            .where(
+                WorkflowBatchItem.batch_id == batch_id,
+                WorkflowBatchItem.status == BatchItemStatus.PENDING
+            )
+            .values(status=BatchItemStatus.SKIPPED)
         )
-        .values(status=BatchItemStatus.SKIPPED)
-    )
 
     await db.commit()
 
