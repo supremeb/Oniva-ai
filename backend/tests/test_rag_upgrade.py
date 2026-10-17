@@ -66,8 +66,8 @@ class TestZeroVectorFallback:
         mock_db = AsyncMock()
         service = RAGService(mock_db)
 
-        with patch("app.services.rag_service.litellm") as mock_litellm:
-            mock_litellm.aembedding = AsyncMock(side_effect=Exception("API error"))
+        with patch("app.services.rag_service.llm_direct") as mock_llm_direct:
+            mock_llm_direct.embed = AsyncMock(side_effect=Exception("API error"))
 
             with patch("app.services.rag_service.get_embedding_cache") as mock_cache:
                 mock_cache_instance = AsyncMock()
@@ -186,11 +186,10 @@ class TestContextualRetrieval:
     async def test_generate_single_context_success(self):
         from app.services.contextual_retrieval import _generate_single_context
 
-        with patch("app.services.contextual_retrieval.litellm") as mock_litellm:
+        with patch("app.services.contextual_retrieval.llm_direct") as mock_llm_direct:
             mock_response = MagicMock()
-            mock_response.choices = [MagicMock()]
-            mock_response.choices[0].message.content = "This chunk discusses Q3 revenue."
-            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+            mock_response.content = "This chunk discusses Q3 revenue."
+            mock_llm_direct.complete = AsyncMock(return_value=mock_response)
 
             result = await _generate_single_context(
                 document_text="Full document text...",
@@ -204,8 +203,8 @@ class TestContextualRetrieval:
     async def test_generate_single_context_failure_returns_none(self):
         from app.services.contextual_retrieval import _generate_single_context
 
-        with patch("app.services.contextual_retrieval.litellm") as mock_litellm:
-            mock_litellm.acompletion = AsyncMock(side_effect=Exception("API error"))
+        with patch("app.services.contextual_retrieval.llm_direct") as mock_llm_direct:
+            mock_llm_direct.complete = AsyncMock(side_effect=Exception("API error"))
 
             result = await _generate_single_context(
                 document_text="Full document text...",
@@ -225,11 +224,10 @@ class TestContextualRetrieval:
             ChunkResult(content="Expenses were $8M", token_count=5, start_index=17, end_index=34),
         ]
 
-        with patch("app.services.contextual_retrieval.litellm") as mock_litellm:
+        with patch("app.services.contextual_retrieval.llm_direct") as mock_llm_direct:
             mock_response = MagicMock()
-            mock_response.choices = [MagicMock()]
-            mock_response.choices[0].message.content = "Q3 financial data."
-            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+            mock_response.content = "Q3 financial data."
+            mock_llm_direct.complete = AsyncMock(return_value=mock_response)
 
             results = await generate_chunk_contexts("Full doc", chunks)
 
@@ -254,11 +252,10 @@ class TestContextualRetrieval:
         large_doc = "x" * (MAX_DOC_TOKENS * 4 + 1000)
         chunks = [ChunkResult(content="chunk", token_count=1, start_index=0, end_index=5)]
 
-        with patch("app.services.contextual_retrieval.litellm") as mock_litellm:
+        with patch("app.services.contextual_retrieval.llm_direct") as mock_llm_direct:
             mock_response = MagicMock()
-            mock_response.choices = [MagicMock()]
-            mock_response.choices[0].message.content = "context"
-            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+            mock_response.content = "context"
+            mock_llm_direct.complete = AsyncMock(return_value=mock_response)
 
             results = await generate_chunk_contexts(large_doc, chunks)
             assert len(results) == 1

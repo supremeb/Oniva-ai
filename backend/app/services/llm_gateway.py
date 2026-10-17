@@ -1,7 +1,7 @@
 """
 LLM Gateway Service - Centralized LLM control with failover.
 
-Phase 2: LLM Reliability - Thin wrapper around LiteLLM with:
+Phase 2: LLM Reliability - Thin wrapper around the direct provider layer with:
 - Tenant-specific provider configuration from Settings
 - Circuit breaker for provider health (reuses redis_ha.py)
 - User-defined fallback chains
@@ -11,7 +11,7 @@ Phase 2: LLM Reliability - Thin wrapper around LiteLLM with:
 Design principles (from review):
 - Reuse existing CircuitBreaker from redis_ha.py
 - No custom rate limiting (rely on provider limits)
-- Use LiteLLM's built-in cost calculation
+- Cost comes from app/config/llm_pricing.py, never from a library estimate
 """
 
 from __future__ import annotations
@@ -30,36 +30,42 @@ from uuid import UUID, uuid4
 
 from cachetools import TTLCache
 
-import litellm
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.config.llm_pricing import calculate_cost_with_cache, find_model_pricing
 from app.core.encryption import get_encryption_service
 from app.models.llm_provider import LLMProvider
+from app.services import llm_direct
+from app.services.llm_direct import DirectProvider, DirectRequest, DirectResponse
 from app.services.redis_ha import CircuitBreaker, CircuitBreakerConfig
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Suppress litellm's noisy debug logging
-litellm.suppress_debug_info = True
-# Drop unsupported params (e.g. 'usage') for providers that reject them
-litellm.drop_params = True
+# A single provider attempt retries transient errors this many times (plus the first try).
+_MAX_LLM_RETRIES = 3
+# 4xx errors are permanent (do not retry, do not trip the breaker) except rate limits.
+_RETRYABLE_CLIENT_ERROR = 429
 
-# Patch litellm OpenRouter transform to remove 'usage' field that newer
-# OpenRouter API rejects (litellm 1.83.x bug)
-try:
-    from litellm.llms.openrouter.chat.transformation import OpenrouterConfig as _ORC
-    _orig_transform = _ORC.transform_request
-    def _patched_transform(self, *args, **kwargs):
-        result = _orig_transform(self, *args, **kwargs)
-        result.pop("usage", None)
-        return result
-    _ORC.transform_request = _patched_transform
-except Exception:
-    pass
+
+def _error_status_code(exc: Exception) -> Optional[int]:
+    """The HTTP status on an SDK exception, when the provider attached one."""
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "code", None)
+    return status if isinstance(status, int) else None
+
+
+def _is_client_error(status: Optional[int]) -> bool:
+    return status is not None and 400 <= status < 500
+
+
+def _is_retryable(status: Optional[int]) -> bool:
+    # Unknown status = network/timeout; 5xx and 429 are transient.
+    return status is None or status >= 500 or status == _RETRYABLE_CLIENT_ERROR
 
 
 # ============================================================================
@@ -390,8 +396,8 @@ async def resolve_key_with_fallback(
     specific provider key isn't available.
 
     When falling back to OpenRouter, the model_id is prefixed with
-    'openrouter/' so that litellm.acompletion() and create_litellm_model()
-    route the request through OpenRouter's proxy.
+    'openrouter/' so that the direct provider layer and
+    create_litellm_model() route the request through OpenRouter's proxy.
 
     Args:
         db: Database session
@@ -694,31 +700,12 @@ class LLMGateway:
             start_time = time.time()
 
             try:
-                # Build LiteLLM call parameters
-                litellm_params = self._build_litellm_params(request, provider)
+                direct_request = self._build_direct_request(request, provider)
 
-                # Execute call with retry on transient errors
-                # Retry wraps only this single provider attempt, not the outer fallback chain.
-                # 400/401/403 = permanent errors, fail immediately.
-                # 429/500/503/timeout/network = transient, retry with exponential backoff + jitter.
-                _MAX_LLM_RETRIES = 3
-                for _retry_attempt in range(_MAX_LLM_RETRIES + 1):
-                    try:
-                        response = await litellm.acompletion(**litellm_params)
-                        break  # Success
-                    except Exception as _retry_exc:
-                        _status = getattr(_retry_exc, 'status_code', getattr(_retry_exc, 'code', None))
-                        # Don't retry client errors — they won't succeed on retry
-                        if _status in (400, 401, 403):
-                            raise
-                        if _retry_attempt == _MAX_LLM_RETRIES:
-                            raise  # Exhausted retries, propagate to outer handler
-                        _wait = min(2 ** _retry_attempt + random.random(), 30)
-                        logger.warning(
-                            f"LLM call to {provider.name} failed (attempt {_retry_attempt + 1}/{_MAX_LLM_RETRIES}), "
-                            f"retrying in {_wait:.1f}s: {_retry_exc}"
-                        )
-                        await asyncio.sleep(_wait)
+                # Retry wraps only this single provider attempt, not the outer
+                # fallback chain. 400/401/403 = permanent, fail immediately.
+                # 429/500/503/timeout/network = transient, retry with backoff.
+                response = await self._complete_with_retry(direct_request, provider)
 
                 # Record success
                 await circuit.record_success()
@@ -729,16 +716,7 @@ class LLMGateway:
 
                 latency_ms = int((time.time() - start_time) * 1000)
 
-                # Calculate cost using LiteLLM's built-in function
-                try:
-                    cost = litellm.completion_cost(completion_response=response)
-                except Exception:
-                    # Fallback: estimate based on tokens
-                    cost = self._estimate_cost(
-                        response.usage.prompt_tokens,
-                        response.usage.completion_tokens,
-                        response.model,
-                    )
+                cost = self._calculate_cost(response)
 
                 # Log usage asynchronously (don't block response)
                 await self._log_usage(
@@ -751,23 +729,17 @@ class LLMGateway:
                     latency_ms=latency_ms,
                 )
 
-                # Extract tool calls if present
-                raw_tool_calls = response.choices[0].message.tool_calls
                 tool_calls = [
-                    ToolCallResponse(
-                        id=tc.id,
-                        name=tc.function.name,
-                        arguments=tc.function.arguments,
-                    )
-                    for tc in raw_tool_calls
-                ] if raw_tool_calls else None
+                    ToolCallResponse(id=tc.id, name=tc.name, arguments=tc.arguments)
+                    for tc in response.tool_calls
+                ] if response.tool_calls else None
 
                 return LLMResponse(
-                    content=response.choices[0].message.content or "",
+                    content=response.content,
                     model=response.model,
                     provider_name=provider.name,
-                    input_tokens=response.usage.prompt_tokens,
-                    output_tokens=response.usage.completion_tokens,
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
                     cost_usd=cost,
                     latency_ms=latency_ms,
                     tool_calls=tool_calls,
@@ -778,8 +750,11 @@ class LLMGateway:
                 errors.append(error_msg)
                 logger.warning(f"LLM call failed: {error_msg}")
 
-                # Record failure for circuit breaker
-                await circuit.record_failure(e)
+                # Record failure for circuit breaker; client errors are not the
+                # provider's fault, so they do not trip it.
+                status = _error_status_code(e)
+                if not _is_client_error(status):
+                    await circuit.record_failure(e)
 
                 # Continue to next provider
                 continue
@@ -788,6 +763,48 @@ class LLMGateway:
         raise AllProvidersFailedError(
             f"All {len(providers)} providers failed",
             errors=errors,
+        )
+
+    async def _complete_with_retry(
+        self,
+        request: DirectRequest,
+        provider: ProviderConfig,
+    ) -> DirectResponse:
+        """Call one provider, retrying transient errors with exponential backoff + jitter."""
+        direct_provider = DirectProvider(
+            provider_type=provider.provider_type,
+            api_key=provider.api_key,
+            api_base=provider.api_base,
+        )
+        for attempt in range(_MAX_LLM_RETRIES + 1):
+            try:
+                return await llm_direct.complete(request, direct_provider)
+            except Exception as exc:
+                status = _error_status_code(exc)
+                if not _is_retryable(status):
+                    raise
+                if attempt == _MAX_LLM_RETRIES:
+                    raise
+                wait = min(2 ** attempt + random.random(), 30)
+                logger.warning(
+                    f"LLM call to {provider.name} failed (attempt {attempt + 1}/{_MAX_LLM_RETRIES}), "
+                    f"retrying in {wait:.1f}s: {exc}"
+                )
+                await asyncio.sleep(wait)
+        raise AllProvidersFailedError("Retry loop exhausted", errors=[])  # pragma: no cover
+
+    def _calculate_cost(self, response: DirectResponse) -> float:
+        """Cost from the pricing table; an unknown model records cost 0, like the ledger."""
+        pricing = find_model_pricing(response.model)
+        if pricing is None:
+            logger.warning("No pricing for model %s; recording cost 0", response.model)
+            return 0.0
+        return calculate_cost_with_cache(
+            pricing,
+            response.input_tokens,
+            response.output_tokens,
+            response.cache_read_tokens,
+            response.cache_creation_tokens,
         )
 
     async def stream(
@@ -816,27 +833,23 @@ class LLMGateway:
                 continue
 
             try:
-                litellm_params = self._build_litellm_params(request, provider)
-                litellm_params["stream"] = True
+                direct_request = self._build_direct_request(request, provider)
+                direct_provider = DirectProvider(
+                    provider_type=provider.provider_type,
+                    api_key=provider.api_key,
+                    api_base=provider.api_base,
+                )
 
-                response = await litellm.acompletion(**litellm_params)
-                await circuit.record_success()
-
-                async for chunk in response:
-                    delta = chunk.choices[0].delta
-                    if delta.content:
-                        yield LLMStreamChunk(content=delta.content)
-                    if chunk.choices[0].finish_reason:
-                        yield LLMStreamChunk(
-                            content="",
-                            finish_reason=chunk.choices[0].finish_reason,
-                        )
+                async for chunk in llm_direct.stream(direct_request, direct_provider):
+                    await circuit.record_success()
+                    yield LLMStreamChunk(content=chunk.content, finish_reason=chunk.finish_reason)
                 return  # Stream complete — exit provider loop
 
             except Exception as e:
                 errors.append(f"{provider.name}: {str(e)}")
                 logger.warning(f"LLM stream failed: {provider.name}: {e}")
-                await circuit.record_failure(e)
+                if not _is_client_error(_error_status_code(e)):
+                    await circuit.record_failure(e)
                 continue
 
         raise AllProvidersFailedError(
@@ -844,88 +857,37 @@ class LLMGateway:
             errors=errors,
         )
 
-    def _build_litellm_params(
+    def _build_direct_request(
         self,
         request: LLMRequest,
         provider: ProviderConfig,
-    ) -> dict[str, Any]:
-        """Build parameters for LiteLLM call."""
-        params: dict[str, Any] = {
-            "messages": request.messages,
-            "model": request.model,
-            "temperature": request.temperature,
-            "api_key": provider.api_key,
-        }
+    ) -> DirectRequest:
+        """Build the provider-agnostic request the direct layer runs."""
+        messages = request.messages
+        system: Any = None
+        tools = request.tools
 
-        if request.max_tokens:
-            params["max_tokens"] = request.max_tokens
-
-        # Pass tools and tool_choice from request
-        if request.tools:
-            params["tools"] = request.tools
-        if request.tool_choice:
-            params["tool_choice"] = request.tool_choice
-
-        # Custom endpoint URL
-        if provider.api_base:
-            params["api_base"] = provider.api_base
-
-        # Provider-specific model prefixes for LiteLLM
-        model = request.model
-        if provider.provider_type == "openrouter" and not model.startswith("openrouter/"):
-            params["model"] = f"openrouter/{model}"
-        elif provider.provider_type == "anthropic" and not model.startswith("anthropic/"):
-            # LiteLLM requires anthropic/ prefix for Anthropic models
-            if model.startswith("claude"):
-                params["model"] = f"anthropic/{model}"
-
-        # Apply provider-native caching for Anthropic
+        # Apply provider-native caching for Anthropic: extract the system prompt
+        # and cache-mark the last tool.
         if settings.USE_PROVIDER_CACHING and provider.provider_type == "anthropic":
             anthropic_params = self._prepare_anthropic_request(
                 messages=request.messages,
                 tools=request.tools,
             )
-            # Update messages with filtered version (system prompt extracted)
-            params["messages"] = anthropic_params["messages"]
-            # Add system prompt as separate parameter if present
-            if anthropic_params["system"]:
-                params["system"] = anthropic_params["system"]
-            # Add cached tools if present
+            messages = anthropic_params["messages"]
+            system = anthropic_params["system"]
             if anthropic_params["tools"]:
-                params["tools"] = anthropic_params["tools"]
+                tools = anthropic_params["tools"]
 
-        return params
-
-    def _estimate_cost(
-        self,
-        input_tokens: int,
-        output_tokens: int,
-        model: str,
-    ) -> float:
-        """Fallback cost estimation when LiteLLM can't calculate."""
-        # Conservative estimates per 1M tokens
-        cost_per_1m = {
-            "gpt-4o": {"input": 2.5, "output": 10.0},
-            "gpt-4o-mini": {"input": 0.15, "output": 0.6},
-            "claude-3-5-sonnet": {"input": 3.0, "output": 15.0},
-            "claude-3-haiku": {"input": 0.25, "output": 1.25},
-        }
-
-        # Find matching model or use default
-        model_lower = model.lower()
-        pricing = None
-        for key, prices in cost_per_1m.items():
-            if key in model_lower:
-                pricing = prices
-                break
-
-        if not pricing:
-            pricing = {"input": 1.0, "output": 2.0}  # Default conservative
-
-        input_cost = (input_tokens / 1_000_000) * pricing["input"]
-        output_cost = (output_tokens / 1_000_000) * pricing["output"]
-
-        return input_cost + output_cost
+        return DirectRequest(
+            messages=messages,
+            model=request.model,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            tools=tools,
+            tool_choice=request.tool_choice,
+            system=system,
+        )
 
     # ========================================================================
     # Provider-Native Prompt Caching (P2 Cost Optimization)
@@ -995,20 +957,11 @@ class LLMGateway:
             "tools": cached_tools,
         }
 
-    def _log_cache_stats(self, response: Any, provider: str) -> None:
+    def _log_cache_stats(self, response: DirectResponse, provider: str) -> None:
         """Log cache performance for monitoring."""
         if provider == "anthropic":
-            usage = response.usage
-            cache_read = getattr(usage, 'cache_read_input_tokens', None)
-
-            if cache_read is None:
-                logger.debug(
-                    "Anthropic response missing cache_read_input_tokens - "
-                    "caching may not be enabled"
-                )
-                return
-
-            total_input = usage.input_tokens
+            cache_read = response.cache_read_tokens
+            total_input = response.input_tokens
             hit_rate = cache_read / total_input if total_input > 0 else 0
 
             logger.info(
@@ -1017,13 +970,9 @@ class LLMGateway:
             )
 
         elif provider == "openai":
-            usage = response.usage
-            details = getattr(usage, 'prompt_tokens_details', None)
-            if details:
-                cached = getattr(details, 'cached_tokens', 0)
-                logger.info(
-                    f"OpenAI cache: cached={cached} total={usage.prompt_tokens}"
-                )
+            logger.info(
+                f"OpenAI cache: cached={response.cache_read_tokens} total={response.input_tokens}"
+            )
 
     def _hash_prompt(self, messages: List[Dict[str, Any]]) -> str:
         """Create deterministic hash of messages for cache key.
@@ -1044,27 +993,12 @@ class LLMGateway:
         user_id: Optional[UUID],
         provider: ProviderConfig,
         request: LLMRequest,
-        response: Any,
+        response: DirectResponse,
         cost: float,
         latency_ms: int,
     ) -> None:
         """Log usage record to database."""
         from app.models.llm_usage import LLMUsageRecord
-
-        # Extract cache stats per provider
-        cache_read = 0
-        cache_creation = 0
-
-        match provider.provider_type:
-            case "anthropic":
-                cache_read = getattr(response.usage, 'cache_read_input_tokens', 0) or 0
-                cache_creation = getattr(response.usage, 'cache_creation_input_tokens', 0) or 0
-            case "openai":
-                details = getattr(response.usage, 'prompt_tokens_details', None)
-                if details:
-                    cache_read = getattr(details, 'cached_tokens', 0) or 0
-            case _:
-                pass
 
         record = LLMUsageRecord(
             id=uuid4(),
@@ -1073,15 +1007,15 @@ class LLMGateway:
             provider_id=provider.id,
             provider_name=provider.name,
             model=response.model,
-            input_tokens=response.usage.prompt_tokens,
-            output_tokens=response.usage.completion_tokens,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
             cost_usd=cost,
             latency_ms=latency_ms,
             workflow_id=request.workflow_id,
             node_id=request.node_id,
             agent_id=request.agent_id,
-            cache_creation_tokens=cache_creation,
-            cache_read_tokens=cache_read,
+            cache_creation_tokens=response.cache_creation_tokens,
+            cache_read_tokens=response.cache_read_tokens,
             status="success",
         )
 
@@ -1095,8 +1029,8 @@ class LLMGateway:
                 call_id=str(record.id),
                 provider=provider.provider_type,
                 model=response.model,
-                input_tokens=response.usage.prompt_tokens,
-                output_tokens=response.usage.completion_tokens,
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
                 latency_ms=latency_ms,
                 status="success",
                 workflow_id=str(request.workflow_id) if request.workflow_id else None,
@@ -1120,22 +1054,18 @@ async def verify_provider_connection(
     Used by Settings UI to verify provider configuration works.
     """
     try:
-        params = {
-            "messages": [{"role": "user", "content": "Say 'ok'"}],
-            "model": model,
-            "api_key": api_key,
-            "max_tokens": 5,
-        }
+        provider = DirectProvider(
+            provider_type=provider_type,
+            api_key=api_key,
+            api_base=api_base,
+        )
+        request = DirectRequest(
+            messages=[{"role": "user", "content": "Say 'ok'"}],
+            model=model,
+            max_tokens=5,
+        )
 
-        if api_base:
-            params["api_base"] = api_base
-
-        if provider_type == "openrouter" and not model.startswith("openrouter/"):
-            params["model"] = f"openrouter/{model}"
-        elif provider_type == "anthropic" and model.startswith("claude"):
-            params["model"] = f"anthropic/{model}"
-
-        response = await litellm.acompletion(**params)
+        response = await llm_direct.complete(request, provider)
 
         return {
             "success": True,

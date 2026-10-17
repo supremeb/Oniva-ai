@@ -9,7 +9,7 @@ Verifies that:
 """
 
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, AsyncMock
 
 
 class TestEmbeddingGeneration:
@@ -38,11 +38,9 @@ class TestEmbeddingGeneration:
                 new_callable=AsyncMock,
                 return_value=("text-embedding-3-small", "test-key", "openai")
             ):
-                with patch("app.services.rag_service.litellm") as mock_litellm:
-                    # litellm returns response.data[0]["embedding"] (dict access)
-                    mock_response = MagicMock()
-                    mock_response.data = [{"embedding": embedding_data}]
-                    mock_litellm.aembedding = AsyncMock(return_value=mock_response)
+                with patch("app.services.rag_service.llm_direct") as mock_llm_direct:
+                    # llm_direct.embed returns vectors in input order
+                    mock_llm_direct.embed = AsyncMock(return_value=[embedding_data])
 
                     result = await service.get_embedding("test query")
 
@@ -52,7 +50,7 @@ class TestEmbeddingGeneration:
 
     @pytest.mark.asyncio
     async def test_generate_embedding_calls_correct_model(self):
-        """Verify correct model is used for embeddings via litellm."""
+        """Verify correct model is used for embeddings via llm_direct."""
         from app.services.rag_service import RAGService
 
         mock_db = AsyncMock()
@@ -71,16 +69,14 @@ class TestEmbeddingGeneration:
                 new_callable=AsyncMock,
                 return_value=("text-embedding-3-small", "test-key", "openai")
             ):
-                with patch("app.services.rag_service.litellm") as mock_litellm:
-                    mock_response = MagicMock()
-                    mock_response.data = [{"embedding": [0.1] * 1536}]
-                    mock_litellm.aembedding = AsyncMock(return_value=mock_response)
+                with patch("app.services.rag_service.llm_direct") as mock_llm_direct:
+                    mock_llm_direct.embed = AsyncMock(return_value=[[0.1] * 1536])
 
                     await service.get_embedding("test query")
 
-                    mock_litellm.aembedding.assert_called_once()
-                    call_kwargs = mock_litellm.aembedding.call_args.kwargs
-                    assert "model" in call_kwargs
+                    mock_llm_direct.embed.assert_called_once()
+                    call_kwargs = mock_llm_direct.embed.call_args.kwargs
+                    assert call_kwargs["model"] == "text-embedding-3-small"
 
 
 class TestSearchDocumentsUsesHybridSearchV2:
