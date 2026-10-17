@@ -43,9 +43,15 @@ async function scenario(answer: "answer" | "expire") {
   const fx = await memoryBackend.fixture();
   fx.provider.enqueue(fakeToolCall("ask_user", ASK, { id: "call_ask_1" }), fakeText("Done."));
   const w = await fx.open({ tools: [askUserTool], questionTtlMs: 30 * 60_000 });
-  const conv = await w.harness.createConversation({ tenantId: "t1", projectId: "p1", agent: AGENT });
+  const conv = await w.harness.createConversation({
+    tenantId: "t1",
+    projectId: "p1",
+    agent: AGENT,
+  });
   const sub = await conv.submit({ text: "deploy it" });
-  await waitFor(async () => (await w.harness.questions(conv.id)).some((i) => i.status === "pending"));
+  await waitFor(async () =>
+    (await w.harness.questions(conv.id)).some((i) => i.status === "pending"),
+  );
   await w.harness.waitForIdle();
   const out: Record<string, ConversationView> = {};
   out.pending = structuredClone(await loadConversationView(w.harness.session, conv.id));
