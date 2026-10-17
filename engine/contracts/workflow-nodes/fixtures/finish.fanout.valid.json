@@ -1,0 +1,11 @@
+{
+  "contractVersion": 1,
+  "kind": "fanout",
+  "fanout": {
+    "count": 10,
+    "completed": 9,
+    "failed": 1,
+    "cancelled": 0,
+    "firstError": "item 3 failed"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "version": 0,
+  "runId": "run-1",
+  "runAttempt": 0,
+  "nodes": { "n1": "success" },
+  "pending": ["n2"],
+  "errorMode": "stop"
+}

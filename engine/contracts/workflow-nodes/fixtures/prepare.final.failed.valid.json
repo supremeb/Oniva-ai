@@ -1,0 +1,9 @@
+{
+  "contractVersion": 1,
+  "kind": "final",
+  "status": "failed",
+  "output": null,
+  "error": { "message": "node blew up", "code": "boom" },
+  "tokensUsed": 0,
+  "classification": "error"
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "finish.input.schema.json",
+  "title": "Workflow node finish input",
+  "description": "What the engine sends to the backend finish route: the generation answer, the signal payload or a fan-out summary. finish returns a final.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "kind"],
+  "properties": {
+    "contractVersion": { "const": 1 },
+    "kind": { "enum": ["llm", "wait", "fanout"] },
+    "answer": {},
+    "signalPayload": {},
+    "wakeReason": { "enum": ["signal", "deadline"] },
+    "fanout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "completed", "failed", "cancelled"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "completed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "cancelled": { "type": "integer", "minimum": 0 },
+        "firstError": {}
+      }
+    }
+  }
+}

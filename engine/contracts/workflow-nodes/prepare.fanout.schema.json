@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prepare.fanout.schema.json",
+  "title": "Workflow node prepare result: fanout",
+  "description": "The node fans out. It carries a count and a backend reference (itemsRef), never item payloads or results.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "kind", "count", "parallel", "failFast", "target", "itemsRef"],
+  "properties": {
+    "contractVersion": { "const": 1 },
+    "kind": { "const": "fanout" },
+    "count": { "type": "integer", "minimum": 0, "maximum": 1000 },
+    "parallel": { "type": "integer", "minimum": 1, "maximum": 50 },
+    "failFast": { "type": "boolean" },
+    "target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["subgraph"],
+          "properties": { "subgraph": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["workflowId"],
+          "properties": { "workflowId": { "type": "string" } }
+        }
+      ]
+    },
+    "itemsRef": { "type": "string" }
+  }
+}
