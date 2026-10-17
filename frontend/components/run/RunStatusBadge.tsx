@@ -41,10 +41,10 @@ function StatusIcon({ status }: { status: RunStatus }) {
   }
 }
 
-export const RunStatusBadge = memo(function RunStatusBadge({ status, className }: { status: RunStatus; className?: string }) {
+export const RunStatusBadge = memo(function RunStatusBadge({ status, className, testId = 'run-status-badge' }: { status: RunStatus; className?: string; testId?: string }) {
   return (
     <span
-      data-testid="run-status-badge"
+      data-testid={testId}
       data-status={status}
       className={cn('inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium', STYLE[status], className)}
     >

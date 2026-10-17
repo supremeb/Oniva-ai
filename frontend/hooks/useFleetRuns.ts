@@ -16,9 +16,10 @@ export interface UseFleetRunsParams {
   page_size?: number;
 }
 
-export function useFleetRuns(params?: UseFleetRunsParams) {
+export function useFleetRuns(params?: UseFleetRunsParams, options?: { enabled?: boolean }) {
   return useQuery<FleetRunsResponse>({
     queryKey: ['fleet-runs', params],
     queryFn: () => getFleetRuns(params),
+    enabled: options?.enabled ?? true,
   });
 }

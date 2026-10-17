@@ -50,7 +50,7 @@ async function openRun(page: Page, jobId: string) {
   await page.getByTestId(`fleet-run-${jobId}`).click();
 }
 
-const header = (page: Page) => page.getByTestId('run-status-badge').first();
+const header = (page: Page) => page.getByTestId('fleet-detail-status');
 const box = (page: Page) => page.getByLabel('Message to agent');
 
 test.beforeAll(async () => {
@@ -73,8 +73,11 @@ test('@recovery worker killed mid-run: banner, resume, one completion, refresh r
   await expect(page.getByTestId('connection-banner')).toBeVisible({ timeout: 60_000 });
   await control('/start-worker');
 
-  await page.reload(); // a refresh mid-run rejoins the same run
-  await expect(page.getByRole('tree')).toBeVisible();
+  await page.reload(); // a refresh mid-run rejoins the same run (selection lives in ?run=<jobId>)
+  await expect(page).toHaveURL(new RegExp(`[?&]run=${jobId}`));
+  // The run may already have resumed to its end (the killed write comes back interrupted), and the run tree
+  // is only shown while a run is active, so the rejoin check is the run header, not the tree.
+  await expect(header(page)).toBeVisible();
   await control('/open-gate');
   await expect(header(page)).toHaveAttribute('data-status', 'completed', { timeout: 180_000 });
   await expect(box(page)).toBeDisabled();

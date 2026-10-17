@@ -88,7 +88,7 @@ describe('FleetChat', () => {
 
   it('a cancelled job shows cancelled, hides Cancel and disables the input', () => {
     renderChat({ status: 'cancelled', isLive: false });
-    expect(screen.getByTestId('run-status-badge')).toHaveAttribute('data-status', 'cancelled');
+    expect(screen.getByTestId('fleet-detail-status')).toHaveAttribute('data-status', 'cancelled');
     expect(screen.queryByRole('button', { name: 'Cancel run' })).toBeNull();
     expect(screen.getByLabelText('Message to agent')).toBeDisabled();
   });
