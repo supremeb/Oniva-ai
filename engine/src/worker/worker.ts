@@ -47,6 +47,7 @@ import { defaultOwnerId, LeaseKeeper, PostgresLeases } from "../storage/postgres
 import { migrate } from "../storage/postgres/migrate.js";
 import { PostgresStorageProvider } from "../storage/postgres/storage.js";
 import type { StorageProvider } from "../storage/types.js";
+import type { TaskDefinition } from "../tasks/define.js";
 import { createGatewayTools, type GatewayToolset } from "../tools/gateway.js";
 import type { ToolDefinition } from "../tools/registry.js";
 import { BackendPolicyClient, UsageReporter } from "./backend-policy.js";
@@ -112,6 +113,8 @@ export interface WorkerOptions {
   subagentTools?: readonly string[];
   // biome-ignore lint/suspicious/noExplicitAny: tools with any argument type
   tools?: ToolDefinition<any>[];
+  /** Host task kinds registered after the harness's built-ins (KTD3). */
+  hostTasks?: readonly TaskDefinition[];
   /** Engine clock (approval expiry, deadlines, throttling). Leases use the database clock. */
   clock?: Clock;
   settings?: Partial<AgentSettings>;
@@ -423,6 +426,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       clock,
       fence: k.fence,
       signal: k.signal,
+      ...(options.hostTasks ? { tasks: options.hostTasks } : {}),
       ...(options.settings ? { settings: options.settings } : {}),
       ...(options.redact ? { redact: options.redact } : {}),
       ...(options.hooks || usageReporter

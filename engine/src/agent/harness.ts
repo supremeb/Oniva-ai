@@ -93,6 +93,8 @@ export interface HarnessOptions {
   clock?: Clock;
   settings?: Partial<AgentSettings>;
   limits?: Partial<EngineLimits>;
+  /** Extra task kinds registered after the built-ins; a duplicate kind throws when opening. */
+  tasks?: readonly TaskDefinition[];
   /** Lease fence for commits (`LeaseKeeper.fence`), for a session the harness opens. */
   fence?: FenceProvider;
   /** Stops the harness's runtime when aborted (`LeaseKeeper.signal`). */
@@ -254,7 +256,8 @@ export class Harness implements AgentCore {
       runtime = await TaskRuntime.open(session, {
         // Subagents need no kind of their own: they run as the tool task's
         // `subagent` phase over child conversations of these same kinds.
-        tasks: [generation, toolTask, compaction],
+        // Host tasks are registered after the built-ins, so they cannot shadow one.
+        tasks: [generation, toolTask, compaction, ...(options.tasks ?? [])],
         clock,
         concurrency: settings.concurrency,
         ...(options.signal ? { signal: options.signal } : {}),

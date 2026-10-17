@@ -29,7 +29,7 @@ Everything is exported from the package root (`src/index.ts`).
 
 | Area | Main exports |
 | --- | --- |
-| Harness | `Harness.open(storage, options)`, `harness.createConversation`, `harness.conversation(id)`, `harness.submission(id)`, `harness.decideApproval`, `harness.approvals`, `harness.waitForIdle`, `harness.close` |
+| Harness | `Harness.open(storage, options)`, `harness.createConversation`, `harness.conversation(id)`, `harness.submission(id)`, `harness.decideApproval`, `harness.approvals`, `harness.waitForIdle`, `harness.close`. `options.tasks` registers extra task kinds after the built-ins (host tasks); a duplicate kind throws at `open`. |
 | Conversations | `conversation.submit({ text, requestId?, whenBusy?: "followUp" \| "steer" \| "reject", type? })` → `Submission` (`wait()`, `record()`), `conversation.abort(reason?)`, `conversation.cancelSubmission(submissionId)` → `"cancelled" \| "not_queued" \| "unknown"`, `entries()`, `live()`, `usage()` |
 | Policy & hooks | `HostPolicy` (`resolveModelRequest`, `authorizeTool` → `allow` / `block` / `requireApproval`), `AgentHooks` |
 | Tools | `defineTool`, `ToolRegistry`, `createGatewayTools`, `createSubagentTool` |
@@ -66,13 +66,16 @@ routes also need `X-Oniva-Tenant` / `X-Oniva-Project` matching the conversation.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /v1/health` | `{ status, sessionId, ownerId, owner }` (no auth) |
+| `GET /v1/health` | `{ status, sessionId, ownerId, owner, apiVersion, taskKinds }`; `apiVersion` is the engine API version and `taskKinds` the sorted registered kinds (built-ins plus host tasks) (no auth) |
 | `POST /v1/conversations` | create (`{ id?, agent? }`) → 201 |
+| `POST /v1/runs` | start a run: `{ id, kind, input?, agent? }`; creates the conversation with the caller's `id` and spawns a root task of `kind`, conversation-owned → 201 `{ conversationId, taskId }`; a repeat `id` returns the existing run (200) and spawns nothing; an unknown `kind` is 400 |
 | `POST /v1/conversations/:id/submissions` | submit (`{ text \| content, requestId?, whenBusy?, type? }`; `Idempotency-Key` header works too) → 202 |
 | `PUT /v1/conversations/:id/agent` | partial agent config (`systemPrompt`, `tools`, `model`, `thinking`, `depth`, `metadata`, `compaction`, `maxRounds`, `deadlineMs`); unknown or mistyped fields → 400 and nothing committed; applies from the next model request and arrives at watchers as a patch to `/agent` → 200 `{ conversationId, agent }` |
 | `GET /v1/conversations/:id/watch` | SSE watch stream (`id:` is the cursor; resume with `Last-Event-ID` or `?cursor=`) |
 | `DELETE /v1/conversations/:id/submissions/:submissionId` | cancel a still-queued input; it settles `unanswered(withdrawn)` → 200 `{ conversationId, submissionId, cancelled: true }`; 404 unknown submission, 409 `not_queued` if it already started, was placed into a run or settled |
 | `POST /v1/conversations/:id/abort` | abort queued and running work; answers once the run is idle |
+| `POST /v1/conversations/:id/tasks/:taskId/signal` | deliver a signal to one of the conversation's tasks: `{ key, payload? }` → 200; 404 for an unknown task or one of another conversation, 409 for a duplicate key or a finished task |
+| `GET /v1/conversations/:id/tasks/:taskId` | a task's status: `{ id, kind, status, phase, outcome? }` |
 | `POST /v1/conversations/:id/approvals/:toolTaskId/decision` | `{ decision: "approve" \| "deny", note? }`, principal in `X-Oniva-Principal` |
 
 Each watch-view `inbox.queue` item is `{ submissionId, mode, preview?, requestId? }`: `preview` is the first 200 characters of the queued text and `requestId` the caller's id (both absent on items queued by older engines); `inbox.placed` is unchanged.

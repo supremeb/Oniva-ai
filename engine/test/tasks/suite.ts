@@ -13,6 +13,7 @@ import {
   WaitRejected,
   waiting,
 } from "../../src/tasks/define.js";
+import type { AgentBackend } from "../agent/support.js";
 import { type Backend, deferred, type Fixture, untilAborted, type Worker } from "./support.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -678,6 +679,63 @@ export function defineTaskRuntimeSuite(backend: Backend): void {
       gate.resolve();
       expect((await w.runtime.waitForTask(t.id)).outcome).toEqual({ type: "done", value: "early" });
       await w.crash();
+    });
+  });
+}
+
+/** A host task: two phases with a deadline wait between them (U3). */
+function hostWaitTask() {
+  return defineTask<{ until: number }, null>({
+    kind: "host.wait",
+    phases: {
+      start: async (task, rt) =>
+        rt.commit(() => waiting({ until: task.input.until, phase: "finish" })),
+      finish: async (_task, rt) => rt.commit(() => done({ ok: true })),
+    },
+  });
+}
+
+/**
+ * The host-task suite (U3): extra kinds registered through
+ * `HarnessOptions.tasks` run like any other task and survive a restart.
+ */
+export function defineHostTaskSuite(backend: AgentBackend): void {
+  describe(`host tasks (${backend.name})`, () => {
+    it("runs a host task registered through HarnessOptions.tasks to done", async () => {
+      const fx = await backend.fixture();
+      const w = await fx.open({ tasks: [hostWaitTask()] });
+      const conv = await w.harness.createConversation({ tenantId: "t1", projectId: "p1" });
+      const t = await w.harness.runtime.spawn(hostWaitTask(), {
+        conversationId: conv.id,
+        input: { until: fx.clock.now() + 10 },
+      });
+      fx.clock.advance(10);
+      const final = await w.harness.runtime.waitForTask(t.id);
+      expect(final.outcome).toEqual({ type: "done", value: { ok: true } });
+      await w.crash();
+    });
+
+    it("resumes a host task waiting({until}) after a restart and wakes at the deadline", async () => {
+      const fx = await backend.fixture();
+      const w1 = await fx.open({ tasks: [hostWaitTask()] });
+      const conv = await w1.harness.createConversation({ tenantId: "t1", projectId: "p1" });
+      const t = await w1.harness.runtime.spawn(hostWaitTask(), {
+        conversationId: conv.id,
+        input: { until: fx.clock.now() + 200 },
+      });
+      await w1.harness.runtime.waitForIdle();
+      expect(w1.harness.runtime.task(t.id)?.status).toBe("waiting");
+      await w1.crash();
+
+      const w2 = await fx.open({ tasks: [hostWaitTask()] });
+      await w2.harness.runtime.waitForIdle();
+      fx.clock.advance(100);
+      await w2.harness.runtime.waitForIdle();
+      expect(w2.harness.runtime.task(t.id)?.status).toBe("waiting");
+      fx.clock.advance(100);
+      const final = await w2.harness.runtime.waitForTask(t.id);
+      expect(final.outcome).toEqual({ type: "done", value: { ok: true } });
+      await w2.crash();
     });
   });
 }
