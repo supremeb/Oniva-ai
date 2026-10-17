@@ -77,6 +77,7 @@ async function main(): Promise<number> {
         : null,
     workflow,
     approvalTtlMs: config.approvalTtlMs,
+    questionTtlMs: config.questionTtlMs,
     subagentTool: config.subagentTool,
     subagentTools: config.subagentTools,
     settings: { progressIntervalMs: config.progressIntervalMs },

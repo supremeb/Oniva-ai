@@ -102,13 +102,13 @@ FLAG_METADATA: dict[str, FlagMeta] = {
     # Engine chat (operator-only: rollout is controlled per tenant)
     "ENABLE_ENGINE_CHAT": FlagMeta(
         group="Core",
-        description="Run chat on the new engine (needs global ENABLE_ENGINE_CHAT + ENABLE_ENGINE_API)",
+        description="Run chat on the new engine (on by default; set false to opt a tenant out)",
         operator_only=True,
     ),
 
     "ENABLE_ENGINE_DEEP_WORK": FlagMeta(
         group="Core",
-        description="Run Deep Work on the new engine (needs global ENABLE_ENGINE_DEEP_WORK + ENABLE_ENGINE_API)",
+        description="Run Deep Work on the new engine (on by default; set false to opt a tenant out)",
         operator_only=True,
     ),
 
@@ -196,25 +196,30 @@ ENGINE_WORKFLOWS_FLAG = "ENABLE_ENGINE_WORKFLOWS"
 
 
 def _engine_tenant_flag(tenant: Tenant, flag: str, global_on: bool, settings) -> bool:
-    """Every global condition AND an explicit tenant opt-in (global is a ceiling, not a default)."""
+    """Every global condition AND the tenant not opting out.
+
+    The globals are a ceiling and the kill switch; the tenant setting is an opt-out. An absent
+    tenant setting is on, and only an explicit ``false`` turns engine paths off for that tenant.
+    """
     s = settings if settings is not None else get_settings()
     if not (global_on and s.ENABLE_ENGINE_API and s.ENGINE_URL and s.ENGINE_SERVICE_TOKEN):
         return False
-    return (((tenant.settings or {}).get("features") or {}).get(flag)) is True
+    return (((tenant.settings or {}).get("features") or {}).get(flag)) is not False
 
 
 def engine_chat_enabled(tenant: Tenant, settings=None) -> bool:
-    """Engine chat for a tenant: every global condition AND an explicit tenant opt-in.
+    """Engine chat for a tenant: every global condition AND the tenant not opting out.
 
-    Unlike other flags the global value is a ceiling, not a default: a tenant setting of true
-    never enables engine chat while the global flag, ENABLE_ENGINE_API or the engine config is off.
+    Unlike other flags the global value is a ceiling: engine chat is on for a tenant whose
+    setting is absent or true, but never while the global flag, ENABLE_ENGINE_API or the engine
+    config is off. Set ``features.ENABLE_ENGINE_CHAT=false`` to opt the tenant out.
     """
     s = settings if settings is not None else get_settings()
     return _engine_tenant_flag(tenant, ENGINE_CHAT_FLAG, s.ENABLE_ENGINE_CHAT, s)
 
 
 def engine_deep_work_enabled(tenant: Tenant, settings=None) -> bool:
-    """Engine Deep Work for a tenant; same ceiling semantics as engine_chat_enabled."""
+    """Engine Deep Work for a tenant; same ceiling and opt-out semantics as engine_chat_enabled."""
     s = settings if settings is not None else get_settings()
     return _engine_tenant_flag(tenant, ENGINE_DEEP_WORK_FLAG, s.ENABLE_ENGINE_DEEP_WORK, s)
 

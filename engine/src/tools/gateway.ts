@@ -77,6 +77,8 @@ export interface GatewayToolInfo {
   idempotent: boolean;
   timeoutMs: number;
   requiresApproval: boolean;
+  /** Whether the tool's result is untrusted input for the conversation (taints it). */
+  untrustedOutput: boolean;
 }
 
 export interface GatewayRetryOptions {
@@ -264,6 +266,8 @@ class GatewayHttp {
       description: info.description,
       parameters: gatewayParameters(info.parameters),
       replay,
+      source: "gateway",
+      untrustedOutput: info.untrustedOutput,
       execute: (args, api) => this.#invoke(info, args, api),
       reconcile: (_args, api) => this.#reconcile(info, api.idempotencyKey, api.ctx.signal),
     });
@@ -685,8 +689,16 @@ function parseManifest(body: JsonValue | null): GatewayToolInfo[] {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
       throw new TypeError(`${at}: expected an object`);
     }
-    const { name, description, parameters, sideEffect, idempotent, timeoutMs, requiresApproval } =
-      raw;
+    const {
+      name,
+      description,
+      parameters,
+      sideEffect,
+      idempotent,
+      timeoutMs,
+      requiresApproval,
+      untrustedOutput,
+    } = raw;
     if (typeof name !== "string") throw new TypeError(`${at}: name must be a string`);
     if (seen.has(name)) throw new TypeError(`${at}: duplicate tool ${name}`);
     seen.add(name);
@@ -713,6 +725,9 @@ function parseManifest(body: JsonValue | null): GatewayToolInfo[] {
     if (requiresApproval !== undefined && typeof requiresApproval !== "boolean") {
       throw new TypeError(`${at} (${name}): requiresApproval must be a boolean`);
     }
+    if (untrustedOutput !== undefined && typeof untrustedOutput !== "boolean") {
+      throw new TypeError(`${at} (${name}): untrustedOutput must be a boolean`);
+    }
     return {
       name,
       description,
@@ -721,6 +736,7 @@ function parseManifest(body: JsonValue | null): GatewayToolInfo[] {
       idempotent: idempotent === true,
       timeoutMs,
       requiresApproval: requiresApproval === true,
+      untrustedOutput: untrustedOutput === true,
     };
   });
 }

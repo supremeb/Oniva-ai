@@ -15,6 +15,7 @@ const view = (over: Partial<ConversationView> = {}): ConversationView => ({
   live: { runId: null, taskId: null, message: null },
   inbox: { queue: [], placed: [] },
   approvals: { items: [] },
+  questions: { items: [] },
   usage: { requests: 1, total: usage, byModel: {}, byPurpose: {} },
   agent: {},
   toolOutput: {},

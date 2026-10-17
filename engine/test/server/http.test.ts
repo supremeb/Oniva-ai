@@ -1,7 +1,9 @@
 import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { askUserTool } from "../../src/agent/ask-user-tool.js";
 import type { HostPolicy } from "../../src/agent/policy.js";
+import { createSubagentTool } from "../../src/agent/subagents.js";
 import { fakeText, fakeToolCall } from "../../src/models/fake.js";
 import { defineTool } from "../../src/tools/registry.js";
 import type { WatchFrame } from "../../src/watch/stream.js";
@@ -61,6 +63,14 @@ async function pendingApproval(w: AgentWorker, conversationId: string) {
   return (await w.harness.approvals(conversationId)).find((i) => i.status === "pending") as Any;
 }
 
+/** The child conversation a parent's still-running `research` subagent call created. */
+function childApprovalOwner(w: AgentWorker, parentId: string): string | undefined {
+  const tool = w.harness.runtime
+    .tasks({ conversationId: parentId })
+    .find((t) => t.kind === "agent.tool" && (t.input as Any)?.call?.name === "research");
+  return (tool?.checkpoint as Any)?.subagent?.conversationId;
+}
+
 describe("engine HTTP server", () => {
   it("serves health without auth", async () => {
     const { url, w } = await start();
@@ -98,7 +108,10 @@ describe("engine HTTP server", () => {
       ["POST", `/v1/conversations/${id}/submissions`],
       ["GET", `/v1/conversations/${id}/watch`],
       ["POST", `/v1/conversations/${id}/abort`],
+      ["GET", `/v1/conversations/${id}/approvals`],
       ["POST", `/v1/conversations/${id}/approvals/task_x/decision`],
+      ["GET", `/v1/conversations/${id}/questions`],
+      ["POST", `/v1/conversations/${id}/questions/task_x/answer`],
     ];
     for (const [method, path] of routes) {
       const body = method === "POST" ? { body: {} } : {};
@@ -130,9 +143,16 @@ describe("engine HTTP server", () => {
         ["POST", `/v1/conversations/${id}/submissions`, headers],
         ["GET", `/v1/conversations/${id}/watch`, headers],
         ["POST", `/v1/conversations/${id}/abort`, headers],
+        ["GET", `/v1/conversations/${id}/approvals`, headers],
         [
           "POST",
           `/v1/conversations/${id}/approvals/task_x/decision`,
+          { ...headers, "x-oniva-principal": "user:alice" },
+        ],
+        ["GET", `/v1/conversations/${id}/questions`, headers],
+        [
+          "POST",
+          `/v1/conversations/${id}/questions/task_x/answer`,
           { ...headers, "x-oniva-principal": "user:alice" },
         ],
       ];
@@ -159,6 +179,10 @@ describe("engine HTTP server", () => {
       headers: AUTH,
     });
     expect(watch.status).toBe(404);
+    const approvals = await call(url, "GET", "/v1/conversations/conv_missing/approvals", {
+      headers: AUTH,
+    });
+    expect(approvals.status).toBe(404);
     expect((await call(url, "GET", "/v1/nope", { headers: AUTH })).status).toBe(404);
     const wrongMethod = await call(url, "GET", "/v1/conversations", { headers: AUTH });
     expect(wrongMethod.status).toBe(405);
@@ -182,7 +206,7 @@ describe("engine HTTP server", () => {
   });
 
   it("rejects an oversized body with 413 and malformed input with 400", async () => {
-    const { url } = await start({}, { limits: { maxRequestBodyBytes: 512 } });
+    const { url, w } = await start({}, { limits: { maxRequestBodyBytes: 512 } });
     const id = await createConv(url);
     const big = await call(url, "POST", `/v1/conversations/${id}/submissions`, {
       headers: AUTH,
@@ -212,6 +236,16 @@ describe("engine HTTP server", () => {
       body: {},
     });
     expect(noContent.status).toBe(400);
+    const badUntrusted = await call(url, "POST", `/v1/conversations/${id}/submissions`, {
+      headers: AUTH,
+      body: { text: "x", untrusted: "yes" },
+    });
+    expect(badUntrusted.status).toBe(400);
+    expect(badUntrusted.body).toMatchObject({
+      error: "bad_request",
+      reason: "untrusted must be a boolean",
+    });
+    expect(await w.harness.conversation(id).entries()).toHaveLength(0);
   });
 
   it("413s a chunked body that grows past the limit", async () => {
@@ -384,6 +418,222 @@ describe("engine HTTP server", () => {
     });
     expect(again.status).toBe(409);
     expect(again.body.reason).toBe("already_decided");
+    expect(again.body.approval).toMatchObject({ id: item.id, status: "approved" });
+  });
+
+  it("lists a conversation's approval items and reaches a subagent child's item through the root", async () => {
+    const childPolicy: HostPolicy = {
+      resolveModelRequest: allowAll.resolveModelRequest,
+      authorizeTool: ({ toolName }) =>
+        toolName === "scrape"
+          ? { decision: "requireApproval", reason: "needs a human" }
+          : { decision: "allow" },
+    };
+    const research = createSubagentTool({ name: "research", tools: ["scrape"] });
+    const scrape = defineTool({
+      name: "scrape",
+      description: "Scrape",
+      parameters: z.object({}),
+      execute: () => ({ content: "scraped" }),
+    });
+    const { url, w, fx } = await start({ tools: [research, scrape], policy: childPolicy });
+    fx.provider.enqueue(
+      fakeToolCall("research", { prompt: "go" }, { id: "r1" }),
+      fakeToolCall("scrape", {}, { id: "s1" }),
+      fakeText("scraped"),
+      fakeText("done"),
+    );
+    const id = await createConv(url, { agent: { systemPrompt: "s", tools: ["research"] } });
+    const sub = await call(url, "POST", `/v1/conversations/${id}/submissions`, {
+      headers: AUTH,
+      body: { text: "research" },
+    });
+
+    await waitFor(() => childApprovalOwner(w, id) !== undefined);
+    const child = childApprovalOwner(w, id) as string;
+    await w.harness.waitForIdle();
+    const item = (await w.harness.approvals(child)).find((i) => i.status === "pending") as Any;
+
+    const view = await call(url, "GET", `/v1/conversations/${id}/approvals`, { headers: AUTH });
+    expect(view.status).toBe(200);
+    expect(view.body.conversationId).toBe(id);
+    expect(view.body.approvals).toHaveLength(1);
+    expect(child).not.toBe(id);
+    expect(view.body.approvals[0]).toMatchObject({
+      id: item.id,
+      toolName: "scrape",
+      status: "pending",
+    });
+
+    const decided = await call(
+      url,
+      "POST",
+      `/v1/conversations/${id}/approvals/${item.toolTaskId}/decision`,
+      { headers: { ...AUTH, "x-oniva-principal": "user:alice" }, body: { decision: "approve" } },
+    );
+    expect(decided.status).toBe(200);
+    expect(decided.body.approval).toMatchObject({ id: item.id, status: "approved" });
+    const settled = await w.harness.submission(sub.body.submissionId).wait();
+    expect(settled.status).toBe("done");
+  });
+
+  describe("questions", () => {
+    const PRINCIPAL = { ...AUTH, "x-oniva-principal": "user:alice" };
+    const ASK = {
+      question: "Which colour?",
+      options: [
+        { id: "blue", label: "Blue" },
+        { id: "green", label: "Green" },
+      ],
+    };
+
+    async function asking(workerOptions: Parameters<typeof start>[0] = {}) {
+      const s = await start({ tools: [askUserTool], ...workerOptions });
+      s.fx.provider.enqueue(fakeToolCall("ask_user", ASK, { id: "c1" }), fakeText("done"));
+      const id = await createConv(s.url, { agent: { systemPrompt: "s", tools: ["ask_user"] } });
+      const sub = await call(s.url, "POST", `/v1/conversations/${id}/submissions`, {
+        headers: AUTH,
+        body: { text: "ask" },
+      });
+      await waitFor(async () =>
+        (await s.w.harness.questions(id)).some((i) => i.status === "pending"),
+      );
+      await s.w.harness.waitForIdle();
+      const item = (await s.w.harness.questions(id))[0] as Any;
+      return {
+        ...s,
+        id,
+        item,
+        sub,
+        path: `/v1/conversations/${id}/questions/${item.toolTaskId}/answer`,
+      };
+    }
+
+    it("answers over HTTP: 200, the run resumes with the option label", async () => {
+      const { url, w, sub, path, item } = await asking();
+      const ok = await call(url, "POST", path, {
+        headers: PRINCIPAL,
+        body: { answer: { optionIds: ["blue"] } },
+      });
+      expect(ok.status).toBe(200);
+      expect(ok.body.question).toMatchObject({
+        id: item.id,
+        status: "answered",
+        answer: { optionIds: ["blue"], principal: "user:alice" },
+      });
+      const settled = await w.harness.submission(sub.body.submissionId).wait();
+      expect(settled.status).toBe("done");
+    });
+
+    it("requires a principal (400); an unknown conversation is 404", async () => {
+      const { url, path, item } = await asking();
+      const none = await call(url, "POST", path, {
+        headers: AUTH,
+        body: { answer: { optionIds: ["blue"] } },
+      });
+      expect(none.status).toBe(400);
+      expect(none.body.error).toBe("missing_header");
+      const missing = await call(
+        url,
+        "POST",
+        `/v1/conversations/conv_missing/questions/${item.toolTaskId}/answer`,
+        { headers: PRINCIPAL, body: { answer: { optionIds: ["blue"] } } },
+      );
+      expect(missing.status).toBe(404);
+      const list = await call(url, "GET", "/v1/conversations/conv_missing/questions", {
+        headers: AUTH,
+      });
+      expect(list.status).toBe(404);
+    });
+
+    it("answering twice: the second is 409 already_answered", async () => {
+      const { url, w, sub, path } = await asking();
+      const body = { answer: { optionIds: ["green"] } };
+      expect((await call(url, "POST", path, { headers: PRINCIPAL, body })).status).toBe(200);
+      const again = await call(url, "POST", path, { headers: PRINCIPAL, body });
+      expect(again.status).toBe(409);
+      expect(again.body).toMatchObject({ error: "question_rejected", reason: "already_answered" });
+      expect(again.body.question).toMatchObject({ status: "answered" });
+      await w.harness.submission(sub.body.submissionId).wait();
+    });
+
+    it("rejects an invalid or oversized answer with 400 and commits nothing", async () => {
+      const { url, w, id, path } = await asking();
+      const bodies = [
+        { answer: { optionIds: ["red"] } },
+        { answer: { optionIds: ["blue", "green"] } },
+        { answer: "blue" },
+        { answer: { text: "x".repeat(20_000) } },
+        {},
+      ];
+      for (const body of bodies) {
+        const res = await call(url, "POST", path, { headers: PRINCIPAL, body });
+        expect(res.status, JSON.stringify(body).slice(0, 40)).toBe(400);
+        expect(res.body).toMatchObject({ error: "question_rejected", reason: "invalid" });
+      }
+      expect((await w.harness.questions(id))[0]).toMatchObject({ status: "pending", answer: null });
+    });
+
+    it("maps an unknown task to 404 not_owned and an expired question to 410", async () => {
+      const { url, id, path, fx, w, sub } = await asking({ questionTtlMs: 60_000 });
+      const other = await call(url, "POST", `/v1/conversations/${id}/questions/task_nope/answer`, {
+        headers: PRINCIPAL,
+        body: { answer: { optionIds: ["blue"] } },
+      });
+      expect(other.status).toBe(404);
+      expect(other.body).toMatchObject({ error: "question_rejected", reason: "not_owned" });
+      await fx.clock.advanceAsync(61_000);
+      await w.harness.submission(sub.body.submissionId).wait();
+      const late = await call(url, "POST", path, {
+        headers: PRINCIPAL,
+        body: { answer: { optionIds: ["blue"] } },
+      });
+      expect(late.status).toBe(410);
+      expect(late.body).toMatchObject({ error: "question_rejected", reason: "expired" });
+    });
+
+    it("lists the conversation's questions, scoped to that conversation", async () => {
+      const { url, id, item } = await asking();
+      const res = await call(url, "GET", `/v1/conversations/${id}/questions`, { headers: AUTH });
+      expect(res.status).toBe(200);
+      expect(res.body.conversationId).toBe(id);
+      expect(res.body.questions).toHaveLength(1);
+      expect(res.body.questions[0]).toMatchObject({ id: item.id, status: "pending" });
+      const otherId = await createConv(url);
+      const empty = await call(url, "GET", `/v1/conversations/${otherId}/questions`, {
+        headers: AUTH,
+      });
+      expect(empty.body.questions).toEqual([]);
+    });
+
+    it("lists a subagent child's pending question through the root", async () => {
+      const research = createSubagentTool({ name: "research", tools: ["ask_user"] });
+      const { url, w, fx } = await start({ tools: [research, askUserTool] });
+      fx.provider.enqueue(
+        fakeToolCall("research", { prompt: "go" }, { id: "r1" }),
+        fakeToolCall("ask_user", ASK, { id: "q1" }),
+        fakeText("answered"),
+        fakeText("done"),
+      );
+      const id = await createConv(url, { agent: { systemPrompt: "s", tools: ["research"] } });
+      await call(url, "POST", `/v1/conversations/${id}/submissions`, {
+        headers: AUTH,
+        body: { text: "research" },
+      });
+      await waitFor(() => childApprovalOwner(w, id) !== undefined);
+      const child = childApprovalOwner(w, id) as string;
+      await waitFor(async () =>
+        (await w.harness.questions(child)).some((i) => i.status === "pending"),
+      );
+      const item = (await w.harness.questions(child))[0] as Any;
+      expect(child).not.toBe(id);
+      expect(await w.harness.questions(id)).toEqual([]);
+
+      const res = await call(url, "GET", `/v1/conversations/${id}/questions`, { headers: AUTH });
+      expect(res.status).toBe(200);
+      expect(res.body.questions).toHaveLength(1);
+      expect(res.body.questions[0]).toMatchObject({ id: item.id, status: "pending" });
+    });
   });
 
   it("streams a mid-run watch over SSE: snapshot, then patches that reproduce the final view", async () => {

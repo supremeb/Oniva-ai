@@ -58,6 +58,7 @@ const mkView = (over: Partial<ConversationView> = {}): ConversationView => ({
   live: { runId: null, taskId: null, message: null },
   inbox: { queue: [], placed: [] },
   approvals: { items: [] },
+  questions: { items: [] },
   usage: emptyUsage,
   agent: { systemPrompt: 'hi' },
   toolOutput: {},

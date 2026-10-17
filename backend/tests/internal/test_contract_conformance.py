@@ -27,8 +27,11 @@ from tests.internal import test_invoke as ti
 from tests.internal import test_model_policy as tp
 from tests.internal import test_workflow_nodes as tw
 from tests.internal.test_invoke import effects, factory, gw, maker  # noqa: F401  (fixtures)
+from tests.internal import test_tool_authorize as ta
+from tests.internal.test_manifest import by_name, loaded  # noqa: F401  (fixtures)
 from tests.internal.test_model_policy import _env, client  # noqa: F401  (fixtures)
 from tests.internal.test_workflow_nodes import counts, wf  # noqa: F401  (fixtures)
+from tests.internal.test_tool_authorize import env  # noqa: F401  (fixture)
 
 FAKE_GATEWAY = Path(__file__).resolve().parents[3] / "engine" / "test" / "support" / "fake-gateway.ts"
 CLAUSE_TAG = re.compile(r"\[clause:([a-z0-9-]+)\]")
@@ -471,7 +474,8 @@ async def test_models_no_retry_definitive(client, test_db):
     assert r.status_code == 200 and r.json()["ok"] is False and r.json()["code"] == "no_key"
 
 
-# ==== the workflow node gateway: engine/test/support/fake-workflow-backend.ts (U11) =============
+# ==== the workflow node gateway: engine/test/support/fake-workflow-backend.ts (U11) ======
+
 #
 # Same rule as above for the second fake: every `[clause:<id>]` tag in its leading TSDoc needs exactly one
 # `@wf_clause("<id>")` test. The scenarios run against `/internal/workflows` with the fixtures of
@@ -696,3 +700,62 @@ async def test_wf_retry_after(wf):
     busy = await tw.call(wf, "t")
     assert busy.status_code == 503 and busy.headers["retry-after"] == "1"
     assert wf.counts["template"] == 0
+
+
+# ---- tool authorization (Approvals & Policy plan, U5) -----------------------------------------
+
+
+@clause("authorize-no-store")
+async def test_authorize_no_store(env):
+    for b in (ta.body(env, tool="update_todo", toolSource="native"), ta.body(env, n=2),
+              ta.body(env, n=3, tool="nope_tool")):
+        r = await ta.post(env, b)
+        assert r.status_code == 200
+        assert r.headers["cache-control"] == "no-store"
+
+
+@clause("authorize-allow-shape")
+async def test_authorize_allow_shape(env):
+    r = await ta.post(env, ta.body(env, tool="update_todo", toolSource="native"))
+    assert r.status_code == 200 and r.json() == {"decision": "allow"}
+
+
+@clause("authorize-block-shape")
+async def test_authorize_block_shape(env):
+    r = (await ta.post(env, ta.body(env, tool="nope_tool"))).json()
+    assert r["decision"] == "block"
+    assert isinstance(r["code"], str) and r["code"]
+    assert isinstance(r["reason"], str) and r["reason"]
+
+
+@clause("authorize-require-approval-shape")
+async def test_authorize_require_approval_shape(env):
+    r = (await ta.post(env, ta.body(env))).json()
+    assert r["decision"] == "requireApproval"
+    assert isinstance(r["reason"], str) and r["reason"]
+    assert isinstance(r["approvalId"], str) and r["approvalId"]
+    assert r["approvalTtlMs"] is None or (isinstance(r["approvalTtlMs"], int) and r["approvalTtlMs"] >= 0)
+    assert isinstance(r["requiredRole"], str) and r["requiredRole"]
+    env.tenant.settings = {"approvals": {"ttl_hours": 0}}  # ttl_hours 0: never expires
+    await env.db.commit()
+    assert (await ta.post(env, ta.body(env, n=2))).json()["approvalTtlMs"] is None
+
+
+@clause("authorize-repeat-same")
+async def test_authorize_repeat_same(env):
+    b = ta.body(env)
+    first = (await ta.post(env, b)).json()
+    second = (await ta.post(env, b)).json()
+    assert second == first
+    assert len(await ta.rows(env)) == 1
+
+
+@clause("authorize-invalid-422")
+async def test_authorize_invalid_422(env):
+    for key in ("requestId", "tenantId", "runId", "toolCallId", "toolName", "toolSource"):
+        b = ta.body(env)
+        del b[key]
+        assert (await ta.post(env, b)).status_code == 422, key
+    assert (await ta.post(env, ta.body(env, toolSource="other"))).status_code == 422
+    assert (await ta.post(env, ta.body(env, arguments=["not", "an", "object"]))).status_code == 422
+    assert await ta.rows(env) == []

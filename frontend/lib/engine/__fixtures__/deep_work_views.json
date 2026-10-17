@@ -143,6 +143,9 @@
           "approvals": {
             "items": []
           },
+          "questions": {
+            "items": []
+          },
           "usage": {
             "requests": 2,
             "total": {
@@ -436,6 +439,9 @@
             "placed": []
           },
           "approvals": {
+            "items": []
+          },
+          "questions": {
             "items": []
           },
           "usage": {
@@ -1138,6 +1144,9 @@
           "approvals": {
             "items": []
           },
+          "questions": {
+            "items": []
+          },
           "usage": {
             "requests": 10,
             "total": {
@@ -1314,6 +1323,9 @@
             "placed": []
           },
           "approvals": {
+            "items": []
+          },
+          "questions": {
             "items": []
           },
           "usage": {
@@ -3803,6 +3815,9 @@
           "approvals": {
             "items": []
           },
+          "questions": {
+            "items": []
+          },
           "usage": {
             "requests": 3,
             "total": {
@@ -4157,6 +4172,9 @@
           "approvals": {
             "items": []
           },
+          "questions": {
+            "items": []
+          },
           "usage": {
             "requests": 4,
             "total": {
@@ -4290,6 +4308,9 @@
             "placed": []
           },
           "approvals": {
+            "items": []
+          },
+          "questions": {
             "items": []
           },
           "usage": {
@@ -5371,6 +5392,9 @@
           "approvals": {
             "items": []
           },
+          "questions": {
+            "items": []
+          },
           "usage": {
             "requests": 2,
             "total": {
@@ -5610,6 +5634,9 @@
           "approvals": {
             "items": []
           },
+          "questions": {
+            "items": []
+          },
           "usage": {
             "requests": 2,
             "total": {
@@ -5723,6 +5750,9 @@
             "placed": []
           },
           "approvals": {
+            "items": []
+          },
+          "questions": {
             "items": []
           },
           "usage": {

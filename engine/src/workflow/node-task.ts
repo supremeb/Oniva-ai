@@ -345,7 +345,12 @@ function spawnChild(
       id: submissionId,
       conversationId: child.id,
       requestId: `node:${task.id}`,
-      input: toSubmissionInput({ content: llm.prompt, type: "input", whenBusy: "followUp" }),
+      input: toSubmissionInput({
+        content: llm.prompt,
+        type: "input",
+        whenBusy: "followUp",
+        untrusted: false,
+      }),
       status: "active",
       result: null,
       taskId: runId,

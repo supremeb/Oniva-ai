@@ -57,6 +57,7 @@ CAPABILITY_FAMILIES = (
 # request), so the context window is a conservative default rather than a per-model lookup.
 # Background compaction starts at COMPACT_FRACTION of the window; a request waits for one
 # once only the reply reserve is left.
+ASK_USER_TOOL = "ask_user"
 DEFAULT_CONTEXT_WINDOW = 200_000
 COMPACT_FRACTION = 0.70
 RESERVE_FRACTION = 0.10
@@ -142,6 +143,10 @@ def build_capabilities_block(tools: Iterable[str]) -> str:
         for label, names in CAPABILITY_FAMILIES
         if granted.intersection(names)
     ]
+    listed = set().union(*(set(names) for _, names in CAPABILITY_FAMILIES))
+    other = sorted(granted - listed)
+    if other:
+        lines.append(f"- other tools: {', '.join(other)}")
     body = "\n".join(lines) if lines else "You have no tools beyond your own knowledge."
     return f"## {CAPABILITY_HEADING}\n\n{body}\n\n{CAPABILITY_FOOTER}"
 
@@ -152,6 +157,7 @@ def compose_agent_config(
     manifest_names: Iterable[str],
     now: Optional[datetime] = None,
     continuation_summary: Optional[str] = None,
+    agent_role: Optional[str] = None,
 ) -> BuiltAgent:
     now = now or datetime.now(timezone.utc)
     manifest = set(manifest_names)
@@ -190,6 +196,10 @@ def compose_agent_config(
     if selections.web_search:
         parts.append(build_web_search_instruction(now, selections.specific_sites or None))
     parts.append(build_capabilities_block(tools))
+    # ask_user is native to the engine and only reaches a human in a top-level chat (U11): workers
+    # (any ``agent_role``) have nobody to ask.
+    if agent_role is None:
+        tools.add(ASK_USER_TOOL)
 
     if continuation_summary and continuation_summary.strip():
         parts.append(
@@ -331,6 +341,7 @@ async def build_engine_chat_agent(
     manifest: Optional[Iterable[str]] = None,
     now: Optional[datetime] = None,
     continuation_summary: Optional[str] = None,
+    agent_role: Optional[str] = None,
 ) -> BuiltAgent:
     """Agent config for a chat conversation: raises ``AgentUnavailable`` for an unusable agent."""
     inputs = await loader(
@@ -338,4 +349,4 @@ async def build_engine_chat_agent(
         is_admin=getattr(user, "role", None) == "admin",
         project_id=uuid.UUID(str(project_id)), selections=selections)
     names = set(manifest) if manifest is not None else await manifest_tool_names()
-    return compose_agent_config(inputs, selections, names, now, continuation_summary)
+    return compose_agent_config(inputs, selections, names, now, continuation_summary, agent_role)

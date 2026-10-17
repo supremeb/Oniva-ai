@@ -19,6 +19,7 @@ import {
 import {
   AgentQuestion,
   ApprovalCard,
+  QuestionCard,
   QuestionPrompt,
   FormCard,
   OAuthCard,
@@ -64,7 +65,7 @@ export interface MessageRendererProps {
   /** Callback handlers */
   handlers?: {
     onToolRetry?: (toolId: string) => void;
-    onQuestionAnswer?: (questionId: string, answer: { optionIds: string[]; otherValue?: string }) => void;
+    onQuestionAnswer?: (questionId: string, answer: { optionIds: string[]; otherValue?: string }) => void | Promise<void>;
     onApprove?: (approvalId: string) => void | Promise<void>;
     onReject?: (approvalId: string) => void | Promise<void>;
     onFormSubmit?: (formId: string, values: Record<string, string>) => void;
@@ -149,6 +150,24 @@ export const MessageRenderer = memo(function MessageRenderer({
 
       // Agent questions
       case 'question':
+        if (part.toolTaskId !== undefined) {
+          // Engine `ask_user`: the durable question card.
+          return (
+            <QuestionCard
+              key={key}
+              id={part.id}
+              question={part.question}
+              options={part.options}
+              multiSelect={part.multiSelect}
+              allowFreeText={part.allowFreeText}
+              status={part.status}
+              answer={part.answer}
+              expiresAt={part.expiresAt}
+              readOnly={part.canDecide === false}
+              onAnswer={handlers.onQuestionAnswer ? (answer) => handlers.onQuestionAnswer?.(part.id, answer) : undefined}
+            />
+          );
+        }
         return (
           <AgentQuestion
             key={key}
@@ -173,6 +192,7 @@ export const MessageRenderer = memo(function MessageRenderer({
             description={part.description}
             riskLevel={part.riskLevel}
             items={part.items}
+            argumentsHash={part.argumentsHash}
             status={part.status}
             toolName={part.toolName}
             expiresAt={part.expiresAt}

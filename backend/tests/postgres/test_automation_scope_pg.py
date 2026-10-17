@@ -87,7 +87,7 @@ def test_migration_120_up_down_up(pg_migrated_url):
     assert cols(q.format("workflow_executions", "'engine_conversation_id'")) == ["engine_conversation_id"]
     assert cols("SELECT indexname FROM pg_indexes WHERE indexname='ix_engine_conversations_run'") == [
         "ix_engine_conversations_run"]
-    down = run_alembic(pg_migrated_url, "downgrade", "109_llm_usage_agent_role")
+    down = run_alembic(pg_migrated_url, "downgrade", "113_retire_review_tickets")
     assert down.returncode == 0, down.stderr[-2000:]
     assert cols(q.format("engine_conversations", "'run_kind','run_ref_id'")) == []
     up = run_alembic(pg_migrated_url, "upgrade", "head")

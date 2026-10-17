@@ -426,7 +426,11 @@ export interface ChatMessageListProps {
     /** Callback to open artifact modal */
     onOpenModal?: (data: ArtifactModalData) => void;
     /** Approve/reject handlers for approval parts (receive the part id). */
-    approvalHandlers?: { onApprove?: (id: string) => void | Promise<void>; onReject?: (id: string) => void | Promise<void> };
+    approvalHandlers?: {
+        onApprove?: (id: string) => void | Promise<void>;
+        onReject?: (id: string) => void | Promise<void>;
+        onQuestionAnswer?: (id: string, answer: { optionIds: string[]; otherValue?: string }) => void | Promise<void>;
+    };
     /** Extra content under a message (e.g. a per-turn cost caption). */
     renderMessageFooter?: (message: ChatMessageData) => React.ReactNode;
 }

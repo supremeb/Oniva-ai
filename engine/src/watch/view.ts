@@ -18,6 +18,7 @@ import { GENERATION_TASK_KIND } from "../agent/generation.js";
 import { type InboxState, inboxDoc } from "../agent/inbox.js";
 import { type LiveState, liveDoc, type ToolOutputState, toolOutputDoc } from "../agent/progress.js";
 import { type AgentConfig, agentConfigDoc } from "../agent/prompt.js";
+import { type QuestionsState, questionsDoc } from "../agent/questions.js";
 import { TOOL_TASK_KIND } from "../agent/tool-task.js";
 import { type UsageTally, type UsageTotals, usageDoc } from "../agent/usage.js";
 import type { JsonValue } from "../core/json.js";
@@ -38,6 +39,8 @@ export interface ConversationView {
   live: LiveState;
   inbox: InboxState;
   approvals: ApprovalsState;
+  /** `ask_user` questions; `{ items: [] }` when the conversation has none. */
+  questions: QuestionsState;
   usage: UsageTotals;
   agent: AgentConfig;
   /** Partial output by tool task id; each carries the `toolCallId` / `toolName` it belongs to. */
@@ -323,13 +326,14 @@ function compactionView(
   };
 }
 
-type DocKey = "live" | "inbox" | "approvals" | "usage" | "agent";
+type DocKey = "live" | "inbox" | "approvals" | "questions" | "usage" | "agent";
 
 /** Conversation-scoped documents in the view, by document kind. */
 export const VIEW_DOCUMENTS: Readonly<Record<string, DocKey>> = Object.freeze({
   [liveDoc.kind]: "live",
   [inboxDoc.kind]: "inbox",
   [approvalsDoc.kind]: "approvals",
+  [questionsDoc.kind]: "questions",
   [usageDoc.kind]: "usage",
   [agentConfigDoc.kind]: "agent",
 });
@@ -448,6 +452,7 @@ export async function loadViewState(
     live: await session.document(liveDoc, conversationId),
     inbox: await session.document(inboxDoc, conversationId),
     approvals: await session.document(approvalsDoc, conversationId),
+    questions: await session.document(questionsDoc, conversationId),
     usage: await session.document(usageDoc, conversationId),
     agent: await session.document(agentConfigDoc, conversationId),
     toolOutput,

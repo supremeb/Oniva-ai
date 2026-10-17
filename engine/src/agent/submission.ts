@@ -37,6 +37,12 @@ export interface SubmitInput {
   whenBusy?: WhenBusy;
   /** `input` (default) is answered; `write` is display-only. */
   type?: SubmissionType;
+  /**
+   * The host's assertion that this input is untrusted content (e.g. an
+   * uploaded image or a forwarded document): it taints the conversation when
+   * the input reaches the model.
+   */
+  untrusted?: boolean;
 }
 
 /** The stored `input` of a submission. */
@@ -44,6 +50,7 @@ export type SubmissionInputRecord = {
   content: string | TextContent[];
   type: SubmissionType;
   whenBusy: WhenBusy;
+  untrusted: boolean;
 };
 
 /** `done` result of an answered submission. */
@@ -157,10 +164,18 @@ export function normalizeSubmit(input: SubmitInput): {
   if (requestId !== null && (typeof requestId !== "string" || requestId.length === 0)) {
     throw new TypeError("requestId must be a non-empty string");
   }
-  return { record: { content, type, whenBusy }, requestId };
+  if (input.untrusted !== undefined && typeof input.untrusted !== "boolean") {
+    throw new TypeError("untrusted must be a boolean");
+  }
+  return { record: { content, type, whenBusy, untrusted: input.untrusted ?? false }, requestId };
 }
 
 /** The content of a stored submission input. */
 export function storedContent(sub: SubmissionRecord): string | TextContent[] {
   return (sub.input as unknown as SubmissionInputRecord).content;
+}
+
+/** Whether a stored submission input was marked untrusted by the host. */
+export function storedUntrusted(sub: SubmissionRecord): boolean {
+  return (sub.input as unknown as SubmissionInputRecord).untrusted === true;
 }

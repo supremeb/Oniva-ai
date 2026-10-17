@@ -1,25 +1,5 @@
 import { apiFetch } from './index';
 
-export interface SandboxExecuteRequest {
-  code: string;
-  session_id: string;
-  input_files?: string[];
-}
-
-export interface SandboxExecutionResponse {
-  id: string;
-  session_id: string;
-  tenant_id: string;
-  sandbox_id: string;
-  code: string;
-  status: string;
-  stdout?: string;
-  stderr?: string;
-  duration_seconds?: number;
-  created_at?: string;
-  completed_at?: string;
-}
-
 export interface WorkspaceFileInfo {
   name: string;
   type: 'file' | 'directory';
@@ -43,18 +23,6 @@ export interface WorkspaceFileContentResponse {
 export interface WorkspaceTodoResponse {
   content: string;
   session_id: string;
-}
-
-export async function executeSandbox(request: SandboxExecuteRequest): Promise<SandboxExecutionResponse> {
-  return apiFetch<SandboxExecutionResponse>('/api/v1/sandbox/execute', {
-    method: 'POST',
-    body: JSON.stringify(request),
-    timeout: 10000,
-  });
-}
-
-export async function getSandboxExecution(executionId: string): Promise<SandboxExecutionResponse> {
-  return apiFetch<SandboxExecutionResponse>(`/api/v1/sandbox/${executionId}`);
 }
 
 export async function listWorkspaceFiles(sessionId: string): Promise<WorkspaceFileListResponse> {

@@ -201,7 +201,7 @@ def test_response_satisfies_the_engines_parse_constraints(manifest_json):
     assert names == sorted(names) and len(set(names)) == len(names) and names
     for t in manifest_json:
         assert set(t) == {"name", "description", "parameters", "sideEffect", "idempotent", "timeoutMs",
-                          "requiresApproval"}
+                          "requiresApproval", "untrustedOutput"}
         assert isinstance(t["name"], str) and t["name"]
         assert isinstance(t["description"], str) and t["description"]
         assert t["sideEffect"] in ("none", "write")
@@ -223,3 +223,10 @@ def test_manifest_requires_the_service_token():
 def test_previously_unregistered_batch_skills_are_served(manifest_json):
     names = {t["name"] for t in manifest_json}
     assert {"batch_sanctions_check", "batch_kyc_verification"} <= names
+
+
+def test_manifest_carries_untrusted_output(manifest_json):
+    tools = by_name(manifest_json)
+    assert tools["browse_url"]["untrustedOutput"] is True
+    assert tools["write_file"]["untrustedOutput"] is False
+    assert all(isinstance(t["untrustedOutput"], bool) for t in manifest_json)

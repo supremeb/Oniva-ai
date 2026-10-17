@@ -65,6 +65,40 @@ export interface ApprovalsState {
   items: ApprovalItem[];
 }
 
+export interface QuestionOptionItem {
+  id: string;
+  label: string;
+  description: string | null;
+}
+
+export interface QuestionAnswerRecord {
+  optionIds: string[];
+  text: string | null;
+  principal: string;
+  answeredAt: number;
+}
+
+/** An `ask_user` question (engine/src/agent/questions.ts `QuestionItem`). */
+export interface QuestionItem {
+  id: string;
+  toolTaskId: string;
+  runId: string;
+  toolCallId: string;
+  question: string;
+  options: QuestionOptionItem[];
+  multiSelect: boolean;
+  allowFreeText: boolean;
+  requestedAt: number;
+  expiresAt: number | null;
+  status: 'pending' | 'answered' | 'expired' | 'cancelled';
+  answer: QuestionAnswerRecord | null;
+  closedAt: number | null;
+}
+
+export interface QuestionsState {
+  items: QuestionItem[];
+}
+
 export interface UsageTally {
   requests: number;
   inputTokens: number;
@@ -127,6 +161,8 @@ export interface ConversationView {
   live: LiveState;
   inbox: InboxState;
   approvals: ApprovalsState;
+  /** Always present after parsing; `{ items: [] }` when an older engine omits it. */
+  questions: QuestionsState;
   usage: UsageTotals;
   agent: { [key: string]: JsonValue };
   toolOutput: { [toolTaskId: string]: ToolOutputState };
@@ -218,7 +254,12 @@ export function parseConversationView(raw: unknown): ConversationView {
     throw new WireError('view.tasks');
   }
   // Skeleton verified above; the engine's zod schemas own the leaves.
-  return raw as unknown as ConversationView;
+  if ('questions' in raw && raw.questions !== undefined) {
+    if (!isObj(raw.questions) || !Array.isArray(raw.questions.items)) throw new WireError('view.questions');
+    return raw as unknown as ConversationView;
+  }
+  // Older engines have no questions document.
+  return { ...raw, questions: { items: [] } } as unknown as ConversationView;
 }
 
 export function parseWatchFrame(raw: unknown): WatchFrame {

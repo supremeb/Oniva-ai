@@ -11,6 +11,9 @@
  * human decision and resumes the call, `approvals` lists a conversation's
  * requests.
  *
+ * `ask_user` questions wait the same way: `answerQuestion` records a person's
+ * answer and resumes the call, `questions` lists a conversation's questions.
+ *
  * Submissions whose run ended without settling them (a generation aborted or
  * faulted) are settled `unanswered` by the harness, both as it happens and
  * when the harness opens, together with the steers placed into that run; the
@@ -64,6 +67,13 @@ import {
   applyAgentConfig,
   type CompactionOverrides,
 } from "./prompt.js";
+import {
+  type AnswerQuestionInput,
+  applyAnswer,
+  DEFAULT_QUESTION_TTL_MS,
+  type QuestionItem,
+  questionsDoc,
+} from "./questions.js";
 import type { SubmissionUnanswered } from "./submission.js";
 import { type AgentDeps, TOOL_TASK_KIND, toolTaskDefinition } from "./tool-task.js";
 
@@ -101,6 +111,11 @@ export interface HarnessOptions {
   signal?: AbortSignal;
   /** Receives non-fatal errors: hook throws, progress-write failures, late handler throws. */
   onError?: AgentErrorReporter;
+  /**
+   * How long a question from `ask_user` waits for an answer, in ms; `0` or
+   * `null` for no expiry. Defaults to {@link DEFAULT_QUESTION_TTL_MS} (7 days).
+   */
+  questionTtlMs?: number | null;
   /** Harness-level compaction settings; a conversation's `agent.compaction` overrides them. */
   compaction?: CompactionOverrides;
   /** Registered like {@link Harness.onSettled}, before the harness settles submissions left over from a previous process. */
@@ -261,6 +276,12 @@ export class Harness implements AgentCore {
       progressIntervalMs: settings.progressIntervalMs,
       report,
       freshIntents: new Set(),
+      questionTtlMs:
+        options.questionTtlMs === undefined
+          ? DEFAULT_QUESTION_TTL_MS
+          : options.questionTtlMs === null || options.questionTtlMs === 0
+            ? null
+            : options.questionTtlMs,
     };
     const toolTask = toolTaskDefinition(deps);
     const compaction = compactionTaskDefinition(deps, options.compaction);
@@ -374,6 +395,22 @@ export class Harness implements AgentCore {
   /** A conversation's approval requests (pending and closed), oldest first. */
   async approvals(conversationId: string): Promise<ApprovalItem[]> {
     return (await this.session.document(approvalsDoc, conversationId)).items;
+  }
+
+  /**
+   * Answer a pending question: verify the conversation owns the tool call,
+   * validate the answer against the question, record it with `principal` and
+   * signal the call, in one commit. Rejects with `QuestionRejected` (writing
+   * nothing) for a call of another conversation, an expired or already
+   * answered question, or an answer that does not fit.
+   */
+  answerQuestion(input: AnswerQuestionInput): Promise<QuestionItem> {
+    return this.runtime.commit((tx, ops) => applyAnswer(tx, ops, input, TOOL_TASK_KIND));
+  }
+
+  /** A conversation's questions (pending and closed), oldest first. */
+  async questions(conversationId: string): Promise<QuestionItem[]> {
+    return (await this.session.document(questionsDoc, conversationId)).items;
   }
 
   /** Resolves once no task handler is running and nothing is due. */

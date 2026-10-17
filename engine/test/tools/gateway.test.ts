@@ -192,6 +192,39 @@ describe("gateway manifest", () => {
     await expect(client(bad)).rejects.toThrow(/sideEffect/);
     await expect(client(gw, { serviceToken: "wrong" })).rejects.toThrow(/401/);
   });
+
+  it("reads untrustedOutput, defaulting to false and rejecting a non-boolean", async () => {
+    const entry = (name: string, extra: JsonObject = {}): JsonObject => ({
+      name,
+      description: "d",
+      parameters: { type: "object", properties: {} },
+      sideEffect: "none",
+      timeoutMs: 1_000,
+      ...extra,
+    });
+    const serve = (tools: JsonObject[]) =>
+      createGatewayTools({
+        baseUrl: "https://gw.test",
+        serviceToken: "svc",
+        fence: () => 1,
+        retry: { attempts: 1, baseDelayMs: 1, maxDelayMs: 1 },
+        fetch: async () =>
+          new Response(JSON.stringify({ tools }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      });
+
+    const set = await serve([entry("u", { untrustedOutput: true }), entry("plain")]);
+    expect(set.describe("u")?.untrustedOutput).toBe(true);
+    expect(set.describe("plain")?.untrustedOutput).toBe(false);
+    expect(tool(set, "u").untrustedOutput).toBe(true);
+    expect(tool(set, "plain").source).toBe("gateway");
+
+    await expect(serve([entry("bad", { untrustedOutput: "yes" })])).rejects.toThrow(
+      /untrustedOutput/,
+    );
+  });
 });
 
 describe("gateway invoke", () => {

@@ -16,6 +16,7 @@ export interface UseEngineConversation extends WatcherState {
   /** Withdraw a queued input by submission id (409 once it has started). */
   cancelSubmission(submissionId: string): Promise<void>;
   decide(toolTaskId: string, decision: 'approve' | 'deny', note?: string): Promise<void>;
+  answerQuestion(toolTaskId: string, answer: { optionIds?: string[]; text?: string }): Promise<void>;
 }
 
 export function useEngineConversation(
@@ -79,5 +80,12 @@ export function useEngineConversation(
     [client, conversationId]
   );
 
-  return { ...state, submit, retry, abort, cancelSubmission, decide };
+  const answerQuestion = useCallback(
+    async (toolTaskId: string, answer: { optionIds?: string[]; text?: string }) => {
+      if (conversationId) await client.answer(conversationId, toolTaskId, answer);
+    },
+    [client, conversationId]
+  );
+
+  return { ...state, submit, retry, abort, cancelSubmission, decide, answerQuestion };
 }

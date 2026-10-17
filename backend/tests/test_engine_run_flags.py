@@ -64,10 +64,11 @@ def test_flag_matrix(health):
     assert ff.engine_fleet_enabled(tenant(**{FLEET: True}), s) is True
     assert ff.engine_workflows_enabled(tenant(**{WF: True}), s) is True
     assert ff.engine_fleet_enabled(tenant(**{FLEET: False}), s) is False
-    assert ff.engine_fleet_enabled(tenant(), s) is False  # absent: opt-in default
-    assert ff.engine_workflows_enabled(tenant(), s) is False
-    # one flag never enables the other
-    assert ff.engine_workflows_enabled(tenant(**{FLEET: True}), s) is False
+    assert ff.engine_fleet_enabled(tenant(), s) is True  # absent: on (the rollout's opt-out default)
+    assert ff.engine_workflows_enabled(tenant(), s) is True
+    # each flag opts out on its own
+    assert ff.engine_workflows_enabled(tenant(**{FLEET: False}), s) is True
+    assert ff.engine_workflows_enabled(tenant(**{WF: False}), s) is False
 
 
 @pytest.mark.parametrize("override", [
@@ -138,7 +139,7 @@ def test_failed_probe_reads_off_and_is_retried_after_ten_seconds(health):
 
 
 def test_probe_not_made_when_flag_conditions_already_fail(health):
-    ff.engine_fleet_enabled(tenant(), cfg())
+    ff.engine_fleet_enabled(tenant(**{FLEET: False}), cfg())  # tenant opted out
     ff.engine_fleet_enabled(tenant(**{FLEET: True}), cfg(ENABLE_ENGINE_FLEET=False))
     assert health.calls == 0
 
@@ -147,7 +148,7 @@ def test_get_tenant_features_includes_both_flags(health, monkeypatch):
     monkeypatch.setattr(ff, "get_settings", lambda: cfg())
     t = tenant(**{FLEET: True})
     feats = ff.get_tenant_features(t)
-    assert feats[FLEET] is True and feats[WF] is False
+    assert feats[FLEET] is True and feats[WF] is True  # absent tenant setting: on
     assert ff.is_known_flag(FLEET) and ff.is_operator_only(WF)
     assert ff.get_feature(t, FLEET) is True
 

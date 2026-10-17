@@ -145,6 +145,9 @@
         "approvals": {
           "items": []
         },
+        "questions": {
+          "items": []
+        },
         "usage": {
           "requests": 2,
           "total": {
@@ -396,6 +399,9 @@
         "approvals": {
           "items": []
         },
+        "questions": {
+          "items": []
+        },
         "usage": {
           "requests": 2,
           "total": {
@@ -518,6 +524,9 @@
           "placed": []
         },
         "approvals": {
+          "items": []
+        },
+        "questions": {
           "items": []
         },
         "usage": {

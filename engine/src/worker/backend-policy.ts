@@ -24,10 +24,25 @@
  * - The key lives only in the returned resolution for that request. It is
  *   never logged, stored or cached here, and error text never includes a
  *   response body.
+ * - Tool policy (`authorizeTool`, Approvals & Policy plan U5) delegates every
+ *   tool decision to `POST /internal/tools/authorize`; the worker keeps no
+ *   policy of its own beyond skipping the round trip for a manifest read
+ *   (`sideEffect: "none"`) and for the internal native tools (except
+ *   `ask_user`, which is sent so the question is indexed). The body carries
+ *   the arguments redacted by `redact.ts` and `argumentsHash` over the
+ *   unredacted final arguments. A transient failure retries on the same budget
+ *   as above with the same `requestId`; once it is spent, or on a 401/403/other
+ *   4xx or a malformed answer (immediately, no retry), the call is blocked with
+ *   reason `policy_unavailable`. There is never a local fallback. The approval
+ *   expiry is the backend's `approvalTtlMs` applied to the injected clock;
+ *   `null` means the request never expires. Arguments and response bodies are
+ *   never logged.
  * - Usage reporting never blocks the conversation: `afterResponse` starts the
  *   report in the background; network errors, 408, 429 and 5xx are retried
  *   with the same backoff and the same time budget as policy (`usage_retry`,
- *   then `usage_failed`); other statuses are logged and dropped (`usage_dropped`).
+ *   then `usage_failed`); 401/403 are logged `usage_auth_error` and the outbox
+ *   row is kept for redelivery after the token is fixed; other statuses are
+ *   logged and dropped (`usage_dropped`).
  *   `flush` waits for reports in flight (each bounded by the budget) at shutdown.
  * - Durable outbox (U6, KTD6): with an outbox every report is enqueued (claimed)
  *   before its first attempt and deleted only on a 2xx, so a report survives a
@@ -38,11 +53,15 @@
  *   `usage_stale` but still delivered. Without an outbox reports are memory-only.
  */
 import type { AfterCompactionEvent, AfterResponseEvent, AgentHooks } from "../agent/hooks.js";
-import type { ModelRequestInfo } from "../agent/policy.js";
+import type { ModelRequestInfo, ToolAuthorizationRequest, ToolVerdict } from "../agent/policy.js";
+import { type Clock, realClock } from "../core/clock.js";
 import type { JsonValue } from "../core/json.js";
 import type { ModelResolution } from "../models/types.js";
+import type { RedactTarget } from "../session/transaction.js";
 import type { UsageOutbox, UsageOutboxRecord } from "../storage/types.js";
-import { backendConversationIds } from "../tools/registry.js";
+import { backendConversationIds, INTERNAL_NATIVE_TOOLS } from "../tools/registry.js";
+import { argsHash } from "./args-hash.js";
+import { maskSecrets } from "./redact.js";
 
 export type BackendLog = (event: string, fields?: Record<string, unknown>) => void;
 
@@ -77,6 +96,13 @@ export interface BackendPolicyOptions extends RetryOptions {
   timeoutMs?: number;
   fetch?: typeof fetch;
   log?: BackendLog;
+  /** Clock for approval expiry (`expiresAt = now + approvalTtlMs`). Default: real time. */
+  clock?: Clock;
+}
+
+/** What the worker knows about a gateway tool from its manifest. */
+export interface ToolManifestLookup {
+  describe?(name: string): { sideEffect: "none" | "write" } | undefined;
 }
 
 export const requestIdFor = (runId: string, round: number, purpose: string): string =>
@@ -101,6 +127,12 @@ function unavailable(reason: string, transient = false): ModelResolution {
     ...(transient ? { transient: true } : {}),
   };
 }
+
+/** Redaction target of the arguments sent to the backend (same masking as stored task input). */
+const ARGS_TARGET: RedactTarget = { record: "task", kind: "agent.tool", field: "input" };
+
+/** Tool authorization when the backend cannot be reached or answers nonsense: closed. */
+const UNAVAILABLE: ToolVerdict = { decision: "block", reason: "policy_unavailable" };
 
 /** Network errors, timeouts and these statuses are worth another try. */
 export const isTransientStatus = (status: number): boolean =>
@@ -167,9 +199,13 @@ export class BackendPolicyClient {
   readonly #fetch: typeof fetch;
   readonly #log: BackendLog;
   readonly #backoff: Backoff;
+  readonly #authorizeUrl: string;
+  readonly #clock: Clock;
 
   constructor(options: BackendPolicyOptions) {
     this.#url = `${trimSlash(options.baseUrl)}/internal/models/policy`;
+    this.#authorizeUrl = `${trimSlash(options.baseUrl)}/internal/tools/authorize`;
+    this.#clock = options.clock ?? realClock;
     this.#token = options.serviceToken;
     this.#providers = options.supportedProviders;
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_POLICY_TIMEOUT_MS;
@@ -207,6 +243,132 @@ export class BackendPolicyClient {
       this.#log("policy_retry", { requestId, attempt, delayMs: delay, error: outcome.why });
       await this.#backoff.sleep(delay, signal);
     }
+  }
+
+  /**
+   * The verdict for one tool call. `manifest` is the gateway manifest, used
+   * only to skip the round trip for a read.
+   */
+  async authorizeTool(
+    request: ToolAuthorizationRequest,
+    manifest?: ToolManifestLookup | null,
+  ): Promise<ToolVerdict> {
+    const info =
+      request.toolSource === "gateway" ? manifest?.describe?.(request.toolName) : undefined;
+    if (info?.sideEffect === "none") return { decision: "allow" };
+    if (
+      request.toolSource === "native" &&
+      request.toolName !== "ask_user" &&
+      (INTERNAL_NATIVE_TOOLS.includes(request.toolName) || request.toolInternal === true)
+    ) {
+      return { decision: "allow" }; // includes every subagent-spawn tool (flagged `internal`)
+    }
+    const requestId = `${request.runId}:${request.toolCallId}`;
+    const body = JSON.stringify({
+      requestId,
+      tenantId: request.conversation.tenantId,
+      projectId: request.conversation.projectId,
+      ...backendConversationIds(request.conversation),
+      ...(request.conversation.agentRole !== undefined
+        ? { agentRole: request.conversation.agentRole }
+        : {}),
+      runId: request.runId,
+      toolCallId: request.toolCallId,
+      toolTaskId: request.toolTaskId,
+      toolName: request.toolName,
+      toolSource: request.toolSource,
+      arguments: maskSecrets(request.arguments, ARGS_TARGET),
+      argumentsHash: argsHash(request.arguments),
+      ...(info ? { sideEffect: info.sideEffect } : {}),
+      replay: request.replay,
+      taint: {
+        tainted: request.taint.tainted,
+        sources: request.taint.sources,
+      },
+    });
+    const deadline = this.#backoff.now() + this.#backoff.retryMs;
+    for (let attempt = 1; ; attempt++) {
+      const outcome = await this.#authorizeAttempt(body, requestId);
+      if (outcome.done) return outcome.verdict;
+      const delay = this.#backoff.delay(attempt, deadline, outcome.retryAfterMs);
+      if (delay === null) {
+        this.#log("policy_error", { requestId, error: outcome.why, attempts: attempt });
+        return UNAVAILABLE;
+      }
+      this.#log("policy_retry", { requestId, attempt, delayMs: delay, error: outcome.why });
+      await this.#backoff.sleep(delay);
+    }
+  }
+
+  async #authorizeAttempt(
+    body: string,
+    requestId: string,
+  ): Promise<
+    { done: true; verdict: ToolVerdict } | { done: false; why: string; retryAfterMs: number | null }
+  > {
+    const timeout = AbortSignal.timeout(this.#timeoutMs);
+    let res: Response;
+    let json: unknown;
+    try {
+      res = await this.#fetch(this.#authorizeUrl, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.#token}`,
+          "content-type": "application/json",
+        },
+        body,
+        signal: timeout,
+      });
+      if (res.ok) json = await res.json();
+      else await res.body?.cancel().catch(() => {});
+    } catch (err) {
+      return {
+        done: false,
+        why: timeout.aborted ? "timed out" : errorName(err),
+        retryAfterMs: null,
+      };
+    }
+    if (!res.ok) {
+      const why = `backend answered ${res.status}`;
+      if (isTransientStatus(res.status)) {
+        const after =
+          res.status === 429 || res.status === 503
+            ? retryAfterMs(res.headers.get("retry-after"), this.#backoff.now())
+            : null;
+        return { done: false, why, retryAfterMs: after };
+      }
+      this.#log("policy_error", { requestId, status: res.status });
+      return { done: true, verdict: UNAVAILABLE };
+    }
+    return { done: true, verdict: this.#parseVerdict(json, requestId) };
+  }
+
+  #parseVerdict(json: unknown, requestId: string): ToolVerdict {
+    if (isRecord(json)) {
+      if (json.decision === "allow") return { decision: "allow" };
+      if (json.decision === "block") {
+        return {
+          decision: "block",
+          reason:
+            typeof json.reason === "string" && json.reason !== ""
+              ? json.reason
+              : "blocked by policy",
+        };
+      }
+      const ttl = json.approvalTtlMs;
+      if (
+        json.decision === "requireApproval" &&
+        (ttl === null || (typeof ttl === "number" && Number.isFinite(ttl) && ttl >= 0))
+      ) {
+        return {
+          decision: "requireApproval",
+          ...(typeof json.reason === "string" ? { reason: json.reason } : {}),
+          ...(ttl === null ? {} : { expiresAt: this.#clock.now() + (ttl as number) }),
+        };
+      }
+    }
+    this.#log("policy_error", { requestId, error: "malformed response" });
+    return UNAVAILABLE;
   }
 
   /** One POST: a final resolution, or a transient failure to retry. */
@@ -446,13 +608,43 @@ export class UsageReporter {
     this.#pending.add(job);
   }
 
-  /** Enqueue a fresh report, then send it; keep the row when the send gives up. */
+  /**
+   * Enqueue a fresh report, then send it; keep the row when the send gives up.
+   * Never rejects: the job runs in the background with no handler. A failed
+   * enqueue still sends (the report is just not durable); a failed ack leaves
+   * the row, and the backend dedupes the redelivery.
+   */
   async #deliver(record: UsageOutboxRecord, fresh: boolean): Promise<void> {
-    if (fresh) await this.#outbox?.enqueue(record);
-    const ageMs = this.#backoff.now() - record.createdAt;
-    if (ageMs > this.#staleAgeMs) this.#log("usage_stale", { requestId: record.requestId, ageMs });
-    if (await this.#send(record.requestId, record.body)) {
-      await this.#outbox?.ack(record.requestId);
+    const outbox = this.#outbox;
+    try {
+      if (fresh && outbox) {
+        try {
+          await outbox.enqueue(record);
+        } catch (err) {
+          this.#log("usage_outbox_error", {
+            requestId: record.requestId,
+            op: "enqueue",
+            error: errorName(err),
+          });
+        }
+      }
+      const ageMs = this.#backoff.now() - record.createdAt;
+      if (ageMs > this.#staleAgeMs) {
+        this.#log("usage_stale", { requestId: record.requestId, ageMs });
+      }
+      if (await this.#send(record.requestId, record.body)) {
+        try {
+          await outbox?.ack(record.requestId);
+        } catch (err) {
+          this.#log("usage_outbox_error", {
+            requestId: record.requestId,
+            op: "ack",
+            error: errorName(err),
+          });
+        }
+      }
+    } catch (err) {
+      this.#log("usage_outbox_error", { requestId: record.requestId, error: errorName(err) });
     }
   }
 
@@ -476,6 +668,11 @@ export class UsageReporter {
         await res.body?.cancel().catch(() => {});
         if (res.ok) return true;
         why = `status ${res.status}`;
+        // Auth failures are fixed by rotating the token, so keep the row for redelivery.
+        if (res.status === 401 || res.status === 403) {
+          this.#log("usage_auth_error", { requestId, status: res.status });
+          return false;
+        }
         // A client error other than 408/429 will not change on retry.
         if (!isTransientStatus(res.status)) {
           this.#log("usage_dropped", { requestId, status: res.status });

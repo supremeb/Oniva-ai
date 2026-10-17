@@ -247,6 +247,10 @@ class Settings(BaseSettings):
     SESSION_MAX_SIZE_GB: int = 10
     SESSION_RETENTION_DAYS: int = 30              # Delete stale sessions after N days
 
+    # Phase 5: Audit chain signing backend. "local" writes RSA keys under SESSION_BASE_PATH and
+    # is refused in production (fail closed) — configure a real KMS backend there.
+    AUDIT_KMS_BACKEND: str = "local"
+
     # SSE Tool Result Display
     TOOL_RESULT_SSE_LIMIT: int = 5000             # Max chars for tool results in SSE events (LLM sees full output)
 
@@ -369,6 +373,9 @@ class Settings(BaseSettings):
     RUN_RECONCILE_INTERVAL_S: float = 60.0
     RUN_START_RETRY_MAX: int = 5  # attempts of a hook's start_missing before fail(ref, "engine_start_failed")
     RUN_START_RETRY_BASE_S: float = 30.0  # exponential backoff base between those attempts
+    # ISO timestamp (the U5 deploy time). Approvals the engine created before it have no ledger row and
+    # may still be decided by the legacy rule; unset disables that fallback. Removed one release after U5.
+    APPROVALS_LEGACY_CUTOFF: Optional[str] = None
     # Legacy POST /api/v1/chat: when a stored session is supplied, rebuild model history from the
     # stored messages and ignore client-supplied assistant/tool parts (anti-forgery). Set to
     # false (CHAT_SERVER_HISTORY=false) to restore the old client-trusted history.

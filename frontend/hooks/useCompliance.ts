@@ -12,15 +12,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getComplianceStats,
   getAuditLogs,
-  getReviewTickets,
   exportAuditLogs,
   verifySignature,
-  assignReviewer,
-  approveReview,
-  rejectReview,
   getWorkflowReplay,
   type ComplianceAuditLog,
-  type ReviewTicket,
 } from '@/lib/api/compliance';
 
 // ============================================================================
@@ -32,8 +27,6 @@ export const complianceKeys = {
   stats: () => [...complianceKeys.all, 'stats'] as const,
   auditLogs: (filters?: Record<string, unknown>) =>
     [...complianceKeys.all, 'audit-logs', filters] as const,
-  reviewTickets: (filters?: Record<string, unknown>) =>
-    [...complianceKeys.all, 'review-tickets', filters] as const,
   workflowReplay: (workflowId: string) =>
     [...complianceKeys.all, 'workflow-replay', workflowId] as const,
 };
@@ -68,20 +61,6 @@ export function useAuditLogs(filters?: {
   });
 }
 
-export function useReviewTickets(filters?: {
-  status?: ReviewTicket['status'];
-  priority?: ReviewTicket['priority'];
-  assigned_to?: string;
-  limit?: number;
-  offset?: number;
-}) {
-  return useQuery({
-    queryKey: complianceKeys.reviewTickets(filters),
-    queryFn: () => getReviewTickets(filters),
-    staleTime: 10_000,
-  });
-}
-
 export function useWorkflowReplay(workflowId: string | null) {
   return useQuery({
     queryKey: complianceKeys.workflowReplay(workflowId ?? ''),
@@ -112,56 +91,5 @@ export function useExportAuditLogs() {
 export function useVerifySignature() {
   return useMutation({
     mutationFn: (id: string) => verifySignature(id),
-  });
-}
-
-export function useAssignReviewer() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      ticketId,
-      reviewerId,
-    }: {
-      ticketId: string;
-      reviewerId: string;
-    }) => assignReviewer(ticketId, reviewerId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: complianceKeys.reviewTickets() });
-      queryClient.invalidateQueries({ queryKey: complianceKeys.stats() });
-    },
-  });
-}
-
-export function useApproveReview() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      ticketId,
-      reason,
-    }: {
-      ticketId: string;
-      reason: string;
-    }) => approveReview(ticketId, reason),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: complianceKeys.reviewTickets() });
-      queryClient.invalidateQueries({ queryKey: complianceKeys.stats() });
-    },
-  });
-}
-
-export function useRejectReview() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      ticketId,
-      reason,
-    }: {
-      ticketId: string;
-      reason: string;
-    }) => rejectReview(ticketId, reason),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: complianceKeys.reviewTickets() });
-      queryClient.invalidateQueries({ queryKey: complianceKeys.stats() });
-    },
   });
 }

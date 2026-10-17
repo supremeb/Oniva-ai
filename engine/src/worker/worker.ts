@@ -32,6 +32,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Pool } from "pg";
+import { askUserTool } from "../agent/ask-user-tool.js";
 import { type AgentSettings, Harness } from "../agent/harness.js";
 import type { AgentHooks } from "../agent/hooks.js";
 import type { HostPolicy } from "../agent/policy.js";
@@ -117,6 +118,8 @@ export interface WorkerOptions {
   backendPolicy?: WorkerBackendPolicyOptions | null;
   /** Approval expiry for gateway tools that require approval; null for none. */
   approvalTtlMs?: number | null;
+  /** `ask_user` question expiry; null or `0` for none. Default 7 days. */
+  questionTtlMs?: number | null;
   /** Register a subagent tool under this name. */
   subagentTool?: string | null;
   /** Register a subagent tool under each of these names (with `subagentTool`, deduplicated). */
@@ -169,16 +172,21 @@ export interface WorkerHandle {
 }
 
 /**
- * The host policy a worker runs with: the model defaults decide every model
- * request, and a gateway tool that asks for approval requires one.
+ * The host policy a worker runs with. Without a backend the model defaults
+ * decide every model request and a gateway tool that asks for approval
+ * requires one (local development, `approvalTtlMs` applies). With a backend,
+ * model requests and every tool call that is not a manifest read or an
+ * internal native tool are decided by Python.
  */
 export function workerHostPolicy(options: {
   modelDefaults: WorkerModelDefaults;
-  gateway: Pick<GatewayToolset, "requiresApproval"> | null;
+  gateway:
+    | (Pick<GatewayToolset, "requiresApproval"> & Partial<Pick<GatewayToolset, "describe">>)
+    | null;
   approvalTtlMs: number | null;
   clock: Clock;
   /** Resolves model requests instead of `modelDefaults`; no local fallback. */
-  backend?: Pick<BackendPolicyClient, "resolveModelRequest"> | null;
+  backend?: Pick<BackendPolicyClient, "resolveModelRequest" | "authorizeTool"> | null;
 }): HostPolicy {
   const { modelDefaults: d, gateway, approvalTtlMs, clock, backend } = options;
   return {
@@ -195,6 +203,10 @@ export function workerHostPolicy(options: {
       };
     },
     authorizeTool(request) {
+      // With a backend the worker holds no tool policy: Python decides, the
+      // manifest only spares the round trip for reads. `approvalTtlMs` is the
+      // local-mode value; the backend's TTL applies otherwise.
+      if (backend) return backend.authorizeTool(request, gateway);
       if (gateway?.requiresApproval(request.toolName)) {
         return {
           decision: "requireApproval",
@@ -276,6 +288,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
     ? new BackendPolicyClient({
         ...options.backendPolicy,
         supportedProviders: () => options.models.names(),
+        clock,
         log,
       })
     : null;
@@ -434,9 +447,12 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
   }
 
   async function serve(k: LeaseKeeper, gateway: GatewayToolset | null): Promise<void> {
+    // `ask_user` is native: always registered, usable only by conversations
+    // whose agent tools list it. A caller-supplied tool of that name wins.
+    const supplied = [...(gateway?.tools ?? []), ...(options.tools ?? [])];
     const tools = [
-      ...(gateway?.tools ?? []),
-      ...(options.tools ?? []),
+      ...supplied,
+      ...(supplied.some((t) => t.name === askUserTool.name) ? [] : [askUserTool]),
       ...[
         ...new Set([
           ...(options.subagentTool ? [options.subagentTool] : []),
@@ -469,6 +485,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       sessionId,
       models: options.models,
       tools,
+      ...(options.questionTtlMs === undefined ? {} : { questionTtlMs: options.questionTtlMs }),
       policy: workerHostPolicy({
         modelDefaults: options.modelDefaults,
         gateway,

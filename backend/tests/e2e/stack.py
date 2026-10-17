@@ -9,7 +9,9 @@ write), ``GET /effects`` (lines the write has appended), ``GET /state``. For Dee
 ``/dw-close-gate`` (a ``web_search`` of a query containing GATED), ``GET /dw-state`` (fake search log, the
 tools currently in flight on the backend, sandbox events). For Fleet: ``POST /fleet-seed?script=<recovery|steer|cancel>``
 creates a Fleet job through the backend's ``/api/v1/background-jobs`` and answers ``{jobId, conversationId}``; the run
-holds one write on the same gate as ``/open-gate`` / ``/close-gate`` (``script=probe`` only answers 200). Exits on SIGTERM/SIGINT or stdin EOF.
+holds one write on the same gate as ``/open-gate`` / ``/close-gate`` (``script=probe`` only answers 200). For approvals: ``POST /decide-approval?decision=approve|deny&who=admin``
+(decides the newest pending approval as one of the backend's seeded users), ``GET /approvals`` (the ledger), ``GET /exec-log``
+(the fake sandbox's runs). Exits on SIGTERM/SIGINT or stdin EOF.
 """
 import json
 import os
@@ -19,13 +21,14 @@ import sys
 import threading
 import urllib.parse
 import uuid
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from tests.e2e import fleet_script
-from tests.e2e.harness import AUTH, stack
+from tests.e2e.harness import AUTH, api, as_user, sql, stack
 
 
 def main() -> int:
@@ -50,7 +53,23 @@ def main() -> int:
 
             def _handle(self):
                 path = self.path.split("?")[0]
+                query = parse_qs(urlsplit(self.path).query)
                 try:
+                    if path == "/decide-approval":
+                        rows = sql(w, "SELECT conversation_id, tool_task_id FROM tool_approvals "
+                                      "WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1")
+                        if not rows:
+                            return self._send(409, {"error": "no pending approval"})
+                        conv, task = str(uuid.UUID(str(rows[0][0]))), rows[0][1]
+                        r = api(w, "POST", f"/{conv}/approvals/{task}/decision",
+                                headers=as_user(query.get("who", ["admin"])[0]),
+                                json={"decision": query.get("decision", ["approve"])[0]})
+                        return self._send(200 if r.status_code == 200 else 502, {"status": r.status_code, "body": r.text})
+                    if path == "/approvals":
+                        rows = sql(w, "SELECT tool_name, status, rule, approver_role FROM tool_approvals")
+                        return self._send(200, {"approvals": [list(r) for r in rows]})
+                    if path == "/exec-log":
+                        return self._send(200, {"runs": w.dw.lines(w.dw_dir / "exec.log")})
                     if path == "/kill-worker":
                         state["worker"].kill(signal.SIGKILL)
                     elif path == "/start-worker":

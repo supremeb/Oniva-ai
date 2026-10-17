@@ -127,6 +127,7 @@ export function createSubagentTool(options: SubagentToolOptions): SubagentToolDe
     parameters: z.object({
       prompt: z.string().min(1).describe("The task for the subagent, with everything it needs."),
     }),
+    internal: true,
     execute: () => ({
       content: `Subagent tool ${options.name} runs only inside the agent loop.`,
       isError: true,
@@ -301,7 +302,12 @@ function spawnChild(
     (await tx.doc(agentConfigDoc, child.id)).set(agent);
     const submissionId = tx.mintId("submission");
     const runId = tx.mintId("task");
-    const input: SubmissionInputRecord = { content: prompt, type: "input", whenBusy: "followUp" };
+    const input: SubmissionInputRecord = {
+      content: prompt,
+      type: "input",
+      whenBusy: "followUp",
+      untrusted: false,
+    };
     tx.createSubmission({
       id: submissionId,
       conversationId: child.id,

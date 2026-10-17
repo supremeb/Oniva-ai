@@ -1,7 +1,7 @@
 """Automation run binding (fleet/workflows on engine, U1).
 
 Revision ID: 120_engine_runs
-Revises: 109_llm_usage_agent_role
+Revises: 113_retire_review_tickets
 
 Adds nullable ``engine_conversations.run_kind`` / ``run_ref_id`` (the domain row an archived
 automation conversation belongs to), an index on them, and nullable
@@ -12,7 +12,7 @@ coordinator rebases only ``down_revision`` when Phase 5 lands.
 from alembic import op
 
 revision = "120_engine_runs"
-down_revision = "109_llm_usage_agent_role"
+down_revision = "113_retire_review_tickets"
 branch_labels = None
 depends_on = None
 

@@ -160,6 +160,20 @@ describe('default project for a first message', () => {
         expect(box().value).toBe('keep me');
     });
 
+    it('project list fails to load: does not create "Personal", shows the error, keeps the draft', async () => {
+        mockFetchProjects.mockRejectedValue(new Error('network down'));
+        const client = fakeClient();
+        mount(client);
+
+        type('keep me');
+        await submit();
+
+        expect(await screen.findByText(/pick or create a project/i)).toBeTruthy();
+        expect(mockCreateProject).not.toHaveBeenCalled();
+        expect(client.create).not.toHaveBeenCalled();
+        expect(box().value).toBe('keep me');
+    });
+
     it('never picks a newer shared project over an owned one', async () => {
         mockFetchProjects.mockResolvedValue(
             list([
