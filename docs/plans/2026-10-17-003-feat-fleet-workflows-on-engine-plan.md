@@ -1661,6 +1661,33 @@ The Playwright spec `frontend/e2e/workflow-engine-recovery.spec.ts` is owned by 
 
 **Verification:** every Verification Contract gate green; `grep -r litellm backend/app` empty.
 
+### U37. Present the engine as Oniva's own harness (READMEs)
+
+**Goal:** the READMEs describe one harness, but only after the replacement is real.
+**Requirements:** Phase 6 exit criteria.
+**Dependencies:** U32. This unit is merged last, only after every exit check passes on the integration branch:
+- `grep -r litellm backend/app` is empty;
+- no `asyncio.create_task` does run work;
+- the legacy workflow, Fleet and Deep Work engines are deleted;
+- the rolling-deploy test passes.
+
+**Files:** `engine/README.md`, `README.md`
+
+**Approach:**
+- **`engine/README.md`:** retitle it "Oniva Engine", Oniva's own agent harness. Cover:
+  - what it guarantees (durable runs, exactly-once effects, a single commit line, live views, inbox, approvals, subagents, provider-neutral models);
+  - the backend as control plane (tool gateway, model policy, usage ledger);
+  - the product surfaces running on it: chat, Deep Work, Fleet, workflows, approvals.
+- **Root `README.md`:**
+  - Overview, core value proposition and "What's Technically Interesting" lead with the engine.
+  - The Built-with table gains an Engine row and drops LiteLLM.
+  - The data-flow diagram adds the engine worker and its Postgres.
+  - The repository layout adds `engine/`.
+  - Remove statements the replacement made stale (the DBOS / manual `/recover` checkpoint description, the "state machine not wired" note if it is deleted).
+- Every claim must match code on the branch. Clean-room: name no third-party harness.
+
+**Test expectation:** none, documentation only. Verification: a reviewer checks each README claim against the code and the exit checks.
+
 ---
 
 ## Verification Contract
