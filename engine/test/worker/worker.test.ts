@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { uuidv7 } from "../../src/core/ids.js";
-import { FakeProvider } from "../../src/models/fake.js";
+import { FakeProvider, fakeText, fakeToolCall } from "../../src/models/fake.js";
 import { ModelRegistry } from "../../src/models/stream.js";
 import { PostgresLeases } from "../../src/storage/postgres/lease.js";
 import type { SessionStorage, StorageProvider } from "../../src/storage/types.js";
 import { startWorker, type WorkerHandle, type WorkerOptions } from "../../src/worker/worker.js";
+import { waitFor } from "../agent/support.js";
 import { usePostgres } from "../support/pg.js";
 
 const env = usePostgres();
@@ -147,5 +148,66 @@ describe("startWorker", () => {
     expect(manifestCalls).toBe(3);
     expect(events.filter((e) => e === "gateway_unavailable")).toHaveLength(2);
     expect(events).not.toContain("failed");
+  });
+  describe("ask_user", () => {
+    const ASK = { question: "Which colour?", options: [{ id: "blue", label: "Blue" }] };
+
+    async function serving(extra: Partial<WorkerOptions> = {}) {
+      const provider = new FakeProvider();
+      const w = await startWorker(
+        options(`sess-${uuidv7()}`, [], {
+          models: new ModelRegistry().register(provider),
+          ...extra,
+        }),
+      );
+      workers.push(w);
+      await w.serving;
+      return { w, provider, harness: w.harness as NonNullable<typeof w.harness> };
+    }
+
+    it("is registered natively: a conversation whose tools include it parks a question", async () => {
+      const { provider, harness } = await serving();
+      provider.enqueue(fakeToolCall("ask_user", ASK, { id: "c1" }), fakeText("ok"));
+      const conv = await harness.createConversation({
+        tenantId: "t1",
+        projectId: "p1",
+        agent: { systemPrompt: "s", tools: ["ask_user"] },
+      });
+      await conv.submit({ text: "ask" });
+      await waitFor(async () => (await harness.questions(conv.id)).length === 1);
+      expect((await harness.questions(conv.id))[0]).toMatchObject({
+        status: "pending",
+        question: "Which colour?",
+      });
+    });
+
+    it("cannot be called by a conversation whose tools do not include it", async () => {
+      const { provider, harness } = await serving();
+      provider.enqueue(fakeToolCall("ask_user", ASK, { id: "c1" }), fakeText("ok"));
+      const conv = await harness.createConversation({
+        tenantId: "t1",
+        projectId: "p1",
+        agent: { systemPrompt: "s", tools: [] },
+      });
+      const settled = await (await conv.submit({ text: "ask" })).wait();
+      expect(settled.status).toBe("done");
+      expect(await harness.questions(conv.id)).toEqual([]);
+      const result = (await conv.entries()).find((e) => e.kind === "tool_result");
+      expect(JSON.stringify(result?.payload)).toContain("unknown_tool");
+    });
+
+    it("expires a question after questionTtlMs from the worker options", async () => {
+      const { provider, harness } = await serving({ questionTtlMs: 60_000 });
+      provider.enqueue(fakeToolCall("ask_user", ASK, { id: "c1" }), fakeText("ok"));
+      const conv = await harness.createConversation({
+        tenantId: "t1",
+        projectId: "p1",
+        agent: { systemPrompt: "s", tools: ["ask_user"] },
+      });
+      await conv.submit({ text: "ask" });
+      await waitFor(async () => (await harness.questions(conv.id)).length === 1);
+      const item = (await harness.questions(conv.id))[0];
+      expect((item?.expiresAt ?? 0) - (item?.requestedAt ?? 0)).toBe(60_000);
+    });
   });
 });

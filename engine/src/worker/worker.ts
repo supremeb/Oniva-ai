@@ -32,6 +32,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Pool } from "pg";
+import { askUserTool } from "../agent/ask-user-tool.js";
 import { type AgentSettings, Harness } from "../agent/harness.js";
 import type { AgentHooks } from "../agent/hooks.js";
 import type { HostPolicy } from "../agent/policy.js";
@@ -106,6 +107,8 @@ export interface WorkerOptions {
   backendPolicy?: WorkerBackendPolicyOptions | null;
   /** Approval expiry for gateway tools that require approval; null for none. */
   approvalTtlMs?: number | null;
+  /** `ask_user` question expiry; null or `0` for none. Default 7 days. */
+  questionTtlMs?: number | null;
   /** Register a subagent tool under this name. */
   subagentTool?: string | null;
   /** Register a subagent tool under each of these names (with `subagentTool`, deduplicated). */
@@ -402,9 +405,12 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
   }
 
   async function serve(k: LeaseKeeper, gateway: GatewayToolset | null): Promise<void> {
+    // `ask_user` is native: always registered, usable only by conversations
+    // whose agent tools list it. A caller-supplied tool of that name wins.
+    const supplied = [...(gateway?.tools ?? []), ...(options.tools ?? [])];
     const tools = [
-      ...(gateway?.tools ?? []),
-      ...(options.tools ?? []),
+      ...supplied,
+      ...(supplied.some((t) => t.name === askUserTool.name) ? [] : [askUserTool]),
       ...[
         ...new Set([
           ...(options.subagentTool ? [options.subagentTool] : []),
@@ -418,6 +424,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       sessionId,
       models: options.models,
       tools,
+      ...(options.questionTtlMs === undefined ? {} : { questionTtlMs: options.questionTtlMs }),
       policy: workerHostPolicy({
         modelDefaults: options.modelDefaults,
         gateway,
