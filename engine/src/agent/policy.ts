@@ -48,6 +48,8 @@ export interface ToolAuthorizationRequest {
   toolTaskId: string;
   /** Where the tool comes from, so policy can treat gateway tools differently. */
   toolSource: ToolSource;
+  /** The tool is flagged `internal` (ask_user, subagent spawn): side-effect free, never a taint source. */
+  toolInternal?: boolean;
   /** The conversation's taint state, so policy can react to untrusted input. */
   taint: TaintState;
   /** The final arguments, after every `beforeTool` hook. */

@@ -250,9 +250,9 @@ export class BackendPolicyClient {
     if (
       request.toolSource === "native" &&
       request.toolName !== "ask_user" &&
-      INTERNAL_NATIVE_TOOLS.includes(request.toolName)
+      (INTERNAL_NATIVE_TOOLS.includes(request.toolName) || request.toolInternal === true)
     ) {
-      return { decision: "allow" };
+      return { decision: "allow" }; // includes every subagent-spawn tool (flagged `internal`)
     }
     const requestId = `${request.runId}:${request.toolCallId}`;
     const body = JSON.stringify({

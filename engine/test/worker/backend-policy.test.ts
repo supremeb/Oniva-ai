@@ -708,6 +708,16 @@ describe("BackendPolicyClient.authorizeTool", () => {
     expect(gw.authorizeRequests()).toHaveLength(0);
   });
 
+  it("allows a subagent-spawn tool (flagged internal) with no round trip", async () => {
+    const gw = await start();
+    const v = await client(gw).authorizeTool(
+      toolReq({ toolName: "research_worker", toolSource: "native", toolInternal: true }),
+      READ,
+    );
+    expect(v).toEqual({ decision: "allow" });
+    expect(gw.authorizeRequests()).toHaveLength(0);
+  });
+
   it("sends ask_user so the question is indexed", async () => {
     const gw = await start();
     const v = await client(gw).authorizeTool(
