@@ -1,0 +1,126 @@
+{
+  "errorMode": "stop",
+  "graph": {
+    "nodes": [
+      {
+        "deps": [],
+        "id": "s",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "start"
+      },
+      {
+        "deps": [
+          {
+            "from": "s",
+            "handle": null
+          }
+        ],
+        "handles": [
+          "true",
+          "false"
+        ],
+        "id": "c",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "ifelse"
+      },
+      {
+        "deps": [
+          {
+            "from": "c",
+            "handle": "true"
+          }
+        ],
+        "id": "a",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "template"
+      },
+      {
+        "deps": [
+          {
+            "from": "c",
+            "handle": "false"
+          }
+        ],
+        "id": "b",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "template"
+      },
+      {
+        "deps": [
+          {
+            "from": "a",
+            "handle": null
+          }
+        ],
+        "handles": [
+          "billing",
+          "tech"
+        ],
+        "id": "k",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 120000
+        },
+        "type": "classifier"
+      },
+      {
+        "deps": [
+          {
+            "from": "k",
+            "handle": "billing"
+          }
+        ],
+        "id": "x",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "template"
+      },
+      {
+        "deps": [
+          {
+            "from": "k",
+            "handle": "tech"
+          }
+        ],
+        "id": "y",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "template"
+      }
+    ]
+  },
+  "runAttempt": 0,
+  "runId": "00000000-0000-4000-8000-000000000001",
+  "variables": {},
+  "version": 1
+}

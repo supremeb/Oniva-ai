@@ -84,6 +84,14 @@ def engine_has_capability(settings: Settings, kinds: tuple[str, ...] = ()) -> bo
             and all(k in caps["taskKinds"] for k in kinds))
 
 
+def run_start_body(kind: str, conversation_id: Any, run_input: Any, *, agent: Optional[dict] = None) -> dict:
+    """The ``POST /v1/runs`` body for a host task run: ``{ id, kind, input, agent? }`` (plan 003, U15)."""
+    body: dict[str, Any] = {"id": str(conversation_id), "kind": kind, "input": run_input}
+    if agent is not None:
+        body["agent"] = agent
+    return body
+
+
 class EngineError(Exception):
     """An engine answer the route layer maps to an HTTP status (never carries the token)."""
 

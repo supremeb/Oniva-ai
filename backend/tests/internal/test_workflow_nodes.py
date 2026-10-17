@@ -453,3 +453,94 @@ async def test_lookup_returns_the_stored_outcome_and_404s_otherwise(wf):
     )
     assert other_session.status_code == 404
     assert (await wf.client.get(f"/internal/workflows/invocations/{key}")).status_code == 401
+
+
+# ---- U15: the node's input classification is computed server-side from the stored trace -------------
+
+
+async def put_trace(w, *steps):
+    async with w.maker() as db:
+        row = await db.get(WorkflowExecution, w.run)
+        row.execution_trace = [
+            {"run_attempt": 0, "attempt": 0, "status": "success", "output": {}, "tokens_used": 0, **s} for s in steps
+        ]
+        await db.commit()
+
+
+async def test_a_confidential_predecessor_blocks_an_export_controlled_node_without_any_body_hint(wf):
+    await put_trace(wf, {"node_id": "t", "classification": "confidential"})
+    r = await call(wf, "h", body={**scope(wf), "contractVersion": 1})  # the body names no classification
+    body = wc.validate_prepare_response(r.json())
+    assert body.status == "blocked" and body.classification == "confidential"
+    assert wf.counts["http"] == 0 and wf.counts["audit"] == [("h", "confidential")]
+
+
+async def test_a_body_that_claims_public_cannot_lower_the_stored_level(wf):
+    await put_trace(wf, {"node_id": "t", "classification": "confidential"})
+    body = wc.validate_prepare_response((await call(wf, "h", classification="public")).json())
+    assert body.status == "blocked" and body.classification == "confidential"
+    assert wf.counts["http"] == 0
+
+
+async def test_confidentiality_flows_through_the_trace_from_one_node_to_the_next(wf):
+    first = await call(wf, "t", classification="confidential")  # t's output is stored as confidential
+    assert first.json()["classification"] == "confidential"
+    blocked = wc.validate_prepare_response((await call(wf, "h", body={**scope(wf), "contractVersion": 1})).json())
+    assert blocked.status == "blocked" and wf.counts["http"] == 0
+
+
+async def test_an_internal_predecessor_does_not_block_the_node(wf):
+    await call(wf, "t")
+    await call(wf, "h", body={**scope(wf), "contractVersion": 1})
+    assert wf.counts["http"] == 1  # the executor ran (the test double then fails it on purpose)
+    assert wf.counts["audit"] == []
+
+
+async def test_only_live_in_edge_sources_count(wf):
+    await put_trace(wf, {"node_id": "bad", "classification": "confidential"})  # not an in-edge source of h
+    await call(wf, "h", body={**scope(wf), "contractVersion": 1})
+    assert wf.counts["http"] == 1
+
+
+async def test_an_earlier_run_attempts_classification_still_counts(wf):
+    await put_trace(wf, {"node_id": "t", "classification": "confidential", "run_attempt": 0})
+    r = await call(wf, "h", r=1, body={**scope(wf), "contractVersion": 1})
+    assert wc.validate_prepare_response(r.json()).status == "blocked"
+
+
+async def test_a_stored_level_that_cannot_be_read_fails_closed(wf):
+    await put_trace(wf, {"node_id": "t", "classification": "top-secret"})
+    r = await call(wf, "h", body={**scope(wf), "contractVersion": 1})
+    assert wc.validate_prepare_response(r.json()).status == "blocked"
+
+
+async def test_fanout_items_inherit_the_iteration_nodes_input_classification(wf):
+    r = await call(wf, "it", classification="confidential")
+    assert r.json()["kind"] == "fanout"
+    async with wf.maker() as db:
+        rows = (await db.execute(select(WorkflowExecution).where(WorkflowExecution.id != wf.run))).scalars().all()
+    assert len(rows) == 3
+    assert {row.input_data["__classification"] for row in rows} == {"confidential"}
+    assert {row.input_data["__fanout"] for row in rows} == {"iteration"}
+
+
+def test_an_entry_node_takes_the_level_its_fanout_item_inherited():
+    from types import SimpleNamespace
+
+    from app.schemas.classification import DataClassification
+
+    spec = {"nodes": [n("it", "iteration", targetNodeId="b1"), n("b1", "http"), n("b2", "http")],
+            "edges": [e("it", "b1"), e("b1", "b2"), e("b2", "it", "iteration_output")]}
+
+    def view(node_id, trace=(), variables=None):
+        row = SimpleNamespace(id=uuid.uuid4(), workflow_id=None, user_id=uuid.uuid4(), tenant_id=uuid.uuid4(),
+                              trigger="manual", input_data=variables or {}, execution_trace=list(trace))
+        return workflow_nodes.RunView(row, spec, next(x for x in spec["nodes"] if x["id"] == node_id))
+
+    item = {"__classification": "confidential", "__fanout": "iteration"}
+    assert workflow_nodes.input_classification(view("b1", variables=item), 0).value == "confidential"
+    assert workflow_nodes.input_classification(view("b1"), 0).value == "internal"  # a plain entry node
+    # A body node past the entry reads its predecessor's stored level (it is not in the root graph).
+    step = {"node_id": "b1", "run_attempt": 0, "classification": "confidential"}
+    assert workflow_nodes.input_classification(view("b2", trace=[step]), 0).value == "confidential"
+    assert workflow_nodes.input_classification(view("b1"), 0, DataClassification.CONFIDENTIAL).value == "confidential"

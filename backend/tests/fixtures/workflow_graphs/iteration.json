@@ -1,0 +1,88 @@
+{
+  "errorMode": "stop",
+  "graph": {
+    "nodes": [
+      {
+        "deps": [],
+        "id": "s",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "start"
+      },
+      {
+        "deps": [
+          {
+            "from": "s",
+            "handle": null
+          }
+        ],
+        "id": "it",
+        "mayFanOut": true,
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "iteration"
+      },
+      {
+        "deps": [
+          {
+            "from": "it",
+            "handle": null
+          }
+        ],
+        "id": "after",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 60000
+        },
+        "type": "output"
+      }
+    ],
+    "subgraphs": {
+      "it:sub": {
+        "nodes": [
+          {
+            "deps": [],
+            "id": "t1",
+            "policy": {
+              "backoffMs": 0,
+              "maxRetries": 0,
+              "onError": "stop",
+              "timeoutMs": 60000
+            },
+            "type": "template"
+          },
+          {
+            "deps": [
+              {
+                "from": "t1",
+                "handle": null
+              }
+            ],
+            "id": "t2",
+            "policy": {
+              "backoffMs": 1000,
+              "maxRetries": 2,
+              "onError": "stop",
+              "timeoutMs": 60000
+            },
+            "type": "template"
+          }
+        ]
+      }
+    }
+  },
+  "runAttempt": 0,
+  "runId": "00000000-0000-4000-8000-000000000001",
+  "variables": {},
+  "version": 1
+}

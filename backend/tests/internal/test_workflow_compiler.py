@@ -59,7 +59,11 @@ def test_iteration_target_reachable_set_leaves_the_main_graph_and_attaches_to_th
     compiled = compile_workflow(spec)
     nodes = by_id(compiled)
     assert set(nodes) == {"s", "it", "after"}
-    assert nodes["it"]["fanout"] == {"subgraph": "it:sub", "entry": "t1", "nodes": ["t1", "t2"]}
+    assert nodes["it"]["mayFanOut"] is True
+    body = compiled["subgraphs"]["it:sub"]
+    assert [n["id"] for n in body["nodes"]] == ["t1", "t2"]
+    assert body["nodes"][0]["deps"] == []  # the entry's edge from the iteration node stays outside the body
+    assert body["nodes"][1]["deps"] == [{"from": "t1", "handle": None}]
     assert nodes["after"]["deps"] == [{"from": "it", "handle": None}]
     assert nodes["it"]["policy"]["maxRetries"] == 0
 
@@ -77,9 +81,9 @@ def test_adornments_map_to_policy_and_fanout_nodes_never_retry():
     }
     compiled = compile_workflow(spec)
     nodes = by_id(compiled)
-    assert nodes["r"]["policy"] == {"maxRetries": 2, "backoffMs": 1500, "timeoutMs": 9000}
-    assert nodes["t"]["policy"] == {"maxRetries": 0, "onError": "continue"}
-    assert nodes["it"]["policy"] == {"maxRetries": 0}
+    assert nodes["r"]["policy"] == {"maxRetries": 2, "backoffMs": 1500, "timeoutMs": 9000, "onError": "stop"}
+    assert nodes["t"]["policy"] == {"maxRetries": 0, "backoffMs": 0, "timeoutMs": 60000, "onError": "continue"}
+    assert nodes["it"]["policy"] == {"maxRetries": 0, "backoffMs": 0, "timeoutMs": 60000, "onError": "stop"}
     assert compiled["errorMode"] == "continue"
 
 
@@ -87,9 +91,10 @@ def test_builder_types_without_executors_compile_as_skipped_with_a_warning():
     spec = {"nodes": [node("s", "start"), node("d", "data"), node("r", "research")], "edges": [edge("s", "d")]}
     compiled = compile_workflow(spec)
     nodes = by_id(compiled)
-    assert nodes["d"]["skip"] is True and "no executor" in nodes["d"]["warning"]
+    assert nodes["d"]["type"] == "data"  # still a graph node: the gateway answers it `skipped`
     assert {w["nodeId"] for w in compiled["warnings"]} == {"d", "r"}
-    assert "skip" not in nodes["s"]
+    assert all("no executor" in w["message"] for w in compiled["warnings"])
+    assert not {"skip", "warning"} & set(nodes["d"])  # the engine's schema is strict
 
 
 def test_node_limit_comes_from_the_validator():

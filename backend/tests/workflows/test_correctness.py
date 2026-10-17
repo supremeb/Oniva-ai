@@ -542,3 +542,51 @@ async def test_wait_rejects_invalid_durations(duration, unit):
     result = await _wait(waitType="duration", duration=duration, durationUnit=unit)
     assert result.status == "failed"
     assert "Invalid wait duration" in result.error
+
+
+# --------------------------------------------------------------------------
+# U15: the compiled engine graph schedules like the legacy engines do
+# --------------------------------------------------------------------------
+
+def _schedule(compiled, selected):
+    """Port of the engine's ``resolveGraph``: run every ready node, branch nodes select ``selected[id]``.
+
+    Returns ``(ran, skipped)``. A node is ready when all in-edge sources settled and one edge is live; an
+    edge is dead when its source was skipped, or names a handle the source did not select.
+    """
+    nodes = {n["id"]: n for n in compiled["nodes"]}
+    state, ran = {}, []
+    while len(state) < len(nodes):
+        progressed = False
+        for node in compiled["nodes"]:
+            if node["id"] in state or not all(d["from"] in state for d in node["deps"]):
+                continue
+            live = [
+                d for d in node["deps"]
+                if state[d["from"]] == "success" and (d["handle"] is None or d["handle"] in selected.get(d["from"], []))
+            ]
+            state[node["id"]] = "success" if (live or not node["deps"]) else "skipped"
+            ran.append(node["id"]) if state[node["id"]] == "success" else None
+            progressed = True
+        assert progressed, "scheduler stuck"
+    return ran, sorted(k for k, v in state.items() if v == "skipped")
+
+
+@pytest.mark.parametrize("branch,taken,untaken", [("true", "A", "B"), ("false", "B", "A")])
+def test_compiled_graph_skips_the_untaken_branch_and_runs_the_join_once(branch, taken, untaken):
+    from app.services.workflow_compiler import compile_workflow
+
+    ran, skipped = _schedule(compile_workflow(_branch_spec()), {"c": [branch]})
+    assert ran == ["s", "c", taken, "J"] and skipped == [untaken]
+
+
+def test_compiled_graph_skips_everything_downstream_of_a_skipped_branch():
+    from app.services.workflow_compiler import compile_workflow
+
+    spec = {
+        "nodes": [_node("s", "start"), _node("c", "ifelse"), _node("A", "llm"),
+                  _node("B", "llm"), _node("B2", "llm")],
+        "edges": [_edge("s", "c"), _edge("c", "A", "true"), _edge("c", "B", "false"), _edge("B", "B2")],
+    }
+    ran, skipped = _schedule(compile_workflow(spec), {"c": ["true"]})
+    assert ran == ["s", "c", "A"] and skipped == ["B", "B2"]
