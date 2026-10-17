@@ -54,6 +54,8 @@ export * from "./worker/config.js";
 export * from "./worker/redact.js";
 export * from "./worker/worker.js";
 export * from "./workflow/contract.js";
+export * from "./workflow/fanout-lane-task.js";
+export * from "./workflow/gate-task.js";
 export * from "./workflow/graph.js";
 export * from "./workflow/node-gateway.js";
 export * from "./workflow/node-task.js";

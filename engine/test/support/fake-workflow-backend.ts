@@ -53,8 +53,16 @@
  * engine retries with the same key. [clause:retry-after]
  *
  * Test controls: scripted answers per node and phase ({@link FakeWorkflowBackend.script}),
- * per-key execution counts ({@link FakeWorkflowBackend.executions}), stored
- * outcomes, the fence marks, and a log of every request with its headers.
+ * scripted answers for one run's node (a fan-out item, U34:
+ * {@link FakeWorkflowBackend.scriptRun}), holds that keep a node's calls in
+ * flight until released ({@link FakeWorkflowBackend.hold}), per-key execution
+ * counts ({@link FakeWorkflowBackend.executions}), stored outcomes, the fence
+ * marks, and a log of every request with its headers.
+ *
+ * Fan-out items (U34) are runs whose id the engine derives from the parent run
+ * (`{runId}:{nodeId}:i{index}` for a non-UUID run id). Their node calls arrive
+ * on the same routes with that run id, so the key rules above apply unchanged;
+ * a test lists a fan-out node's item calls with {@link FakeWorkflowBackend.itemKeys}.
  */
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -94,6 +102,14 @@ export type FakeScript =
   /** Run the call and store its outcome, then never answer. */
   | { hangAfterEffect: JsonValue };
 
+/** A hold on a node's calls: they stay in flight, before running, until released. */
+export interface FakeHold {
+  /** Calls currently held. */
+  readonly waiting: number;
+  /** Let the held calls and every later call through. */
+  release(): void;
+}
+
 export interface FakeRequest {
   method: string;
   path: string;
@@ -116,6 +132,8 @@ export class FakeWorkflowBackend {
   readonly requests: FakeRequest[] = [];
   readonly #server: Server;
   readonly #scripts = new Map<string, FakeScript[]>();
+  readonly #runScripts = new Map<string, FakeScript[]>();
+  readonly #holds = new Map<string, { gate: Promise<void>; open: () => void; waiting: number }>();
   readonly #outcomes = new Map<string, JsonValue>();
   readonly #executions = new Map<string, number>();
   readonly #highWater = new Map<string, number>();
@@ -153,16 +171,51 @@ export class FakeWorkflowBackend {
     return this;
   }
 
+  /** Like {@link script}, but only for `nodeId` of the run `runId` (a fan-out item). Wins over `script`. */
+  scriptRun(
+    runId: string,
+    nodeId: string,
+    phase: "prepare" | "finish",
+    ...scripts: FakeScript[]
+  ): this {
+    const k = `${runId}\u0000${nodeId}:${phase}`;
+    this.#runScripts.set(k, [...(this.#runScripts.get(k) ?? []), ...scripts]);
+    return this;
+  }
+
+  /** Hold every not-yet-stored call of `nodeId`'s `phase` (any run) until released. */
+  hold(nodeId: string, phase: "prepare" | "finish"): FakeHold {
+    let open = () => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const state = { gate, open, waiting: 0 };
+    this.#holds.set(`${nodeId}:${phase}`, state);
+    return {
+      get waiting() {
+        return state.waiting;
+      },
+      release: () => state.open(),
+    };
+  }
+
+  /** Keys of `phase` calls made by the fan-out items of node `fanNodeId` in `runId`, in arrival order. */
+  itemKeys(runId: string, fanNodeId: string, phase: "prepare" | "finish" = "prepare"): string[] {
+    const prefix = `${runId}:${fanNodeId}:i`;
+    return this.keys(phase).filter((k) => k.startsWith(prefix));
+  }
+
   /** How many times the call under `key` actually ran. */
   executions(key: string): number {
     return this.#executions.get(key) ?? 0;
   }
 
-  /** Total executions of `nodeId`'s `phase` across keys. */
+  /** Total executions of `nodeId`'s `phase` across keys (the node's own keys, not those of a run it fans out to). */
   total(nodeId: string, phase: "prepare" | "finish"): number {
+    const own = new RegExp(`:${reEscape(nodeId)}:r\\d+:a\\d+:${phase}$`);
     let n = 0;
     for (const [key, count] of this.#executions) {
-      if (key.includes(`:${nodeId}:`) && key.endsWith(`:${phase}`)) n += count;
+      if (own.test(key)) n += count;
     }
     return n;
   }
@@ -279,7 +332,18 @@ export class FakeWorkflowBackend {
         throw err;
       }
     }
-    const scripts = this.#scripts.get(`${nodeId}:${phase}`);
+    const held = this.#holds.get(`${nodeId}:${phase}`);
+    if (held) {
+      held.waiting += 1;
+      try {
+        await held.gate;
+      } finally {
+        held.waiting -= 1;
+      }
+    }
+    const runQueue = this.#runScripts.get(`${runId}\u0000${nodeId}:${phase}`);
+    const scripts =
+      runQueue && runQueue.length > 0 ? runQueue : this.#scripts.get(`${nodeId}:${phase}`);
     const script = scripts?.shift();
     const fallback = phase === "prepare" ? this.defaultPrepare : this.defaultFinish;
     if (script && "hang" in script) return;

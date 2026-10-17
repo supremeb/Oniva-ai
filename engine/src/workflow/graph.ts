@@ -15,10 +15,13 @@
  *
  * Validation rejects a cycle, a duplicate id, a dependency on an unknown node,
  * a handle the source node never declares and a node count over
- * {@link MAX_WORKFLOW_NODES}.
+ * {@link MAX_WORKFLOW_NODES}. Nested graphs (`subgraphs` for iteration bodies,
+ * `workflows` for referenced workflows, U34) are checked the same way; the node
+ * count spans all of them, `workflows` nest at most {@link MAX_SUBWORKFLOW_DEPTH}
+ * deep and a workflow cannot contain itself.
  */
 import { z } from "zod";
-import { nodePolicySchema } from "./contract.js";
+import { MAX_FANOUT_ITEMS, MAX_PARALLEL, nodePolicySchema } from "./contract.js";
 import type { NodePolicy, NodeStatus } from "./types.js";
 
 /**
@@ -27,6 +30,11 @@ import type { NodePolicy, NodeStatus } from "./types.js";
  * backend (a test pins the equality).
  */
 export const MAX_WORKFLOW_NODES = 95;
+
+/** Mirrors `maxSubworkflowDepth` in `limits.json`: how deep `workflows` may nest. */
+export const MAX_SUBWORKFLOW_DEPTH = 3;
+
+export { MAX_FANOUT_ITEMS, MAX_PARALLEL };
 
 /** An in-edge: the source node and, for a branch, the handle it must have selected. */
 export interface GraphDep {
@@ -42,10 +50,26 @@ export interface GraphNode {
   policy: NodePolicy;
   /** The handles this node may select (a condition's `true`/`false`). Absent: none. */
   handles?: string[] | undefined;
+  /**
+   * The node may answer `prepare` with `fanout` (iteration, subworkflow, batch).
+   * The run then spawns a `workflow_gate` next to it so it learns the node parked (U34).
+   */
+  mayFanOut?: boolean | undefined;
 }
 
 export interface WorkflowGraph {
   nodes: GraphNode[];
+  /**
+   * Iteration bodies by the name a `fanout` target gives (`{ subgraph }`). Each is
+   * a self-contained graph; its nodes count toward {@link MAX_WORKFLOW_NODES}.
+   */
+  subgraphs?: Record<string, WorkflowGraph> | undefined;
+  /**
+   * Referenced workflows by id (`{ workflowId }` targets), resolved by the backend at
+   * start. Nesting is capped at {@link MAX_SUBWORKFLOW_DEPTH} and a workflow cannot
+   * appear inside itself.
+   */
+  workflows?: Record<string, WorkflowGraph> | undefined;
 }
 
 export type ErrorMode = "stop" | "continue";
@@ -56,7 +80,9 @@ export type GraphErrorCode =
   | "duplicate_node"
   | "unknown_dependency"
   | "unknown_handle"
-  | "cycle";
+  | "cycle"
+  | "subworkflow_too_deep"
+  | "recursive_reference";
 
 /** A graph the engine refuses to run; `code` is stable. */
 export class GraphError extends Error {
@@ -69,44 +95,65 @@ export class GraphError extends Error {
   }
 }
 
-const graphSchema = z.strictObject({
-  nodes: z
-    .array(
-      z.strictObject({
-        id: z.string().min(1),
-        type: z.string().min(1),
-        deps: z.array(
-          z.strictObject({ from: z.string().min(1), handle: z.string().nullable().optional() }),
-        ),
-        policy: nodePolicySchema,
-        handles: z.array(z.string()).optional(),
-      }),
-    )
-    .min(1),
-});
+const graphSchema: z.ZodType<WorkflowGraph> = z.lazy(() =>
+  z.strictObject({
+    nodes: z
+      .array(
+        z.strictObject({
+          id: z.string().min(1),
+          type: z.string().min(1),
+          deps: z.array(
+            z.strictObject({ from: z.string().min(1), handle: z.string().nullable().optional() }),
+          ),
+          policy: nodePolicySchema,
+          handles: z.array(z.string()).optional(),
+          mayFanOut: z.boolean().optional(),
+        }),
+      )
+      .min(1),
+    subgraphs: z.record(z.string(), graphSchema).optional(),
+    workflows: z.record(z.string(), graphSchema).optional(),
+  }),
+) as unknown as z.ZodType<WorkflowGraph>;
+
+/** Nesting of `subgraphs`/`workflows` the raw input may have before parsing is refused. */
+const MAX_RAW_NESTING = 16;
+
+/** Every node of a raw graph and its nested graphs, bounded in depth. */
+function countRawNodes(raw: unknown, level = 0): number {
+  if (typeof raw !== "object" || raw === null) return 0;
+  if (level > MAX_RAW_NESTING) {
+    throw new GraphError("invalid_graph", `graphs nest deeper than ${MAX_RAW_NESTING} levels`);
+  }
+  const g = raw as { nodes?: unknown; subgraphs?: unknown; workflows?: unknown };
+  let total = Array.isArray(g.nodes) ? g.nodes.length : 0;
+  for (const nested of [g.subgraphs, g.workflows]) {
+    if (typeof nested !== "object" || nested === null || Array.isArray(nested)) continue;
+    for (const child of Object.values(nested)) total += countRawNodes(child, level + 1);
+  }
+  return total;
+}
 
 /**
  * Validate a graph taken from untrusted input. Returns it typed or throws
- * {@link GraphError}.
+ * {@link GraphError}. The node limit counts the nodes of every nested graph.
  */
 export function validateGraph(raw: unknown): WorkflowGraph {
-  if (
-    typeof raw === "object" &&
-    raw !== null &&
-    Array.isArray((raw as { nodes?: unknown }).nodes)
-  ) {
-    const count = (raw as { nodes: unknown[] }).nodes.length;
-    if (count > MAX_WORKFLOW_NODES) {
-      throw new GraphError(
-        "too_many_nodes",
-        `a graph holds at most ${MAX_WORKFLOW_NODES} nodes, got ${count}`,
-      );
-    }
+  const count = countRawNodes(raw);
+  if (count > MAX_WORKFLOW_NODES) {
+    throw new GraphError(
+      "too_many_nodes",
+      `a graph holds at most ${MAX_WORKFLOW_NODES} nodes, got ${count}`,
+    );
   }
   const parsed = graphSchema.safeParse(raw);
   if (!parsed.success) throw new GraphError("invalid_graph", z.prettifyError(parsed.error));
-  const graph = parsed.data as WorkflowGraph;
+  checkGraph(parsed.data, 0, []);
+  return parsed.data;
+}
 
+/** The structural checks of one graph level, then of its nested graphs. */
+function checkGraph(graph: WorkflowGraph, depth: number, ancestors: string[]): void {
   const byId = new Map<string, GraphNode>();
   for (const node of graph.nodes) {
     if (byId.has(node.id)) throw new GraphError("duplicate_node", `duplicate node ${node.id}`);
@@ -130,7 +177,32 @@ export function validateGraph(raw: unknown): WorkflowGraph {
     }
   }
   assertAcyclic(graph);
-  return graph;
+  for (const sub of Object.values(graph.subgraphs ?? {})) checkGraph(sub, depth, ancestors);
+  for (const [id, workflow] of Object.entries(graph.workflows ?? {})) {
+    if (ancestors.includes(id)) {
+      throw new GraphError("recursive_reference", `workflow ${id} references itself`);
+    }
+    if (depth + 1 > MAX_SUBWORKFLOW_DEPTH) {
+      throw new GraphError(
+        "subworkflow_too_deep",
+        `subworkflows nest at most ${MAX_SUBWORKFLOW_DEPTH} levels deep`,
+      );
+    }
+    checkGraph(workflow, depth + 1, [...ancestors, id]);
+  }
+}
+
+/** The graph a fan-out target runs per item, or null when the graph does not hold it. */
+export function resolveTarget(
+  graph: WorkflowGraph,
+  target: { subgraph: string } | { workflowId: string },
+): WorkflowGraph | null {
+  if ("subgraph" in target) {
+    const sub = graph.subgraphs;
+    return sub && Object.hasOwn(sub, target.subgraph) ? (sub[target.subgraph] ?? null) : null;
+  }
+  const wf = graph.workflows;
+  return wf && Object.hasOwn(wf, target.workflowId) ? (wf[target.workflowId] ?? null) : null;
 }
 
 /** Kahn's algorithm; a leftover node is on or behind a cycle. */
