@@ -123,6 +123,7 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_LEASE_TTL_MS` | `15000` | lease TTL; heartbeat every TTL/3 |
 | `ENGINE_LEASE_RETRY_MS` | TTL/3 | standby retry interval |
 | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
+| `ENGINE_WORKFLOW_BACKEND_URL` | `ENGINE_GATEWAY_URL` | backend origin of the workflow node gateway (`/internal/workflows/...`), authenticated with the gateway token. The production worker (`npm run worker`) exits 2 at startup when neither is set |
 | `ENGINE_APPROVAL_TTL_MS` | `86400000` | approval expiry (`0`: none) |
 | `ANTHROPIC_API_KEY` | none | model key (read per request; unused under `ENGINE_POLICY=backend`) |
 | `ENGINE_POLICY` | `backend` if `ENGINE_POLICY_URL` is set, else `local` | `backend`: the backend resolves each model request (provider, model, tenant key, token budget, quota) and records usage; a definitive refusal denies the request, an outage is retried (`ENGINE_POLICY_RETRY_MS`) and then fails it as a retryable `policy_unavailable`; there is never a fallback to a local key |
@@ -243,6 +244,12 @@ Register `createWorkflowFanoutLaneTask()` (`workflow_fanout_lane`) and `createWo
 - **Failure.** With `failFast` the first failed item ends its lane and aborts the sibling lanes (and their live items). Otherwise every item runs. An item child's own `finalize` writes its results to the backend.
 - **Result.** When the lanes are terminal the run signals the node `fanout-result` with `{ count, completed, failed, cancelled, firstError? }` and waits for the node, which calls `finish` itself under its own key. A count over 1000 items or a target the graph lacks is answered with a failure summary and no lanes.
 - **Bounded state (KTD17).** Checkpoints and signals hold counts and ids, never items or results: the run, lane and node checkpoints stay under 8 KiB and do not depend on the item count.
+
+### Run retry, deadline and worker wiring
+
+- **Retry.** `workflow_run` input may carry `retry: { max, delayMs }`. A run that ends `failed` with attempts left does not finalize: it parks on `waiting({ until: now + delayMs })` and restarts from `start` with a fresh checkpoint and `runAttempt + 1` (kept in the checkpoint's `attempt`). Node and lane task ids and node keys carry `r{runAttempt}`, so the retry re-executes nodes that failed in the earlier attempt and a fan-out starts afresh. `finalize` is called once, after the last attempt, with `attempts` (key `{runId}:r{attempt}:finalize`). A retry whose wake would not come before the deadline is not taken.
+- **Deadline.** `deadlineMs` (absolute engine-clock epoch ms) bounds every wait of the run. When reached, live nodes, gates and lanes are aborted (reason `run_deadline`, recorded `skipped`) and the run finalizes `failed` with `{ code: "deadline_exceeded" }`; a deadline failure never retries.
+- **Worker.** `startWorker({ workflow: { baseUrl, serviceToken } })` registers `workflow_run`, `workflow_node`, `workflow_fanout_lane` and `workflow_gate` (`createWorkflowTasks`, `src/workflow/tasks.ts`) with a node gateway client that carries the lease fence, so `/v1/health` `taskKinds` lists them. `scripts/worker.ts` takes the backend from `ENGINE_WORKFLOW_BACKEND_URL`, falling back to `ENGINE_GATEWAY_URL`.
 
 ## Commands
 

@@ -12,6 +12,7 @@
  * | `ENGINE_LEASE_TTL_MS` | `15000` | lease time-to-live; heartbeats every ttl/3 |
  * | `ENGINE_LEASE_RETRY_MS` | ttl/3 | how often a standby worker retries the lease |
  * | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
+ * | `ENGINE_WORKFLOW_BACKEND_URL` | `ENGINE_GATEWAY_URL` | backend origin of the workflow node gateway (`/internal/workflows/...`); authenticated with the gateway token. The production worker requires one of the two |
  * | `ENGINE_POLICY` | `backend` when `ENGINE_POLICY_URL` is set, else `local` | `backend`: model, key and quota come from the backend per request; `local`: `ENGINE_MODEL` and `ANTHROPIC_API_KEY` |
  * | `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` under `ENGINE_POLICY=backend` | backend origin serving `/internal/models/{policy,usage}`; authenticated with the gateway token |
  * | `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
@@ -55,6 +56,8 @@ export interface WorkerConfig {
   leaseRetryMs: number | null;
   gatewayUrl: string | null;
   gatewayToken: string | null;
+  /** Backend origin of the workflow node gateway: `ENGINE_WORKFLOW_BACKEND_URL`, else `gatewayUrl`. */
+  workflowBackendUrl: string | null;
   /** `backend`: the backend resolves every model request and records usage. */
   policy: "local" | "backend";
   /** Backend origin for the policy and usage endpoints; set iff `policy` is `backend`. */
@@ -214,6 +217,7 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
     leaseRetryMs: retry === null ? null : integer(env, "ENGINE_LEASE_RETRY_MS", 0, 1),
     gatewayUrl,
     gatewayToken: text(env, "ENGINE_GATEWAY_TOKEN"),
+    workflowBackendUrl: text(env, "ENGINE_WORKFLOW_BACKEND_URL") ?? gatewayUrl,
     policy,
     policyUrl,
     policyTimeoutMs: integer(env, "ENGINE_POLICY_TIMEOUT_MS", DEFAULT_POLICY_TIMEOUT_MS, 1),
@@ -239,6 +243,25 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
     subagentTools: subagentTools(env),
     shutdownTimeoutMs: integer(env, "ENGINE_SHUTDOWN_TIMEOUT_MS", DEFAULT_SHUTDOWN_TIMEOUT_MS, 1),
     db,
+  };
+}
+
+/**
+ * The workflow node gateway the worker registers its workflow task kinds with
+ * (U35). Throws {@link WorkerConfigError} when no backend URL is configured, so
+ * the worker fails at startup instead of advertising kinds it cannot serve.
+ */
+export function requireWorkflowBackend(
+  config: Pick<WorkerConfig, "workflowBackendUrl" | "gatewayToken" | "serviceToken">,
+): { baseUrl: string; serviceToken: string } {
+  if (config.workflowBackendUrl === null) {
+    throw new WorkerConfigError(
+      "the workflow task kinds need a backend: set ENGINE_WORKFLOW_BACKEND_URL or ENGINE_GATEWAY_URL",
+    );
+  }
+  return {
+    baseUrl: config.workflowBackendUrl,
+    serviceToken: config.gatewayToken ?? config.serviceToken,
   };
 }
 
