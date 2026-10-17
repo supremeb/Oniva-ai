@@ -325,6 +325,11 @@ export const ROUTES: readonly Route[] = Object.freeze([
         return { status: 200, body: { conversationId: id, taskId: rootTaskId(ctx, id, kind) } };
       }
       const input = (body.input ?? null) as JsonValue;
+      // A kind may check its input up front (a workflow graph); nothing is created for a bad one.
+      const problem = (
+        def as { validateInput?: (input: unknown) => string | null }
+      ).validateInput?.(input);
+      if (problem) throw bad(problem);
       let taskId: string;
       try {
         taskId = await ctx.harness.runtime.commit(async (tx, ops) => {

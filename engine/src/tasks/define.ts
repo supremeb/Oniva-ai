@@ -338,6 +338,8 @@ export interface TaskViewInfo {
   label?: string;
   /** Which attempt of the work this task is on (1-based). */
   attempt?: number;
+  /** A compact `{ id: status }` summary of the parts of the work (a workflow run's nodes). */
+  nodes?: { [id: string]: string };
 }
 
 /**

@@ -1,9 +1,8 @@
 """U13 / KTD4: the idempotent backend node gateway under /internal/workflows.
 
-The contract is the U33 schemas and fixtures (engine/contracts/workflow-nodes). The fake workflow
-backend (U11, `engine/test/support/fake-workflow-backend.ts`) is not in this branch yet: when it
-merges, its `[clause:]` tags must each get a `@clause` test in test_contract_conformance.py (see the
-`TODO(U11)` marker there). Until then the fixtures are the oracle.
+The contract is the U33 schemas and fixtures (engine/contracts/workflow-nodes) and the clauses of the
+fake workflow backend (U11, `engine/test/support/fake-workflow-backend.ts`), whose `@wf_clause` tests live
+in test_contract_conformance.py.
 """
 import json
 import uuid
