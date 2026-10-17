@@ -1,3 +1,4 @@
+import type { RunStatus } from '@/lib/run/status';
 /**
  * Types for integrated chat panels feature.
  */
@@ -114,7 +115,11 @@ export interface AgentAlias {
 }
 
 // Background Job
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+/**
+ * A job's status is the shared run status (plan 003, KTD10). Rows written before the
+ * enum landed (legacy jobs) can still carry `pending`; `normalizeStatus` maps it to `queued`.
+ */
+export type JobStatus = RunStatus | 'pending';
 export type JobType = 'workflow_execution' | 'agent_chat' | 'batch_processing' | 'deep_work';
 
 export interface ExecutionTraceStep {

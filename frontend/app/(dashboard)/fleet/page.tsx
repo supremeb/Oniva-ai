@@ -15,6 +15,7 @@ export default function FleetPage() {
     id: string;
     agent_name: string | null;
     status: string;
+    conversation_id: string | null;
   } | null>(null);
 
   return (
@@ -27,6 +28,8 @@ export default function FleetPage() {
             id: run.id,
             agent_name: run.agent_name,
             status: run.status,
+            // An engine job carries its conversation; a legacy job has none (trace path).
+            conversation_id: run.engine === false ? null : (run.conversation_id ?? null),
           })}
         />
       </div>
@@ -39,6 +42,7 @@ export default function FleetPage() {
             runId={selectedRun.id}
             agentName={selectedRun.agent_name || 'Unknown Agent'}
             status={selectedRun.status}
+            conversationId={selectedRun.conversation_id}
           />
         ) : (
           <div className="h-full flex items-center justify-center text-muted-foreground">
