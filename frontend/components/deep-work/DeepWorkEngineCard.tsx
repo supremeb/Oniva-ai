@@ -15,6 +15,7 @@ import { WorkerTranscript } from './WorkerTranscript';
 import { useEngineSessionStore, type EngineDeepWorkSession } from './engineSession';
 
 const PHASE_TEXT: Record<string, string> = {
+  planning_workers: 'Planning workers…',
   researching: 'Researching',
   reflecting: 'Evaluating research quality...',
   synthesizing: 'Writing report...',
@@ -211,7 +212,7 @@ export const DeepWorkEngineCard = memo(function DeepWorkEngineCard({ session }: 
 
             {running && (
               <div className="space-y-2.5 px-5 pb-4 pt-1">
-                {(deepWork.phase === 'synthesizing' || deepWork.phase === 'reflecting' || deepWork.phase === 'generating_output') && (
+                {(deepWork.phase === 'planning_workers' || deepWork.phase === 'synthesizing' || deepWork.phase === 'reflecting' || deepWork.phase === 'generating_output') && (
                   <div className="flex items-center gap-2">
                     <div className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-neutral-400 motion-reduce:animate-none" />
                     <p className="truncate text-sm text-neutral-500">{PHASE_TEXT[deepWork.phase]}</p>

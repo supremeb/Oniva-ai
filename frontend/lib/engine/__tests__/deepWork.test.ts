@@ -1,6 +1,31 @@
+import goldenViews from '../__fixtures__/deep_work_views.json';
 import { applyJsonPatch } from '../patch';
 import { createDeepWorkAdapter, parseWorkerId, viewToDeepWork } from '../deepWork';
-import type { ConversationView, EntryRecord, JsonValue } from '../types';
+import type { ConversationView, EntryRecord, JsonPatchOp, JsonValue } from '../types';
+
+// ---- real captured views: replay the engine's recorded watch frames (U3) ----
+type GoldenFrame = { snapshot?: ConversationView; patch?: JsonPatchOp[] };
+
+function replay(scenario: string): ConversationView[] {
+  const frames = (goldenViews as unknown as Record<string, { frames: GoldenFrame[] }>)[scenario].frames;
+  const first = frames[0].snapshot as ConversationView;
+  const out: ConversationView[] = [first];
+  let view = first as unknown as JsonValue;
+  for (const f of frames.slice(1)) {
+    view = f.snapshot ? (f.snapshot as unknown as JsonValue) : applyJsonPatch(view, f.patch ?? []);
+    out.push(view as unknown as ConversationView);
+  }
+  return out;
+}
+
+const callNames = (v: ConversationView): string[] =>
+  v.entries.flatMap((e) => {
+    const p = e.payload as { message?: { blocks?: Array<{ type?: string; name?: string }> } };
+    return (p.message?.blocks ?? []).filter((b) => b.type === 'tool_call' && b.name).map((b) => b.name as string);
+  });
+const resultNames = (v: ConversationView): string[] =>
+  v.entries.filter((e) => e.kind === 'tool_result').map((e) => (e.payload as { toolName?: string }).toolName ?? '');
+const hasSubagent = (v: ConversationView): boolean => Object.keys(v.subagents ?? {}).length > 0;
 
 // ---- view builders (shapes recorded from engine/src/watch/view.ts + context-builder) ----
 const ZERO = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: null };
@@ -349,5 +374,44 @@ describe('viewToDeepWork', () => {
     expect(() => viewToDeepWork(odd)).not.toThrow();
     const older = { ...midResearch(), subagents: undefined } as ConversationView;
     expect(viewToDeepWork(older).workers[1]?.status).toBe('researching');
+  });
+});
+
+describe('U3: the planning workers gap (R3, AE3)', () => {
+  const success = replay('success');
+  const planning = success.find(
+    (v) => v.run?.active === true && v.live.runId != null && resultNames(v).includes('dw_start_round') && !callNames(v).includes('research_worker'),
+  );
+  const withSubagent = success.find(hasSubagent);
+
+  it('a captured planning view (round registered, orchestrator turn live, no subagents) is planning_workers', () => {
+    expect(planning).toBeDefined();
+    const s = viewToDeepWork(planning!);
+    expect(s).toMatchObject({ status: 'executing', phase: 'planning_workers' });
+    expect(s.workers).toHaveLength(0);
+    expect(s.plan?.steps.length).toBeGreaterThan(0);
+  });
+
+  it('the fallback predicate decides alone: a live research_worker block does not change the phase', () => {
+    const withLiveBlock: ConversationView = {
+      ...planning!,
+      live: {
+        ...planning!.live,
+        message: {
+          role: 'assistant',
+          blocks: [{ type: 'tool_call', id: 'c_live', name: 'research_worker', arguments: {} }],
+        } as unknown as JsonValue,
+      },
+    };
+    expect(viewToDeepWork(withLiveBlock).phase).toBe('planning_workers');
+  });
+
+  it('leaves planning_workers once the first subagent has started', () => {
+    expect(withSubagent).toBeDefined();
+    expect(viewToDeepWork(withSubagent!).phase).toBe('researching');
+  });
+
+  it('a finished run has no phase', () => {
+    expect(viewToDeepWork(success[success.length - 1])).toMatchObject({ status: 'completed', phase: null });
   });
 });
