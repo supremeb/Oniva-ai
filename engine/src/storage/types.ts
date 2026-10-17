@@ -262,11 +262,42 @@ export interface SessionStorage {
 }
 
 /** Opens session handles over one shared store. */
-export interface StorageProvider {
+export interface StorageProvider extends UsageOutbox {
   /** Open (creating if needed) storage for `sessionId`. */
   open(sessionId: string): Promise<SessionStorage>;
   /** The session holding a conversation, or null. */
   sessionOfConversation(conversationId: string): Promise<string | null>;
   /** The session holding a task, or null. */
   sessionOfTask(taskId: string): Promise<string | null>;
+}
+
+/**
+ * A usage report parked until the backend ledger acknowledges it (KTD6/U6).
+ * The body is the exact JSON POSTed to `/internal/models/usage`.
+ */
+export interface UsageOutboxRecord {
+  /** Unique report id; re-enqueuing the same id changes nothing. */
+  requestId: string;
+  body: JsonValue;
+  /** Epoch ms the row was first enqueued. */
+  createdAt: number;
+  /** Epoch ms of the current claim, or null when unclaimed. */
+  claimedAt: number | null;
+}
+
+/**
+ * The worker's durable usage outbox (KTD6/U6). It is provider-level, not
+ * session-level: writes are unfenced single-row operations outside the session
+ * commit line, so they never touch the lease.
+ */
+export interface UsageOutbox {
+  /** Park a report for delivery; idempotent per `requestId`. */
+  enqueue(record: UsageOutboxRecord): Promise<void>;
+  /**
+   * Claim reports that are unclaimed or were claimed longer than
+   * `claimTimeoutMs` ago, oldest first, and stamp them claimed now.
+   */
+  claimPending(claimTimeoutMs: number): Promise<UsageOutboxRecord[]>;
+  /** Delete a delivered report. A no-op when the row is absent. */
+  ack(requestId: string): Promise<void>;
 }

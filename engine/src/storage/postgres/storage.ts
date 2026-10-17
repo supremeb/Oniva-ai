@@ -47,6 +47,7 @@ import {
   TASK_STATUSES,
   type TaskRecord,
   type TaskScanOptions,
+  type UsageOutboxRecord,
 } from "../types.js";
 import {
   normalizePage,
@@ -85,6 +86,60 @@ export class PostgresStorageProvider implements StorageProvider {
       [taskId],
     );
     return rows[0]?.session_id ?? null;
+  }
+
+  /**
+   * Park a usage report (KTD6). One unfenced row, outside the session commit
+   * line; a repeated `requestId` is a no-op. `created_at`/`claimed_at` are
+   * epoch ms, so the memory and Postgres backends agree exactly.
+   */
+  async enqueue(record: UsageOutboxRecord): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO engine_usage_outbox (request_id, body, created_at, claimed_at)
+       VALUES ($1, $2::json, $3, $4)
+       ON CONFLICT (request_id) DO NOTHING`,
+      [record.requestId, JSON.stringify(record.body), record.createdAt, record.claimedAt],
+    );
+  }
+
+  /**
+   * Claim rows that are unclaimed or whose claim is at least `claimTimeoutMs` old
+   * (stale), oldest first. `FOR UPDATE SKIP LOCKED` keeps concurrent claimers
+   * from taking the same row.
+   */
+  async claimPending(claimTimeoutMs: number): Promise<UsageOutboxRecord[]> {
+    const now = Date.now();
+    const { rows } = await this.pool.query<{
+      request_id: string;
+      body: JsonValue;
+      created_at: string;
+      claimed_at: string | null;
+    }>(
+      `WITH claimed AS (
+         UPDATE engine_usage_outbox SET claimed_at = $1
+          WHERE request_id IN (
+            SELECT request_id FROM engine_usage_outbox
+             WHERE claimed_at IS NULL OR claimed_at <= $2
+             ORDER BY created_at, request_id
+             FOR UPDATE SKIP LOCKED
+          )
+         RETURNING request_id, body, created_at, claimed_at
+       )
+       SELECT request_id, body, created_at, claimed_at FROM claimed
+        ORDER BY created_at, request_id`,
+      [now, now - claimTimeoutMs],
+    );
+    return rows.map((r) => ({
+      requestId: r.request_id,
+      body: r.body,
+      createdAt: Number(r.created_at),
+      claimedAt: r.claimed_at === null ? null : Number(r.claimed_at),
+    }));
+  }
+
+  /** Delete a delivered report. */
+  async ack(requestId: string): Promise<void> {
+    await this.pool.query("DELETE FROM engine_usage_outbox WHERE request_id = $1", [requestId]);
   }
 }
 

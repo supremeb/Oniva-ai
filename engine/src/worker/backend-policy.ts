@@ -40,16 +40,25 @@
  * - Usage reporting never blocks the conversation: `afterResponse` starts the
  *   report in the background; network errors, 408, 429 and 5xx are retried
  *   with the same backoff and the same time budget as policy (`usage_retry`,
- *   then `usage_failed`); other statuses are logged and dropped. `flush` waits
- *   for reports in flight (each bounded by the budget) at shutdown.
- *   Reports are held in memory only: one still pending when the process dies
- *   is lost (see the README).
+ *   then `usage_failed`); 401/403 are logged `usage_auth_error` and the outbox
+ *   row is kept for redelivery after the token is fixed; other statuses are
+ *   logged and dropped (`usage_dropped`).
+ *   `flush` waits for reports in flight (each bounded by the budget) at shutdown.
+ * - Durable outbox (U6, KTD6): with an outbox every report is enqueued (claimed)
+ *   before its first attempt and deleted only on a 2xx, so a report survives a
+ *   backend outage and a worker restart. The flusher reclaims undelivered rows
+ *   (unclaimed or past the claim timeout, oldest first) at start and every
+ *   `flushIntervalMs`; the backend ledger dedupes `(tenant, requestId)`, so a
+ *   redelivery is counted once. A row older than `staleAgeMs` is logged
+ *   `usage_stale` but still delivered. Without an outbox reports are memory-only.
  */
 import type { AfterCompactionEvent, AfterResponseEvent, AgentHooks } from "../agent/hooks.js";
 import type { ModelRequestInfo, ToolAuthorizationRequest, ToolVerdict } from "../agent/policy.js";
 import { type Clock, realClock } from "../core/clock.js";
+import type { JsonValue } from "../core/json.js";
 import type { ModelResolution } from "../models/types.js";
 import type { RedactTarget } from "../session/transaction.js";
+import type { UsageOutbox, UsageOutboxRecord } from "../storage/types.js";
 import { backendConversationIds, INTERNAL_NATIVE_TOOLS } from "../tools/registry.js";
 import { argsHash } from "./args-hash.js";
 import { maskSecrets } from "./redact.js";
@@ -443,9 +452,25 @@ export interface UsageReporterOptions extends RetryOptions {
   /** Optional cap on attempts per report (first try included); default: limited by `retryMs` only. */
   attempts?: number;
   timeoutMs?: number;
+  /**
+   * Durable outbox (U6, KTD6). Set: every report is parked before its first
+   * attempt and deleted on a 2xx, and the flusher re-drives anything left.
+   * Unset: reports are held in memory only.
+   */
+  outbox?: UsageOutbox | null;
+  /** How often the flusher re-drives undelivered reports. Default 30 s. */
+  flushIntervalMs?: number;
+  /** A claim older than this may be taken again by the flusher. Default 60 s. */
+  claimTimeoutMs?: number;
+  /** A report older than this is logged `usage_stale` but still delivered. Default 7 days. */
+  staleAgeMs?: number;
   fetch?: typeof fetch;
   log?: BackendLog;
 }
+
+export const DEFAULT_USAGE_FLUSH_INTERVAL_MS = 30_000;
+export const DEFAULT_USAGE_CLAIM_TIMEOUT_MS = 60_000;
+export const DEFAULT_USAGE_STALE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Posts each model response's usage to the backend ledger, in the background. */
 export class UsageReporter {
@@ -456,7 +481,12 @@ export class UsageReporter {
   readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
   readonly #log: BackendLog;
+  readonly #outbox: UsageOutbox | null;
+  readonly #flushIntervalMs: number;
+  readonly #claimTimeoutMs: number;
+  readonly #staleAgeMs: number;
   readonly #pending = new Set<Promise<void>>();
+  #flushTimer: ReturnType<typeof setInterval> | null = null;
   #closed = false;
 
   constructor(options: UsageReporterOptions) {
@@ -467,6 +497,10 @@ export class UsageReporter {
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_POLICY_TIMEOUT_MS;
     this.#fetch = options.fetch ?? fetch;
     this.#log = options.log ?? (() => {});
+    this.#outbox = options.outbox ?? null;
+    this.#flushIntervalMs = Math.max(1, options.flushIntervalMs ?? DEFAULT_USAGE_FLUSH_INTERVAL_MS);
+    this.#claimTimeoutMs = Math.max(0, options.claimTimeoutMs ?? DEFAULT_USAGE_CLAIM_TIMEOUT_MS);
+    this.#staleAgeMs = Math.max(0, options.staleAgeMs ?? DEFAULT_USAGE_STALE_AGE_MS);
   }
 
   /** Hooks to register with the harness. */
@@ -500,13 +534,55 @@ export class UsageReporter {
     );
   }
 
+  /**
+   * Begin re-driving the outbox: once now, then every `flushIntervalMs`. A
+   * no-op without an outbox. The timer is unref'd so it never holds the process.
+   */
+  startFlushing(): void {
+    if (!this.#outbox || this.#flushTimer) return;
+    this.#flushSafely();
+    this.#flushTimer = setInterval(() => this.#flushSafely(), this.#flushIntervalMs);
+    this.#flushTimer.unref?.();
+  }
+
+  /** Claim and deliver every due outbox row once (the worker's start-up flush). */
+  async flushOutbox(): Promise<void> {
+    const outbox = this.#outbox;
+    if (!outbox) return;
+    for (const record of await outbox.claimPending(this.#claimTimeoutMs)) {
+      const job = this.#deliver(record, false).finally(() => this.#pending.delete(job));
+      this.#pending.add(job);
+    }
+    await Promise.allSettled([...this.#pending]);
+  }
+
+  /** Reports still in flight. */
+  get pending(): number {
+    return this.#pending.size;
+  }
+
+  /** Wait for in-flight reports to finish (each is already bounded by its retries). */
+  async flush(): Promise<void> {
+    while (this.#pending.size > 0) await Promise.allSettled([...this.#pending]);
+  }
+
+  /** Stop accepting reports and the flusher timer, then wait for the ones in flight. */
+  async close(): Promise<void> {
+    this.#closed = true;
+    if (this.#flushTimer) {
+      clearInterval(this.#flushTimer);
+      this.#flushTimer = null;
+    }
+    await this.flush();
+  }
+
   #start(
     requestId: string,
     purpose: "generation" | "compaction",
     event: AfterResponseEvent | AfterCompactionEvent,
   ): void {
     if (this.#closed) return;
-    const body = JSON.stringify({
+    const body = {
       tenantId: event.conversation.tenantId,
       projectId: event.conversation.projectId,
       ...backendConversationIds(event.conversation),
@@ -525,28 +601,56 @@ export class UsageReporter {
         cacheWriteTokens: event.usage.cacheWriteTokens,
       },
       status: "success",
-    });
-    const job = this.#send(requestId, body).finally(() => this.#pending.delete(job));
+    };
+    const now = this.#backoff.now();
+    const record: UsageOutboxRecord = { requestId, body, createdAt: now, claimedAt: now };
+    const job = this.#deliver(record, true).finally(() => this.#pending.delete(job));
     this.#pending.add(job);
   }
 
-  /** Reports still in flight. */
-  get pending(): number {
-    return this.#pending.size;
+  /**
+   * Enqueue a fresh report, then send it; keep the row when the send gives up.
+   * Never rejects: the job runs in the background with no handler. A failed
+   * enqueue still sends (the report is just not durable); a failed ack leaves
+   * the row, and the backend dedupes the redelivery.
+   */
+  async #deliver(record: UsageOutboxRecord, fresh: boolean): Promise<void> {
+    const outbox = this.#outbox;
+    try {
+      if (fresh && outbox) {
+        try {
+          await outbox.enqueue(record);
+        } catch (err) {
+          this.#log("usage_outbox_error", {
+            requestId: record.requestId,
+            op: "enqueue",
+            error: errorName(err),
+          });
+        }
+      }
+      const ageMs = this.#backoff.now() - record.createdAt;
+      if (ageMs > this.#staleAgeMs) {
+        this.#log("usage_stale", { requestId: record.requestId, ageMs });
+      }
+      if (await this.#send(record.requestId, record.body)) {
+        try {
+          await outbox?.ack(record.requestId);
+        } catch (err) {
+          this.#log("usage_outbox_error", {
+            requestId: record.requestId,
+            op: "ack",
+            error: errorName(err),
+          });
+        }
+      }
+    } catch (err) {
+      this.#log("usage_outbox_error", { requestId: record.requestId, error: errorName(err) });
+    }
   }
 
-  /** Wait for in-flight reports to finish (each is already bounded by its retries). */
-  async flush(): Promise<void> {
-    while (this.#pending.size > 0) await Promise.allSettled([...this.#pending]);
-  }
-
-  /** Stop accepting reports and wait for the ones in flight. */
-  async close(): Promise<void> {
-    this.#closed = true;
-    await this.flush();
-  }
-
-  async #send(requestId: string, body: string): Promise<void> {
+  /** One report: retry to the budget. True when the row may be deleted, false to keep it. */
+  async #send(requestId: string, body: JsonValue): Promise<boolean> {
+    const payload = JSON.stringify(body);
     const deadline = this.#backoff.now() + this.#backoff.retryMs;
     for (let attempt = 1; ; attempt++) {
       let why = "";
@@ -558,16 +662,21 @@ export class UsageReporter {
             authorization: `Bearer ${this.#token}`,
             "content-type": "application/json",
           },
-          body,
+          body: payload,
           signal: AbortSignal.timeout(this.#timeoutMs),
         });
         await res.body?.cancel().catch(() => {});
-        if (res.ok) return;
+        if (res.ok) return true;
         why = `status ${res.status}`;
+        // Auth failures are fixed by rotating the token, so keep the row for redelivery.
+        if (res.status === 401 || res.status === 403) {
+          this.#log("usage_auth_error", { requestId, status: res.status });
+          return false;
+        }
         // A client error other than 408/429 will not change on retry.
         if (!isTransientStatus(res.status)) {
           this.#log("usage_dropped", { requestId, status: res.status });
-          return;
+          return true;
         }
         if (res.status === 429 || res.status === 503) {
           retryAfter = retryAfterMs(res.headers.get("retry-after"), this.#backoff.now());
@@ -579,10 +688,16 @@ export class UsageReporter {
         attempt >= this.#attempts ? null : this.#backoff.delay(attempt, deadline, retryAfter);
       if (delay === null) {
         this.#log("usage_failed", { requestId, attempts: attempt, error: why });
-        return;
+        return false;
       }
       this.#log("usage_retry", { requestId, attempt, delayMs: delay, error: why });
       await this.#backoff.sleep(delay);
     }
+  }
+
+  #flushSafely(): void {
+    void this.flushOutbox().catch((err: unknown) => {
+      this.#log("usage_outbox_error", { error: errorName(err) });
+    });
   }
 }

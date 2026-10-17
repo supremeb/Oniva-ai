@@ -86,7 +86,10 @@
  * runId, requestId, provider, model, usage: { inputTokens, outputTokens,
  * cacheReadTokens, cacheWriteTokens }, latencyMs?, status }` →
  * `200 { recorded }` [clause:usage-recorded]; a repeated `(tenantId,
- * requestId)` is `recorded: false` and counts once [clause:usage-repeat-false].
+ * requestId)` is `recorded: false` and counts once [clause:usage-repeat-false],
+ * which is what makes the engine's durable outbox safe: a report re-sent after
+ * a restart is the same `requestId` and is counted once
+ * [clause:usage-outbox-redelivery].
  * A body missing a required field is `422`. [clause:usage-invalid-422]
  * An optional `agentRole` (the subagent tool name, `[a-z0-9_]{1,64}`) is
  * present on usage from a subagent's child conversation and absent for the

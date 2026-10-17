@@ -87,12 +87,18 @@ describe("migrate", () => {
     const { schema, pool, exists } = await freshSchema();
     const other = env.newPool({ options: `-c search_path=${schema}` });
     const results = await Promise.all([migrate(pool), migrate(other), migrate(pool)]);
-    assert.deepEqual(results.map((r) => r.join(",")).sort(), ["", "", "001"]);
+    assert.deepEqual(results.map((r) => r.join(",")).sort(), ["", "", "001,002"]);
     assert.equal(await exists("engine_sessions"), true);
-    const { rows } = await pool.query("SELECT version, checksum FROM engine_migrations");
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].version, "001");
-    assert.match(rows[0].checksum, /^[0-9a-f]{64}$/);
+    assert.equal(await exists("engine_usage_outbox"), true);
+    const { rows } = await pool.query(
+      "SELECT version, checksum FROM engine_migrations ORDER BY version",
+    );
+    assert.equal(rows.length, 2);
+    assert.deepEqual(
+      rows.map((r) => r.version),
+      ["001", "002"],
+    );
+    for (const r of rows) assert.match(r.checksum, /^[0-9a-f]{64}$/);
   });
 
   it("detects a migration modified after being applied", async () => {

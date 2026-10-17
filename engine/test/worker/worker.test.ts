@@ -29,6 +29,9 @@ function wrapSessions(
     open: async (sessionId) => wrap(await provider.open(sessionId)),
     sessionOfConversation: (id) => provider.sessionOfConversation(id),
     sessionOfTask: (id) => provider.sessionOfTask(id),
+    enqueue: (record) => provider.enqueue(record),
+    claimPending: (claimTimeoutMs) => provider.claimPending(claimTimeoutMs),
+    ack: (requestId) => provider.ack(requestId),
   };
 }
 

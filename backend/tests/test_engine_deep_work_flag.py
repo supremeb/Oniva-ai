@@ -40,7 +40,8 @@ def test_tenant_on_off_and_unset():
     s = cfg()
     assert ff.engine_deep_work_enabled(tenant(True), s) is True
     assert ff.engine_deep_work_enabled(tenant(False), s) is False
-    assert ff.engine_deep_work_enabled(tenant(None), s) is False
+    # R7 / AE6: absent tenant setting means on while the globals are on.
+    assert ff.engine_deep_work_enabled(tenant(None), s) is True
 
 
 @pytest.mark.parametrize("override", [
@@ -51,20 +52,25 @@ def test_tenant_on_off_and_unset():
 ])
 def test_global_conditions_override_tenant_true(override):
     assert ff.engine_deep_work_enabled(tenant(True), cfg(**override)) is False
+    assert ff.engine_deep_work_enabled(tenant(None), cfg(**override)) is False
 
 
-def test_chat_flag_does_not_enable_deep_work_and_vice_versa():
+def test_chat_and_deep_work_flags_are_independent_opt_outs():
     s = cfg(ENABLE_ENGINE_CHAT=True)
-    t = Tenant(id=uuid.uuid4(), name="t", slug="t", settings={"features": {"ENABLE_ENGINE_CHAT": True}})
+    t = Tenant(id=uuid.uuid4(), name="t", slug="t",
+               settings={"features": {"ENABLE_ENGINE_CHAT": True, "ENABLE_ENGINE_DEEP_WORK": False}})
     assert ff.engine_deep_work_enabled(t, s) is False
     t2 = tenant(True)
+    t2.settings = {"features": {"ENABLE_ENGINE_CHAT": False, "ENABLE_ENGINE_DEEP_WORK": True}}
     assert ff.engine_chat_enabled(t2, s) is False
+    assert ff.engine_deep_work_enabled(t2, s) is True
 
 
 def test_feature_map_and_metadata(monkeypatch):
-    on, glob_off = tenant(True), tenant(True)
+    on, glob_off, unset = tenant(True), tenant(True), tenant(None)
     monkeypatch.setattr(ff, "get_settings", lambda: cfg())
     assert ff.get_tenant_features(on)[FLAG] is True
+    assert ff.get_tenant_features(unset)[FLAG] is True  # no setting -> resolved on
     assert ff.get_feature(on, FLAG) is True
     monkeypatch.setattr(ff, "get_settings", lambda: cfg(ENABLE_ENGINE_DEEP_WORK=False))
     assert ff.get_tenant_features(glob_off)[FLAG] is False

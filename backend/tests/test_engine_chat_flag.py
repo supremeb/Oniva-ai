@@ -45,9 +45,9 @@ def test_tenant_on_and_off():
     assert ff.engine_chat_enabled(tenant(False), s) is False
 
 
-def test_tenant_without_setting_is_off():
-    # Global ON alone never enables a tenant: the tenant setting must be true.
-    assert ff.engine_chat_enabled(tenant(None), cfg()) is False
+def test_tenant_without_setting_is_on_when_globals_on():
+    # R7 / AE6: the tenant setting is an opt-out; absent means on while the globals are on.
+    assert ff.engine_chat_enabled(tenant(None), cfg()) is True
 
 
 @pytest.mark.parametrize("override", [
@@ -56,18 +56,22 @@ def test_tenant_without_setting_is_off():
     dict(ENGINE_URL=""),
     dict(ENGINE_SERVICE_TOKEN=None),
 ])
-def test_global_conditions_override_tenant_true(override):
+def test_global_conditions_disable_whatever_the_tenant_says(override):
+    # A global off is the kill switch: it disables an explicit true and an unset tenant alike.
     assert ff.engine_chat_enabled(tenant(True), cfg(**override)) is False
+    assert ff.engine_chat_enabled(tenant(None), cfg(**override)) is False
 
 
 def test_feature_map_exposes_resolved_value(monkeypatch):
-    on, off, glob_off = tenant(True), tenant(False), tenant(True)
+    on, off, unset = tenant(True), tenant(False), tenant(None)
+    unset_glob_off = tenant(None)
     monkeypatch.setattr(ff, "get_settings", lambda: cfg())
     assert ff.get_tenant_features(on)["ENABLE_ENGINE_CHAT"] is True
     assert ff.get_tenant_features(off)["ENABLE_ENGINE_CHAT"] is False
+    assert ff.get_tenant_features(unset)["ENABLE_ENGINE_CHAT"] is True  # no setting -> resolved on
     monkeypatch.setattr(ff, "get_settings", lambda: cfg(ENABLE_ENGINE_CHAT=False))
-    assert ff.get_tenant_features(glob_off)["ENABLE_ENGINE_CHAT"] is False
-    assert ff.get_feature(glob_off, "ENABLE_ENGINE_CHAT") is False
+    assert ff.get_tenant_features(unset_glob_off)["ENABLE_ENGINE_CHAT"] is False
+    assert ff.get_feature(unset_glob_off, "ENABLE_ENGINE_CHAT") is False
 
 
 def test_flag_is_known_and_operator_only():
