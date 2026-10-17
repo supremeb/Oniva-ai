@@ -286,7 +286,8 @@ own Postgres database. One worker serves one `ENGINE_SESSION_ID`, so run exactly
 | `ENGINE_GATEWAY_TOKEN_PREVIOUS` | backend | Old gateway token, accepted only during rotation |
 | `ENGINE_URL` / `ENGINE_SESSION_ID` | backend | Where the worker is and which session it serves |
 | `ENABLE_ENGINE_API` | backend | Exposes `/api/v1/engine/conversations` (default `false`) |
-| `ENABLE_ENGINE_CHAT` | backend | Global ceiling for engine chat (default `false`); a tenant also needs `features.ENABLE_ENGINE_CHAT` |
+| `ENABLE_ENGINE_CHAT` | backend | Global ceiling / kill switch for engine chat (default `false`). On: engine chat is on for every tenant unless it opts out |
+| `ENABLE_ENGINE_DEEP_WORK` | backend | Global ceiling / kill switch for engine Deep Work (default `false`). On: Deep Work on the engine for every tenant unless it opts out |
 | `INTERNAL_ALLOW_PLAINTEXT` | backend | Allows an `http://` `ENGINE_URL` in production (in-cluster / compose network only) |
 | `DATABASE_URL` | engine | The engine's own Postgres (`ENGINE_DATABASE_URL` secret in k8s, `engine-db` in compose) |
 | `ENGINE_GATEWAY_URL`, `ENGINE_POLICY=backend`, `ENGINE_POLICY_URL` | engine | Point at the backend; the worker holds no model key |
@@ -294,6 +295,35 @@ own Postgres database. One worker serves one `ENGINE_SESSION_ID`, so run exactly
 The three tokens must be distinct, at least 32 characters, and different from `SECRET_KEY`; production
 validation rejects equal tokens, a missing token with `ENABLE_ENGINE_API` on, and a plaintext
 `ENGINE_URL` without the opt-in.
+
+### Engine rollout: opt-out and spend control
+
+Engine chat and engine Deep Work are **on by default** once the globals are set. The globals
+(`ENABLE_ENGINE_API`, `ENABLE_ENGINE_CHAT`, `ENABLE_ENGINE_DEEP_WORK`) plus a reachable `ENGINE_URL`
+and `ENGINE_SERVICE_TOKEN` are the ceiling and the kill switch: turning any of them off disables the
+engine paths for every tenant at once, whatever a tenant says.
+
+A tenant's setting is an **opt-out**, not an opt-in. A tenant with no `features` entry for a flag
+gets the engine path; set `features.ENABLE_ENGINE_CHAT=false` or
+`features.ENABLE_ENGINE_DEEP_WORK=false` to exclude one tenant. `get_tenant_features` returns the
+same resolved value the routes use, so the frontend hides the engine UI exactly when a tenant is
+opted out.
+
+Spend is bounded by the per-tenant LLM token quota, which runs in the model policy for every engine
+request (chat and Deep Work workers alike). Set one directly in the system database:
+
+```sql
+INSERT INTO usage_quotas
+  (id, tenant_id, scope_type, scope_id, quota_type, limit_value, current_usage,
+   period, period_start, period_end, warning_threshold, is_active)
+VALUES
+  (gen_random_uuid(), '<tenant-uuid>', 'tenant', '<tenant-uuid>', 'llm_tokens', 5000000, 0,
+   'monthly', now(), now() + interval '30 days', 0.8, true)
+ON CONFLICT DO NOTHING;
+```
+
+A request over the quota is denied `quota_exceeded` and the run fails fast with a readable reason;
+no model key is ever returned for a denied request.
 
 **`/internal` is never public.** nginx answers 404 for `/internal` (`nginx/nginx.conf`), the k8s ingress
 carries the same rule as a server snippet and has no route for it, the engine Service is a ClusterIP,
