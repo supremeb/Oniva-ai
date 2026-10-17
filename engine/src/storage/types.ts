@@ -271,13 +271,26 @@ export interface StorageProvider extends UsageOutbox {
   sessionOfTask(taskId: string): Promise<string | null>;
 }
 
+/** Outbox row kinds. */
+export type OutboxKind = "usage" | "run_finished";
+
+/** The kind of a row, defaulting to `usage`. */
+export const outboxKindOf = (r: { kind?: OutboxKind }): OutboxKind => r.kind ?? "usage";
+
 /**
  * A usage report parked until the backend ledger acknowledges it (KTD6/U6).
  * The body is the exact JSON POSTed to `/internal/models/usage`.
  */
 export interface UsageOutboxRecord {
-  /** Unique report id; re-enqueuing the same id changes nothing. */
+  /** Unique row id; re-enqueuing the same id changes nothing. */
   requestId: string;
+  /**
+   * What the row carries: `usage` (the default, a report for the ledger) or
+   * `run_finished` (a settled run for the backend's run reconciler). Rows
+   * written before kinds existed read as `usage`.
+   */
+  kind?: OutboxKind;
+  /** The exact JSON POSTed for this kind. */
   body: JsonValue;
   /** Epoch ms the row was first enqueued. */
   createdAt: number;
@@ -295,9 +308,10 @@ export interface UsageOutbox {
   enqueue(record: UsageOutboxRecord): Promise<void>;
   /**
    * Claim reports that are unclaimed or were claimed longer than
-   * `claimTimeoutMs` ago, oldest first, and stamp them claimed now.
+   * `claimTimeoutMs` ago, oldest first, and stamp them claimed now. With
+   * `kind` only rows of that kind are taken (each flusher drains its own).
    */
-  claimPending(claimTimeoutMs: number): Promise<UsageOutboxRecord[]>;
+  claimPending(claimTimeoutMs: number, kind?: OutboxKind): Promise<UsageOutboxRecord[]>;
   /** Delete a delivered report. A no-op when the row is absent. */
   ack(requestId: string): Promise<void>;
 }

@@ -51,6 +51,7 @@ import type { TaskDefinition } from "../tasks/define.js";
 import { createGatewayTools, type GatewayToolset } from "../tools/gateway.js";
 import type { ToolDefinition } from "../tools/registry.js";
 import { BackendPolicyClient, UsageReporter } from "./backend-policy.js";
+import { RunNotifier } from "./run-notifier.js";
 
 export type WorkerLog = (event: string, fields?: Record<string, unknown>) => void;
 
@@ -271,6 +272,23 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       })
     : null;
   usageReporter?.startFlushing();
+  // Run-finished push (phase 6 U5): only conversations tagged notify=backend are reported.
+  const runNotifier = options.backendPolicy
+    ? new RunNotifier({
+        baseUrl: options.backendPolicy.baseUrl,
+        serviceToken: options.backendPolicy.serviceToken,
+        ...(options.backendPolicy.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: options.backendPolicy.timeoutMs }),
+        ...(options.backendPolicy.retryMs === undefined
+          ? {}
+          : { retryMs: options.backendPolicy.retryMs }),
+        ...(options.backendPolicy.fetch ? { fetch: options.backendPolicy.fetch } : {}),
+        outbox: new PostgresStorageProvider(pool),
+        log,
+      })
+    : null;
+  runNotifier?.startFlushing();
 
   const currentOwner = async (): Promise<string | null> => {
     const lease = await leases.current(sessionId);
@@ -349,6 +367,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       await step("engine", engine?.close(), left());
       await step("harness", harness?.close(), left());
       await step("usage", usageReporter?.close(), left());
+      await step("run_finished", runNotifier?.close(), left());
       if (exit.reason !== "lease_lost") await step("lease", keeper?.release(), closeTimeoutMs);
       state = exit.reason === "lease_lost" ? "lost" : "stopped";
       log("exited", { reason: exit.reason });
@@ -437,9 +456,11 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
             ],
           }
         : {}),
+      ...(runNotifier ? { onSettled: runNotifier.listener } : {}),
       onError: (err, info) => log("engine_error", { ...info, error: logErrorText(err) }),
     });
     harness = h;
+    runNotifier?.attach(h);
     void h.runtime.closed.then((reason) => onEngineStopped(k, reason));
     engine = createEngineServer({
       harness: h,

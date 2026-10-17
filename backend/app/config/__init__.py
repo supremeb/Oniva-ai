@@ -364,6 +364,11 @@ class Settings(BaseSettings):
     ENABLE_ENGINE_FLEET: bool = False  # global gate for engine-backed Fleet runs; tenants opt in via settings.features
     ENABLE_ENGINE_WORKFLOWS: bool = False  # global gate for engine-backed workflow runs; tenants opt in via settings.features
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
+    # Run reconciler (plan 003 U5): rows stuck active for this long are checked against the engine.
+    RUN_RECONCILE_AFTER_S: int = 120
+    RUN_RECONCILE_INTERVAL_S: float = 60.0
+    RUN_START_RETRY_MAX: int = 5  # attempts of a hook's start_missing before fail(ref, "engine_start_failed")
+    RUN_START_RETRY_BASE_S: float = 30.0  # exponential backoff base between those attempts
     # Legacy POST /api/v1/chat: when a stored session is supplied, rebuild model history from the
     # stored messages and ignore client-supplied assistant/tool parts (anti-forgery). Set to
     # false (CHAT_SERVER_HISTORY=false) to restore the old client-trusted history.

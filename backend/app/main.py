@@ -115,6 +115,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️ Failed startup recovery sweep: {e}")
 
+    # Run reconciler (plan 003 U5): settles engine runs whose finished post was lost and re-issues
+    # starts that never happened, through the hooks each run kind registers. Leader-safe.
+    run_reconciler = None
+    if app_settings.ENGINE_URL and app_settings.ENGINE_SERVICE_TOKEN:
+        try:
+            from app.services import run_handlers
+            from app.services.run_reconciler import RunReconciler
+            run_handlers.bootstrap()
+            run_reconciler = RunReconciler(SystemSessionLocal, app_settings)
+            run_reconciler.start()
+            print("✅ Run reconciler started")
+        except Exception as e:
+            print(f"⚠️ Failed to start run reconciler: {e}")
+
     # Start Workflow Scheduler Daemon
     if app_settings.USE_WORKFLOW_SCHEDULER:
         try:
@@ -129,6 +143,12 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     print("👋 Shutting down Oniva Backend")
+
+    if run_reconciler is not None:
+        try:
+            await run_reconciler.stop()
+        except Exception as e:
+            print(f"⚠️ Failed to stop run reconciler: {e}")
 
     # Stop Workflow Scheduler Daemon
     if app_settings.USE_WORKFLOW_SCHEDULER:
