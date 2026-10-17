@@ -13,6 +13,7 @@ from app.models.background_job import BackgroundJob, JobStatus as ModelJobStatus
 from app.models.custom_agent import CustomAgent
 from app.models.workflow import Workflow
 from app.core.database import get_db
+from app.services import fleet_engine
 from app.auth.dependencies import get_current_user, get_current_tenant_id
 from app.auth.providers.base import AuthUser
 from app.schemas.background_job import (
@@ -94,6 +95,11 @@ async def create_job(
                 detail="Agent not found"
             )
 
+    use_engine = bool(
+        job_data.job_type.value == "background_agent" and job_data.agent_id
+        and await fleet_engine.tenant_uses_engine_fleet(db, tenant_id)
+    )
+
     # Create job
     job = BackgroundJob(
         tenant_id=tenant_id,
@@ -103,7 +109,7 @@ async def create_job(
         job_type=job_data.job_type.value,
         status=ModelJobStatus.PENDING.value,
         trigger="manual",
-        input_data=job_data.input_data,
+        input_data=fleet_engine.mark_engine(job_data.input_data) if use_engine else job_data.input_data,
         execution_trace=[],
     )
 
@@ -111,8 +117,13 @@ async def create_job(
     await db.commit()
     await db.refresh(job)
 
-    # Spawn background agent executor for background_agent jobs
-    if job_data.job_type.value == "background_agent" and job_data.agent_id:
+    if use_engine:
+        # Engine tenants: a conversation plus one submission, no asyncio task. A start that cannot
+        # reach the engine leaves the job pending and the reconciler retries it (plan 003 U7).
+        await fleet_engine.start_after_commit(tenant_id, job.id)
+        await db.refresh(job)
+    # Spawn background agent executor for background_agent jobs (legacy path, flag off)
+    elif job_data.job_type.value == "background_agent" and job_data.agent_id:
         from app.services.background_agent_executor import run_background_agent
         asyncio.create_task(
             run_background_agent(
