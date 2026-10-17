@@ -33,7 +33,7 @@ import {
   parseToolResultContent,
 } from '@/lib/chat/parts';
 import type { ApprovalItem, ConversationView, EntryRecord, JsonValue, QuestionItem } from './types';
-import { summarizeArguments } from './approval';
+import { fullArguments, argumentsFingerprint } from './approval';
 
 export interface EngineMessage {
   id: string;
@@ -269,7 +269,8 @@ function approvalPart(a: ApprovalItem, canDecide: boolean): MessagePart | null {
     title: `Allow ${a.toolName}?`,
     ...(a.reason ? { description: a.reason } : {}),
     riskLevel: 'medium',
-    items: summarizeArguments(a.arguments),
+    items: fullArguments(a.arguments),
+    argumentsHash: argumentsFingerprint(a.arguments),
     status,
     toolTaskId: a.toolTaskId,
     toolName: a.toolName,

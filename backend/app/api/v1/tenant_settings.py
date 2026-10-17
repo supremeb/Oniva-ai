@@ -207,6 +207,15 @@ async def update_approval_settings(
             user_id=UUID(user.id), actor_email=user.email, actor_name=getattr(user, "name", None),
             extra_metadata={"actor_id": user.id, "actor_role": user.role,
                             "previous": before.rule_of_two, "current": after.rule_of_two})
+    for key in ("ttl_hours", "require_separate_approver"):
+        previous, current = getattr(before, key), getattr(after, key)
+        if previous != current:
+            await get_audit_chain(db).append(
+                tenant_id=tenant.id, agent_id="approvals", action=AuditAction.APPROVAL_SETTINGS_CHANGED,
+                decision="changed", rationale=f"Approval setting {key} changed by {user.email}",
+                user_id=UUID(user.id), actor_email=user.email, actor_name=getattr(user, "name", None),
+                extra_metadata={"actor_id": user.id, "actor_role": user.role, "setting": key,
+                                "previous": previous, "current": current})
     logger.info(f"Tenant {tenant.slug} approval settings updated by {user.email}")
     return after
 

@@ -117,7 +117,8 @@ def test_ttl_from_tenant_policy():
 UNTRUSTED = {"web_search", "browse_url", "extract_structured_data", "browser_navigate", "browser_screenshot",
              "dw_browser_navigate", "dw_browser_screenshot", "search_knowledge", "read_file", "parse_document",
              "parse_pdf", "linear_search_issues", "servicenow_search_incidents", "invoke_connector_tool",
-             "inspect_artifact"}
+             "inspect_artifact", "search_past_decisions", "search_entities", "get_workflow_entities",
+             "list_tasks", "dw_get_report", "dw_get_learnings", "shell_exec"}
 SANDBOX = {"shell_exec", "dw_browser_navigate", "dw_browser_screenshot"}
 WORKSPACE = {"write_file", "delete_file", "update_todo", "create_task", "update_task", "store_decision",
              "browser_screenshot", "publish_artifact", "dw_start_round", "dw_save_learnings",

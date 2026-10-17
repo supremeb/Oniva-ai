@@ -49,6 +49,16 @@ beforeAll(() => {
 describe('ApprovalCard', () => {
     const base = { id: 't1', title: 'Allow save_report?', items: [{ label: 'filename', value: 'report.md' }] };
 
+    it('shows every item in full (no truncation, no hidden rows), scrollable, with the fingerprint', () => {
+        const items = Array.from({ length: 6 }, (_, i) => ({ label: `k${i}`, value: i === 5 ? 'z'.repeat(900) + 'END' : `v${i}` }));
+        render(<ApprovalCard {...base} items={items} argumentsHash="abc123def456" onApprove={jest.fn()} onReject={jest.fn()} />);
+        expect(screen.getByText('k5')).toBeTruthy();
+        expect(screen.getByText('z'.repeat(900) + 'END')).toBeTruthy();
+        expect(screen.queryByText(/more items/)).toBeNull();
+        expect(screen.getByTestId('approval-arguments').className).toMatch(/overflow-auto/);
+        expect(screen.getByText(/abc123def456/)).toBeTruthy();
+    });
+
     it('pending: shows the request and calls approve once; a double click sends one decision', async () => {
         let release!: () => void;
         const onApprove = jest.fn(() => new Promise<void>((r) => (release = r)));

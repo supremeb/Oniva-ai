@@ -50,6 +50,16 @@ def test_admin_changes_ttl_and_separate_approver_keeping_other_settings(env):
     r = env.http.put("/api/v1/tenant/approvals", json={"ttl_hours": 24, "require_separate_approver": True})
     assert r.status_code == 200
     assert r.json() == {"ttl_hours": 24, "require_separate_approver": True, "rule_of_two": True}
+    entries = {e.extra_metadata["setting"]: e for e in env.audit.entries}
+    assert set(entries) == {"ttl_hours", "require_separate_approver"}
+    assert all(e.action == "approval_settings_changed" for e in entries.values())
+    ttl = entries["ttl_hours"]
+    assert (ttl.extra_metadata["previous"], ttl.extra_metadata["current"]) == (168, 24)
+    assert (ttl.actor_email, ttl.actor_name, ttl.extra_metadata["actor_role"]) == ("a@x.io", "Ada", "admin")
+
+
+def test_unchanged_ttl_and_separate_approver_write_no_entry(env):
+    env.http.put("/api/v1/tenant/approvals", json={"ttl_hours": 168, "require_separate_approver": False})
     assert env.audit.entries == []
 
 

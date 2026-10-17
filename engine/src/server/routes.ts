@@ -37,6 +37,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { type ApprovalDecisionKind, type ApprovalItem, approvalsDoc } from "../agent/approvals.js";
 import type { Harness } from "../agent/harness.js";
 import { type AgentConfigInput, parseAgentConfigInput } from "../agent/prompt.js";
+import { type QuestionItem, questionsDoc } from "../agent/questions.js";
 import { normalizeSubmit, type SubmitInput } from "../agent/submission.js";
 import { rootConversationId } from "../agent/taint.js";
 import { StorageRequestError } from "../core/errors.js";
@@ -151,6 +152,16 @@ async function approvalsForRoot(harness: Harness, rootId: string): Promise<Appro
   const items: ApprovalItem[] = [];
   for (const id of await conversationTree(harness.session, rootId)) {
     items.push(...(await harness.session.document(approvalsDoc, id)).items);
+  }
+  items.sort((a, b) => a.requestedAt - b.requestedAt || a.id.localeCompare(b.id));
+  return items;
+}
+
+/** Question items for a conversation and its subagent descendants, oldest first. */
+async function questionsForRoot(harness: Harness, rootId: string): Promise<QuestionItem[]> {
+  const items: QuestionItem[] = [];
+  for (const id of await conversationTree(harness.session, rootId)) {
+    items.push(...(await harness.session.document(questionsDoc, id)).items);
   }
   items.sort((a, b) => a.requestedAt - b.requestedAt || a.id.localeCompare(b.id));
   return items;
@@ -362,7 +373,7 @@ export const ROUTES: readonly Route[] = Object.freeze([
     auth: true,
     async handle(ctx) {
       const conv = await ctx.conversation();
-      const questions = await ctx.harness.questions(conv.id);
+      const questions = await questionsForRoot(ctx.harness, conv.id);
       return {
         status: 200,
         body: { conversationId: conv.id, questions: questions as unknown as JsonObject },

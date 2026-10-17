@@ -343,6 +343,82 @@ async def test_decide_refused_writes_nothing_and_never_calls_engine(world):
     assert not await world.audits(AuditAction.APPROVAL_DECIDED)
 
 
+async def test_decide_rejects_non_tool_call_rows_before_any_engine_call(world):
+    row = await world.pending(kind="question")
+    with pytest.raises(ApprovalError) as ei:
+        await world.decide("admin", row)
+    assert (ei.value.status, ei.value.code) == (404, "not_found")
+    assert row.status == "pending" and not world.engine.decide_calls
+
+
+async def _stuck_deciding(world, age_s):
+    row = await world.pending()
+    world.engine.outcomes = [EngineError(502, "engine_unreachable")]
+    with pytest.raises(EngineError):
+        await world.decide("member", row, "approve", note="first")
+    row.updated_at = datetime.now(timezone.utc) - timedelta(seconds=age_s)
+    await world.db.commit()
+    return row
+
+
+async def test_stale_deciding_row_is_reclaimed_by_another_authorised_decider(world):
+    row = await _stuck_deciding(world, 600)
+    await world.decide("admin", row, "deny", note="second")
+    assert row.status == "denied" and row.decided_by == world.users["admin"].id and row.note == "second"
+    assert world.engine.decide_calls[-1]["principal"] == str(world.users["admin"].id)
+    assert world.engine.decide_calls[-1]["decision"] == "deny"
+    (entry,) = await world.audits(AuditAction.APPROVAL_DECIDED)
+    assert entry.extra_metadata["actor_id"] == str(world.users["admin"].id)
+
+
+async def test_stale_deciding_row_is_not_reclaimable_by_an_unauthorised_user(world):
+    row = await _stuck_deciding(world, 600)
+    with pytest.raises(ApprovalError) as ei:
+        await world.decide("member2", row, "approve")
+    assert (ei.value.status, ei.value.code) == (403, "not_authorized")
+    assert row.status == "deciding" and row.decided_by == world.users["member"].id
+
+
+async def test_fresh_deciding_row_still_locks_out_others(world):
+    row = await _stuck_deciding(world, 5)
+    with pytest.raises(ApprovalError) as ei:
+        await world.decide("admin", row, "deny")
+    assert (ei.value.status, ei.value.code) == (409, "decision_in_progress")
+    assert len(world.engine.decide_calls) == 1
+
+
+async def test_reclaim_settles_from_the_engine_when_it_already_decided(world):
+    row = await _stuck_deciding(world, 600)
+    world.engine.items = [{"status": "approved", "toolTaskId": row.tool_task_id,
+                           "decision": {"decision": "approve", "principal": str(world.users["member"].id),
+                                        "note": "first", "decidedAt": 5}}]
+    with pytest.raises(ApprovalError) as ei:
+        await world.decide("admin", row, "deny")
+    assert (ei.value.status, ei.value.code) == (409, "already_decided")
+    assert row.status == "approved" and row.decided_by == world.users["member"].id
+    assert len(world.engine.decide_calls) == 1  # no second engine decision
+    assert len(await world.audits(AuditAction.APPROVAL_DECIDED)) == 1
+
+
+async def test_reclaim_loses_the_compare_and_set_when_the_row_moved(world):
+    from sqlalchemy import update
+
+    row = await _stuck_deciding(world, 600)
+    rid, owner = row.id, world.users["member"].id
+    real = world.engine.approvals
+
+    async def racing_read(*a):  # another decider reclaims between our read and our write
+        await world.db.execute(update(ToolApproval).where(ToolApproval.id == rid).values(
+            updated_at=datetime.now(timezone.utc)).execution_options(synchronize_session=False))
+        return await real(*a)
+
+    world.engine.approvals = racing_read
+    with pytest.raises(ApprovalError) as ei:
+        await world.decide("admin", row, "deny")
+    assert (ei.value.status, ei.value.code) == (409, "decision_in_progress")
+    assert len(world.engine.decide_calls) == 1 and row.decided_by == owner
+
+
 # --- expiry and closing ---------------------------------------------------------
 
 async def test_expire_overdue_marks_pending_rows_and_audits(world):

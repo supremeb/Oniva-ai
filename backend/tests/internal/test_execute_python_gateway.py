@@ -78,11 +78,11 @@ async def world(test_db, monkeypatch):
         await test_db.commit()
         return row
 
-    async def run(args=CODE, call=CALL, run_id=RUN):
+    async def run(args=CODE, call=CALL, run_id=RUN, **kw):
         return await execute_tool(
             "execute_python", args, tenant_id=str(TENANT), project_id=str(uuid.uuid4()),
             user_id=str(uuid.uuid4()), conversation_id=str(uuid.uuid4()), run_id=run_id,
-            tool_call_id=call, limiter=ToolRateLimiter(None))
+            tool_call_id=call, limiter=ToolRateLimiter(None), **kw)
 
     async def reload(row):
         async with maker() as s:
@@ -214,3 +214,31 @@ async def test_outside_gateway_refuses_and_creates_nothing(world):
     assert world.sandbox.runs == []
     rows = (await world.db.execute(select(ToolApproval))).scalars().all()
     assert rows == []
+
+
+async def test_gateway_timeout_after_code_started_consumes_the_approval(world, monkeypatch):
+    async def hang(self, code, timeout=60):
+        self.sandbox.runs.append((code, timeout))
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(FakeHandle, "execute_code", hang)
+    row = await world.approval()
+    out = await world.run(timeout_ms=50)
+    assert out.is_error and out.details["error"] == "timeout" and out.executed
+    assert len(world.sandbox.runs) == 1
+    assert (await world.reload(row)).consumed_at is not None
+    with pytest.raises(ToolApprovalRefused) as e:  # the same approval cannot run the code again
+        await world.run()
+    assert e.value.code == "approval_consumed"
+
+
+async def test_gateway_timeout_before_code_started_leaves_the_approval_unconsumed(world, monkeypatch):
+    async def slow_start(*a, **k):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(world.sandbox, "get_or_create", slow_start)
+    row = await world.approval()
+    out = await world.run(timeout_ms=50)
+    assert out.is_error and out.details["error"] == "timeout" and not out.executed
+    assert world.sandbox.runs == []
+    assert (await world.reload(row)).consumed_at is None

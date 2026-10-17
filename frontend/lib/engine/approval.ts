@@ -64,15 +64,46 @@ const SENSITIVE_KEY = /pass(word|wd)?|secret|token|api[-_]?key|authorization|cre
 const MAX_VALUE = 160;
 export const SCRUBBED = '[hidden]';
 
-/** Short, credential-scrubbed `label: value` rows for an approval's arguments. */
-export function summarizeArguments(
-  args: { [key: string]: unknown } | null | undefined
-): Array<{ label: string; value: string; sensitive?: boolean }> {
+type ArgRow = { label: string; value: string; sensitive?: boolean };
+
+function rows(args: { [key: string]: unknown } | null | undefined, max: number): ArgRow[] {
   if (!args) return [];
   return Object.entries(args).map(([label, raw]) => {
     if (SENSITIVE_KEY.test(label)) return { label, value: SCRUBBED, sensitive: true };
     let value = typeof raw === 'string' ? raw : JSON.stringify(raw) ?? '';
-    if (value.length > MAX_VALUE) value = `${value.slice(0, MAX_VALUE)}...`;
+    if (value.length > max) value = `${value.slice(0, max)}...`;
     return { label, value };
   });
+}
+
+/** Short, credential-scrubbed `label: value` rows (values truncated). Never use for an approval decision. */
+export function summarizeArguments(args: { [key: string]: unknown } | null | undefined): ArgRow[] {
+  return rows(args, MAX_VALUE);
+}
+
+/** Credential-scrubbed rows with the FULL value of every argument: what an approver must see. */
+export function fullArguments(args: { [key: string]: unknown } | null | undefined): ArgRow[] {
+  return rows(args, Number.POSITIVE_INFINITY);
+}
+
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v !== null && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v) ?? 'null';
+}
+
+/** 12 hex chars of a 64-bit FNV-1a over the key-sorted canonical JSON of the arguments. */
+export function argumentsFingerprint(args: { [key: string]: unknown } | null | undefined): string {
+  const text = canonical(args ?? {});
+  let h1 = 0x811c9dc5;
+  let h2 = 0xcbf29ce4;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ c ^ (h1 & 0xff), 0x85ebca6b) >>> 0;
+  }
+  return (h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0')).slice(0, 12);
 }

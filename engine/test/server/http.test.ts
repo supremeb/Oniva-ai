@@ -605,6 +605,35 @@ describe("engine HTTP server", () => {
       });
       expect(empty.body.questions).toEqual([]);
     });
+
+    it("lists a subagent child's pending question through the root", async () => {
+      const research = createSubagentTool({ name: "research", tools: ["ask_user"] });
+      const { url, w, fx } = await start({ tools: [research, askUserTool] });
+      fx.provider.enqueue(
+        fakeToolCall("research", { prompt: "go" }, { id: "r1" }),
+        fakeToolCall("ask_user", ASK, { id: "q1" }),
+        fakeText("answered"),
+        fakeText("done"),
+      );
+      const id = await createConv(url, { agent: { systemPrompt: "s", tools: ["research"] } });
+      await call(url, "POST", `/v1/conversations/${id}/submissions`, {
+        headers: AUTH,
+        body: { text: "research" },
+      });
+      await waitFor(() => childApprovalOwner(w, id) !== undefined);
+      const child = childApprovalOwner(w, id) as string;
+      await waitFor(async () =>
+        (await w.harness.questions(child)).some((i) => i.status === "pending"),
+      );
+      const item = (await w.harness.questions(child))[0] as Any;
+      expect(child).not.toBe(id);
+      expect(await w.harness.questions(id)).toEqual([]);
+
+      const res = await call(url, "GET", `/v1/conversations/${id}/questions`, { headers: AUTH });
+      expect(res.status).toBe(200);
+      expect(res.body.questions).toHaveLength(1);
+      expect(res.body.questions[0]).toMatchObject({ id: item.id, status: "pending" });
+    });
   });
 
   it("streams a mid-run watch over SSE: snapshot, then patches that reproduce the final view", async () => {

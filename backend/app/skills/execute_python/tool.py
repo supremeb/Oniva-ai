@@ -107,6 +107,7 @@ async def _execute_e2b(
             if uploads:
                 await handle.upload_files(uploads)
             started = True
+            ctx.metadata["execution_started"] = True  # a timeout or error from here on still spends the approval
             result = await handle.execute_code(code, timeout=timeout)
         finally:
             try:

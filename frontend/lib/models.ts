@@ -202,6 +202,8 @@ export type MessagePart =
           description?: string;
           riskLevel?: 'low' | 'medium' | 'high' | 'critical';
           items?: ApprovalItem[];
+          /** Short hash of the canonical arguments, so an approver can match what they saw. */
+          argumentsHash?: string;
           status?: 'pending' | 'approved' | 'rejected' | 'expired';
           /** Engine approvals: the tool task the decision route is keyed by (equals `id`). */
           toolTaskId?: string;

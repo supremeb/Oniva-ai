@@ -1,4 +1,4 @@
-import { DecisionError, describeApproval, summarizeArguments, SCRUBBED, toDecisionError } from '../approval';
+import { DecisionError, describeApproval, summarizeArguments, fullArguments, argumentsFingerprint, SCRUBBED, toDecisionError } from '../approval';
 
 const apiError = (status: number, detail?: unknown) =>
   Object.assign(new Error('x'), { status, data: detail === undefined ? undefined : { detail } });
@@ -88,4 +88,22 @@ describe('summarizeArguments', () => {
     }
   });
   it('null args give no rows', () => expect(summarizeArguments(null)).toEqual([]));
+});
+
+describe('fullArguments (approval cards)', () => {
+  const long = 'x'.repeat(5000) + 'TAIL';
+  it('never truncates a value, while summarizeArguments still does', () => {
+    expect(fullArguments({ code: long })[0].value).toBe(long);
+    expect(summarizeArguments({ code: long })[0].value.length).toBeLessThan(long.length);
+  });
+  it('still scrubs credential keys', () => {
+    expect(fullArguments({ api_key: 'sk-1' })[0]).toMatchObject({ value: SCRUBBED, sensitive: true });
+  });
+  it('fingerprint is short, stable under key order, and changes with any argument byte', () => {
+    const a = argumentsFingerprint({ a: 1, b: { c: 2, d: 3 } });
+    expect(a).toMatch(/^[0-9a-f]{12}$/);
+    expect(argumentsFingerprint({ b: { d: 3, c: 2 }, a: 1 })).toBe(a);
+    expect(argumentsFingerprint({ a: 1, b: { c: 2, d: 4 } })).not.toBe(a);
+    expect(argumentsFingerprint({ code: long })).not.toBe(argumentsFingerprint({ code: long.slice(0, 200) }));
+  });
 });

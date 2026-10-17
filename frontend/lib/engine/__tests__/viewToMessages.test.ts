@@ -177,6 +177,15 @@ describe('approvals and running tools', () => {
     expect(JSON.stringify(card)).not.toContain('sk-secret');
   });
 
+  it('approval cards carry the full, untruncated arguments and a fingerprint', () => {
+    const v = clone(views.approval_pending);
+    const long = 'y'.repeat(1000) + 'END';
+    v.approvals.items[0].arguments = { code: long };
+    const card = parts(viewToMessages(v)[1]).find((p) => p.type === 'approval');
+    expect(card.items).toEqual([{ label: 'code', value: long }]);
+    expect(card.argumentsHash).toMatch(/^[0-9a-f]{12}$/);
+  });
+
   it('canDecide comes from the adapter option', () => {
     const card = parts(createViewAdapter({ canDecide: false })(views.approval_pending)[1]).find((p) => p.type === 'approval');
     expect(card.canDecide).toBe(false);

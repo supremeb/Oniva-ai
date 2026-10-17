@@ -46,6 +46,10 @@ class ToolOutcome:
     content: str
     is_error: bool = False
     details: Dict[str, Any] = field(default_factory=dict)
+    # The tool's side effect may have happened even though this is an error (e.g. a timeout after
+    # sandbox code started). An approved call that may have run is spent: only "never started"
+    # leaves its approval unconsumed.
+    executed: bool = False
 
 
 def _session_factory():
@@ -292,6 +296,12 @@ def _error(tool: str, error: str, message: str) -> ToolOutcome:
     return ToolOutcome(content=message, is_error=True, details={"error": error, "tool": tool})
 
 
+def _execution_started(ctx: Any) -> bool:
+    """Whether a skill marked its side effect as started (``ctx.metadata["execution_started"]``)."""
+    meta = getattr(ctx, "metadata", None)
+    return bool(isinstance(meta, dict) and meta.get("execution_started"))
+
+
 async def _run_tool(
     name: str,
     args: Dict[str, Any],
@@ -312,6 +322,7 @@ async def _run_tool(
     spec = spec or spec_for(name)
     timeout_s = (timeout_ms if timeout_ms is not None else spec.timeout_ms) / 1000
     held: Dict[str, str] = {}
+    ctx: Any = None
     try:
         async with build_skill_context(
             spec, tenant_id, project_id, user_id, conversation_id,
@@ -323,14 +334,19 @@ async def _run_tool(
                 SkillRegistry.invoke_skill(ctx, name, **(args or {})), timeout=timeout_s
             )
     except asyncio.TimeoutError:
-        return _error(name, "timeout", f"Tool '{name}' timed out after {timeout_s:g}s")
+        out = _error(name, "timeout", f"Tool '{name}' timed out after {timeout_s:g}s")
+        out.executed = _execution_started(ctx)
+        return out
     except Exception as exc:
         logger.warning("Tool %s failed: %s", name, type(exc).__name__)
-        return _error(name, type(exc).__name__, f"Tool '{name}' failed: {type(exc).__name__}")
+        out = _error(name, type(exc).__name__, f"Tool '{name}' failed: {type(exc).__name__}")
+        out.executed = _execution_started(ctx)
+        return out
 
     if isinstance(result, ToolOutcome):  # a tool that reports its own error flag and details (Deep Work tools)
         content, guard_details = guard_result(result.content, name, held.values())
-        return ToolOutcome(content=content, is_error=result.is_error, details={**result.details, **guard_details})
+        return ToolOutcome(content=content, is_error=result.is_error, details={**result.details, **guard_details},
+                           executed=result.executed)
     content, details = guard_result(result, name, held.values())
     return ToolOutcome(content=content, is_error=False, details=details)
 
@@ -372,7 +388,7 @@ async def _guarded_run(name: str, args: Dict[str, Any], *, tenant_id: Any, run_i
                 raise ToolApprovalRefused(e.code) from None
             outcome = await _run_tool(
                 name, args, tenant_id=tenant_id, run_id=run_id, tool_call_id=tool_call_id, **kwargs)
-            if not outcome.is_error:
+            if not outcome.is_error or outcome.executed:
                 await service.consume(row)
                 await session.commit()
             return outcome

@@ -96,15 +96,15 @@ TOOL_SPECS: Dict[str, ToolSpec] = {
     "risk_assessment": _read(),
     # Memory
     "store_decision": _write(needs_db=True, scope="workspace"),
-    "search_past_decisions": _read(needs_db=True),
-    "search_entities": _read(needs_db=True),
-    "get_workflow_entities": _read(needs_db=True),
+    "search_past_decisions": _read(needs_db=True, untrusted_output=True),
+    "search_entities": _read(needs_db=True, untrusted_output=True),
+    "get_workflow_entities": _read(needs_db=True, untrusted_output=True),
     "search_knowledge": _read(needs_db=True, untrusted_output=True),
     # Planning
     "update_todo": _write(idempotent=True, scope="workspace"),
     "create_task": _write(scope="workspace"),
     "update_task": _write(idempotent=True, scope="workspace"),
-    "list_tasks": _read(),
+    "list_tasks": _read(untrusted_output=True),
     # Connectors
     "list_available_connectors": _read(needs_connectors=True),
     "get_connector_schema": _read(needs_connectors=True),
@@ -120,13 +120,13 @@ TOOL_SPECS: Dict[str, ToolSpec] = {
     "dw_record_reflection": _write(idempotent=True, scope="workspace"),
     "dw_write_section": _write(idempotent=True, scope="workspace"),
     "dw_finalize": _write(idempotent=True, scope="workspace"),
-    "dw_get_learnings": _read(),
-    "dw_get_report": _read(),
+    "dw_get_learnings": _read(untrusted_output=True),
+    "dw_get_report": _read(untrusted_output=True),
     # Deep Work sandbox and output tools (engine path, U5). Sandboxes are isolated and the worker cannot
     # ask for approval, so none requires it. Only inspect is a pure read; a repeated publish replaces by
     # filename but stays non-idempotent so the engine reconciles instead of re-running. The E2B key is
     # resolved by the tool itself (env, then the user's stored key), so no needs_keys.
-    "shell_exec": _write(timeout_ms=SANDBOX_MS, scope="sandbox"),
+    "shell_exec": _write(timeout_ms=SANDBOX_MS, untrusted_output=True, scope="sandbox"),
     "dw_browser_navigate": _write(timeout_ms=BROWSER_MS, untrusted_output=True, scope="sandbox"),
     "dw_browser_screenshot": _write(timeout_ms=BROWSER_MS, untrusted_output=True, scope="sandbox"),
     "inspect_artifact": _read(SANDBOX_MS, untrusted_output=True),

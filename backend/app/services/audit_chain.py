@@ -187,12 +187,18 @@ class AuditChain:
 
         checked = 0
         legacy = 0
-        expected_seq = 1
+        # Retention may have purged a prefix: the chain starts at the first remaining sequence, and
+        # that entry's link to the purged one cannot (and need not) be checked.
+        expected_seq: Optional[int] = None
         expected_prev: Optional[str] = None
         for row in rows:
             if row.seq is None:
                 legacy += 1
                 continue
+            if expected_seq is None:
+                expected_seq = row.seq
+                if row.seq != 1:
+                    expected_prev = row.previous_hash or None
             reason = self._break_reason(row, expected_seq, expected_prev)
             if reason is not None:
                 return {"ok": False, "checked": checked, "legacy_unchained": legacy,

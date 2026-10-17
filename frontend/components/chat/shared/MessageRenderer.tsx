@@ -192,6 +192,7 @@ export const MessageRenderer = memo(function MessageRenderer({
             description={part.description}
             riskLevel={part.riskLevel}
             items={part.items}
+            argumentsHash={part.argumentsHash}
             status={part.status}
             toolName={part.toolName}
             expiresAt={part.expiresAt}

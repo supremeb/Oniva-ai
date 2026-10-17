@@ -63,7 +63,7 @@
       "idempotent": true,
       "timeoutMs": 30000,
       "requiresApproval": false,
-      "untrustedOutput": false
+      "untrustedOutput": true
     },
     {
       "name": "dw_get_report",
@@ -77,7 +77,7 @@
       "idempotent": true,
       "timeoutMs": 30000,
       "requiresApproval": false,
-      "untrustedOutput": false
+      "untrustedOutput": true
     },
     {
       "name": "dw_record_reflection",

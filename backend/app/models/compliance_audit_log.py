@@ -41,6 +41,7 @@ class AuditAction(str, Enum):
     TOOL_POLICY_BLOCK = 'tool_policy_block'
     QUESTION_ANSWERED = 'question_answered'
     RULE_OF_TWO_CHANGED = 'rule_of_two_changed'
+    APPROVAL_SETTINGS_CHANGED = 'approval_settings_changed'
 
 
 class ComplianceAuditLog(Base):

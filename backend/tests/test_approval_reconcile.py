@@ -184,3 +184,27 @@ async def test_overdue_pending_row_is_swept_to_expired(world):
     await world.db.refresh(row)
     assert row.status == "expired"
     assert len(await world.audits(AuditAction.APPROVAL_EXPIRED)) == 1
+
+
+class QuestionEngine(FakeEngine):
+    def __init__(self, questions):
+        super().__init__()
+        self.question_items = questions
+
+    async def questions(self, *a):
+        return self.question_items
+
+
+async def test_live_subagent_child_question_listed_by_the_engine_is_not_cancelled(world):
+    row = await world.pending(kind="question", task="child_q")
+    await age(world, row, 3600)  # well past the orphan grace
+    eng = QuestionEngine([{"toolTaskId": "child_q", "status": "pending"}])
+    assert await world.svc.reconcile(TENANT, eng, force=True) == 0
+    await world.db.refresh(row)
+    assert row.status == "pending"
+    assert not await world.audits(AuditAction.APPROVAL_CANCELLED)
+
+    eng.question_items = []  # an engine that omits the child's question reads as an orphan
+    assert await world.svc.reconcile(TENANT, eng, force=True) == 1
+    await world.db.refresh(row)
+    assert row.status == "cancelled"

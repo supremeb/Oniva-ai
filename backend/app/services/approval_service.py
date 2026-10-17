@@ -43,7 +43,9 @@ SENSITIVE_KEY = re.compile(
 RECONCILE_MIN_INTERVAL = timedelta(seconds=30)  # per tenant, in-process (KTD11)
 RECONCILE_MAX_CONVERSATIONS = 20  # engine conversations read per pass
 ORPHAN_GRACE = timedelta(seconds=120)  # authorize-then-engine-commit gap
-DECIDING_STALE = timedelta(seconds=60)
+# A `deciding` row this old (engine 502/timeout left it there) may be reclaimed by any authorised
+# decider and is settled against the engine item by reconcile.
+DECIDING_STALE = timedelta(seconds=120)
 _last_reconcile: dict[str, datetime] = {}
 
 
@@ -244,15 +246,18 @@ class ApprovalService:
     async def decide(self, *, user: AuthUser, conv: EngineConversation, row: ToolApproval,
                      decision: str, note: Optional[str], engine: EngineClient) -> dict:
         """Decide a ledger row through the engine. Returns the engine's response body."""
-        if str(row.tenant_id) != str(user.tenant_id):
+        if row.kind != "tool_call" or str(row.tenant_id) != str(user.tenant_id):
             raise ApprovalError(404, "not_found")
         uid = _uuid(user.id)
 
         if row.status == "deciding":
             if row.decided_by != uid:
-                raise ApprovalError(409, "decision_in_progress")
-            await self.can_decide(user, row)
-            decision, note = row.decision or decision, row.note  # a retry repeats the same inputs
+                done = await self._reclaim_stale(row, user, uid, decision, note, engine, conv)
+                if done is not None:
+                    return done
+            else:
+                await self.can_decide(user, row)
+                decision, note = row.decision or decision, row.note  # a retry repeats the same inputs
         elif row.status == "pending":
             self_approved = await self.can_decide(user, row)
             if not await self._claim(row, uid, decision, note, self_approved):
@@ -279,6 +284,44 @@ class ApprovalService:
         await self._finalize_decided(row, decided_by=user, decision=decision, note=note,
                                      engine_item=result.get("approval") if isinstance(result, dict) else None)
         return result
+
+    async def _reclaim_stale(self, row: ToolApproval, user: AuthUser, uid, decision: str,
+                             note: Optional[str], engine: EngineClient, conv: EngineConversation) -> Optional[dict]:
+        """Another decider's `deciding` row. Fresh: 409. Older than ``DECIDING_STALE``: a stuck engine
+        call must not lock everyone else out, so an authorised decider may take it over, after
+        checking the engine item (already decided: settle from it; the caller's call, if identical,
+        is a 200). Returns a response body when the engine had decided, ``None`` once reclaimed."""
+        seen = _aware(row.updated_at) or _now()
+        if _now() - seen < DECIDING_STALE:
+            raise ApprovalError(409, "decision_in_progress")
+        self_approved = await self.can_decide(user, row)  # 403/404 for anyone not allowed to decide
+        items = await engine.approvals(conv.session_id, conv.tenant_id, conv.project_id, conv.conversation_id)
+        item = next((i for i in items if i.get("toolTaskId") == row.tool_task_id), None)
+        if item is not None and item.get("status") in ("approved", "denied", "expired", "cancelled"):
+            await self.finalize_from_engine(row, item)
+            await self._commit(row.tenant_id)
+            status = item.get("status")
+            if status == "expired":
+                raise ApprovalError(410, "approval_expired")
+            if status == "cancelled":
+                raise ApprovalError(409, "not_waiting")
+            dec = item.get("decision") or {}
+            if str(dec.get("principal")) == str(user.id) and dec.get("decision") == decision:
+                return {"approval": item}
+            raise ApprovalError(409, "already_decided")
+        res = await self.db.execute(
+            update(ToolApproval)
+            .where(ToolApproval.id == row.id, ToolApproval.status == "deciding",
+                   ToolApproval.updated_at == row.updated_at)
+            .values(decided_by=uid, decision=decision, note=note, self_approved=self_approved,
+                    updated_at=_now())
+            .execution_options(synchronize_session=False))
+        won = res.rowcount == 1
+        await self._commit(row.tenant_id)
+        await self.db.refresh(row)
+        if not won:
+            raise ApprovalError(409, "decision_in_progress")
+        return None
 
     async def _claim(self, row: ToolApproval, uid, decision: str, note: Optional[str],
                      self_approved: bool) -> bool:
