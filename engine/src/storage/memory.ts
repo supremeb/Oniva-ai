@@ -26,6 +26,7 @@ import {
   TASK_STATUSES,
   type TaskRecord,
   type TaskScanOptions,
+  type UsageOutboxRecord,
 } from "./types.js";
 import {
   normalizePage,
@@ -66,6 +67,8 @@ export class MemoryStorageProvider implements StorageProvider {
   /** Global id → session id indexes (conversation and task ids are unique across sessions). */
   readonly #conversationSessions = new Map<string, string>();
   readonly #taskSessions = new Map<string, string>();
+  /** Usage reports awaiting delivery, keyed by request id (KTD6). */
+  readonly #usageOutbox = new Map<string, UsageOutboxRecord>();
 
   async open(sessionId: string): Promise<SessionStorage> {
     if (typeof sessionId !== "string" || sessionId.length === 0) {
@@ -88,6 +91,28 @@ export class MemoryStorageProvider implements StorageProvider {
 
   async sessionOfTask(taskId: string): Promise<string | null> {
     return this.#taskSessions.get(taskId) ?? null;
+  }
+
+  async enqueue(record: UsageOutboxRecord): Promise<void> {
+    if (!this.#usageOutbox.has(record.requestId)) {
+      this.#usageOutbox.set(record.requestId, structuredClone(record));
+    }
+  }
+
+  async claimPending(claimTimeoutMs: number): Promise<UsageOutboxRecord[]> {
+    const now = Date.now();
+    const due = [...this.#usageOutbox.values()]
+      .filter((r) => r.claimedAt === null || r.claimedAt <= now - claimTimeoutMs)
+      .sort((a, b) => a.createdAt - b.createdAt || (a.requestId < b.requestId ? -1 : 1));
+    return due.map((r) => {
+      const claimed: UsageOutboxRecord = { ...r, claimedAt: now };
+      this.#usageOutbox.set(r.requestId, claimed);
+      return structuredClone(claimed);
+    });
+  }
+
+  async ack(requestId: string): Promise<void> {
+    this.#usageOutbox.delete(requestId);
   }
 }
 

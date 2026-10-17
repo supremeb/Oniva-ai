@@ -236,7 +236,7 @@ describe("postgres specifics", () => {
     const { rows } = await env.pool.query("SELECT version FROM engine_migrations ORDER BY version");
     assert.deepEqual(
       rows.map((r) => r.version),
-      ["001"],
+      ["001", "002"],
     );
   });
 });
