@@ -179,8 +179,7 @@ async def test_registry_has_fleet_on_finished_and_the_reconciler_settles_a_stuck
         maker, factory, engine, wired, delivered, monkeypatch):  # noqa: F811
     assert "app.services.fleet_run_sync" in rh.BOOTSTRAP_MODULES
     assert "fleet" in rh.bootstrap()
-    # workflow registers start_missing/find_stuck/fail (U15); its on_finished is U16's.
-    assert [k for k in rh.missing_on_finished() if k != "workflow"] == []
+    assert rh.missing_on_finished() == []
     assert rh.hook("fleet", "on_finished") is frs.on_finished
     _, _, job_id = await started(maker, factory, engine, wired)
     async with maker() as db:  # long quiet: looks stuck as a running row

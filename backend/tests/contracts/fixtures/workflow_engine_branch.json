@@ -1,0 +1,43 @@
+{
+  "status": "completed",
+  "results": {
+    "start-1": {
+      "status": "success",
+      "output": {},
+      "error": null
+    },
+    "a": {
+      "status": "success",
+      "output": {},
+      "error": null
+    },
+    "b": {
+      "status": "skipped",
+      "output": null,
+      "error": null
+    }
+  },
+  "error": null,
+  "nodes_executed": 2,
+  "total_tokens": 42,
+  "completed_at": "<timestamp>",
+  "duration_ms": "<duration>",
+  "execution_trace": [
+    {
+      "node_id": "start-1",
+      "run_attempt": 0,
+      "attempt": 0,
+      "status": "success",
+      "output": {},
+      "tokens_used": 0
+    },
+    {
+      "node_id": "a",
+      "run_attempt": 0,
+      "attempt": 0,
+      "status": "success",
+      "output": {},
+      "tokens_used": 0
+    }
+  ]
+}

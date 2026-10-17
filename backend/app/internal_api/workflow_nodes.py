@@ -6,7 +6,8 @@ exactly-once. ``runAttempt`` is part of the key: a run retry re-executes a node 
 a failure. Auth, fence and the outcome store are the tool gateway's (``tool_invocations`` is keyed by the
 same unique ``Idempotency-Key`` column). Bodies are validated by the U33 models.
 
-The ``finalize`` route belongs to U16.
+``finalize`` (U16) is keyed ``{runId}:r{runAttempt}:finalize`` and settles the execution through
+``workflow_run_sync``; a terminal row never moves, so a replay changes nothing.
 """
 from __future__ import annotations
 
@@ -44,6 +45,7 @@ from app.models.workflow import WorkflowExecution
 from app.node_executors import NodeExecutionContext, NodeExecutionResult, get_executor
 from app.node_executors.adornments import CacheAdornment
 from app.schemas.classification import DataClassification
+from app.services import workflow_run_sync
 from app.services.workflow_compiler import (
     UNEXECUTED_TYPES,
     compile_workflow,
@@ -58,6 +60,7 @@ router = APIRouter(prefix="/workflows")
 
 TenantSessionFactory = Callable[[str], AsyncContextManager[Any]]
 
+FINALIZE_KEY_RE = re.compile(r"^(?P<run>[^:\s]+):r(?P<r>\d+):finalize$")
 KEY_RE = re.compile(r"^(?P<run>[^:\s]+):(?P<node>[^:\s]+):r(?P<r>\d+):a(?P<a>\d+):(?P<phase>prepare|finish)$")
 SCOPE_KEYS = ("tenantId", "projectId", "conversationId", "classification", "nodeType")
 PHASE_TOOL = {"prepare": "workflow_prepare", "finish": "workflow_finish"}
@@ -792,6 +795,41 @@ async def finish_node(
     tenants: TenantSessionFactory = Depends(get_tenant_session_factory),
 ) -> JSONResponse:
     return await _handle(request, run_id, node_id, "finish", factory, tenants)
+
+
+@router.post("/runs/{run_id}/finalize")
+async def finalize_run(
+    run_id: str,
+    request: Request,
+    factory: SessionFactory = Depends(get_session_factory),
+    tenants: TenantSessionFactory = Depends(get_tenant_session_factory),
+) -> JSONResponse:
+    key = request.headers.get("idempotency-key") or ""
+    m = FINALIZE_KEY_RE.match(key)
+    if not m or len(key) > 255 or m["run"] != run_id:
+        raise GatewayError(
+            400, {"error": "invalid_idempotency_key", "message": "expected {runId}:r{n}:finalize"}
+        )
+    run = _uuid(run_id, "runId")
+    raw = await _read_body(request)
+    claimed, rest = _split_scope(raw)
+    try:
+        fin = wc.validate_finalize_input(rest)
+    except wc.ContractError:
+        raise GatewayError(422, {"error": "invalid_request"})
+    scope = await bind_run(factory, run, claimed)
+    token, header_session = fence_headers(request)
+    session_id = header_session or f"{scope.tenantId}/{scope.projectId}"
+    if token is not None:
+        await admit_fence(factory, session_id, token)
+
+    async def apply() -> None:
+        guard = hold_write_fence(factory, session_id, token) if token is not None else nullcontext()
+        async with guard:
+            await workflow_run_sync.finalize(tenants, scope.tenantId, run, fin)
+
+    await asyncio.shield(_detach(apply()))
+    return _no_store({"ok": True})
 
 
 @router.get("/invocations/{key}")

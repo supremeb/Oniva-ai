@@ -13,7 +13,7 @@ Cancel is a real engine ``abort`` of the container conversation. An abort that c
 still cancels the row and sets ``input_data["abort_pending"]``; ``find_stuck`` returns such rows and
 ``start_missing`` retries the abort.
 
-Registers the ``workflow`` ``start_missing``, ``find_stuck`` and ``fail`` hooks (``on_finished`` is U16's).
+Registers the ``workflow`` ``start_missing``, ``find_stuck`` and ``fail`` hooks (``on_finished`` is ``workflow_run_sync``'s, U16).
 """
 from __future__ import annotations
 
