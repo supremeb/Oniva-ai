@@ -1,4 +1,5 @@
 """Plan 003 U5: the run handler registry."""
+import importlib
 import logging
 import sys
 import types
@@ -77,6 +78,10 @@ def test_bootstrap_reports_a_kind_without_on_finished(monkeypatch, caplog):
 
 
 def test_bootstrap_module_list_imports_cleanly_today():
+    # Modules register at import and are cached; reload so the reset registry is filled again.
+    for name in rh.BOOTSTRAP_MODULES:
+        importlib.reload(importlib.import_module(name))
     assert rh.bootstrap() is not None
-    # fleet registers start_missing/find_stuck/fail (U7); its on_finished arrives with U9.
-    assert set(rh.missing_on_finished()) <= {"fleet"}
+    # fleet registers start_missing/find_stuck/fail (U7) and on_finished (U9).
+    assert "fleet" in rh.kinds()
+    assert rh.missing_on_finished() == [], "every registered run kind needs an on_finished hook"

@@ -181,8 +181,8 @@ class RunReconciler:
         await self._missing(ref, counts)
 
     async def _settle(self, ref, snap: dict, counts: dict) -> None:
-        if view_is_active(snap["view"]):
-            return
+        if view_is_active(snap["view"]) and not ref.extra.get("abort_pending"):
+            return  # (a cancelled row with an unsent abort still goes to its hook to re-issue it)
         on_finished = run_handlers.hook(ref.kind, "on_finished")
         if on_finished is None:
             logger.warning("run kind %r has no on_finished hook", ref.kind)
