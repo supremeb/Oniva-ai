@@ -366,6 +366,9 @@ class Settings(BaseSettings):
     ENABLE_ENGINE_CHAT: bool = False  # global gate for engine-backed chat; tenants opt in via settings.features
     ENABLE_ENGINE_DEEP_WORK: bool = False  # global gate for engine-backed Deep Work; tenants opt in via settings.features
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
+    # ISO timestamp (the U5 deploy time). Approvals the engine created before it have no ledger row and
+    # may still be decided by the legacy rule; unset disables that fallback. Removed one release after U5.
+    APPROVALS_LEGACY_CUTOFF: Optional[str] = None
     # Legacy POST /api/v1/chat: when a stored session is supplied, rebuild model history from the
     # stored messages and ignore client-supplied assistant/tool parts (anti-forgery). Set to
     # false (CHAT_SERVER_HISTORY=false) to restore the old client-trusted history.
