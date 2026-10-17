@@ -46,7 +46,6 @@ describe('useDeepWorkChat engine rejoin', () => {
   it('publishes the engine session without hydrating the legacy store or opening SSE', async () => {
     (getDeepWorkFullState as jest.Mock).mockResolvedValue(ENGINE_FS);
     const hydrate = jest.spyOn(useDeepWorkStore.getState(), 'hydrateFromBackend');
-    const connectEngine = jest.spyOn(useDeepWorkStore.getState(), 'connectEngineEvents');
     const ES = jest.fn();
     (globalThis as unknown as { EventSource: unknown }).EventSource = ES;
 
@@ -54,7 +53,6 @@ describe('useDeepWorkChat engine rejoin', () => {
     await waitFor(() => expect(result.current.isDeepWorkForThisChat).toBe(true));
     expect(result.current.engineSession).toMatchObject({ sessionId: 'dw_1', conversationId: 'conv_1', chatId: 'chat_1', planTitle: 'Battery market' });
     expect(hydrate).not.toHaveBeenCalled();
-    expect(connectEngine).not.toHaveBeenCalled();
     expect(ES).not.toHaveBeenCalled();
   });
 
@@ -76,11 +74,14 @@ describe('useDeepWorkChat engine rejoin', () => {
     expect(ES).not.toHaveBeenCalled();
   });
 
-  it('legacy v2 sessions (is_engine with engine_report) still hydrate the legacy store', async () => {
+  it('a historical v2 session (is_engine with engine_report) opens read-only and never streams', async () => {
     (getDeepWorkFullState as jest.Mock).mockResolvedValue({ ...LEGACY_V2_FS, status: 'completed' });
+    const ES = jest.fn();
+    (globalThis as unknown as { EventSource: unknown }).EventSource = ES;
     const hydrate = jest.spyOn(useDeepWorkStore.getState(), 'hydrateFromBackend');
     const { result } = renderHook(() => useDeepWorkChat('chat_2'), { wrapper });
     await waitFor(() => expect(hydrate).toHaveBeenCalledTimes(1));
+    expect(ES).not.toHaveBeenCalled();
     expect(result.current.engineSession).toBeNull();
     expect(useEngineSessionStore.getState().session).toBeNull();
   });
@@ -92,15 +93,20 @@ describe('useDeepWorkChat engine rejoin', () => {
     });
     const ES = jest.fn();
     (globalThis as unknown as { EventSource: unknown }).EventSource = ES;
-    const connectEngine = jest.spyOn(useDeepWorkStore.getState(), 'connectEngineEvents');
     renderHook(() => useDeepWorkChat('chat_v1'), { wrapper });
     await waitFor(() => expect(useDeepWorkStore.getState().sessionId).toBe('v1_1'));
     const st = useDeepWorkStore.getState();
     expect(st.status).toBe('stopped'); // its executor is gone; never shown as live
     expect(st.summary).toBe('saved summary');
     expect(st.workspaceFiles.map((f) => f.path)).toEqual(['a.md']);
-    expect(connectEngine).not.toHaveBeenCalled();
     expect(ES).not.toHaveBeenCalled();
+  });
+
+  it('a historical v2 session that was left running is shown as stopped, not live', async () => {
+    (getDeepWorkFullState as jest.Mock).mockResolvedValue({ ...LEGACY_V2_FS, status: 'running' });
+    renderHook(() => useDeepWorkChat('chat_v2'), { wrapper });
+    await waitFor(() => expect(useDeepWorkStore.getState().sessionId).toBe('legacy_1'));
+    expect(useDeepWorkStore.getState().status).toBe('stopped');
   });
 
   it('saves the result message once, only when the card watched the run end', async () => {

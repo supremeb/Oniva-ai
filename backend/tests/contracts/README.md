@@ -20,7 +20,6 @@ A deliberate event rename in `engine.py` was verified to fail the test.
 | Stream | Driven through | Fake |
 |---|---|---|
 | Chat SSE | `generate_enhanced_sse_stream` (`api/v1/chat.py`) | real pydantic-ai `Agent` + `FunctionModel` (so real PartStart/PartDelta/FunctionToolCall/Result events); `AsyncSessionLocal`, `emit_run_event`, `store_memory_async` patched; `persist_session` replaced by a capture, so `persisted_messages[].message_parts` = the `metadata.parts` shape |
-| Deep Work engine v2 | `DeepWorkEngine.run` with the real `SSEQueueSink`, plus `_build_full_state` (`full-state` recovery) | `LLMGateway` replaced by a tier/prompt-dispatching fake; `DeepWorkWorker._execute_tool` returns a canned `web_search` result; real `SessionStorage` on a temp dir |
 | Fleet | `run_background_agent` then `stream_job_progress` (`api/v1/background_jobs.py`) | `LLMGateway` fake (tool call, then text); fake skill handler; an in-memory `BackgroundJob` instead of a DB |
 | Workflow | `WorkflowOrchestrator.execute_workflow_stream` (raw events) and `execute_workflow_stream` endpoint (`workflow_progress`/`workflow_complete`) | in-memory spec of real executors (`start`, `template`, `output`); `AsyncMock` DB. `USE_STATE_MACHINE` and `USE_DATA_CLASSIFICATION` pinned to their code defaults (True) |
 
@@ -42,7 +41,8 @@ engine were in flight when this was recorded. Re-record
 - **Error path (`chat_error`)**: partial `text_delta`s are emitted first, then a single `error` event (`title: "Chat Error"`, `details: null`, message rewritten by `format_error`, `retryable` is a substring check on "rate limit"). No `done`, and **nothing is persisted** (`persisted_messages: []`), so the partial text is lost on reload. Non-rate-limit exceptions collapse to a generic message (not recorded separately).
 - Not driven: XML tool-call rescue, KB/memory source events, `deep_work_suggested`, `metric`/`memory_saved` parts, the legacy non-enhanced stream, and agent-studio chat (`agent_chat.py`, a second SSE translator).
 
-### deep_work_success / deep_work_failure
+### deep_work_success / deep_work_failure (historical)
+- These fixtures were recorded from the legacy v2 executor, which has been removed (U8). They are kept as the comparison baseline for `test_engine_deep_work_fixtures.py`; they are no longer re-recorded.
 - `events` is what `GET /deep-work/engine/{id}/stream` sends on the wire: `{event, data}` (envelope `id`/`timestamp` is unwrapped and not recorded; SSE ids there are uuid4).
 - Scenario: one planned worker (`w1`), one reflection round that adds a gap task (`gap-1`), a second reflection that stops, then synthesis with two sections. Only one worker per round is planned on purpose: parallel worker interleaving depends on aiofiles thread timing and is not deterministic, so concurrent ordering is **not** recorded.
 - `deep_work_engine_worker_complete.tool_call_count` equals `iterations_used` (2 here) although only one tool call ran (it counts LLM iterations, not tool calls).

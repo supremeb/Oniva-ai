@@ -20,12 +20,6 @@ async def test_chat_sse_contract(scenario):
     check_or_record(f"chat_{scenario}", live)
 
 
-@pytest.mark.parametrize("scenario", ["success", "failure"])
-async def test_deep_work_engine_contract(scenario):
-    live = await streams.run_deep_work_scenario(scenario)
-    check_or_record(f"deep_work_{scenario}", live)
-
-
 @pytest.mark.parametrize("scenario", ["completed", "failed", "cancelled"])
 async def test_fleet_background_agent_contract(scenario):
     live = await streams.run_fleet_scenario(scenario)

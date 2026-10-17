@@ -161,10 +161,6 @@ def _parse_uuid(value: Optional[str]) -> Optional[uuid.UUID]:
         return None
 
 
-# In-memory engine task registry
-_engine_tasks: dict[str, asyncio.Task] = {}
-
-
 async def _verify_session_ownership(
     db: AsyncSession, session_id: str, tenant_id: UUID, user_id: UUID,
 ) -> BackgroundJob:
@@ -198,29 +194,6 @@ async def _get_general_assistant_config(
     if agent and agent.config:
         return agent.config
     return None
-
-
-async def _update_job_status(
-    db: AsyncSession, session_id: str, status: JobStatus,
-    error_detail: str | None = None,
-) -> None:
-    """Update BackgroundJob status by session_id."""
-    result = await db.execute(
-        select(BackgroundJob).where(BackgroundJob.session_id == session_id)
-    )
-    job = result.scalar_one_or_none()
-    if job:
-        if status == JobStatus.COMPLETED:
-            job.complete()
-        elif status == JobStatus.FAILED:
-            job.fail(error_detail or "Engine pipeline error")
-        elif status == JobStatus.CANCELLED:
-            job.cancel()
-        await db.commit()
-
-
-# SSE queues per session
-_sse_queues: dict[str, asyncio.Queue] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +307,7 @@ async def _build_full_state(
 
     if is_engine:
         # Detect orphaned engine jobs: DB says "running"/"pending" but no in-memory task
-        if job.status in ("running", "pending") and job.session_id not in _engine_tasks:
+        if job.status in ("running", "pending"):
             if engine_report:
                 # Has report → completed successfully before server restart
                 job.complete()
@@ -637,7 +610,7 @@ async def list_deep_work_sessions(
                 plan_title = job.input_data.get("query", "")[:80]
 
         # Fix orphaned running/pending jobs inline (no active in-memory task)
-        if job.status in ("running", "pending") and job.session_id not in _engine_tasks:
+        if job.status in ("running", "pending"):
             job.fail("Server restarted during execution")
             effective_status = "failed"
             needs_commit = True
@@ -681,13 +654,6 @@ async def delete_deep_work_session(
     job = await _verify_session_ownership(db, session_id, tenant_id, user_id)
 
     # Don't allow deleting a truly running session (with active task)
-    if job.status == JobStatus.RUNNING.value:
-        if session_id in _engine_tasks:
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot delete a running session. Stop it first.",
-        )
-
     # Mark as cancelled
     job.cancel()
     await db.commit()
@@ -707,8 +673,7 @@ async def delete_deep_work_session(
 
 
 # ===========================================================================
-# Deep Work Engine (v2) — Orchestrator-Worker-Synthesizer pipeline
-# These endpoints run alongside the existing AutonomousExecutor endpoints.
+# Deep Work engine routes — served by the @oniva/engine path (deep_work_engine.py)
 # ===========================================================================
 
 
@@ -729,26 +694,7 @@ async def clarify_deep_work_query(
     if await engine_dw.tenant_uses_engine_deep_work(db, tenant_id, request):
         return await engine_dw.clarify(body, db, user_id, tenant_id)
 
-    from app.services.deep_work.engine import DeepWorkEngine
-    from app.services.deep_work.event_sink import NullSink
-    from app.services.session_storage import get_session_storage
-
-    agent_config = await _get_general_assistant_config(db, tenant_id)
-
-    engine = DeepWorkEngine(
-        db, get_session_storage(),
-        str(tenant_id), str(user_id),
-        str(uuid.uuid4()),
-        agent_config=agent_config,
-        event_sink=NullSink(),
-    )
-
-    result = await engine.generate_intake_questions(
-        query=body.query,
-        available_kbs=body.available_kbs,
-        available_connectors=body.available_connectors,
-    )
-    return result.model_dump()
+    raise HTTPException(status_code=404, detail="Deep Work unavailable")
 
 
 # ---------------------------------------------------------------------------
@@ -768,29 +714,7 @@ async def plan_deep_work_engine(
     if await engine_dw.tenant_uses_engine_deep_work(db, tenant_id, request):
         return await engine_dw.plan(body, db, user_id, tenant_id)
 
-    from app.services.deep_work.engine import DeepWorkEngine
-    from app.services.deep_work.event_sink import NullSink
-    from app.services.session_storage import get_session_storage
-
-    agent_config = await _get_general_assistant_config(db, tenant_id)
-
-    engine = DeepWorkEngine(
-        db, get_session_storage(),
-        str(tenant_id), str(user_id),
-        body.session_id or str(uuid.uuid4()),
-        agent_config=agent_config,
-        event_sink=NullSink(),
-    )
-
-    plan = await engine.plan_only(body.query, enriched_query=body.enriched_query)
-    steps = [t.sub_query for t in plan.sub_queries]
-    title = plan.title or body.query[:80]
-
-    return EnginePlanResponse(
-        title=title,
-        steps=steps,
-        raw_plan=plan.model_dump(),
-    )
+    raise HTTPException(status_code=404, detail="Deep Work unavailable")
 
 
 # ---------------------------------------------------------------------------
@@ -810,139 +734,7 @@ async def start_deep_work_engine(
     if await engine_dw.tenant_uses_engine_deep_work(db, tenant_id, request):
         return await engine_dw.start(body, db, user_id, tenant_id)
 
-    session_id = body.session_id or str(uuid.uuid4())
-
-    # Guard against duplicate session starts
-    if session_id in _engine_tasks:
-        raise HTTPException(status_code=409, detail="Session already active")
-
-    sse_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
-    _sse_queues[session_id] = sse_queue
-
-    # Load agent config for model tier resolution (using request-scoped db)
-    agent_config = await _get_general_assistant_config(db, tenant_id)
-
-    # Create BackgroundJob record — matches AutonomousExecutor pattern
-    job = BackgroundJob(
-        id=uuid.uuid4(),
-        tenant_id=tenant_id,
-        user_id=user_id,
-        job_type=JobType.DEEP_WORK.value,
-        status=JobStatus.RUNNING.value,
-        trigger=JobTrigger.MANUAL.value,
-        session_id=session_id,
-        conversation_id=_parse_uuid(body.conversation_id),
-        input_data={
-            "query": body.query,
-            "engine": "orchestrator-worker",
-        },
-    )
-    db.add(job)
-    await db.commit()
-
-    async def _run_engine():
-        """Background task with its own DB session."""
-        from app.services.deep_work.engine import DeepWorkEngine
-        from app.services.deep_work.event_sink import SSEQueueSink
-        from app.services.session_storage import get_session_storage
-
-        async with AsyncSessionLocal() as bg_db:
-            await set_tenant_context(bg_db, str(tenant_id))
-            try:
-                engine = DeepWorkEngine(
-                    bg_db, get_session_storage(),
-                    str(tenant_id), str(user_id), session_id,
-                    agent_config=agent_config,
-                    event_sink=SSEQueueSink(sse_queue),
-                )
-                # Reconstruct precomputed plan if provided
-                precomputed_plan = None
-                if body.plan:
-                    from app.services.deep_work.models import DeepWorkPlan
-                    precomputed_plan = DeepWorkPlan.model_validate(body.plan)
-                await engine.run(
-                    body.query,
-                    precomputed_plan=precomputed_plan,
-                    enriched_query=body.enriched_query,
-                )
-                await set_tenant_context(bg_db, str(tenant_id))
-                await _update_job_status(bg_db, session_id, JobStatus.COMPLETED)
-            except asyncio.CancelledError:
-                logger.info("Deep work engine cancelled: %s", session_id)
-                await set_tenant_context(bg_db, str(tenant_id))
-                await _update_job_status(bg_db, session_id, JobStatus.CANCELLED)
-            except Exception as exc:
-                logger.exception("Deep work engine failed: %s", exc)
-                await set_tenant_context(bg_db, str(tenant_id))
-                await _update_job_status(bg_db, session_id, JobStatus.FAILED, str(exc))
-                await sse_queue.put({
-                    "id": str(uuid.uuid4()),
-                    "type": "deep_work_engine_error",
-                    "data": {"message": str(exc)},
-                })
-            finally:
-                _engine_tasks.pop(session_id, None)
-                _sse_queues.pop(session_id, None)
-
-    task = asyncio.create_task(_run_engine())
-    _engine_tasks[session_id] = task
-
-    return {"session_id": session_id, "status": "started"}
-
-
-# ---------------------------------------------------------------------------
-# GET /deep-work/engine/{session_id}/stream — SSE event stream
-# ---------------------------------------------------------------------------
-
-@router.get("/deep-work/engine/{session_id}/stream")
-async def stream_deep_work_engine(
-    session_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
-    tenant_id: UUID = Depends(get_current_tenant_id),
-):
-    """SSE stream for a deep work engine session."""
-    _check_feature_enabled()
-    await _verify_session_ownership(db, session_id, tenant_id, user_id)
-
-    queue = _sse_queues.get(session_id)
-    if not queue:
-        raise HTTPException(status_code=404, detail="Engine session not found or completed")
-
-    async def event_generator():
-        try:
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=60.0)
-                    yield {
-                        "id": event["id"],
-                        "event": event["type"],
-                        "data": json.dumps(event["data"]),
-                    }
-                    if event["type"] in (
-                        "deep_work_engine_complete",
-                        "deep_work_engine_error",
-                    ):
-                        break
-                except asyncio.TimeoutError:
-                    yield {"comment": "keepalive"}
-        except asyncio.CancelledError:
-            pass
-
-    return EventSourceResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        ping=15,
-        send_timeout=60.0,
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    raise HTTPException(status_code=404, detail="Deep Work unavailable")
 
 
 # ---------------------------------------------------------------------------
@@ -960,23 +752,7 @@ async def cancel_deep_work_engine(
     _check_feature_enabled()
     if await engine_dw.find_engine_run(engine_dw.reading(db), tenant_id, session_id) is not None:
         return await engine_dw.cancel(session_id, db, user_id, tenant_id)
-    await _verify_session_ownership(db, session_id, tenant_id, user_id)
-
-    task = _engine_tasks.get(session_id)
-    if not task or task.done():
-        raise HTTPException(status_code=404, detail="No active engine session")
-
-    task.cancel()
-
-    queue = _sse_queues.get(session_id)
-    if queue:
-        await queue.put({
-            "id": str(uuid.uuid4()),
-            "type": "deep_work_engine_error",
-            "data": {"message": "Cancelled by user"},
-        })
-
-    return {"session_id": session_id, "status": "cancelled"}
+    raise HTTPException(status_code=404, detail="No active engine session")
 
 
 # Engine-only routes (steer, worker drill-down watch); each checks ownership / the tenant gate itself.

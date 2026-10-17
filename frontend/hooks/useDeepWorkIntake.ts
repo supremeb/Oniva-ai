@@ -2,9 +2,10 @@
  * useDeepWorkIntake — starts the Deep Work intake (clarify -> plan -> approve -> start)
  * on the right runtime for a chat surface.
  *
- * Flag ENABLE_ENGINE_DEEP_WORK on: the intake calls the engine API with the chat's project
- * (the page's project, else the user's first active one, as EngineChat does) and the run is
- * published to the engine session store on start. Off: the legacy store flow, unchanged.
+ * The intake calls the engine API with the chat's project (the page's project, else the
+ * user's first active one, as EngineChat does) and the run is published to the engine session
+ * store on start. When engine Deep Work is off for the tenant there is no intake: the toggle
+ * is hidden and the store reports Deep Work as unavailable.
  */
 import { useCallback, useEffect } from 'react';
 import { useEngineDeepWorkMode } from '@/lib/hooks/useFeature';
