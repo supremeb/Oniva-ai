@@ -28,11 +28,28 @@ logger = logging.getLogger(__name__)
 WEB_TOOLS = ("web_search", "browse_url")
 CONNECTOR_TOOLS = ("list_available_connectors", "get_connector_schema", "invoke_connector_tool")
 KNOWLEDGE_TOOL = "search_knowledge"
+FILE_TOOLS = ("read_file", "write_file")
+CODE_TOOLS = ("execute_python",)
 _SKILL_NS = uuid.uuid5(uuid.NAMESPACE_DNS, "system.skills.oniva")
 
 KNOWLEDGE_INSTRUCTION = (
     "Knowledge bases are selected for this conversation. Call search_knowledge first, before "
     "answering any question their documents might cover, and cite what it returns."
+)
+
+# Capability-honest prompt (U4 / R4, KTD4): the block names the tool families actually granted, so
+# the model never offers a capability it lacks. Families are ordered as the product names them.
+CAPABILITY_HEADING = "Your capabilities in this conversation"
+CAPABILITY_FOOTER = (
+    "Any capability not listed above is unavailable in this conversation. Do not offer it, "
+    "promise it, or claim you can do it."
+)
+CAPABILITY_FAMILIES = (
+    ("web search", WEB_TOOLS),
+    ("knowledge base search", (KNOWLEDGE_TOOL,)),
+    ("connectors", CONNECTOR_TOOLS),
+    ("file operations", FILE_TOOLS),
+    ("code execution", CODE_TOOLS),
 )
 
 
@@ -117,6 +134,22 @@ def skill_names(refs: Iterable[str], known: Iterable[str]) -> List[str]:
     return _dedupe(by_uuid.get(r, r) for r in refs)
 
 
+def build_capabilities_block(tools: Iterable[str]) -> str:
+    """The capability block naming the tool families actually granted (U4 / R4, KTD4)."""
+    granted = set(tools)
+    lines = [
+        f"- {label}: {', '.join(sorted(granted.intersection(names)))}"
+        for label, names in CAPABILITY_FAMILIES
+        if granted.intersection(names)
+    ]
+    listed = set().union(*(set(names) for _, names in CAPABILITY_FAMILIES))
+    other = sorted(granted - listed)
+    if other:
+        lines.append(f"- other tools: {', '.join(other)}")
+    body = "\n".join(lines) if lines else "You have no tools beyond your own knowledge."
+    return f"## {CAPABILITY_HEADING}\n\n{body}\n\n{CAPABILITY_FOOTER}"
+
+
 def compose_agent_config(
     inputs: ChatInputs,
     selections: Selections,
@@ -160,6 +193,7 @@ def compose_agent_config(
         parts.append(KNOWLEDGE_INSTRUCTION)
     if selections.web_search:
         parts.append(build_web_search_instruction(now, selections.specific_sites or None))
+    parts.append(build_capabilities_block(tools))
 
     if continuation_summary and continuation_summary.strip():
         parts.append(

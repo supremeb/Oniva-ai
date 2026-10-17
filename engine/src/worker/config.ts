@@ -18,6 +18,8 @@
  * | `ENGINE_POLICY_RETRY_MS` | `60000` | total time a transient policy or usage failure is retried; `0` for none |
  * | `ENGINE_APPROVAL_TTL_MS` | `86400000` | approval expiry; `0` for none |
  * | `ENGINE_MODEL` / `ENGINE_SUMMARY_MODEL` | Anthropic defaults | model ids |
+ * | `ENGINE_MODEL_FIRST_BYTE_TIMEOUT_MS` | `120000` | abort an OpenRouter attempt with no data event by then (retried as `network`) |
+ * | `ENGINE_MODEL_IDLE_TIMEOUT_MS` | `120000` | abort an OpenRouter attempt silent for this long between data events (retryable, partial kept) |
  * | `ENGINE_MAX_TOKENS` | `8192` | reply token budget per request |
  * | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle (KTD11) |
  * | `ENGINE_SUBAGENT_TOOL` | none | register a subagent tool under this name |
@@ -36,6 +38,7 @@
 import pg from "pg";
 import { DEFAULT_PROGRESS_INTERVAL_MS } from "../agent/progress.js";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_ANTHROPIC_SUMMARY_MODEL } from "../models/anthropic.js";
+import { DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_IDLE_TIMEOUT_MS } from "../models/retry.js";
 import { DEFAULT_POLICY_TIMEOUT_MS, DEFAULT_RETRY_MS } from "./backend-policy.js";
 
 export type WorkerEnv = Readonly<Record<string, string | undefined>>;
@@ -62,6 +65,10 @@ export interface WorkerConfig {
   approvalTtlMs: number | null;
   model: string;
   summaryModel: string;
+  /** Abort an OpenRouter attempt that has produced no data event within this long. */
+  modelFirstByteTimeoutMs: number;
+  /** Abort an OpenRouter attempt silent for this long between data events. */
+  modelIdleTimeoutMs: number;
   maxTokens: number;
   progressIntervalMs: number;
   subagentTool: string | null;
@@ -214,6 +221,13 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
     approvalTtlMs: approval === 0 ? null : approval,
     model: text(env, "ENGINE_MODEL") ?? DEFAULT_ANTHROPIC_MODEL,
     summaryModel: text(env, "ENGINE_SUMMARY_MODEL") ?? DEFAULT_ANTHROPIC_SUMMARY_MODEL,
+    modelFirstByteTimeoutMs: integer(
+      env,
+      "ENGINE_MODEL_FIRST_BYTE_TIMEOUT_MS",
+      DEFAULT_FIRST_BYTE_TIMEOUT_MS,
+      1,
+    ),
+    modelIdleTimeoutMs: integer(env, "ENGINE_MODEL_IDLE_TIMEOUT_MS", DEFAULT_IDLE_TIMEOUT_MS, 1),
     maxTokens: integer(env, "ENGINE_MAX_TOKENS", DEFAULT_MAX_TOKENS, 1),
     progressIntervalMs: integer(
       env,

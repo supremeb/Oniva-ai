@@ -27,6 +27,7 @@ import { useAvailableModels } from '@/hooks/useLLMProviders';
 import { useAuthStore } from '@/lib/stores/auth';
 import { useProjectsStore } from '@/lib/stores/projects';
 import { useChatSessionsStore } from '@/lib/stores/chat-sessions';
+import { useEngineNav } from '@/lib/stores/engine-nav';
 import {
     uploadProjectFile,
     fetchProjectFiles,
@@ -109,6 +110,7 @@ export function ProjectView({ project }: ProjectViewProps) {
     const { updateProject: storeUpdateProject } = useProjectsStore();
     const { createSession, setCurrentSession, selectedModel, setSelectedModel, setPendingInput } =
         useChatSessionsStore();
+    const engineNav = useEngineNav();
     const { models: availableModels } = useAvailableModels();
 
     // Load files and sessions
@@ -206,6 +208,17 @@ export function ProjectView({ project }: ProjectViewProps) {
     const handleChatSubmit = () => {
         if (!chatInput.trim()) return;
         handleNewChat();
+    };
+
+    // Engine conversations reopen on this project page with ?c=; legacy sessions use the store.
+    const handleSelectSession = (session: Record<string, unknown>) => {
+        if (session.source === 'engine') {
+            setCurrentSession(null);
+            engineNav.open(session.id as string);
+            router.push(`/chat/projects/${project.id}?c=${encodeURIComponent(session.id as string)}`);
+            return;
+        }
+        setCurrentSession(session.id as string);
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -353,9 +366,7 @@ export function ProjectView({ project }: ProjectViewProps) {
                                                 {sessions.map((session) => (
                                                     <button
                                                         key={session.id as string}
-                                                        onClick={() =>
-                                                            setCurrentSession(session.id as string)
-                                                        }
+                                                        onClick={() => handleSelectSession(session)}
                                                         className="w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors text-sm"
                                                     >
                                                         {(session.title as string) || 'Untitled Chat'}

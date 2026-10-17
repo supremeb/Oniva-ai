@@ -39,7 +39,10 @@ async function main(): Promise<number> {
   }
 
   const pool = createWorkerPool(config, log);
-  const models = defaultModelRegistry(process.env, log);
+  const models = defaultModelRegistry(process.env, log, {
+    firstByteTimeoutMs: config.modelFirstByteTimeoutMs,
+    idleTimeoutMs: config.modelIdleTimeoutMs,
+  });
   const worker = await startWorker({
     pool,
     sessionId: config.sessionId,

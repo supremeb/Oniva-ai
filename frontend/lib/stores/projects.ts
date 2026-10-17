@@ -37,6 +37,12 @@ interface ProjectsStore {
   archiveProject: (projectId: string, isArchived: boolean) => Promise<void>;
   setCurrentProject: (projectId: string | null) => void;
   getProject: (projectId: string) => Project | undefined;
+  /**
+   * Project to start a conversation in when the page names none: the most recently
+   * updated project the user owns, else a new private "Personal" project (KTD1).
+   * Shared projects are never picked. Rejects when the list cannot be loaded or the user cannot create one.
+   */
+  resolveDefaultProject: () => Promise<Project>;
 }
 
 export const useProjectsStore = create<ProjectsStore>()((set, get) => ({
@@ -107,5 +113,24 @@ export const useProjectsStore = create<ProjectsStore>()((set, get) => ({
 
   getProject: (projectId: string) => {
     return get().projects.find((p) => p.id === projectId);
+  },
+
+  resolveDefaultProject: async () => {
+    if (get().projects.length === 0) {
+      await get().loadProjects();
+      // loadProjects swallows failures into `error`; creating "Personal" now could
+      // duplicate a project the user already owns, so surface the failure instead.
+      const loadError = get().error;
+      if (loadError) {
+        throw new Error(loadError);
+      }
+    }
+    const owned = get()
+      .projects.filter((p) => !p.is_archived && p.user_role === 'owner')
+      .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+    if (owned.length > 0) {
+      return owned[0];
+    }
+    return get().createProject('Personal');
   },
 }));

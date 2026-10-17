@@ -236,7 +236,7 @@ describe("postgres specifics", () => {
     const { rows } = await env.pool.query("SELECT version FROM engine_migrations ORDER BY version");
     assert.deepEqual(
       rows.map((r) => r.version),
-      ["001"],
+      ["001", "002"],
     );
   });
 });
@@ -253,3 +253,25 @@ async function waitForBlockedBackend(applicationName: string): Promise<number> {
   }
   throw new Error("victim backend never blocked");
 }
+
+describe("postgres usage outbox claiming", () => {
+  it("two concurrent claimers get disjoint rows covering every pending row", async () => {
+    await env.pool.query("DELETE FROM engine_usage_outbox");
+    const provider = new PostgresStorageProvider(env.pool);
+    const ids = Array.from({ length: 40 }, (_, i) => `req-${String(i).padStart(2, "0")}`);
+    for (const [i, requestId] of ids.entries()) {
+      await provider.enqueue({ requestId, body: { i }, createdAt: i, claimedAt: null });
+    }
+    for (let round = 0; round < 5; round++) {
+      await env.pool.query("UPDATE engine_usage_outbox SET claimed_at = NULL");
+      const [a, b] = await Promise.all([
+        provider.claimPending(60_000),
+        provider.claimPending(60_000),
+      ]);
+      const idsA = a.map((r) => r.requestId);
+      const idsB = b.map((r) => r.requestId);
+      expect(idsA.filter((id) => idsB.includes(id))).toEqual([]);
+      expect([...idsA, ...idsB].sort()).toEqual(ids);
+    }
+  });
+});

@@ -110,13 +110,21 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
     const scrollRef = useRef<HTMLDivElement>(null);
     const viewportRef = useRef<HTMLDivElement>(null);
 
-    // Project for a new conversation: the page's project, else the user's first active one.
-    const projects = useProjectsStore((s) => s.projects);
-    const loadProjects = useProjectsStore((s) => s.loadProjects);
-    useEffect(() => {
-        if (!projectId && projects.length === 0) void loadProjects();
-    }, [projectId, projects.length, loadProjects]);
-    const resolvedProjectId = projectId ?? projects.find((p) => !p.is_archived)?.id ?? null;
+    // Project for a new conversation: the page's project, else the most recent project
+    // the user owns, creating a private "Personal" one when they own none (KTD1). The
+    // resolution is shared and cached so a send and the Deep Work intake agree on it.
+    const resolveDefaultProject = useProjectsStore((s) => s.resolveDefaultProject);
+    const projectResolution = useRef<Promise<string> | null>(null);
+    const ensureProject = useCallback(async (): Promise<string> => {
+        if (projectId) return projectId;
+        if (!projectResolution.current) {
+            projectResolution.current = resolveDefaultProject().then((p) => p.id);
+            projectResolution.current.catch(() => {
+                projectResolution.current = null;
+            });
+        }
+        return projectResolution.current;
+    }, [projectId, resolveDefaultProject]);
 
     // Deep Work: offered only when the tenant's Deep Work runs on the engine (the same entry
     // point the legacy chat has: a toggle in the input, the next send starts the intake).
@@ -235,14 +243,20 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
     // Create the conversation; the first-send effect above submits `text` once the watcher exists.
     const startConversation = useCallback(
         async (text: string) => {
-            if (!resolvedProjectId) {
-                setCreateError('Create a project first to start a conversation.');
-                return;
-            }
             setCreating(true);
             setCreateError(null);
+            let targetProjectId = projectId;
+            if (!targetProjectId) {
+                try {
+                    targetProjectId = await ensureProject();
+                } catch {
+                    setCreateError('Pick or create a project to start a conversation.');
+                    setCreating(false);
+                    return;
+                }
+            }
             try {
-                const created = await client.create(resolvedProjectId, toSelections(sources));
+                const created = await client.create(targetProjectId, toSelections(sources));
                 useEngineChatPrefs.getState().clearDraft(NEW_DRAFT_KEY);
                 setInputState('');
                 firstText.current = text;
@@ -254,7 +268,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                 setCreating(false);
             }
         },
-        [resolvedProjectId, client, sources]
+        [projectId, ensureProject, client, sources]
     );
 
     // Text typed in ProjectView before starting the chat: send it as the first message, once.
@@ -277,7 +291,16 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                 setInputState('');
                 setDeepWorkOn(false);
                 setDeepWorkQuery(text);
-                void startIntake(text, conversationId ?? dwChatKey.current, sources.activeKnowledgeBaseIds, sources.connectorIds);
+                let targetProjectId = projectId;
+                if (!targetProjectId) {
+                    try {
+                        targetProjectId = await ensureProject();
+                    } catch {
+                        setCreateError('Pick or create a project to use Deep Work.');
+                        return;
+                    }
+                }
+                void startIntake(text, conversationId ?? dwChatKey.current, sources.activeKnowledgeBaseIds, sources.connectorIds, targetProjectId);
                 return;
             }
             if (!conversationId) {
@@ -289,7 +312,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
             const whenBusy = running ? (mode === 'steer' ? 'steer' : 'followUp') : undefined;
             await doSubmit(text, whenBusy);
         },
-        [input, creating, conversationId, startConversation, draftKey, running, doSubmit, deepWorkRuntime, deepWorkOn, startIntake, sources.activeKnowledgeBaseIds, sources.connectorIds]
+        [input, creating, conversationId, startConversation, draftKey, running, doSubmit, deepWorkRuntime, deepWorkOn, startIntake, projectId, ensureProject, sources.activeKnowledgeBaseIds, sources.connectorIds]
     );
 
     const handleStop = useCallback(() => {

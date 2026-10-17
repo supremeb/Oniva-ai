@@ -129,6 +129,25 @@ async def test_over_quota_denies_without_key_AE5(client, test_db):
     assert "apiKey" not in j and ANTHROPIC_KEY not in r.text
 
 
+async def test_deep_work_worker_request_goes_through_the_token_quota(client, test_db):
+    """U7 / KTD7: a Deep Work subagent request is ordinary policy traffic, so the tenant LLM
+    token check bounds it exactly like the orchestrator's. The engine sends the worker's resolved
+    model as ``agent.model`` and reports the subagent's usage under ``agentRole``."""
+    t = await make_tenant(test_db)
+    await add_provider(test_db, t)
+    worker = body(t, agent={"model": "claude-haiku-4-5"}, agentRole="research_worker")
+    assert (await post(client, worker)).json()["ok"] is True  # within quota: allowed as usual
+    test_db.add(UsageQuota(
+        tenant_id=t, scope_type="tenant", scope_id=t, quota_type="llm_tokens", limit_value=1000,
+        current_usage=900, period="lifetime", period_start=datetime.now(timezone.utc),
+    ))
+    await test_db.commit()
+    r = await post(client, body(t, agent={"model": "claude-haiku-4-5"}, agentRole="research_worker"))
+    j = r.json()
+    assert j["ok"] is False and j["code"] == "quota_exceeded"
+    assert "apiKey" not in j and ANTHROPIC_KEY not in r.text
+
+
 async def test_disabled_tenant_is_denied(client, test_db):
     t = await make_tenant(test_db, active=False)
     await add_provider(test_db, t)

@@ -31,6 +31,7 @@ import type {
   StorageProvider,
   SubmissionRecord,
   TaskRecord,
+  UsageOutboxRecord,
 } from "./types.js";
 import { MAX_PAGE_LIMIT } from "./types.js";
 
@@ -655,6 +656,82 @@ export function defineStorageConformanceSuite(
         const c = await newConversation();
         assert.deepEqual(await s.listEntries(c.id), { items: [], nextCursor: null });
         assert.deepEqual(await s.listDocuments(), { items: [], nextCursor: null });
+      });
+    });
+
+    describe("usage outbox", () => {
+      const record = (
+        requestId: string,
+        o: Partial<UsageOutboxRecord> = {},
+      ): UsageOutboxRecord => ({
+        requestId,
+        body: { requestId, tenantId: "tenant-1" },
+        createdAt: 1_000,
+        claimedAt: null,
+        ...o,
+      });
+
+      it("parks a report, hides it inside the claim timeout, and takes it after", async () => {
+        const p = fixture.provider;
+        const now = Date.now();
+        const r = record(`req-${uuidv7()}`, { claimedAt: now });
+        await p.enqueue(r);
+        // The outbox is one shared table with no per-conversation scope, so a
+        // test acks whatever it parks to stay independent of the next one.
+        try {
+          assert.deepEqual(await p.claimPending(60_000), []);
+          const claimed = await p.claimPending(0);
+          assert.equal(claimed.length, 1);
+          assert.equal(claimed[0]?.requestId, r.requestId);
+          assert.deepEqual(claimed[0]?.body, r.body);
+          assert.ok((claimed[0]?.claimedAt ?? 0) >= now);
+        } finally {
+          await p.ack(r.requestId);
+        }
+      });
+
+      it("is idempotent per requestId and delivers oldest first", async () => {
+        const p = fixture.provider;
+        const first = record(`req-${uuidv7()}`, { createdAt: 10 });
+        const second = record(`req-${uuidv7()}`, { createdAt: 20 });
+        await p.enqueue(second);
+        await p.enqueue(first);
+        await p.enqueue({ ...first, body: { ignored: true } });
+        try {
+          const claimed = await p.claimPending(0);
+          assert.deepEqual(
+            claimed.map((r) => r.requestId),
+            [first.requestId, second.requestId],
+          );
+          assert.deepEqual(claimed[0]?.body, first.body);
+        } finally {
+          await p.ack(first.requestId);
+          await p.ack(second.requestId);
+        }
+      });
+
+      it("reclaims a row past the claim timeout, then ack removes it", async () => {
+        const p = fixture.provider;
+        const stale = record(`req-${uuidv7()}`, { createdAt: 10, claimedAt: 20 });
+        const fresh = record(`req-${uuidv7()}`, { createdAt: 30, claimedAt: Date.now() });
+        await p.enqueue(stale);
+        await p.enqueue(fresh);
+        try {
+          const claimed = await p.claimPending(1_000);
+          assert.deepEqual(
+            claimed.map((r) => r.requestId),
+            [stale.requestId],
+          );
+          await p.ack(stale.requestId);
+          await p.ack(stale.requestId); // idempotent
+          const remaining = await p.claimPending(0);
+          assert.deepEqual(
+            remaining.map((r) => r.requestId),
+            [fresh.requestId],
+          );
+        } finally {
+          await p.ack(fresh.requestId);
+        }
       });
     });
 

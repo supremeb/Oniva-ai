@@ -23,6 +23,7 @@ import {
   type AttemptMeta,
   describeError,
   isTransportError,
+  modelTimeout,
   type RetryPolicy,
   serverRetryDelay,
   withRetry,
@@ -54,7 +55,10 @@ export interface OpenAICompatibleProviderOptions {
   /**
    * Retry policy for failures before any content was emitted. Default: 3
    * retries within 60 s, backoff 500 ms doubling to 8 s with jitter. Set
-   * `onRetry` to log each retry; `maxRetries: 0` turns retrying off.
+   * `onRetry` to log each retry; `maxRetries: 0` turns retrying off. The
+   * first-byte and idle attempt timeouts (`firstByteTimeoutMs`,
+   * `idleTimeoutMs`, both default 120 000) abort a hung connection (see
+   * `retry.ts`).
    */
   retry?: RetryPolicy;
 }
@@ -151,8 +155,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
       yield b.fail(modelError("aborted", abortMessage(ctx)));
       return;
     }
-    yield* withRetry(ctx, b, this.#options.retry ?? {}, (meta) =>
-      this.#attempt(ctx, request, b, meta),
+    yield* withRetry(ctx, b, this.#options.retry ?? {}, (meta, signal) =>
+      this.#attempt(ctx, request, b, meta, signal),
     );
   }
 
@@ -162,6 +166,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     request: ModelRequest,
     b: MessageBuilder,
     meta: AttemptMeta,
+    signal: AbortSignal,
   ): AsyncGenerator<StreamEvent> {
     let textIndex: number | undefined;
     // Chat Completions tool_call index -> neutral block index.
@@ -188,7 +193,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           authorization: `Bearer ${request.apiKey}`,
         },
         body: JSON.stringify(this.buildParams(request)),
-        signal: ctx.signal,
+        signal,
       });
       if (!res.ok) {
         meta.retryAfterMs = serverRetryDelay(res.headers, Date.now());
@@ -266,7 +271,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         if (choice.finish_reason) finishReason = choice.finish_reason;
       }
     } catch (err) {
-      yield b.fail(classifyOpenAIError(err, ctx));
+      yield b.fail(classifyOpenAIError(err, ctx, signal));
       return;
     }
 
@@ -457,7 +462,11 @@ function streamError(error: NonNullable<Chunk["error"]>): ModelError {
   return status === undefined ? modelError("provider", message) : classifyStatus(status, message);
 }
 
-export function classifyOpenAIError(err: unknown, ctx: Context): ModelError {
+export function classifyOpenAIError(err: unknown, ctx: Context, signal?: AbortSignal): ModelError {
+  // A per-attempt timeout aborts only that attempt's signal; classify it
+  // `network` so it is retried before any block and kept as partial after one.
+  const timeout = ctx.cancelled || signal === undefined ? null : modelTimeout(signal);
+  if (timeout) return modelError("network", timeout.message, { retryable: true });
   if (ctx.cancelled || (err instanceof Error && err.name === "AbortError")) {
     return modelError("aborted", abortMessage(ctx));
   }
