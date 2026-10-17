@@ -14,7 +14,7 @@ key; a cancel is an engine ``abort``. When the abort cannot reach the engine the
 cancelled and ``input_data["abort_pending"]`` is set; ``find_stuck`` returns such rows and
 ``start_missing`` retries the abort.
 
-Registers the ``fleet`` ``start_missing``, ``find_stuck`` and ``fail`` hooks (``on_finished`` is U9).
+Registers the ``fleet`` ``start_missing``, ``find_stuck`` and ``fail`` hooks (``on_finished`` is registered by ``fleet_run_sync``, U9).
 """
 import functools
 import hashlib
@@ -249,8 +249,9 @@ async def start_after_commit(tenant_id: Any, job_id: Any, *, factory: Optional[C
 
 
 def _ref(job: BackgroundJob) -> run_handlers.RunRef:
+    extra = {"abort_pending": True} if (job.input_data or {}).get("abort_pending") else {}
     return run_handlers.RunRef(kind=KIND, ref_id=job.id, tenant_id=job.tenant_id,
-                               session_id=job.session_id, conversation_id=job.conversation_id)
+                               session_id=job.session_id, conversation_id=job.conversation_id, extra=extra)
 
 
 async def find_stuck(session, older_than: timedelta) -> list:
