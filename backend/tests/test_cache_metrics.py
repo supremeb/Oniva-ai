@@ -5,11 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 from app.models.llm_usage import LLMUsageRecord
+from app.services.llm_direct import DirectResponse
 from app.services.llm_gateway import LLMGateway, LLMRequest, ProviderConfig
 
 
 class TestCacheTokenExtraction:
-    """Test that _log_usage() correctly extracts cache tokens per provider."""
+    """Test that _log_usage() records the normalized cache tokens."""
 
     @pytest.fixture
     def mock_db(self):
@@ -41,12 +42,11 @@ class TestCacheTokenExtraction:
     async def test_anthropic_cache_extraction(self, gateway, mock_db, base_request):
         """Anthropic responses populate both cache_read and cache_creation."""
         provider = self._make_provider("anthropic")
-        response = MagicMock()
-        response.model = "claude-3.5-sonnet"
-        response.usage.prompt_tokens = 1000
-        response.usage.completion_tokens = 200
-        response.usage.cache_read_input_tokens = 800
-        response.usage.cache_creation_input_tokens = 100
+        response = DirectResponse(
+            content="hi", model="claude-3.5-sonnet",
+            input_tokens=1000, output_tokens=200,
+            cache_read_tokens=800, cache_creation_tokens=100,
+        )
 
         await gateway._log_usage(
             tenant_id=uuid4(),
@@ -66,16 +66,13 @@ class TestCacheTokenExtraction:
 
     @pytest.mark.asyncio
     async def test_openai_cache_extraction(self, gateway, mock_db, base_request):
-        """OpenAI responses populate cache_read from prompt_tokens_details."""
+        """OpenAI responses populate cache_read; cache_creation stays 0."""
         provider = self._make_provider("openai")
-        response = MagicMock()
-        response.model = "gpt-4o"
-        response.usage.prompt_tokens = 500
-        response.usage.completion_tokens = 100
-        response.usage.prompt_tokens_details = MagicMock(cached_tokens=300)
-        # OpenAI does not report cache_creation
-        del response.usage.cache_read_input_tokens
-        del response.usage.cache_creation_input_tokens
+        response = DirectResponse(
+            content="hi", model="gpt-4o",
+            input_tokens=500, output_tokens=100,
+            cache_read_tokens=300,
+        )
 
         await gateway._log_usage(
             tenant_id=uuid4(),
@@ -95,14 +92,10 @@ class TestCacheTokenExtraction:
     async def test_no_cache_data(self, gateway, mock_db, base_request):
         """Provider with no cache support logs zeros."""
         provider = self._make_provider("openrouter")
-        response = MagicMock()
-        response.model = "meta-llama/llama-3"
-        response.usage.prompt_tokens = 400
-        response.usage.completion_tokens = 50
-        # No cache attributes
-        del response.usage.cache_read_input_tokens
-        del response.usage.cache_creation_input_tokens
-        del response.usage.prompt_tokens_details
+        response = DirectResponse(
+            content="hi", model="meta-llama/llama-3",
+            input_tokens=400, output_tokens=50,
+        )
 
         await gateway._log_usage(
             tenant_id=uuid4(),
@@ -112,57 +105,6 @@ class TestCacheTokenExtraction:
             response=response,
             cost=0.002,
             latency_ms=100,
-        )
-
-        record = mock_db.add.call_args[0][0]
-        assert record.cache_read_tokens == 0
-        assert record.cache_creation_tokens == 0
-
-    @pytest.mark.asyncio
-    async def test_anthropic_none_cache_values(self, gateway, mock_db, base_request):
-        """Anthropic with None cache values treated as 0."""
-        provider = self._make_provider("anthropic")
-        response = MagicMock()
-        response.model = "claude-3.5-sonnet"
-        response.usage.prompt_tokens = 500
-        response.usage.completion_tokens = 100
-        response.usage.cache_read_input_tokens = None
-        response.usage.cache_creation_input_tokens = None
-
-        await gateway._log_usage(
-            tenant_id=uuid4(),
-            user_id=uuid4(),
-            provider=provider,
-            request=base_request,
-            response=response,
-            cost=0.01,
-            latency_ms=150,
-        )
-
-        record = mock_db.add.call_args[0][0]
-        assert record.cache_read_tokens == 0
-        assert record.cache_creation_tokens == 0
-
-    @pytest.mark.asyncio
-    async def test_openai_no_details(self, gateway, mock_db, base_request):
-        """OpenAI without prompt_tokens_details logs 0."""
-        provider = self._make_provider("openai")
-        response = MagicMock()
-        response.model = "gpt-4o-mini"
-        response.usage.prompt_tokens = 200
-        response.usage.completion_tokens = 50
-        response.usage.prompt_tokens_details = None
-        del response.usage.cache_read_input_tokens
-        del response.usage.cache_creation_input_tokens
-
-        await gateway._log_usage(
-            tenant_id=uuid4(),
-            user_id=uuid4(),
-            provider=provider,
-            request=base_request,
-            response=response,
-            cost=0.001,
-            latency_ms=80,
         )
 
         record = mock_db.add.call_args[0][0]

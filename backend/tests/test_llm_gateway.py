@@ -3,8 +3,8 @@ Unit tests for LLM Gateway Service.
 
 Tests cover:
 - Provider failover with circuit breaker
-- Cost estimation
-- Provider-specific model prefixes
+- Cost calculation from the pricing table
+- Direct request construction (Anthropic prompt caching)
 - Connection testing
 - Usage logging
 """
@@ -12,6 +12,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+from app.services.llm_direct import DirectResponse
 from app.services.llm_gateway import (
     LLMGateway,
     LLMRequest,
@@ -24,13 +25,57 @@ from app.services.llm_gateway import (
 )
 
 
+def _http_error(status: int) -> Exception:
+    """An SDK-style error carrying an HTTP status code."""
+    error = Exception(f"HTTP {status}")
+    error.status_code = status
+    return error
+
+
+def _response(
+    content="Hello there!",
+    model="gpt-4o-mini",
+    input_tokens=5,
+    output_tokens=10,
+    tool_calls=None,
+    cache_read=0,
+    cache_creation=0,
+):
+    return DirectResponse(
+        content=content,
+        model=model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        tool_calls=tool_calls,
+        cache_read_tokens=cache_read,
+        cache_creation_tokens=cache_creation,
+    )
+
+
+@pytest.fixture(autouse=True)
+def clear_circuit_breakers():
+    """Clear circuit breaker cache before each test."""
+    _circuit_breakers.clear()
+    yield
+    _circuit_breakers.clear()
+
+
+@pytest.fixture(autouse=True)
+def no_retry_sleep():
+    """Keep retry tests fast."""
+    with patch("app.services.llm_gateway.asyncio.sleep", new=AsyncMock()):
+        yield
+
+
 class TestLLMGateway:
     """Test LLM Gateway functionality."""
 
     @pytest.fixture
     def mock_db(self):
         """Create a mock async database session."""
-        return AsyncMock()
+        db = AsyncMock()
+        db.add = MagicMock()
+        return db
 
     @pytest.fixture
     def gateway(self, mock_db):
@@ -59,30 +104,15 @@ class TestLLMGateway:
             temperature=0.7,
         )
 
-    @pytest.fixture(autouse=True)
-    def clear_circuit_breakers(self):
-        """Clear circuit breaker cache before each test."""
-        _circuit_breakers.clear()
-        yield
-        _circuit_breakers.clear()
-
     @pytest.mark.asyncio
     async def test_successful_completion(self, gateway, sample_request, mock_provider):
         """Test successful LLM completion."""
         tenant_id = uuid4()
 
-        # Mock LiteLLM response
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content="Hello there!"))]
-        mock_response.model = "gpt-4o-mini"
-        mock_response.usage = MagicMock(prompt_tokens=5, completion_tokens=10)
-
         with patch('app.services.llm_gateway.get_tenant_providers') as mock_get_providers, \
-             patch('app.services.llm_gateway.litellm') as mock_litellm:
+             patch('app.services.llm_gateway.llm_direct.complete', new=AsyncMock(return_value=_response())):
 
             mock_get_providers.return_value = [mock_provider]
-            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
-            mock_litellm.completion_cost.return_value = 0.00001
 
             response = await gateway.complete(sample_request, tenant_id)
 
@@ -92,60 +122,45 @@ class TestLLMGateway:
             assert response.input_tokens == 5
             assert response.output_tokens == 10
 
-    @pytest.mark.xfail(strict=True, reason="KNOWN_FAILURES U13: failover/retry behaviour differs from test expectation")
     @pytest.mark.asyncio
-    async def test_failover_to_second_provider(self, gateway, sample_request):
-        """Test automatic failover when first provider fails."""
+    async def test_retries_5xx_then_succeeds(self, gateway, sample_request, mock_provider):
+        """A 5xx is retried against the same provider before giving up."""
+        tenant_id = uuid4()
+        complete = AsyncMock(side_effect=[_http_error(503), _response()])
+
+        with patch('app.services.llm_gateway.get_tenant_providers', return_value=[mock_provider]), \
+             patch('app.services.llm_gateway.llm_direct.complete', new=complete):
+
+            response = await gateway.complete(sample_request, tenant_id)
+
+            assert response.content == "Hello there!"
+            assert complete.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_401(self, gateway, sample_request):
+        """A 401 is not retried; the gateway falls over to the next provider."""
         tenant_id = uuid4()
 
         provider1 = ProviderConfig(
-            id=uuid4(),
-            name="primary-openai",
-            provider_type="openai",
-            api_base=None,
-            api_key="sk-primary",
-            default_model="gpt-4o",
-            priority=0,
+            id=uuid4(), name="primary-openai", provider_type="openai", api_base=None,
+            api_key="sk-primary", default_model="gpt-4o", priority=0,
         )
         provider2 = ProviderConfig(
-            id=uuid4(),
-            name="backup-anthropic",
-            provider_type="anthropic",
-            api_base=None,
-            api_key="sk-ant-backup",
-            default_model="claude-3-haiku-20240307",
-            priority=1,
+            id=uuid4(), name="backup-anthropic", provider_type="anthropic", api_base=None,
+            api_key="sk-ant-backup", default_model="claude-3-haiku-20240307", priority=1,
         )
 
-        # Mock successful response from second provider
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content="Backup response"))]
-        mock_response.model = "claude-3-haiku-20240307"
-        mock_response.usage = MagicMock(
-            prompt_tokens=5,
-            completion_tokens=10,
-            input_tokens=5,
-            cache_read_input_tokens=0,  # Required for Anthropic cache stats logging
-        )
+        complete = AsyncMock(side_effect=[_http_error(401), _response(content="Backup response", model="claude-3-haiku-20240307")])
 
-        with patch('app.services.llm_gateway.get_tenant_providers') as mock_get_providers, \
-             patch('app.services.llm_gateway.litellm') as mock_litellm, \
-             patch('app.services.llm_gateway.settings') as mock_settings:
-            mock_settings.USE_PROVIDER_CACHING = True
-
-            mock_get_providers.return_value = [provider1, provider2]
-
-            # First call fails, second succeeds
-            mock_litellm.acompletion = AsyncMock(side_effect=[
-                Exception("Primary provider down"),
-                mock_response,
-            ])
-            mock_litellm.completion_cost.return_value = 0.00001
+        with patch('app.services.llm_gateway.get_tenant_providers', return_value=[provider1, provider2]), \
+             patch('app.services.llm_gateway.llm_direct.complete', new=complete):
 
             response = await gateway.complete(sample_request, tenant_id)
 
             assert response.provider_name == "backup-anthropic"
             assert response.content == "Backup response"
+            # provider1 called once (no retry), provider2 once.
+            assert complete.call_count == 2
 
     @pytest.mark.asyncio
     async def test_all_providers_fail(self, gateway, sample_request):
@@ -153,29 +168,16 @@ class TestLLMGateway:
         tenant_id = uuid4()
 
         provider1 = ProviderConfig(
-            id=uuid4(),
-            name="primary",
-            provider_type="openai",
-            api_base=None,
-            api_key="sk-1",
-            default_model="gpt-4o",
-            priority=0,
+            id=uuid4(), name="primary", provider_type="openai", api_base=None,
+            api_key="sk-1", default_model="gpt-4o", priority=0,
         )
         provider2 = ProviderConfig(
-            id=uuid4(),
-            name="backup",
-            provider_type="openai",
-            api_base=None,
-            api_key="sk-2",
-            default_model="gpt-4o",
-            priority=1,
+            id=uuid4(), name="backup", provider_type="openai", api_base=None,
+            api_key="sk-2", default_model="gpt-4o", priority=1,
         )
 
-        with patch('app.services.llm_gateway.get_tenant_providers') as mock_get_providers, \
-             patch('app.services.llm_gateway.litellm') as mock_litellm:
-
-            mock_get_providers.return_value = [provider1, provider2]
-            mock_litellm.acompletion = AsyncMock(side_effect=Exception("API Error"))
+        with patch('app.services.llm_gateway.get_tenant_providers', return_value=[provider1, provider2]), \
+             patch('app.services.llm_gateway.llm_direct.complete', new=AsyncMock(side_effect=_http_error(500))):
 
             with pytest.raises(AllProvidersFailedError) as exc_info:
                 await gateway.complete(sample_request, tenant_id)
@@ -196,9 +198,37 @@ class TestLLMGateway:
 
             assert "No LLM providers configured" in str(exc_info.value)
 
+    @pytest.mark.asyncio
+    async def test_breaker_ignores_4xx(self, gateway, sample_request, mock_provider):
+        """Client errors do not trip the circuit breaker."""
+        tenant_id = uuid4()
+        circuit = get_provider_circuit_breaker(f"llm:{tenant_id}:{mock_provider.name}")
 
-class TestProviderPrefixes:
-    """Test provider-specific model prefix handling."""
+        with patch('app.services.llm_gateway.get_tenant_providers', return_value=[mock_provider]), \
+             patch('app.services.llm_gateway.llm_direct.complete', new=AsyncMock(side_effect=_http_error(400))):
+            for _ in range(4):
+                with pytest.raises(AllProvidersFailedError):
+                    await gateway.complete(sample_request, tenant_id)
+
+        assert circuit.state.value == "closed"
+
+    @pytest.mark.asyncio
+    async def test_breaker_opens_on_repeated_5xx(self, gateway, sample_request, mock_provider):
+        """Repeated server errors trip the circuit breaker."""
+        tenant_id = uuid4()
+        circuit = get_provider_circuit_breaker(f"llm:{tenant_id}:{mock_provider.name}")
+
+        with patch('app.services.llm_gateway.get_tenant_providers', return_value=[mock_provider]), \
+             patch('app.services.llm_gateway.llm_direct.complete', new=AsyncMock(side_effect=_http_error(503))):
+            for _ in range(3):
+                with pytest.raises(AllProvidersFailedError):
+                    await gateway.complete(sample_request, tenant_id)
+
+        assert circuit.state.value == "open"
+
+
+class TestDirectRequestConstruction:
+    """The gateway maps an LLMRequest onto the direct layer's request."""
 
     @pytest.fixture
     def mock_db(self):
@@ -208,89 +238,93 @@ class TestProviderPrefixes:
     def gateway(self, mock_db):
         return LLMGateway(mock_db)
 
-    def test_openrouter_prefix(self, gateway):
-        """Test OpenRouter model prefix is added."""
+    @patch('app.services.llm_gateway.settings')
+    def test_caching_applied_for_anthropic(self, mock_settings, gateway):
+        """Anthropic caching extracts the system prompt and marks the last tool."""
+        mock_settings.USE_PROVIDER_CACHING = True
+
         request = LLMRequest(
-            messages=[{"role": "user", "content": "test"}],
-            model="gpt-4o",
-        )
-        provider = ProviderConfig(
-            id=uuid4(),
-            name="openrouter",
-            provider_type="openrouter",
-            api_base=None,
-            api_key="sk-or-test",
-            default_model="gpt-4o",
-            priority=0,
-        )
-
-        params = gateway._build_litellm_params(request, provider)
-
-        assert params["model"] == "openrouter/gpt-4o"
-
-    def test_anthropic_prefix(self, gateway):
-        """Test Anthropic model prefix is added for Claude models."""
-        request = LLMRequest(
-            messages=[{"role": "user", "content": "test"}],
+            messages=[
+                {"role": "system", "content": "Be helpful"},
+                {"role": "user", "content": "Hello"},
+            ],
             model="claude-3-5-sonnet-20241022",
         )
         provider = ProviderConfig(
-            id=uuid4(),
-            name="anthropic",
-            provider_type="anthropic",
-            api_base=None,
-            api_key="sk-ant-test",
-            default_model="claude-3-5-sonnet-20241022",
-            priority=0,
+            id=uuid4(), name="anthropic", provider_type="anthropic", api_base=None,
+            api_key="sk-ant-test", default_model="claude-3-5-sonnet-20241022", priority=0,
         )
 
-        params = gateway._build_litellm_params(request, provider)
+        direct_request = gateway._build_direct_request(request, provider)
 
-        assert params["model"] == "anthropic/claude-3-5-sonnet-20241022"
+        # System prompt should be extracted and have cache_control.
+        assert direct_request.system[0]["cache_control"] == {"type": "ephemeral"}
+        # Messages should not include the system message.
+        assert all(msg.get("role") != "system" for msg in direct_request.messages)
 
-    def test_no_prefix_for_openai(self, gateway):
-        """Test OpenAI models don't get prefixed."""
+    @patch('app.services.llm_gateway.settings')
+    def test_caching_not_applied_for_openai(self, mock_settings, gateway):
+        """Non-Anthropic providers keep the system message inline."""
+        mock_settings.USE_PROVIDER_CACHING = True
+
         request = LLMRequest(
-            messages=[{"role": "user", "content": "test"}],
+            messages=[
+                {"role": "system", "content": "Be helpful"},
+                {"role": "user", "content": "Hello"},
+            ],
             model="gpt-4o",
         )
         provider = ProviderConfig(
-            id=uuid4(),
-            name="openai",
-            provider_type="openai",
-            api_base=None,
-            api_key="sk-test",
-            default_model="gpt-4o",
-            priority=0,
+            id=uuid4(), name="openai", provider_type="openai", api_base=None,
+            api_key="sk-test", default_model="gpt-4o", priority=0,
         )
 
-        params = gateway._build_litellm_params(request, provider)
+        direct_request = gateway._build_direct_request(request, provider)
 
-        assert params["model"] == "gpt-4o"
+        assert direct_request.system is None
+        assert any(msg.get("role") == "system" for msg in direct_request.messages)
 
-    def test_custom_endpoint_includes_api_base(self, gateway):
-        """Test custom endpoints include api_base."""
+    @patch('app.services.llm_gateway.settings')
+    def test_caching_disabled_via_feature_flag(self, mock_settings, gateway):
+        """USE_PROVIDER_CACHING=False leaves the system message inline."""
+        mock_settings.USE_PROVIDER_CACHING = False
+
+        request = LLMRequest(
+            messages=[
+                {"role": "system", "content": "Be helpful"},
+                {"role": "user", "content": "Hello"},
+            ],
+            model="claude-3-5-sonnet-20241022",
+        )
+        provider = ProviderConfig(
+            id=uuid4(), name="anthropic", provider_type="anthropic", api_base=None,
+            api_key="sk-ant-test", default_model="claude-3-5-sonnet-20241022", priority=0,
+        )
+
+        direct_request = gateway._build_direct_request(request, provider)
+
+        assert direct_request.system is None
+
+    def test_custom_endpoint_passed_through(self, gateway):
+        """A custom api_base and model survive request construction untouched."""
         request = LLMRequest(
             messages=[{"role": "user", "content": "test"}],
             model="llama-3.1-70b",
+            max_tokens=128,
         )
         provider = ProviderConfig(
-            id=uuid4(),
-            name="vllm",
-            provider_type="custom",
-            api_base="http://localhost:8001/v1",
-            api_key="token",
-            default_model="llama-3.1-70b",
-            priority=0,
+            id=uuid4(), name="vllm", provider_type="custom", api_base="http://localhost:8001/v1",
+            api_key="token", default_model="llama-3.1-70b", priority=0,
         )
 
-        params = gateway._build_litellm_params(request, provider)
+        direct_request = gateway._build_direct_request(request, provider)
 
-        assert params["api_base"] == "http://localhost:8001/v1"
+        assert direct_request.model == "llama-3.1-70b"
+        assert direct_request.max_tokens == 128
 
 
-class TestCostEstimation:
-    """Test cost estimation fallback."""
+class TestCostCalculation:
+    """Cost comes from app/config/llm_pricing.py."""
 
     @pytest.fixture
     def mock_db(self):
@@ -300,68 +334,26 @@ class TestCostEstimation:
     def gateway(self, mock_db):
         return LLMGateway(mock_db)
 
-    def test_gpt4o_cost_estimation(self, gateway):
-        """Test GPT-4o cost estimation."""
-        cost = gateway._estimate_cost(
-            input_tokens=1000,
-            output_tokens=500,
-            model="gpt-4o",
-        )
+    def test_gpt4o_cost(self, gateway):
+        """GPT-4o is priced from the table."""
+        cost = gateway._calculate_cost(_response(model="gpt-4o", input_tokens=1000, output_tokens=500))
 
-        # 1000 input tokens * $2.5/1M + 500 output tokens * $10/1M
         expected = (1000 / 1_000_000 * 2.5) + (500 / 1_000_000 * 10.0)
         assert abs(cost - expected) < 0.0001
 
-    def test_gpt4o_mini_cost_estimation(self, gateway):
-        """Test GPT-4o-mini cost estimation.
+    def test_unknown_model_is_free_with_warning(self, gateway, caplog):
+        """An unknown model records cost 0 rather than guessing."""
+        import logging
+        caplog.set_level(logging.WARNING)
 
-        Note: The cost estimation uses substring matching, so 'gpt-4o-mini'
-        matches 'gpt-4o' first (which is conservative/safer pricing).
-        """
-        cost = gateway._estimate_cost(
-            input_tokens=1000,
-            output_tokens=500,
-            model="gpt-4o-mini",
-        )
+        cost = gateway._calculate_cost(_response(model="unknown-model-xyz"))
 
-        # Due to substring matching, gpt-4o-mini matches gpt-4o pricing
-        # This is a conservative estimate (higher than actual mini pricing)
-        expected = (1000 / 1_000_000 * 2.5) + (500 / 1_000_000 * 10.0)
-        assert abs(cost - expected) < 0.0001
-
-    def test_claude_cost_estimation(self, gateway):
-        """Test Claude 3.5 Sonnet cost estimation."""
-        cost = gateway._estimate_cost(
-            input_tokens=1000,
-            output_tokens=500,
-            model="claude-3-5-sonnet-20241022",
-        )
-
-        expected = (1000 / 1_000_000 * 3.0) + (500 / 1_000_000 * 15.0)
-        assert abs(cost - expected) < 0.0001
-
-    def test_unknown_model_uses_default(self, gateway):
-        """Test unknown models use conservative defaults."""
-        cost = gateway._estimate_cost(
-            input_tokens=1000,
-            output_tokens=500,
-            model="unknown-model-xyz",
-        )
-
-        # Default: $1/1M input + $2/1M output
-        expected = (1000 / 1_000_000 * 1.0) + (500 / 1_000_000 * 2.0)
-        assert abs(cost - expected) < 0.0001
+        assert cost == 0.0
+        assert "No pricing for model" in caplog.text
 
 
 class TestCircuitBreakerIntegration:
     """Test circuit breaker behavior with LLM Gateway."""
-
-    @pytest.fixture(autouse=True)
-    def clear_circuit_breakers(self):
-        """Clear circuit breaker cache."""
-        _circuit_breakers.clear()
-        yield
-        _circuit_breakers.clear()
 
     def test_circuit_breaker_creation(self):
         """Test circuit breaker is created for each provider key."""
@@ -388,26 +380,17 @@ class TestCircuitBreakerIntegration:
     async def test_skips_provider_with_open_circuit(self):
         """Test gateway skips providers with open circuits."""
         mock_db = AsyncMock()
+        mock_db.add = MagicMock()
         gateway = LLMGateway(mock_db)
         tenant_id = uuid4()
 
         provider1 = ProviderConfig(
-            id=uuid4(),
-            name="primary",
-            provider_type="openai",
-            api_base=None,
-            api_key="sk-1",
-            default_model="gpt-4o",
-            priority=0,
+            id=uuid4(), name="primary", provider_type="openai", api_base=None,
+            api_key="sk-1", default_model="gpt-4o", priority=0,
         )
         provider2 = ProviderConfig(
-            id=uuid4(),
-            name="backup",
-            provider_type="openai",
-            api_base=None,
-            api_key="sk-2",
-            default_model="gpt-4o",
-            priority=1,
+            id=uuid4(), name="backup", provider_type="openai", api_base=None,
+            api_key="sk-2", default_model="gpt-4o", priority=1,
         )
 
         # Open circuit for first provider
@@ -416,30 +399,23 @@ class TestCircuitBreakerIntegration:
         for _ in range(3):
             await circuit.record_failure(Exception("test"))
 
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content="backup response"))]
-        mock_response.model = "gpt-4o"
-        mock_response.usage = MagicMock(prompt_tokens=5, completion_tokens=10)
-
         request = LLMRequest(
             messages=[{"role": "user", "content": "test"}],
             model="gpt-4o",
         )
 
-        with patch('app.services.llm_gateway.get_tenant_providers') as mock_get_providers, \
-             patch('app.services.llm_gateway.litellm') as mock_litellm:
+        complete = AsyncMock(return_value=_response(content="backup response", model="gpt-4o"))
 
-            mock_get_providers.return_value = [provider1, provider2]
-            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
-            mock_litellm.completion_cost.return_value = 0.00001
+        with patch('app.services.llm_gateway.get_tenant_providers', return_value=[provider1, provider2]), \
+             patch('app.services.llm_gateway.llm_direct.complete', new=complete):
 
             response = await gateway.complete(request, tenant_id)
 
             # Should use backup since primary circuit is open
             assert response.provider_name == "backup"
 
-            # LiteLLM should only be called once (for backup)
-            assert mock_litellm.acompletion.call_count == 1
+            # The direct layer should only be called once (for backup)
+            assert complete.call_count == 1
 
 
 class TestProviderConnectionTest:
@@ -448,12 +424,9 @@ class TestProviderConnectionTest:
     @pytest.mark.asyncio
     async def test_successful_connection(self):
         """Test successful connection test."""
-        mock_response = MagicMock()
-        mock_response.model = "gpt-4o-mini"
-
-        with patch('app.services.llm_gateway.litellm') as mock_litellm:
-            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
-
+        with patch('app.services.llm_gateway.llm_direct.complete', new=AsyncMock(
+            return_value=_response(model="gpt-4o-mini"),
+        )):
             result = await verify_provider_connection(
                 provider_type="openai",
                 api_base=None,
@@ -467,9 +440,9 @@ class TestProviderConnectionTest:
     @pytest.mark.asyncio
     async def test_failed_connection(self):
         """Test failed connection test."""
-        with patch('app.services.llm_gateway.litellm') as mock_litellm:
-            mock_litellm.acompletion = AsyncMock(side_effect=Exception("Invalid API key"))
-
+        with patch('app.services.llm_gateway.llm_direct.complete', new=AsyncMock(
+            side_effect=Exception("Invalid API key"),
+        )):
             result = await verify_provider_connection(
                 provider_type="openai",
                 api_base=None,
@@ -481,14 +454,11 @@ class TestProviderConnectionTest:
             assert "Invalid API key" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_openrouter_prefix_in_test(self):
-        """Test OpenRouter prefix is applied during connection test."""
-        mock_response = MagicMock()
-        mock_response.model = "openrouter/gpt-4o"
+    async def test_openrouter_provider_used(self):
+        """Test the OpenRouter provider is what the direct layer receives."""
+        complete = AsyncMock(return_value=_response(model="openai/gpt-4o"))
 
-        with patch('app.services.llm_gateway.litellm') as mock_litellm:
-            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
-
+        with patch('app.services.llm_gateway.llm_direct.complete', new=complete):
             await verify_provider_connection(
                 provider_type="openrouter",
                 api_base=None,
@@ -496,8 +466,9 @@ class TestProviderConnectionTest:
                 model="gpt-4o",
             )
 
-            call_args = mock_litellm.acompletion.call_args
-            assert call_args.kwargs["model"] == "openrouter/gpt-4o"
+            direct_provider = complete.call_args.args[1]
+            assert direct_provider.provider_type == "openrouter"
+            assert direct_provider.api_key == "sk-or-test"
 
 
 class TestUsageLogging:
@@ -507,24 +478,15 @@ class TestUsageLogging:
     async def test_usage_record_created(self):
         """Test usage record is added to database."""
         mock_db = AsyncMock()
+        mock_db.add = MagicMock()
         gateway = LLMGateway(mock_db)
         tenant_id = uuid4()
         user_id = uuid4()
 
         provider = ProviderConfig(
-            id=uuid4(),
-            name="openai",
-            provider_type="openai",
-            api_base=None,
-            api_key="sk-test",
-            default_model="gpt-4o-mini",
-            priority=0,
+            id=uuid4(), name="openai", provider_type="openai", api_base=None,
+            api_key="sk-test", default_model="gpt-4o-mini", priority=0,
         )
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content="response"))]
-        mock_response.model = "gpt-4o-mini"
-        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20)
 
         request = LLMRequest(
             messages=[{"role": "user", "content": "test"}],
@@ -532,12 +494,10 @@ class TestUsageLogging:
             workflow_id=uuid4(),
         )
 
-        with patch('app.services.llm_gateway.get_tenant_providers') as mock_get_providers, \
-             patch('app.services.llm_gateway.litellm') as mock_litellm:
-
-            mock_get_providers.return_value = [provider]
-            mock_litellm.acompletion = AsyncMock(return_value=mock_response)
-            mock_litellm.completion_cost.return_value = 0.00005
+        with patch('app.services.llm_gateway.get_tenant_providers', return_value=[provider]), \
+             patch('app.services.llm_gateway.llm_direct.complete', new=AsyncMock(
+                 return_value=_response(input_tokens=10, output_tokens=20),
+             )):
 
             await gateway.complete(request, tenant_id, user_id)
 
@@ -670,92 +630,6 @@ class TestAnthropicPromptCaching:
 
         assert result["tools"] is None
 
-    @patch('app.services.llm_gateway.settings')
-    def test_caching_applied_for_anthropic(self, mock_settings, gateway):
-        """Verify caching is applied when USE_PROVIDER_CACHING=True and provider is Anthropic."""
-        mock_settings.USE_PROVIDER_CACHING = True
-
-        request = LLMRequest(
-            messages=[
-                {"role": "system", "content": "Be helpful"},
-                {"role": "user", "content": "Hello"},
-            ],
-            model="claude-3-5-sonnet-20241022",
-        )
-        provider = ProviderConfig(
-            id=uuid4(),
-            name="anthropic",
-            provider_type="anthropic",
-            api_base=None,
-            api_key="sk-ant-test",
-            default_model="claude-3-5-sonnet-20241022",
-            priority=0,
-        )
-
-        params = gateway._build_litellm_params(request, provider)
-
-        # System prompt should be extracted and have cache_control
-        assert "system" in params
-        assert params["system"][0]["cache_control"] == {"type": "ephemeral"}
-        # Messages should not include system message
-        assert all(msg.get("role") != "system" for msg in params["messages"])
-
-    @patch('app.services.llm_gateway.settings')
-    def test_caching_not_applied_for_openai(self, mock_settings, gateway):
-        """Verify caching is NOT applied for non-Anthropic providers."""
-        mock_settings.USE_PROVIDER_CACHING = True
-
-        request = LLMRequest(
-            messages=[
-                {"role": "system", "content": "Be helpful"},
-                {"role": "user", "content": "Hello"},
-            ],
-            model="gpt-4o",
-        )
-        provider = ProviderConfig(
-            id=uuid4(),
-            name="openai",
-            provider_type="openai",
-            api_base=None,
-            api_key="sk-test",
-            default_model="gpt-4o",
-            priority=0,
-        )
-
-        params = gateway._build_litellm_params(request, provider)
-
-        # System should NOT be extracted for OpenAI
-        assert "system" not in params
-        # Messages should still include system message
-        assert any(msg.get("role") == "system" for msg in params["messages"])
-
-    @patch('app.services.llm_gateway.settings')
-    def test_caching_disabled_via_feature_flag(self, mock_settings, gateway):
-        """Verify USE_PROVIDER_CACHING=False disables cache markers."""
-        mock_settings.USE_PROVIDER_CACHING = False
-
-        request = LLMRequest(
-            messages=[
-                {"role": "system", "content": "Be helpful"},
-                {"role": "user", "content": "Hello"},
-            ],
-            model="claude-3-5-sonnet-20241022",
-        )
-        provider = ProviderConfig(
-            id=uuid4(),
-            name="anthropic",
-            provider_type="anthropic",
-            api_base=None,
-            api_key="sk-ant-test",
-            default_model="claude-3-5-sonnet-20241022",
-            priority=0,
-        )
-
-        params = gateway._build_litellm_params(request, provider)
-
-        # No cache-related params when disabled
-        assert "system" not in params
-
 
 class TestCacheStatsLogging:
     """Test cache statistics logging."""
@@ -773,43 +647,18 @@ class TestCacheStatsLogging:
         import logging
         caplog.set_level(logging.INFO)
 
-        mock_response = MagicMock()
-        mock_response.usage = MagicMock(
-            input_tokens=1000,
-            cache_read_input_tokens=800,
-        )
-
-        gateway._log_cache_stats(mock_response, "anthropic")
+        gateway._log_cache_stats(_response(input_tokens=1000, cache_read=800), "anthropic")
 
         assert "Anthropic cache" in caplog.text
         assert "hit_rate=80.0%" in caplog.text
         assert "cached=800" in caplog.text
-
-    def test_log_anthropic_missing_cache_attrs(self, gateway, caplog):
-        """Verify graceful handling when cache attributes missing."""
-        import logging
-        caplog.set_level(logging.DEBUG)
-
-        mock_response = MagicMock()
-        mock_response.usage = MagicMock(spec=['input_tokens'])
-        mock_response.usage.input_tokens = 1000
-
-        gateway._log_cache_stats(mock_response, "anthropic")
-
-        assert "caching may not be enabled" in caplog.text
 
     def test_log_openai_cache_stats(self, gateway, caplog):
         """Verify cache stats are logged for OpenAI responses."""
         import logging
         caplog.set_level(logging.INFO)
 
-        mock_response = MagicMock()
-        mock_response.usage = MagicMock(
-            prompt_tokens=1000,
-        )
-        mock_response.usage.prompt_tokens_details = MagicMock(cached_tokens=500)
-
-        gateway._log_cache_stats(mock_response, "openai")
+        gateway._log_cache_stats(_response(input_tokens=1000, cache_read=500), "openai")
 
         assert "OpenAI cache" in caplog.text
         assert "cached=500" in caplog.text

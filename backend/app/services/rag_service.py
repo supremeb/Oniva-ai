@@ -7,7 +7,6 @@ import logging
 from typing import List, Dict, Any, Optional
 from uuid import UUID
 
-import litellm
 import numpy as np
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.encryption import get_encryption_service
 from app.models.llm_provider import LLMProvider
+from app.services import llm_direct
 from app.services.embedding_cache import get_embedding_cache
+from app.services.llm_direct import DirectProvider
 from app.services.llm_gateway import get_provider_from_model, normalize_model_id
 from app.services.query_augmentation import get_query_augmentation_service
 
@@ -106,12 +107,9 @@ class RAGService:
             if provider_type == "openrouter":
                 embedding = await self._openrouter_embedding(model, text_input, api_key)
             else:
-                response = await litellm.aembedding(
-                    model=model,
-                    input=[text_input],
-                    api_key=api_key,
-                )
-                embedding = response.data[0]["embedding"]
+                provider = DirectProvider(provider_type=provider_type, api_key=api_key)
+                vectors = await llm_direct.embed([text_input], provider, model=model)
+                embedding = vectors[0]
 
             # Truncate to 1536 dims if model returns larger vectors
             # (pgvector column is Vector(1536))
