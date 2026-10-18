@@ -126,6 +126,9 @@ import {
 
 export const WORKFLOW_RUN_KIND = "workflow_run";
 
+/** Cap on run-level retries (the backend scheduler allows at most 10); a larger request is clamped. */
+export const MAX_RUN_RETRIES = 10;
+
 export interface WorkflowRunInput {
   version: 1;
   runId: string;
@@ -257,7 +260,7 @@ export function parseRunInput(raw: unknown): WorkflowRunInput {
         "retry must be { max: non-negative integer, delayMs: non-negative number }",
       );
     }
-    retry = { max: r.max, delayMs: r.delayMs };
+    retry = { max: Math.min(r.max, MAX_RUN_RETRIES), delayMs: r.delayMs };
   }
   if (
     input.deadlineMs !== undefined &&

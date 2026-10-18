@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional
 import jmespath  # For payload mapping
 from simpleeval import EvalWithCompoundTypes  # Safe AST-based expression evaluation
 from sqlalchemy import func, select, and_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.webhook_trigger import WebhookTrigger, WebhookDelivery, generate_webhook_token
@@ -24,7 +25,6 @@ logger = logging.getLogger(__name__)
 
 WINDOW_SECONDS = 86400  # body-hash fallback bucket (KTD8)
 DEFAULT_TIMESTAMP_TOLERANCE_S = 300
-DEFAULT_IDEMPOTENCY_HEADER = "Idempotency-Key"
 
 
 def _utcnow() -> datetime:
@@ -123,8 +123,10 @@ class WebhookTriggerService:
             await self.db.commit()
             return {"status": 422, "message": "trigger_unowned", "error": "trigger_unowned"}
 
+        trigger_id, tenant_id = trigger.id, trigger.tenant_id  # plain values: a rolled-back insert expires the row
         key, permanent = self._idempotency_key(trigger, raw_body, request_body, request_headers)
         run_id = self._run_id(trigger, key, permanent, now)
+        earlier_ids = self._earlier_run_ids(trigger, key, permanent, now)
         request_id = f"wh:{trigger.id}:{key}"
         audit_key = request_id if len(request_id) <= 255 else f"wh:{trigger.id}:{hashlib.sha256(key.encode()).hexdigest()}"
 
@@ -136,17 +138,17 @@ class WebhookTriggerService:
 
         inputs = self._map_payload(trigger.payload_mapping or {}, request_body)
         if trigger.workflow_id is not None:
-            outcome = await self._dispatch_workflow(trigger, run_id, request_id, inputs)
+            outcome = await self._dispatch_workflow(trigger, run_id, request_id, inputs, earlier_ids, now)
         elif trigger.agent_id is not None:
-            outcome = await self._dispatch_agent(trigger, run_id, inputs)
+            outcome = await self._dispatch_agent(trigger, run_id, inputs, earlier_ids, now)
         else:
             outcome = {"status": 422, "message": "trigger has no target", "error": "trigger_no_target"}
 
         status = outcome["status"]
         execution_id = uuid.UUID(outcome["execution_id"]) if outcome.get("execution_id") else None
         await self._log_delivery(
-            trigger.id, source_ip, request_body, status, outcome.get("message"),
-            tenant_id=trigger.tenant_id, execution_id=execution_id,
+            trigger_id, source_ip, request_body, status, outcome.get("message"),
+            tenant_id=tenant_id, execution_id=execution_id,
             filter_matched=True, idempotency_key=audit_key)
         await self.db.commit()
         return outcome
@@ -244,13 +246,15 @@ class WebhookTriggerService:
 
     def _idempotency_key(self, trigger: WebhookTrigger, raw_body: bytes, payload: Any,
                          headers: dict) -> tuple[str, bool]:
-        """``(key, permanent)``: configured header, then the JMESPath into the body (both permanent), then the
-        SHA-256 of the raw body (bucketed by 24 h, KTD8)."""
+        """``(key, permanent)``: the JMESPath into the (signed) body, then the SHA-256 of the raw body (bucketed
+        by 24 h, KTD8). A header is unsigned, so replaying a captured body with another header must not start a
+        run: it is trusted only when the trigger names ``idempotency_header`` and sets
+        ``trust_idempotency_header`` (the sender or its gateway vouches for it)."""
         config = trigger.auth_config or {}
-        header = (config.get('idempotency_header') or DEFAULT_IDEMPOTENCY_HEADER).lower()
-        value = headers.get(header)
-        if value:
-            return str(value), True
+        if config.get('idempotency_header') and config.get('trust_idempotency_header') is True:
+            value = headers.get(str(config['idempotency_header']).lower())
+            if value:
+                return str(value), True
         expr = config.get('idempotency_key_path')
         if expr:
             try:
@@ -268,6 +272,22 @@ class WebhookTriggerService:
         bucket = math.floor(now.timestamp() / WINDOW_SECONDS)
         return uuid.uuid5(trigger.id, f"{key}:{bucket}")
 
+    @staticmethod
+    def _earlier_run_ids(trigger: WebhookTrigger, key: str, permanent: bool, now: datetime) -> list[uuid.UUID]:
+        """Ids a body-hash delivery may already have run under: the previous bucket (kept if under 24 h old)."""
+        if permanent:
+            return []
+        bucket = math.floor(now.timestamp() / WINDOW_SECONDS)
+        return [uuid.uuid5(trigger.id, f"{key}:{bucket - 1}")]
+
+    @staticmethod
+    def _recent(stamp: Optional[datetime], now: datetime) -> bool:
+        if stamp is None:
+            return False
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return now - stamp < timedelta(seconds=WINDOW_SECONDS)
+
     async def _check_rate_limit(self, trigger: WebhookTrigger, now: Optional[datetime] = None) -> bool:
         """Within the hourly limit? Counts rows in SQL rather than loading them."""
         cutoff = (now or _utcnow()) - timedelta(hours=1)
@@ -282,14 +302,20 @@ class WebhookTriggerService:
     # ---- dispatch -------------------------------------------------------------------------------
 
     async def _dispatch_workflow(self, trigger: WebhookTrigger, run_id: uuid.UUID, request_id: str,
-                                 inputs: dict) -> Dict[str, Any]:
+                                 inputs: dict, earlier_ids: Optional[list] = None,
+                                 now: Optional[datetime] = None) -> Dict[str, Any]:
         from fastapi import HTTPException
         from app.services import workflow_engine_runs as engine_runs
 
+        now = now or _utcnow()
         existing = await self.db.get(WorkflowExecution, run_id)
+        for earlier in ([] if existing is not None else (earlier_ids or [])):
+            row = await self.db.get(WorkflowExecution, earlier)
+            if row is not None and self._recent(row.started_at, now):
+                existing, run_id = row, earlier
+                break
         if existing is not None:
-            return {"status": 202, "message": "Already processed (idempotent)", "execution_id": str(run_id),
-                    "deduplicated": True}
+            return self._duplicate(run_id)
 
         workflow = (await self.db.execute(select(Workflow).where(
             Workflow.id == trigger.workflow_id, Workflow.tenant_id == trigger.tenant_id
@@ -306,29 +332,48 @@ class WebhookTriggerService:
                 execution, _task = await engine_runs.start_workflow_run(
                     self.db, workflow, spec, inputs, user_id=trigger.created_by, tenant_id=trigger.tenant_id,
                     trigger="webhook", request_key=request_id,
-                    version_id=version.id if version is not None else None, execution_id=run_id)
+                    version_id=version.id if version is not None else None, execution_id=run_id,
+                    settle_on_failure=False)
             except HTTPException as exc:
+                if exc.status_code == 502:
+                    # The row stays queued; the reconciler starts it. Answering an error would make the sender's
+                    # retry hit that row and be dropped as a duplicate.
+                    return {"status": 202, "message": "Accepted; workflow start pending", "execution_id": str(run_id),
+                            "deduplicated": False, "start_pending": True}
                 return {"status": exc.status_code, "message": "Workflow could not start",
                         "error": exc.detail if isinstance(exc.detail, str) else (exc.detail or {}).get("error"),
-                        "execution_id": str(run_id) if exc.status_code == 502 else None}
+                        "execution_id": None}
             return {"status": 202, "message": "Workflow triggered", "execution_id": str(execution.id),
                     "deduplicated": False}
 
-        execution = await self._trigger_workflow(
-            workflow_id=trigger.workflow_id, inputs=inputs, tenant_id=trigger.tenant_id,
-            user_id=trigger.created_by, execution_id=run_id)
+        try:
+            async with self.db.begin_nested():
+                execution = await self._trigger_workflow(
+                    workflow_id=trigger.workflow_id, inputs=inputs, tenant_id=trigger.tenant_id,
+                    user_id=trigger.created_by, execution_id=run_id)
+        except IntegrityError:  # a concurrent identical delivery inserted the row first
+            return self._duplicate(run_id)
         return {"status": 202, "message": "Workflow triggered", "execution_id": str(execution.id),
                 "deduplicated": False}
 
-    async def _dispatch_agent(self, trigger: WebhookTrigger, run_id: uuid.UUID, inputs: dict) -> Dict[str, Any]:
+    @staticmethod
+    def _duplicate(run_id: uuid.UUID, key: str = "execution_id") -> Dict[str, Any]:
+        return {"status": 202, "message": "Already processed (idempotent)", key: str(run_id), "deduplicated": True}
+
+    async def _dispatch_agent(self, trigger: WebhookTrigger, run_id: uuid.UUID, inputs: dict,
+                              earlier_ids: Optional[list] = None, now: Optional[datetime] = None) -> Dict[str, Any]:
         from app.models.background_job import BackgroundJob
         from app.models.custom_agent import CustomAgent
         from app.services import fleet_engine
         from app.services.background_dispatch import ConcurrentLimitExceeded, check_and_create_background_job
 
+        now = now or _utcnow()
         if await self.db.get(BackgroundJob, run_id) is not None:
-            return {"status": 202, "message": "Already processed (idempotent)", "job_id": str(run_id),
-                    "deduplicated": True}
+            return self._duplicate(run_id, "job_id")
+        for earlier in earlier_ids or []:
+            row = await self.db.get(BackgroundJob, earlier)
+            if row is not None and self._recent(row.created_at, now):
+                return self._duplicate(earlier, "job_id")
         agent = await self.db.get(CustomAgent, trigger.agent_id)
         if agent is None or agent.tenant_id != trigger.tenant_id:
             return {"status": 404, "message": "Agent not found", "error": "agent_not_found"}
@@ -343,6 +388,9 @@ class WebhookTriggerService:
                 max_concurrent=max_concurrent, trigger_type="webhook",
                 trigger_info={"type": "webhook", "trigger_id": str(trigger.id)},
                 input_data=job_input, job_id=run_id)
+        except IntegrityError:  # a concurrent identical delivery inserted the job first
+            await self.db.rollback()
+            return self._duplicate(run_id, "job_id")
         except ConcurrentLimitExceeded:
             # Documented: the sender gets 202 with queued=false and nothing was started.
             return {"status": 202, "message": "Agent at its concurrent run limit; delivery not started",

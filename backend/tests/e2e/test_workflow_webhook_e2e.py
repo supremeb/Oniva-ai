@@ -4,9 +4,9 @@ Same stack as test_workflow_engine_recovery.py. A trigger is created through the
 shown once), deliveries are signed over the raw bytes, and the workflow's HTTP node posts to the counting target:
 
   * a delivery whose bytes a re-serialization would change is accepted; one changed byte is rejected 401;
-  * the same ``Idempotency-Key`` delivered again, while the run is held and again after a worker kill, starts no
+  * the same signed body delivered again (whatever unsigned ``Idempotency-Key`` header it carries), while the run is held and again after a worker kill, starts no
     second run (``deduplicated: true``, the same execution id) and the node's POST happens once;
-  * a different key starts a second run;
+  * a different body starts a second run;
   * the database holds the encrypted secret (plus the plaintext until the contract migration).
 
 Skipped unless ONIVA_E2E=1.
@@ -89,13 +89,13 @@ def test_webhook_delivery_is_signed_over_raw_bytes_and_starts_one_run(world):
 
     row = wait_status(w, execution)
     time.sleep(3)
-    late = deliver(w, token, secret, raw, key="d-1")
+    late = deliver(w, token, secret, raw, key="d-replayed-with-another-header")
     assert late.json()["deduplicated"] is True and late.json()["execution_id"] == execution, late.text
     assert runs_of(w, wf) == [execution.replace("-", "")], "the same delivery key started more than one run"
     assert starts(w, "wh-1") == 1 and dones(w, "wh-1") == 1, "the node's POST did not happen exactly once"
     assert row["trigger"] == "webhook" and [t["status"] for t in row["trace"]] == ["success"] * 3, row["trace"]
 
-    other = deliver(w, token, secret, raw, key="d-2")
+    other = deliver(w, token, secret, b'{"z": 2}')
     assert other.status_code == 202 and other.json()["deduplicated"] is False
     assert other.json()["execution_id"] != execution
     wait_status(w, other.json()["execution_id"])
