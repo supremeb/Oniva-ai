@@ -620,7 +620,9 @@ async def settle_run(w, execution_id, status="completed", summaries=None):
     async with w.maker() as db:
         row = await db.get(WorkflowExecution, uuid.UUID(execution_id))
         moved = await wrs.apply_final(db, row, status, summaries=summaries or {"t": "success"})
+        callback = wrs.completion_callback(row) if moved else None
         await db.commit()
+    await wrs.send_completion_webhook(callback)
     return moved
 
 

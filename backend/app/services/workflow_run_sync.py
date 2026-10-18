@@ -147,29 +147,39 @@ async def apply_final(db, execution: WorkflowExecution, status: str, *, summarie
         execution.duration_ms = max(0, int((now - started).total_seconds() * 1000))
     await finish_scheduled(db, execution, status, attempts=attempts)
     await wer.close_wait_approvals(db, execution, f"run {status}")  # no node is waiting on a human any more
-    await send_completion_webhook(execution)
     return True
 
 
-async def send_completion_webhook(execution: WorkflowExecution) -> None:
-    """The run's completion callback (``request.webhook``), sent by the one call that moved the row. Never raises."""
+def completion_callback(execution: WorkflowExecution) -> Optional[Dict[str, Any]]:
+    """The run's completion callback (``request.webhook``) as send arguments, or None when it has none.
+
+    Built by the call that moved the row, before it commits, and sent with ``send_completion_webhook`` after the
+    commit: a slow receiver never holds the row lock, and a rolled-back settle sends nothing.
+    """
     hook = wer.completion_webhook(execution)
     if hook is None:
+        return None
+    total = execution.total_nodes or 0
+    return {
+        "config": WebhookConfig(url=hook["url"], secret=hook.get("secret"), headers=hook.get("headers") or {}),
+        "execution_id": str(execution.id), "tenant_id": str(execution.tenant_id),
+        "workflow_id": str(execution.workflow_id) if execution.workflow_id else None,
+        # The webhook service names the event from "success"; engine statuses say "completed".
+        "status": "success" if execution.status == "completed" else execution.status,
+        "results": execution.results or {}, "executed_nodes": execution.nodes_executed or 0, "total_nodes": total,
+        "execution_time_ms": execution.duration_ms,
+        "message": execution.error or f"Workflow executed: {execution.nodes_executed or 0}/{total} nodes",
+    }
+
+
+async def send_completion_webhook(callback: Optional[Dict[str, Any]]) -> None:
+    """Send a ``completion_callback`` once the settle has committed. Never raises."""
+    if callback is None:
         return
     try:
-        total = execution.total_nodes or 0
-        await get_webhook_service().send_completion_webhook(
-            config=WebhookConfig(url=hook["url"], secret=hook.get("secret"), headers=hook.get("headers") or {}),
-            execution_id=str(execution.id), tenant_id=str(execution.tenant_id),
-            workflow_id=str(execution.workflow_id) if execution.workflow_id else None,
-            # The webhook service names the event from "success"; engine statuses say "completed".
-            status="success" if execution.status == "completed" else execution.status,
-            results=execution.results or {}, executed_nodes=execution.nodes_executed or 0, total_nodes=total,
-            execution_time_ms=execution.duration_ms,
-            message=execution.error or f"Workflow executed: {execution.nodes_executed or 0}/{total} nodes",
-        )
+        await get_webhook_service().send_completion_webhook(**callback)
     except Exception:
-        logger.exception("workflow execution %s: completion webhook failed", execution.id)
+        logger.exception("workflow execution %s: completion webhook failed", callback["execution_id"])
 
 
 async def finalize(factory, tenant_id: Any, run_id: Any, body: Any) -> bool:
@@ -185,7 +195,9 @@ async def finalize(factory, tenant_id: Any, run_id: Any, body: Any) -> bool:
         moved = await apply_final(db, execution, body.status, summaries=dict(body.nodeSummaries), error=body.error,
                                   attempts=body.attempts)
         is_batch = execution.trigger == "batch"
+        callback = completion_callback(execution) if moved else None
         await db.commit()
+    await send_completion_webhook(callback)
     if moved and is_batch:
         # A batch settles with its run, not on the reconciler's next pass.
         from app.services import workflow_batch_engine  # lazy: it imports this module's neighbours
@@ -241,14 +253,20 @@ async def on_finished(ref: run_handlers.RunRef, snapshot: dict) -> None:
     outcome = _outcome(snapshot)
     if outcome is None or outcome in ("queued", "running", "waiting", "resuming"):
         return
+    callback = await _settle_finished(ref, snapshot, outcome)  # the session commits on leaving its block
+    await send_completion_webhook(callback)
+
+
+async def _settle_finished(ref: run_handlers.RunRef, snapshot: dict, outcome: str) -> Optional[Dict[str, Any]]:
+    """Settle the execution a finished run stands for; its completion callback when this call moved the row."""
     async with wer.tenant_factory(ref.tenant_id)() as db:
         execution = (await db.execute(
             select(WorkflowExecution).where(WorkflowExecution.id == ref.ref_id).with_for_update()
         )).scalar_one_or_none()
         if execution is None or execution.status in TERMINAL:
-            return  # a cancelled row stays cancelled; abort_pending is start_missing's
+            return None  # a cancelled row stays cancelled; abort_pending is start_missing's
         if execution.status == "queued":
-            return  # never started: start_missing's
+            return None  # never started: start_missing's
         view = await _view_of(ref, snapshot) if outcome == "completed" else None
         ended = run_ended(view) if view is not None else None
         if outcome == "completed" and ended == "aborted":
@@ -269,7 +287,8 @@ async def on_finished(ref: run_handlers.RunRef, snapshot: dict) -> None:
             status, error = "cancelled", execution.error or "Execution cancelled"
         else:
             status, error = "failed", snapshot.get("reason") or _DEFAULT_ERROR
-        await apply_final(db, execution, status, error=error)
+        moved = await apply_final(db, execution, status, error=error)
+        return completion_callback(execution) if moved else None
 
 
 def register_hooks() -> None:
