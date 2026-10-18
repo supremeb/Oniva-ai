@@ -59,11 +59,12 @@ SCRIPT = {
 
 
 def _with_deep_work_rules(script: dict) -> dict:
-    from tests.e2e import approval_script, dw_script, fleet_script
+    from tests.e2e import approval_script, dw_script, fleet_script, workflow_script
 
     # The approval rules refine tool_result rules of the generic chat ones (e2e_write), so they come first.
     return {**script, "rules": [*approval_script.build()["rules"], *script["rules"],
-                                *fleet_script.build()["rules"], *dw_script.build()["rules"]]}
+                                *fleet_script.build()["rules"], *dw_script.build()["rules"],
+                                *workflow_script.build()["rules"]]}
 
 
 _FLOOR = 20000
@@ -227,6 +228,8 @@ def stack():
                "E2E_OTHER_PROJECT_ID": str(w.other_project), "E2E_UNATTENDED": str(tmp / "unattended.txt"),
                # Fleet on the engine: the tenant opt-in is seeded; this is the global condition.
                "ENABLE_ENGINE_FLEET": "true",
+               # Workflows on the engine; the HTTP node may post to this backend's counting target.
+               "ENABLE_ENGINE_WORKFLOWS": "true", "HTTP_NODE_ALLOWED_URLS": f"http://127.0.0.1:{w.backend_port}/e2e/",
                # Deep Work on the engine: tenant opt-in is seeded; these are the global conditions.
                "ENABLE_ENGINE_API": "true", "ENABLE_ENGINE_DEEP_WORK": "true", "ENABLE_DEEP_WORK": "true",
                "ENABLE_SANDBOX": "true", "E2B_API_KEY": "e2b-FAKE-e2e", "SANDBOX_PROXY_URL": "http://proxy.invalid",

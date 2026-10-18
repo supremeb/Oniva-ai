@@ -565,3 +565,24 @@ def test_an_entry_node_takes_the_level_its_fanout_item_inherited():
     step = {"node_id": "b1", "run_attempt": 0, "classification": "confidential"}
     assert workflow_nodes.input_classification(view("b2", trace=[step]), 0).value == "confidential"
     assert workflow_nodes.input_classification(view("b1"), 0, DataClassification.CONFIDENTIAL).value == "confidential"
+
+
+async def test_a_fanout_item_run_binds_to_the_root_runs_conversation_without_a_body_scope(wf):
+    """The engine sends no scope for an item run (its nodes run in the container conversation of the root run)."""
+    item = uuid.uuid4()
+    async with wf.maker() as db:
+        db.add(WorkflowExecution(id=item, workflow_id=wf.wf_id, user_id=wf.user_a, tenant_id=wf.tenant_a,
+                                 status="pending", execution_trace=[],
+                                 input_data={"__parent_run_id": str(wf.run), "__fanout": "iteration", "item": "x"}))
+        await db.commit()
+    r = await call(wf, "t", run=str(item), body={"contractVersion": 1})
+    assert r.status_code == 200, r.text
+    assert wc.validate_prepare_response(r.json()).status == "success"
+    # An item of another tenant's run is not found for this one.
+    other = uuid.uuid4()
+    async with wf.maker() as db:
+        db.add(WorkflowExecution(id=other, workflow_id=wf.wf_id, user_id=wf.user_a, tenant_id=wf.tenant_a,
+                                 status="pending", execution_trace=[],
+                                 input_data={"__parent_run_id": str(uuid.uuid4()), "__fanout": "iteration"}))
+        await db.commit()
+    assert (await call(wf, "t", run=str(other), body={"contractVersion": 1})).status_code == 404

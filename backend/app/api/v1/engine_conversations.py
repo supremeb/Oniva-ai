@@ -22,8 +22,10 @@ from app.auth.providers.base import AuthUser
 from app.config import Settings
 from app.core.database import get_db
 from app.models.engine import EngineConversation
+from app.models.project import Project
 from app.models.tenant import Tenant
 from app.services.approval_service import ApprovalError, ApprovalService
+from app.services.automation_scope import is_automation_project
 from app.services.engine_chat_agent import AgentUnavailable, Selections, build_engine_chat_agent
 from app.services.chat_service import set_engine_conversation_title, touch_engine_conversation
 from app.services.feature_flags import engine_chat_enabled
@@ -342,6 +344,16 @@ def _legacy_cutoff_ms(request: Request) -> Optional[float]:
     return dt.timestamp() * 1000
 
 
+async def _may_decide_for_automation(db: AsyncSession, conv: EngineConversation, user: AuthUser) -> bool:
+    """A run's conversation lives in the tenant's hidden automation project, which nobody joins: tenant admins and
+    owners (the ledger row still decides who may decide what) are let in for those, so a workflow review that
+    its requester cannot approve himself can be decided by an admin."""
+    if user.role not in ("admin", "owner") or conv.run_kind is None:
+        return False
+    project = await db.get(Project, conv.project_id)
+    return project is not None and is_automation_project(project.settings)
+
+
 @router.post("/{conversation_id}/approvals/{tool_task_id}/decision")
 async def decide_approval(
     conversation_id: UUID,
@@ -363,7 +375,8 @@ async def decide_approval(
     conv = await db.get(EngineConversation, conversation_id)
     if conv is None or str(conv.tenant_id) != str(user.tenant_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
-    if await ProjectService(db).get_user_role(conv.project_id, UUID(str(user.id)), conv.tenant_id) is None:
+    if await ProjectService(db).get_user_role(conv.project_id, UUID(str(user.id)), conv.tenant_id) is None \
+            and not await _may_decide_for_automation(db, conv, user):
         raise HTTPException(status_code=403, detail="Not allowed on this conversation")
     svc = ApprovalService(db)
     row = await svc.get_by_task(conv.tenant_id, conv.conversation_id, tool_task_id)
