@@ -9,6 +9,10 @@ test can count real side effects and hold one in flight while the worker is kill
 It also mounts the Deep Work routes (``/api/v1/deep-work``) with the tenant opted in to engine Deep
 Work, and swaps the network pieces for the fakes in ``dw_fakes`` (web search, E2B, proxy tokens, Redis).
 
+It mounts the workflow routes (``/api/v1/workflows``, ``/api/v1/schedules``, ``/api/v1/webhooks``) with the tenant opted
+in to engine workflows, the node gateway (already part of the internal router), and a counting HTTP target
+(``/e2e/http/<post|hold|flaky>/<tag>``, logged to ``http.log``) that the workflow HTTP nodes post to.
+
 It mounts the Fleet routes (``/api/v1/background-jobs``, ``/api/v1/fleet``) with the tenant opted in to engine
 Fleet, bootstraps the run-handler registry (the ``/internal/runs/finished`` push is already part of the internal
 router) and runs the run reconciler. The seeded Fleet agent delivers to ``/e2e/webhook`` on this backend.
@@ -157,7 +161,8 @@ async def _seed():
     async with maker() as db:
         db.add(Tenant(id=TENANT, name="e2e", slug=f"e2e-{TENANT.hex[:6]}", is_active=True,
                       settings={"features": {"ENABLE_ENGINE_CHAT": True, "ENABLE_ENGINE_DEEP_WORK": True,
-                                             "ENABLE_ENGINE_FLEET": True}}))
+                                             "ENABLE_ENGINE_FLEET": True,
+                                             "ENABLE_ENGINE_WORKFLOWS": True}}))
         await db.commit()
         db.add(User(id=USER, tenant_id=TENANT, email="e2e@x.io", name="e2e"))
         await db.commit()
@@ -219,7 +224,7 @@ settings = Settings(
     ENGINE_SERVICE_TOKEN=E["ENGINE_SERVICE_TOKEN"], ENGINE_URL=E["ENGINE_URL"],
     ENGINE_SESSION_ID=E["ENGINE_SESSION_ID"], ENABLE_ENGINE_API=True,
     ENABLE_ENGINE_CHAT=True, ENABLE_ENGINE_DEEP_WORK=True, ENABLE_ENGINE_FLEET=True,
-    RUN_RECONCILE_INTERVAL_S=3, RUN_RECONCILE_AFTER_S=10)
+    ENABLE_ENGINE_WORKFLOWS=True, RUN_RECONCILE_INTERVAL_S=3, RUN_RECONCILE_AFTER_S=10)
 app = FastAPI(lifespan=lifespan)
 mount_internal_router(app, settings)
 assert mount_engine_conversations(app, settings)
@@ -374,12 +379,84 @@ async def _audit():
         for r in rows]}
 
 
+# --- Workflows: the real routes, node gateway, run sync and hooks on this process's SQLite database ---
+# (webhook triggers, schedules, the human-in-loop decision hook and the counting HTTP target all live here)
+import app.internal_api.workflow_nodes as _workflow_nodes  # noqa: E402
+import app.services.workflow_engine_runs as _wer  # noqa: E402
+from app.services import workflow_wait_decisions as _wait_decisions  # noqa: E402,F401  (the ``review`` decision hook)
+from app.api.v1 import schedules as _schedules  # noqa: E402
+from app.api.v1 import webhooks as _webhooks  # noqa: E402
+from app.api.v1 import workflows as _workflows  # noqa: E402
+from app.core.database import get_db_no_tenant  # noqa: E402
+from app.models.workflow import Workflow  # noqa: E402
+
+# A tenant session is a plain session on this database (Postgres RLS has no SQLite counterpart).
+_wer.get_db_for_tenant = lambda _tenant_id: factory()
+app.dependency_overrides[_workflow_nodes.get_tenant_session_factory] = lambda: (lambda _tenant_id: factory())
+app.dependency_overrides[get_db_no_tenant] = request_db
+# A sync run answers 202 {execution_id} instead of holding the request for two minutes.
+_wer.SYNC_WAIT_S, _wer.POLL_INTERVAL_S = 2.0, 0.2
+
+# SQLite ignores ``SELECT ... FOR UPDATE``, which Postgres uses to serialize two nodes recording into one trace.
+_trace_lock = asyncio.Lock()
+_record_trace = _workflow_nodes.record_trace
+
+
+async def _serialized_record_trace(*args, **kwargs):
+    async with _trace_lock:
+        await _record_trace(*args, **kwargs)
+
+
+_workflow_nodes.record_trace = _serialized_record_trace
+
+app.include_router(_workflows.router, prefix="/api/v1/workflows", tags=["workflows"])
+app.include_router(_schedules.router, prefix="/api/v1/schedules", tags=["schedules"])
+app.include_router(_webhooks.router, prefix="/api/v1", tags=["webhooks"])
+
+HTTP_LOG = DW.root / "http.log"
+
+
+@app.post("/e2e/workflows")
+async def _seed_workflow(payload: dict):
+    """Insert a saved workflow (the builder's save route needs more than this smoke boots)."""
+    async with factory() as db:
+        row = Workflow(id=uuid.UUID(payload["id"]) if payload.get("id") else uuid.uuid4(), user_id=USER,
+                       tenant_id=TENANT, name=payload.get("name", "e2e workflow"), spec=payload["spec"])
+        db.add(row)
+    return {"id": str(row.id)}
+
+
+def _gate_open(tag: str) -> bool:
+    return (DW.root / f"gate-{tag}").exists() or (DW.root / "gate-all").exists()
+
+
+@app.post("/e2e/http/{mode}/{tag}")
+async def _http_target(mode: str, tag: str):
+    """The outside world an HTTP node posts to. Every call is logged (``start``/``done``) and counted.
+
+    ``post``  answers at once. ``hold`` waits for ``gate-<tag>`` (or ``gate-all``) first, so a request can be in
+    flight while a process is killed. ``flaky`` answers 500 to the first call per tag and 200 afterwards.
+    """
+    DW.append(HTTP_LOG, f"start {tag}")
+    if mode == "hold":
+        while not _gate_open(tag):
+            await asyncio.sleep(0.05)
+    if mode == "flaky" and DW.lines(HTTP_LOG).count(f"start {tag}") == 1:
+        DW.append(HTTP_LOG, f"done {tag} 500")
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=500, content={"ok": False})
+    DW.append(HTTP_LOG, f"done {tag}")
+    return {"ok": True, "tag": tag}
+
+
 @app.get("/api/v1/auth/me")
 async def _me():
     return {"id": str(USER), "email": "e2e@x.io", "name": "e2e", "role": "analyst", "tenant_id": str(TENANT),
             "tenant_slug": "e2e", "groups": [], "is_platform_operator": False,
             "features": {"ENABLE_ENGINE_CHAT": True, "ENABLE_ENGINE_DEEP_WORK": True,
-                         "ENABLE_ENGINE_FLEET": True, "ENABLE_FLEET_DASHBOARD": True}}
+                         "ENABLE_ENGINE_FLEET": True, "ENABLE_FLEET_DASHBOARD": True,
+                         "ENABLE_ENGINE_WORKFLOWS": True}}
 
 
 @app.post("/api/v1/auth/refresh")

@@ -66,6 +66,7 @@ KEY_RE = re.compile(r"^(?P<run>[^:\s]+):(?P<node>[^:\s]+):r(?P<r>\d+):a(?P<a>\d+
 SCOPE_KEYS = ("tenantId", "projectId", "conversationId", "classification", "nodeType")
 PHASE_TOOL = {"prepare": "workflow_prepare", "finish": "workflow_finish"}
 RUN_OPTIONS_KEY = "__run_options"  # retry and deadline a run started with (U19); never a node variable
+MAX_ITEM_DEPTH = 8  # fan-out item runs nest at most this deep (sub-workflow depth is 3)
 SPEC_KEY = "__spec"  # the frozen spec a run started with, kept in its input_data (U15)
 INPUT_CLASS_KEY = "__classification"  # an iteration item's inherited input classification (U15)
 INTERRUPTED_FINAL: Dict[str, Any] = {
@@ -94,6 +95,7 @@ class Scope(BaseModel):
     conversationId: Optional[str] = None
     classification: Optional[str] = None
     nodeType: Optional[str] = None
+    rootRunId: Optional[str] = None  # derived: the run whose container conversation this run's nodes execute in
 
 
 class BodyScope(BaseModel):
@@ -229,21 +231,38 @@ async def bind_run(factory: SessionFactory, run: uuid.UUID, claimed: BodyScope) 
     async with factory() as db:
         execution = (
             await db.execute(
-                select(WorkflowExecution.tenant_id, WorkflowExecution.engine_conversation_id).where(
-                    WorkflowExecution.id == run
-                )
+                select(WorkflowExecution.tenant_id, WorkflowExecution.engine_conversation_id,
+                       WorkflowExecution.input_data).where(WorkflowExecution.id == run)
             )
         ).first()
         if execution is None:
             raise GatewayError(404, {"error": "run_not_found"})
+        # A fan-out item run (iteration, sub-workflow, batch item) has no conversation of its own: its nodes run
+        # in the container conversation of the root run, so the binding is found by following ``__parent_run_id``.
+        root_id, root_conversation, data = run, execution.engine_conversation_id, execution.input_data or {}
+        for _ in range(MAX_ITEM_DEPTH):
+            if root_conversation is not None or not data.get("__parent_run_id"):
+                break
+            parent = (
+                await db.execute(
+                    select(WorkflowExecution.id, WorkflowExecution.engine_conversation_id,
+                           WorkflowExecution.input_data).where(
+                        WorkflowExecution.id == uuid.UUID(str(data["__parent_run_id"])),
+                        WorkflowExecution.tenant_id == execution.tenant_id,
+                    )
+                )
+            ).first()
+            if parent is None:
+                break
+            root_id, root_conversation, data = parent.id, parent.engine_conversation_id, parent.input_data or {}
         conv = (
             await db.execute(
                 select(EngineConversation.conversation_id, EngineConversation.project_id)
                 .where(
                     EngineConversation.tenant_id == execution.tenant_id,
                     or_(
-                        EngineConversation.conversation_id == execution.engine_conversation_id,
-                        (EngineConversation.run_kind == "workflow") & (EngineConversation.run_ref_id == run),
+                        EngineConversation.conversation_id == root_conversation,
+                        (EngineConversation.run_kind == "workflow") & (EngineConversation.run_ref_id == root_id),
                     ),
                 )
                 .limit(1)
@@ -266,6 +285,7 @@ async def bind_run(factory: SessionFactory, run: uuid.UUID, claimed: BodyScope) 
         conversationId=conversation,
         classification=claimed.classification,
         nodeType=claimed.nodeType,
+        rootRunId=str(root_id),
     )
 
 
@@ -800,7 +820,7 @@ async def _handle(
                     )
                 )
             ).first()
-        if ref is not None and ref.run_kind == "workflow" and ref.run_ref_id != run:
+        if ref is not None and ref.run_kind == "workflow" and ref.run_ref_id != uuid.UUID(scope.rootRunId or str(run)):
             raise GatewayError(404, {"error": "conversation_not_found"})
 
     view = await load_run(tenants, tenant, run, node_id)
