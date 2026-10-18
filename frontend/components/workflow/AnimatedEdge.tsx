@@ -35,7 +35,7 @@ function AnimatedEdgeComponent({
     // Use string comparison to avoid TypeScript narrowing issues
     const isSourceRunning = sourceNodeStatus === 'running';
     const isTargetRunning = targetNodeStatus === 'running';
-    const isSourceComplete = sourceNodeStatus === 'complete';
+    const isSourceComplete = sourceNodeStatus === 'completed';
 
     const isActiveEdge = isExecuting && (
         isSourceRunning ||

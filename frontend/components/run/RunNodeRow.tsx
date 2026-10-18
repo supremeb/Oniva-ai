@@ -50,11 +50,13 @@ export interface RunNodeRowProps {
   childCount: number;
   onToggle: (id: string) => void;
   onKeyDown: (e: KeyboardEvent<HTMLElement>, node: RunNode) => void;
+  /** Controls for this node (for example Approve and Reject on a waiting node), shown under the row. */
+  actions?: ReactNode;
   /** Rendered after the row inside the same treeitem (the children group). */
   children?: ReactNode;
 }
 
-export const RunNodeRow = memo(function RunNodeRow({ node, depth, now, expanded, tabbable, childCount, onToggle, onKeyDown, children }: RunNodeRowProps) {
+export const RunNodeRow = memo(function RunNodeRow({ node, depth, now, expanded, tabbable, childCount, onToggle, onKeyDown, actions, children }: RunNodeRowProps) {
   const elapsed = elapsedOf(node, now);
   const tokens = totalTokens(node);
   const hasKids = childCount > 0;
@@ -105,6 +107,11 @@ export const RunNodeRow = memo(function RunNodeRow({ node, depth, now, expanded,
         <p className="text-[11px] text-neutral-500" style={{ paddingLeft: 8 + depth * 16 + 20 }}>
           {NOTE[node.status]}
         </p>
+      )}
+      {actions && (
+        <div className="py-1" style={{ paddingLeft: 8 + depth * 16 + 20 }}>
+          {actions}
+        </div>
       )}
       {node.error && (
         <p className="line-clamp-3 text-[11px] text-red-600" style={{ paddingLeft: 8 + depth * 16 + 20 }}>

@@ -1567,6 +1567,8 @@ class WorkflowLogSummary(BaseModel):
     total_nodes: Optional[int] = None
     error: Optional[str]
     progress: int
+    # Engine conversation that runs this execution (plan 003 U26): the UI follows its watch while the run is live.
+    engine_conversation_id: Optional[str] = None
 
 
 class WorkflowLogDetail(WorkflowLogSummary):

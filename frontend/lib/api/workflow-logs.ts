@@ -13,7 +13,7 @@ import { apiFetch } from './index';
 // Types
 // ============================================
 
-export type LogStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type LogStatus = 'pending' | 'queued' | 'running' | 'waiting' | 'resuming' | 'completed' | 'failed' | 'cancelled' | 'skipped' | 'interrupted';
 export type LogTrigger = 'manual' | 'api' | 'scheduled';
 export type TimeRange = '1h' | '24h' | '7d' | '30d';
 
@@ -22,7 +22,7 @@ export interface ExecutionTraceStep {
   node_id: string;
   node_type: string;
   node_name: string | null;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  status: 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'skipped' | 'interrupted';
   started_at: string | null;
   completed_at: string | null;
   duration_ms: number | null;
@@ -47,6 +47,8 @@ export interface WorkflowLogSummary {
   nodes_executed: number;
   error: string | null;
   progress: number;
+  /** The engine conversation running this execution; null/absent for legacy runs. */
+  engine_conversation_id?: string | null;
 }
 
 export interface WorkflowLogDetail extends WorkflowLogSummary {
@@ -161,6 +163,26 @@ export async function fetchWorkflowLogDetail(
   runId: string
 ): Promise<WorkflowLogDetail> {
   return apiFetch<WorkflowLogDetail>(`/api/v1/workflows/${workflowId}/logs/${runId}`);
+}
+
+/** A node of a run parked on a human decision (`GET /workflows/executions/{id}/waiting-nodes`, plan 003 U21). */
+export interface WaitingNode {
+  nodeId: string | null;
+  kind: string;
+  title: string;
+  status: string;
+  /** ISO wake time (the SLA), or null when open-ended. */
+  wakeAt: string | null;
+  approvalId: string;
+  conversationId: string | null;
+  taskId: string | null;
+}
+
+export async function fetchWaitingNodes(executionId: string): Promise<WaitingNode[]> {
+  const res = await apiFetch<{ executionId: string; nodes: WaitingNode[] }>(
+    `/api/v1/workflows/executions/${executionId}/waiting-nodes`
+  );
+  return res.nodes ?? [];
 }
 
 /**
