@@ -118,6 +118,7 @@ class WorkflowExecution(Base):
             "nodes_executed": self.nodes_executed or 0,
             "total_nodes": self.total_nodes,
             "error": self.error,
+            "engine_conversation_id": str(self.engine_conversation_id) if self.engine_conversation_id else None,
             "progress": 100 if self.status in ['completed', 'failed'] else (
                 int((self.nodes_executed / self.total_nodes) * 100) if self.total_nodes > 0 else 0
             ),

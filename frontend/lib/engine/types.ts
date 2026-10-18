@@ -148,6 +148,8 @@ export interface TaskView {
   phase: string;
   label?: string;
   attempt?: number;
+  /** A workflow run's `{ nodeId: status }` summary (success, failed, blocked, skipped). */
+  nodes?: { [nodeId: string]: string };
   /** ISO deadline of a waiting task that has one. */
   waitUntil?: string;
   startedAt: string;

@@ -53,6 +53,48 @@ function taskNode(id: string, t: TaskView): FlatRunNode {
   return node;
 }
 
+/** Engine `nodes` summary value of a workflow run -> run status. */
+function summaryStatus(v: string): RunStatus {
+  switch (v) {
+    case 'success':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    case 'skipped':
+    case 'blocked':
+      return 'skipped';
+    case 'running':
+      return 'running';
+    default:
+      return 'queued';
+  }
+}
+
+/**
+ * A workflow run's `nodes` summary names nodes that never got a task of their own (a skipped branch, a node
+ * blocked behind a failure). Give each a leaf under the run so the tree shows every node.
+ */
+function summaryNodes(runId: string, tasks: Record<string, TaskView>): FlatRunNode[] {
+  const run = tasks[runId];
+  if (!run?.nodes || typeof run.nodes !== 'object') return [];
+  const have = new Set<string>();
+  for (const t of Object.values(tasks)) if (t?.parentId === runId && t.label) have.add(t.label);
+  const out: FlatRunNode[] = [];
+  for (const [nodeId, value] of Object.entries(run.nodes)) {
+    if (have.has(nodeId) || typeof value !== 'string') continue;
+    out.push({
+      id: `${runId}:${nodeId}`,
+      parentId: runId,
+      kind: 'node',
+      label: nodeId,
+      status: summaryStatus(value),
+      startedAt: null,
+      endedAt: null,
+    });
+  }
+  return out;
+}
+
 function subagentNode(id: string, s: SubagentView, parentId: string): FlatRunNode {
   const node: FlatRunNode = {
     id,
@@ -78,7 +120,10 @@ function runStatusOf(view: ConversationView): RunStatus {
 export function viewToFlatNodes(view: ConversationView): FlatRunNode[] {
   const out: FlatRunNode[] = [];
   const tasks = obj(view.tasks) as Record<string, TaskView> | null;
-  if (tasks) for (const [id, t] of Object.entries(tasks)) if (obj(t)) out.push(taskNode(id, t));
+  if (tasks) {
+    for (const [id, t] of Object.entries(tasks)) if (obj(t)) out.push(taskNode(id, t));
+    for (const [id, t] of Object.entries(tasks)) if (obj(t) && t.kind === 'workflow_run') out.push(...summaryNodes(id, tasks));
+  }
 
   const subagents = obj(view.subagents) as Record<string, SubagentView> | null;
   const interrupted = (view.entries ?? []).filter((e) => {

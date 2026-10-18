@@ -10,9 +10,11 @@
 
 import { useQuery, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isActive, normalizeStatus } from '@/lib/run/status';
 import {
   fetchWorkflowLogs,
   fetchWorkflowLogDetail,
+  fetchWaitingNodes,
   fetchMonitoringMetrics,
   fetchTopWorkflows,
   fetchRecentFailures,
@@ -54,7 +56,7 @@ export function useWorkflowLogs(
     refetchInterval: (query) => {
       // Poll more frequently if there are running jobs
       const hasRunning = query.state.data?.logs.some(
-        (log) => log.status === 'running'
+        (log) => isActive(normalizeStatus(log.status, 'workflow_log'))
       );
       return hasRunning ? 3_000 : false; // 3s when running, disabled otherwise
     },
@@ -118,6 +120,26 @@ export function useWorkflowLogDetail(
     enabled: isValidWorkflowId && !!runId,
     staleTime: 30_000,
     gcTime: 5 * 60 * 1000,
+    // An unfinished run keeps refreshing (its trace grows and its status settles); a finished one stops.
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status && isActive(normalizeStatus(status, 'workflow_log')) ? 3_000 : false;
+    },
+  });
+}
+
+/**
+ * Nodes of a run parked on a human decision (plan 003 U21). Polls while enabled; an error (403 for someone who
+ * may not see the run, 404) simply yields no waiting nodes.
+ */
+export function useWaitingNodes(executionId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['workflow-waiting-nodes', executionId],
+    queryFn: () => fetchWaitingNodes(executionId!),
+    enabled: enabled && !!executionId,
+    staleTime: 0,
+    retry: false,
+    refetchInterval: 3_000,
   });
 }
 

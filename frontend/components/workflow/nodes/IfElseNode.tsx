@@ -7,6 +7,7 @@ import { useWorkflowStore } from '@/lib/stores/workflow';
 import { cn } from '@/lib/utils';
 import { NodeInspector } from './NodeInspector';
 import { NODE_THEMES } from './BaseNode';
+import { canvasDotClass, canvasRingClass, canvasStatusLabel } from '@/lib/run/canvasStatus';
 
 export interface IfElseCondition {
     id: string;
@@ -26,17 +27,10 @@ function IfElseNodeComponent({ id, data, selected }: NodeProps) {
     const nodeData = data as unknown as IfElseNodeData;
     const conditions = nodeData.conditions || [];
     const activeNodeId = useWorkflowStore((state) => state.activeNodeId);
-    const nodeStatus = useWorkflowStore((state) => state.nodeStatusMap[id] || 'pending');
+    const nodeStatus = useWorkflowStore((state) => state.nodeStatusMap[id]);
     const isActive = activeNodeId === id;
     const hasError = conditions.length === 0;
     const theme = NODE_THEMES.ifelse;
-
-    const statusClasses = {
-        pending: '',
-        running: 'ring-2 ring-blue-500 ring-offset-2 shadow-[0_0_20px_rgba(59,130,246,0.4)] animate-pulse',
-        complete: 'ring-2 ring-green-500 ring-offset-1 shadow-[0_0_12px_rgba(34,197,94,0.3)]',
-        error: 'ring-2 ring-red-500 ring-offset-1 shadow-[0_0_12px_rgba(239,68,68,0.3)]',
-    };
 
     return (
         <NodeInspector id={id}>
@@ -56,7 +50,7 @@ function IfElseNodeComponent({ id, data, selected }: NodeProps) {
                     // Active state
                     isActive && "scale-[1.02] z-50",
                     // Status states
-                    statusClasses[nodeStatus],
+                    canvasRingClass(nodeStatus),
                     // Min width for consistency
                     "min-w-[220px] max-w-[280px]"
                 )}
@@ -158,14 +152,14 @@ function IfElseNodeComponent({ id, data, selected }: NodeProps) {
                 </span>
 
                 {/* Status Indicator */}
-                {nodeStatus !== 'pending' && (
-                    <div className={cn(
-                        "absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full",
-                        "border-2 border-white shadow-sm z-50",
-                        nodeStatus === 'running' && "bg-blue-500 animate-pulse",
-                        nodeStatus === 'complete' && "bg-green-500",
-                        nodeStatus === 'error' && "bg-red-500"
-                    )} />
+                {canvasDotClass(nodeStatus) && (
+                    <div
+                        data-testid="node-status-dot"
+                        data-status={nodeStatus}
+                        title={canvasStatusLabel(nodeStatus) ?? undefined}
+                        className={cn("absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full",
+                        "border-2 border-white shadow-sm z-50", canvasDotClass(nodeStatus))}
+                    />
                 )}
             </div>
         </NodeInspector>

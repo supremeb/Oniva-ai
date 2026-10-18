@@ -15,18 +15,17 @@ import {
   CaretLeft,
   CaretDown,
   CaretRight,
-  CheckCircle,
   XCircle,
-  Clock,
-  CircleNotch,
   Copy,
   Download,
   Lightning,
   Code,
   Calendar,
-  WarningCircle,
 } from '@phosphor-icons/react';
-import { useWorkflowLogDetail } from '@/hooks/useWorkflowLogs';
+import { useWorkflowRunTree } from '@/hooks/useWorkflowRunTree';
+import { RunStatusBadge } from '@/components/run/RunStatusBadge';
+import { WorkflowRunTree } from './WorkflowRunTree';
+import { normalizeStatus } from '@/lib/run/status';
 import type { ExecutionTraceStep, WorkflowLogDetail } from '@/lib/api/workflow-logs';
 
 interface LogDetailViewProps {
@@ -34,15 +33,6 @@ interface LogDetailViewProps {
   runId: string;
   onBack: () => void;
 }
-
-const statusConfig: Record<string, { icon: typeof Clock; color: string; bg: string; label: string; animate?: boolean }> = {
-  pending: { icon: Clock, color: 'text-gray-400', bg: 'bg-gray-50', label: 'Pending' },
-  running: { icon: CircleNotch, color: 'text-blue-500', bg: 'bg-blue-50', label: 'Running', animate: true },
-  completed: { icon: CheckCircle, color: 'text-green-500', bg: 'bg-green-50', label: 'Success' },
-  failed: { icon: XCircle, color: 'text-red-500', bg: 'bg-red-50', label: 'Failed' },
-  cancelled: { icon: WarningCircle, color: 'text-orange-500', bg: 'bg-orange-50', label: 'Cancelled' },
-  skipped: { icon: Clock, color: 'text-gray-400', bg: 'bg-gray-50', label: 'Skipped' },
-};
 
 const triggerLabels = {
   manual: { icon: Lightning, label: 'Manual Run' },
@@ -70,7 +60,7 @@ function formatTime(isoString: string | null): string {
 }
 
 export function LogDetailView({ workflowId, runId, onBack }: LogDetailViewProps) {
-  const { data: log, isLoading, error } = useWorkflowLogDetail(workflowId, runId);
+  const { log, tree, waiting, decide, isLoading, error } = useWorkflowRunTree(workflowId, runId);
 
   if (isLoading) {
     return <LogDetailSkeleton onBack={onBack} />;
@@ -93,8 +83,7 @@ export function LogDetailView({ workflowId, runId, onBack }: LogDetailViewProps)
     );
   }
 
-  const config = statusConfig[log.status] || statusConfig.pending;
-  const StatusIcon = config.icon;
+  const status = normalizeStatus(log.status, 'workflow_log');
   const trigger = triggerLabels[log.trigger] || triggerLabels.manual;
   const TriggerIcon = trigger.icon;
 
@@ -103,15 +92,9 @@ export function LogDetailView({ workflowId, runId, onBack }: LogDetailViewProps)
       {/* Header with Back Button */}
       <Header onBack={onBack}>
         <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-full ${config.bg} flex items-center justify-center`}>
-            <StatusIcon
-              className={`h-5 w-5 ${config.color} ${config.animate ? 'animate-spin' : ''}`}
-              weight={log.status === 'running' ? 'regular' : 'fill'}
-            />
-          </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold">{config.label}</span>
+              <RunStatusBadge status={status} testId="log-detail-status" className="text-xs" />
               <Badge variant="outline" className="text-xs">
                 <TriggerIcon className="h-3 w-3 mr-1" />
                 {trigger.label}
@@ -161,10 +144,10 @@ export function LogDetailView({ workflowId, runId, onBack }: LogDetailViewProps)
             </CollapsibleSection>
           )}
 
-          {/* Execution Trace */}
+          {/* Run tree: engine tasks while live, the stored trace once finished */}
           <div className="border rounded-lg">
             <div className="flex items-center justify-between p-3 border-b bg-muted/30">
-              <span className="font-medium text-sm">Execution Trace</span>
+              <span className="font-medium text-sm">Run</span>
               <Button
                 variant="ghost"
                 size="sm"
@@ -175,18 +158,27 @@ export function LogDetailView({ workflowId, runId, onBack }: LogDetailViewProps)
                 Export JSON
               </Button>
             </div>
-            <div className="divide-y">
-              {log.execution_trace.length === 0 ? (
+            <div className="p-2">
+              {tree.length === 0 || (tree[0].children.length === 0 && log.execution_trace.length === 0) ? (
                 <div className="p-8 text-center text-muted-foreground text-sm">
                   No execution steps recorded
                 </div>
               ) : (
-                log.execution_trace.map((step, index) => (
-                  <ExecutionStepRow key={step.step_id || index} step={step} index={index} />
-                ))
+                <WorkflowRunTree tree={tree} waiting={waiting} onDecide={decide} aria-label="Workflow run" />
               )}
             </div>
           </div>
+
+          {/* Per-step input, output and token detail from the stored trace */}
+          {log.execution_trace.length > 0 && (
+            <CollapsibleSection title="Step details" defaultOpen={false}>
+              <div className="divide-y">
+                {log.execution_trace.map((step, index) => (
+                  <ExecutionStepRow key={step.step_id || index} step={step} index={index} />
+                ))}
+              </div>
+            </CollapsibleSection>
+          )}
         </div>
       </ScrollArea>
     </Card>
@@ -252,19 +244,13 @@ function CollapsibleSection({
 
 function ExecutionStepRow({ step, index }: { step: ExecutionTraceStep; index: number }) {
   const [isOpen, setIsOpen] = useState(step.status === 'failed');
-  const config = statusConfig[step.status] || statusConfig.pending;
-  const StatusIcon = config.icon;
-
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
         <button className="w-full p-3 text-left hover:bg-muted/50 transition-colors">
           <div className="flex items-center gap-3">
             <span className="text-xs text-muted-foreground w-6 text-right">{index + 1}</span>
-            <StatusIcon
-              className={`h-4 w-4 ${config.color} ${config.animate ? 'animate-spin' : ''}`}
-              weight={step.status === 'running' ? 'regular' : 'fill'}
-            />
+            <RunStatusBadge status={normalizeStatus(step.status, 'execution_trace')} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-sm truncate">
@@ -275,7 +261,7 @@ function ExecutionStepRow({ step, index }: { step: ExecutionTraceStep; index: nu
                 </Badge>
               </div>
             </div>
-            {step.duration_ms !== null && (
+            {step.duration_ms != null && (
               <span className="text-xs text-muted-foreground">
                 {formatDuration(step.duration_ms)}
               </span>

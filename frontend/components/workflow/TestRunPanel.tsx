@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +8,10 @@ import { Label } from '@/components/ui/label';
 import { X, Play, CheckCircle, XCircle, CircleNotch, Clock, ArrowRight } from '@phosphor-icons/react';
 import type { Node } from '@xyflow/react';
 import type { TestRunResult } from './types';
+import { WorkflowRunTree } from './WorkflowRunTree';
+import { useTestRunWaiting } from '@/hooks/useWorkflowRunTree';
+import { overlayWaiting } from '@/lib/run/adapters/workflowRun';
+import { liveRunToTree, type LiveRun } from '@/lib/run/workflowStream';
 
 // Re-export for backward compatibility
 export type { TestRunResult } from './types';
@@ -17,15 +21,28 @@ interface TestRunPanelProps {
     onClose: () => void;
     nodes: Node[];
     onRun: (inputs: Record<string, string>) => Promise<TestRunResult>;
+    /** The stream's per-node state, updated by the editor while the run goes (plan 003 U26). */
+    liveRun?: LiveRun;
+    workflowId?: string | null;
 }
 
 type TabType = 'input' | 'result' | 'detail' | 'tracing';
 
-export function TestRunPanel({ isOpen, onClose, nodes, onRun }: TestRunPanelProps) {
+export function TestRunPanel({ isOpen, onClose, nodes, onRun, liveRun, workflowId = null }: TestRunPanelProps) {
     const [activeTab, setActiveTab] = useState<TabType>('input');
     const [inputs, setInputs] = useState<Record<string, string>>({});
     const [isRunning, setIsRunning] = useState(false);
     const [result, setResult] = useState<TestRunResult | null>(null);
+    const startedAtRef = useRef(0);
+    const { waiting, decide } = useTestRunWaiting(workflowId, isRunning, startedAtRef.current);
+    const { tree, waiting: waitingByNode } = useMemo(() => {
+        const names: Record<string, string> = {};
+        for (const n of nodes) {
+            const label = (n.data as Record<string, unknown> | undefined)?.label;
+            if (typeof label === 'string' && label) names[n.id] = label;
+        }
+        return overlayWaiting(liveRun ? liveRunToTree(liveRun, names) : [], waiting);
+    }, [liveRun, nodes, waiting]);
 
     if (!isOpen) return null;
 
@@ -34,6 +51,7 @@ export function TestRunPanel({ isOpen, onClose, nodes, onRun }: TestRunPanelProp
     const inputVariables = (startNode?.data as Record<string, unknown>)?.variables as Array<{ name: string; type: string }> || [];
 
     const handleRun = async () => {
+        startedAtRef.current = Date.now();
         setIsRunning(true);
         setActiveTab('result');
 
@@ -131,6 +149,11 @@ export function TestRunPanel({ isOpen, onClose, nodes, onRun }: TestRunPanelProp
                                 <div className="flex flex-col items-center py-8">
                                     <CircleNotch className="h-8 w-8 animate-spin text-primary" />
                                     <p className="text-sm text-muted-foreground mt-2">Running workflow...</p>
+                                    {tree.length > 0 && (
+                                        <div className="mt-4 w-full">
+                                            <WorkflowRunTree tree={tree} waiting={waitingByNode} onDecide={decide} aria-label="Test run" />
+                                        </div>
+                                    )}
                                 </div>
                             ) : result ? (
                                 <div className="space-y-4">
@@ -212,7 +235,10 @@ export function TestRunPanel({ isOpen, onClose, nodes, onRun }: TestRunPanelProp
 
                     {activeTab === 'tracing' && (
                         <div className="space-y-2">
-                            {result?.nodeResults ? (
+                            {tree.length > 0 && (
+                                <WorkflowRunTree tree={tree} waiting={waitingByNode} onDecide={decide} aria-label="Test run" />
+                            )}
+                            {result?.nodeResults && result.nodeResults.length > 0 ? (
                                 result.nodeResults.map((node, index) => (
                                     <div key={node.nodeId} className="flex items-start gap-2">
                                         <div className="flex flex-col items-center">
@@ -237,7 +263,7 @@ export function TestRunPanel({ isOpen, onClose, nodes, onRun }: TestRunPanelProp
                                         </div>
                                     </div>
                                 ))
-                            ) : (
+                            ) : tree.length > 0 ? null : (
                                 <div className="text-center py-8 text-muted-foreground">
                                     <ArrowRight className="h-8 w-8 mx-auto opacity-50" />
                                     <p className="text-sm mt-2">Run the workflow to see tracing</p>

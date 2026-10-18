@@ -8,20 +8,19 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   MagnifyingGlass,
-  CheckCircle,
   XCircle,
   Clock,
-  CircleNotch,
   CaretRight,
   Lightning,
   Code,
   Calendar,
   ArrowClockwise,
-  WarningCircle,
 } from '@phosphor-icons/react';
 import { useWorkflowLogs, useLogStream } from '@/hooks/useWorkflowLogs';
 import { useWorkflowVersions } from '@/hooks/useWorkflowVersions';
 import { LogDetailView } from './LogDetailView';
+import { RunStatusBadge } from '@/components/run/RunStatusBadge';
+import { isActive, normalizeStatus, runStatusLabel } from '@/lib/run/status';
 import type {
   WorkflowLogSummary,
   LogFilterParams,
@@ -34,14 +33,6 @@ interface LogsPanelProps {
 
 type ViewMode = 'list' | 'detail';
 type StatusFilter = 'all' | 'success' | 'failed' | 'running';
-
-const statusConfig: Record<string, { icon: typeof Clock; color: string; bg: string; label: string; animate?: boolean }> = {
-  pending: { icon: Clock, color: 'text-gray-400', bg: 'bg-gray-50', label: 'Pending' },
-  running: { icon: CircleNotch, color: 'text-blue-500', bg: 'bg-blue-50', label: 'Running', animate: true },
-  completed: { icon: CheckCircle, color: 'text-green-500', bg: 'bg-green-50', label: 'Success' },
-  failed: { icon: XCircle, color: 'text-red-500', bg: 'bg-red-50', label: 'Failed' },
-  cancelled: { icon: WarningCircle, color: 'text-orange-500', bg: 'bg-orange-50', label: 'Cancelled' },
-};
 
 const triggerConfig = {
   manual: { icon: Lightning, label: 'Manual' },
@@ -267,8 +258,7 @@ interface LogListItemProps {
 }
 
 const LogListItem = React.memo(function LogListItem({ log, onClick }: LogListItemProps) {
-  const config = statusConfig[log.status] || statusConfig.pending;
-  const Icon = config.icon;
+  const status = normalizeStatus(log.status, 'workflow_log');
   const trigger = triggerConfig[log.trigger] || triggerConfig.manual;
   const TriggerIcon = trigger.icon;
 
@@ -283,25 +273,16 @@ const LogListItem = React.memo(function LogListItem({ log, onClick }: LogListIte
     <div
       role="button"
       tabIndex={0}
+      data-testid={`log-row-${log.id}`}
       className="p-4 hover:bg-muted/50 cursor-pointer flex items-center gap-4 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
       onClick={onClick}
       onKeyDown={handleKeyDown}
-      aria-label={`View details for ${config.label} log from ${formatTime(log.started_at)}`}
+      aria-label={`View details for ${runStatusLabel(status).toLowerCase()} log from ${formatTime(log.started_at)}`}
     >
-      <div className={`w-8 h-8 rounded-full ${config.bg} flex items-center justify-center`}>
-        <Icon
-          className={`h-4 w-4 ${config.color} ${config.animate ? 'animate-spin' : ''}`}
-          weight={log.status === 'running' ? 'regular' : 'fill'}
-          aria-hidden="true"
-        />
-      </div>
-
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium">{formatTime(log.started_at)}</span>
-          <span className={`text-xs px-1.5 py-0.5 rounded ${config.bg} ${config.color}`}>
-            {config.label}
-          </span>
+          <RunStatusBadge status={status} testId="log-status" />
           {log.version_number && (
             <span className="text-xs px-1.5 py-0.5 rounded bg-violet-50 text-violet-600 dark:bg-violet-950 dark:text-violet-400">
               v{log.version_number}
@@ -323,7 +304,7 @@ const LogListItem = React.memo(function LogListItem({ log, onClick }: LogListIte
         {log.nodes_executed > 0 && <div>{log.nodes_executed} nodes</div>}
       </div>
 
-      {log.status === 'running' && (
+      {isActive(status) && (
         <div className="text-sm font-medium text-blue-500">
           {log.progress}%
         </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { RunNode } from '@/lib/run/tree';
 import { isActive } from '@/lib/run/status';
 import { RunNodeRow } from './RunNodeRow';
@@ -15,6 +15,8 @@ export interface RunTreeProps {
   now?: number;
   className?: string;
   'aria-label'?: string;
+  /** Controls shown under a node's row (a waiting node's Approve and Reject). Return nothing for most nodes. */
+  renderActions?: (node: RunNode) => ReactNode;
 }
 
 interface Visible {
@@ -22,7 +24,7 @@ interface Visible {
   parentId: string | null;
 }
 
-export function RunTree({ nodes, now, className, 'aria-label': ariaLabel = 'Run tree' }: RunTreeProps) {
+export function RunTree({ nodes, now, className, 'aria-label': ariaLabel = 'Run tree', renderActions }: RunTreeProps) {
   // id -> explicit user choice; absent means "default by depth".
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [shown, setShown] = useState<Record<string, number>>({});
@@ -138,6 +140,7 @@ export function RunTree({ nodes, now, className, 'aria-label': ariaLabel = 'Run 
               expanded={expanded}
               tabbable={n.id === tabbableId}
               childCount={n.children.length}
+              actions={renderActions?.(n)}
               onToggle={(id) => toggle(id, depth)}
               onKeyDown={onKeyDown}
             >
