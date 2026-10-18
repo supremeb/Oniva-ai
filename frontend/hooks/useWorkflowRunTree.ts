@@ -45,17 +45,19 @@ export function useWaitingDecisions(executionId: string | null, enabled: boolean
 }
 
 /**
- * The execution a test run just started, found through the logs list (the stream only names its execution on
- * completion), with its waiting nodes. Only looks while `running`. Only manual runs qualify, so a scheduled or API
- * run of the same workflow is never picked up; another manual run started within the window still could be until
- * execute-stream reports `execution_id` in its first event (needs a backend change).
+ * The execution a test run just started, with its waiting nodes. Only looks while `running`.
+ *
+ * `executionId` is the id execute-stream reports in its first event; with it the run is known exactly. Without it
+ * (an older backend, or a legacy run) the execution is found through the logs list instead: only manual runs
+ * qualify, so a scheduled or API run of the same workflow is never picked up, though another manual run started
+ * within the window still could be.
  */
-export function useTestRunWaiting(workflowId: string | null, running: boolean, sinceMs: number) {
+export function useTestRunWaiting(workflowId: string | null, running: boolean, sinceMs: number, executionId: string | null = null) {
   const valid = !!workflowId && !workflowId.startsWith('local-');
   const latest = useQuery({
     queryKey: ['test-run-latest', workflowId],
     queryFn: () => fetchWorkflowLogs(workflowId!, { limit: 1, trigger: 'manual' }),
-    enabled: running && valid,
+    enabled: running && valid && !executionId,
     staleTime: 0,
     retry: false,
     refetchInterval: 2_000,
@@ -63,7 +65,8 @@ export function useTestRunWaiting(workflowId: string | null, running: boolean, s
   const log = latest.data?.logs[0];
   const fresh =
     running && log?.trigger === 'manual' && !!log.engine_conversation_id && Date.parse(log.started_at ?? '') >= sinceMs - 5_000 && isActive(normalizeStatus(log.status, 'workflow_log'));
-  return useWaitingDecisions(fresh && log ? log.id : null, fresh);
+  const known = running && !!executionId;
+  return useWaitingDecisions(known ? executionId : fresh && log ? log.id : null, known || fresh);
 }
 
 export interface WorkflowRunTreeState {

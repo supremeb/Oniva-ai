@@ -1,7 +1,7 @@
 /**
  * Live workflow stream (`POST /workflows/execute-stream`) -> per-node run state (plan 003, U26).
  *
- * Events (engine path, U17): `progress` (a node started), `node_complete`, `node_skipped`, `error`, `complete`.
+ * Events (engine path, U17): `started` (first; names the execution), `progress` (a node started), `node_complete`, `node_skipped`, `error`, `complete`.
  * The older `node_started` is accepted. Pure: each event returns a new state (or the same object when ignored).
  */
 import { normalizeStatus, RUN_STATUSES, type RunStatus } from './status';
@@ -19,6 +19,8 @@ export interface LiveRun {
   /** Node ids in the order they first appeared. */
   order: string[];
   activeNodeId: string | null;
+  /** The run's execution id, from the stream's first event (`started`) or its `complete`; null before. */
+  executionId: string | null;
   /** The run's final status once `complete` or `error` arrived. */
   ended: RunStatus | null;
   error?: string;
@@ -29,7 +31,7 @@ export interface StreamEvent {
   [key: string]: unknown;
 }
 
-export const emptyLiveRun = (): LiveRun => ({ nodes: {}, order: [], activeNodeId: null, ended: null });
+export const emptyLiveRun = (): LiveRun => ({ nodes: {}, order: [], activeNodeId: null, executionId: null, ended: null });
 
 const isRunStatus = (v: unknown): v is RunStatus => typeof v === 'string' && (RUN_STATUSES as readonly string[]).includes(v);
 
@@ -51,7 +53,10 @@ function put(run: LiveRun, id: string, node: LiveNodeState, active: string | nul
 
 export function applyStreamEvent(run: LiveRun, event: StreamEvent): LiveRun {
   const nodeId = typeof event.node_id === 'string' ? event.node_id : null;
+  if (typeof event.execution_id === 'string' && run.executionId === null) run = { ...run, executionId: event.execution_id };
   switch (event.type) {
+    case 'started':
+      return run;
     case 'node_started':
       return nodeId ? put(run, nodeId, { status: 'running' }, nodeId) : run;
     case 'progress': {

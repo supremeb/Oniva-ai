@@ -23,10 +23,10 @@ from app.models.scheduled_workflow import ScheduledWorkflow, ScheduledWorkflowEx
 from app.models.workflow import WorkflowExecution
 from app.services import run_handlers
 from app.services import workflow_engine_runs as wer
-from app.services.deep_work import engine_view
 from app.services.deep_work.engine_view import read_snapshot
 from app.services.engine_client import get_engine_client
-from app.services.run_status import from_engine_task
+from app.services.run_status import settled_status
+from app.services.webhook_service import WebhookConfig, get_webhook_service
 from app.services.workflow_stream_adapter import node_states, run_ended, run_task
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,29 @@ async def apply_final(db, execution: WorkflowExecution, status: str, *, summarie
         execution.duration_ms = max(0, int((now - started).total_seconds() * 1000))
     await finish_scheduled(db, execution, status, attempts=attempts)
     await wer.close_wait_approvals(db, execution, f"run {status}")  # no node is waiting on a human any more
+    await send_completion_webhook(execution)
     return True
+
+
+async def send_completion_webhook(execution: WorkflowExecution) -> None:
+    """The run's completion callback (``request.webhook``), sent by the one call that moved the row. Never raises."""
+    hook = wer.completion_webhook(execution)
+    if hook is None:
+        return
+    try:
+        total = execution.total_nodes or 0
+        await get_webhook_service().send_completion_webhook(
+            config=WebhookConfig(url=hook["url"], secret=hook.get("secret"), headers=hook.get("headers") or {}),
+            execution_id=str(execution.id), tenant_id=str(execution.tenant_id),
+            workflow_id=str(execution.workflow_id) if execution.workflow_id else None,
+            # The webhook service names the event from "success"; engine statuses say "completed".
+            status="success" if execution.status == "completed" else execution.status,
+            results=execution.results or {}, executed_nodes=execution.nodes_executed or 0, total_nodes=total,
+            execution_time_ms=execution.duration_ms,
+            message=execution.error or f"Workflow executed: {execution.nodes_executed or 0}/{total} nodes",
+        )
+    except Exception:
+        logger.exception("workflow execution %s: completion webhook failed", execution.id)
 
 
 async def finalize(factory, tenant_id: Any, run_id: Any, body: Any) -> bool:
@@ -162,23 +184,20 @@ async def finalize(factory, tenant_id: Any, run_id: Any, body: Any) -> bool:
             return False
         moved = await apply_final(db, execution, body.status, summaries=dict(body.nodeSummaries), error=body.error,
                                   attempts=body.attempts)
+        is_batch = execution.trigger == "batch"
         await db.commit()
-        return moved
+    if moved and is_batch:
+        # A batch settles with its run, not on the reconciler's next pass.
+        from app.services import workflow_batch_engine  # lazy: it imports this module's neighbours
+        await workflow_batch_engine.on_finished(
+            run_handlers.RunRef(kind=workflow_batch_engine.KIND, ref_id=run_id, tenant_id=wer._uuid(tenant_id)),
+            {"runStatus": body.status})
+    return moved
 
 
 def _outcome(snapshot: dict) -> Optional[str]:
     """The run status a settled snapshot stands for; None while the engine still has work or the status is unknown."""
-    status = snapshot.get("runStatus")
-    if status:
-        return status
-    if snapshot.get("source") == "push":
-        if snapshot.get("status") == "done":
-            return from_engine_task("terminal", outcome="done")
-        return from_engine_task("terminal", outcome="aborted" if snapshot.get("reason") == "aborted" else "faulted")
-    if snapshot.get("view") is not None:  # the reconciler calls once nothing is active
-        ended = engine_view.engine_run_state(snapshot["view"]).ended
-        return from_engine_task("terminal", outcome={"aborted": "aborted", "run_error": "faulted"}.get(ended, "done"))
-    return None
+    return settled_status(snapshot)
 
 
 async def _view_of(ref: run_handlers.RunRef, snapshot: dict) -> Optional[dict]:

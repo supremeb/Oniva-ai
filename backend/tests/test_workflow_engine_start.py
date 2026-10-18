@@ -575,3 +575,106 @@ async def test_concurrent_identical_starts_converge_on_one_row(w):
 
     results = await asyncio.gather(*[start_direct(w, w.user, {}, request_key="race") for _ in range(4)])
     assert len({e.id for e, _ in results}) == 1 and len(await executions(w)) == 1
+
+
+# ---- following a run past the sync window ---------------------------------------------------------------
+
+
+@pytest.fixture
+def hooks(monkeypatch):
+    from app.services import workflow_run_sync as wrs
+
+    h = Hooks()
+    monkeypatch.setattr(wrs, "get_webhook_service", lambda: h)
+    monkeypatch.setattr(wf_api, "is_url_safe", lambda url: None)
+    return h
+
+
+async def test_an_adhoc_202_run_is_followed_at_the_executions_route_without_leaking_bookkeeping(w, hooks):
+    w.engine.task = {"status": "running"}
+    async with client_for(make_app(w)) as c:
+        accepted = await c.post("/api/v1/workflows/execute",
+                                json={**EXECUTE, "webhook": {"url": "https://hooks.example.com/x", "secret": "s3cret"}})
+        assert accepted.status_code == 202
+        execution_id = accepted.json()["execution_id"]
+        got = await c.get(f"/api/v1/workflows/executions/{execution_id}")
+        missing = await c.get(f"/api/v1/workflows/executions/{uuid.uuid4()}")
+    assert got.status_code == 200 and missing.status_code == 404
+    body = got.json()
+    assert body["id"] == execution_id and body["workflow_id"] is None and body["status"] == "running"
+    assert body["input_data"] == {"name": "Ada"}  # no __spec / __run_options (the webhook secret)
+    assert "s3cret" not in got.text
+
+
+class Hooks:
+    def __init__(self):
+        self.calls = []
+
+    async def send_completion_webhook(self, **kw):
+        self.calls.append(kw)
+
+
+async def settle_run(w, execution_id, status="completed", summaries=None):
+    from app.services import workflow_run_sync as wrs
+
+    async with w.maker() as db:
+        row = await db.get(WorkflowExecution, uuid.UUID(execution_id))
+        moved = await wrs.apply_final(db, row, status, summaries=summaries or {"t": "success"})
+        await db.commit()
+    return moved
+
+
+async def test_the_completion_webhook_goes_out_once_when_a_run_past_the_window_settles(w, hooks):
+    w.engine.task = {"status": "running"}
+    async with client_for(make_app(w)) as c:
+        r = await c.post("/api/v1/workflows/execute", json={
+            **EXECUTE, "workflow_id": str(w.wf),
+            "webhook": {"url": "https://hooks.example.com/x", "secret": "s3cret", "headers": {"X-A": "1"}}})
+    assert r.status_code == 202
+    assert hooks.calls == []  # nothing yet: the run is still going
+    execution_id = r.json()["execution_id"]
+    assert await settle_run(w, execution_id) is True
+    assert await settle_run(w, execution_id, "failed") is False  # the row never moves twice
+    [call] = hooks.calls
+    assert call["config"].url == "https://hooks.example.com/x" and call["config"].secret == "s3cret"
+    assert call["config"].headers == {"X-A": "1"}
+    assert call["execution_id"] == execution_id and call["status"] == "success"
+    assert call["workflow_id"] == str(w.wf) and call["tenant_id"] == str(w.tenant)
+
+
+async def test_an_idempotent_replay_does_not_send_the_webhook_again(w, hooks):
+    body = {**EXECUTE, "workflow_id": str(w.wf), "webhook": {"url": "https://hooks.example.com/x"}}
+    async with client_for(make_app(w)) as c:
+        first = await c.post("/api/v1/workflows/execute", json=body, headers={"Idempotency-Key": "wh-1"})
+        eid = first.json()["execution_id"]
+        await settle_run(w, eid)
+        replay = await c.post("/api/v1/workflows/execute", json=body, headers={"Idempotency-Key": "wh-1"})
+    assert replay.json()["execution_id"] == eid
+    assert len(hooks.calls) == 1  # the one that moved the row; the replay sends nothing
+
+
+async def test_a_webhook_failure_never_changes_the_settled_run(w, monkeypatch):
+    from app.services import workflow_run_sync as wrs
+
+    class Boom:
+        async def send_completion_webhook(self, **kw):
+            raise RuntimeError("down")
+
+    monkeypatch.setattr(wrs, "get_webhook_service", lambda: Boom())
+    monkeypatch.setattr(wf_api, "is_url_safe", lambda url: None)
+    w.engine.task = {"status": "running"}
+    async with client_for(make_app(w)) as c:
+        r = await c.post("/api/v1/workflows/execute", json={**EXECUTE, "webhook": {"url": "https://hooks.example.com/x"}})
+    assert await settle_run(w, r.json()["execution_id"]) is True
+
+
+async def test_compliance_template_past_the_window_is_a_202_with_the_execution_id(w):
+    from app.templates.compliance import get_compliance_templates
+
+    w.engine.task = {"status": "running"}
+    template_id = get_compliance_templates()[0]["id"]
+    async with client_for(make_app(w)) as c:
+        r = await c.post(f"/api/v1/compliance/templates/{template_id}/execute", json={"template_id": "x", "inputs": {}})
+    assert r.status_code == 202
+    [row] = await executions(w)
+    assert r.json() == {"execution_id": str(row.id), "status": "running"}

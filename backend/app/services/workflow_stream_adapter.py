@@ -194,12 +194,18 @@ async def _frames(upstream: Any, deadline: float) -> AsyncIterator[dict]:
 async def watch_events(
     factory: Callable, execution_id: Any, task_id: Optional[str] = None, *, engine: Any = None,
     timeout_s: float = 300.0, poll_s: Optional[float] = None, reconnect_delay_s: Optional[float] = None,
+    announce: bool = False,
 ) -> AsyncIterator[dict]:
     """Orchestrator-shaped events for the engine run of ``execution_id``, from its container conversation's watch.
+
+    ``announce`` makes the first event ``{"type": "started", "execution_id": ...}``, so a client can follow the run
+    (waiting nodes, a late status read) before it completes.
 
     Raises ``asyncio.TimeoutError`` when the run is still going after ``timeout_s``.
     """
     execution_id = execution_id if isinstance(execution_id, uuid.UUID) else uuid.UUID(str(execution_id))
+    if announce:
+        yield {"type": "started", "execution_id": str(execution_id)}
     engine = engine or get_engine_client()
     deadline = time.monotonic() + timeout_s
     delay = RECONNECT_DELAY_S if reconnect_delay_s is None else reconnect_delay_s

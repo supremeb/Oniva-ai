@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
@@ -164,7 +164,9 @@ async def get_compliance_template(
     )
 
 
-@router.post("/templates/{template_id}/execute", response_model=ComplianceExecutionResponse)
+@router.post("/templates/{template_id}/execute", response_model=ComplianceExecutionResponse, responses={
+    202: {"description": "The run is still going after the sync window: `{execution_id, status}`. "
+                         "Follow it at `GET /workflows/executions/{execution_id}`."}})
 async def execute_compliance_template(
     template_id: str,
     request: ExecuteTemplateRequest,
@@ -189,6 +191,9 @@ async def execute_compliance_template(
         )
         outcome = await engine_runs.await_finished(db, execution, task_id)
         await db.refresh(execution)
+        if outcome is None and execution.status not in engine_runs.TERMINAL:
+            # Past the sync window: the run goes on; follow it at GET /workflows/executions/{execution_id}.
+            return JSONResponse(status_code=202, content={"execution_id": str(execution.id), "status": execution.status})
         results = engine_runs.results_from_trace(execution)
         return ComplianceExecutionResponse(
             execution_id=str(execution.id),

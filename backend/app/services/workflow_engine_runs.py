@@ -35,7 +35,7 @@ from app.models.tenant import Tenant
 from app.models.workflow import WorkflowExecution
 from app.services import run_handlers
 from app.services.automation_scope import RUN_NAMESPACE, bind_run_conversation, run_conversation_id
-from app.services.engine_client import EngineError, get_engine_client, run_start_body
+from app.services.engine_client import EngineError, get_engine_client, run_start_body, warm_engine_capability
 from app.services.feature_flags import engine_workflows_enabled
 from app.services.workflow_compiler import build_run_input, compile_for_run
 
@@ -95,6 +95,7 @@ async def tenant_uses_engine_workflows(db, tenant_id: Any) -> bool:
     """True when this tenant's workflow runs start on the engine. Any failure reads as off."""
     try:
         tenant = await db.get(Tenant, _uuid(tenant_id))
+        await warm_engine_capability()  # the flag check below reads the cache instead of probing on the loop
         return tenant is not None and engine_workflows_enabled(tenant) is True
     except Exception:
         logger.warning("engine workflows flag lookup failed for tenant %s", tenant_id, exc_info=True)
@@ -114,6 +115,13 @@ def settle(execution: WorkflowExecution, status: str, *, error: Optional[str] = 
     if error is not None:
         execution.error = error[:2000]
     return True
+
+
+def completion_webhook(execution: WorkflowExecution) -> Optional[Dict[str, Any]]:
+    """The ``{url, secret, headers}`` the run was started with, None when it has no completion callback."""
+    options = (execution.input_data or {}).get(RUN_OPTIONS_KEY)
+    hook = options.get("webhook") if isinstance(options, dict) else None
+    return hook if isinstance(hook, dict) and hook.get("url") else None
 
 
 def _failure_code(exc: EngineError) -> str:
@@ -199,6 +207,7 @@ async def start_workflow_run(
     retry: Optional[Dict[str, int]] = None,
     settle_on_failure: bool = True,
     execution_id: Any = None,
+    webhook: Optional[Dict[str, Any]] = None,
 ) -> tuple[WorkflowExecution, Optional[str]]:
     """Create the execution (``queued``), bind its conversation and start the engine run.
 
@@ -207,7 +216,8 @@ async def start_workflow_run(
     case the execution is committed ``failed`` with the code (never a dangling ``queued``).
     ``settle_on_failure=False`` (the scheduler) leaves it ``queued`` instead: the reconciler re-starts it with
     bounded retries and ``fail`` ends it. ``retry`` (``{max, delayMs}``) and ``deadline_ms`` (absolute epoch ms)
-    are run-level (U35) and are kept with the execution.
+    are run-level (U35) and are kept with the execution. ``webhook`` (``{url, secret, headers}``) is kept with them too:
+    the settle (``workflow_run_sync.apply_final``) sends the completion callback once, whenever the run ends.
     """
     tenant_id, user_id = _uuid(tenant_id), _uuid(user_id)
     workflow_id = getattr(workflow, "id", workflow)  # a workflow row, its id, or None (ad-hoc spec)
@@ -232,8 +242,10 @@ async def start_workflow_run(
         variables[SPEC_KEY] = spec
         if version_id is not None:
             variables["workflow_version_id"] = str(version_id)
-        if retry is not None or deadline_ms is not None:
-            variables[RUN_OPTIONS_KEY] = {k: v for k, v in (("retry", retry), ("deadlineMs", deadline_ms)) if v is not None}
+        options = {k: v for k, v in (("retry", retry), ("deadlineMs", deadline_ms), ("webhook", webhook))
+                   if v is not None}
+        if options:
+            variables[RUN_OPTIONS_KEY] = options
         existing = WorkflowExecution(
             id=execution_id, workflow_id=workflow_id, user_id=user_id, tenant_id=tenant_id,
             engine_conversation_id=run_conversation_id(KIND, execution_id),
@@ -326,7 +338,11 @@ async def cancel_workflow_run(db, execution: WorkflowExecution, reason: Optional
         return False
     settled = await abort_run(db, execution, reason, engine=engine)
     set_abort_pending(execution, not settled)
-    settle(execution, "cancelled", error=reason or "Execution cancelled by user")
+    if settle(execution, "cancelled", error=reason or "Execution cancelled by user") \
+            and execution.trigger == "scheduled":
+        # The scheduled-run row ends with its execution, or the schedule stays blocked behind it.
+        from app.services import workflow_run_sync  # lazy: it imports this module
+        await workflow_run_sync.finish_scheduled(db, execution, "cancelled")
     # A node parked on a human decision has nothing left to wait for (plan 003 U21).
     await close_wait_approvals(db, execution, "run cancelled")
     return True

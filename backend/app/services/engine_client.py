@@ -4,6 +4,7 @@ The backend authenticates browser users and calls the engine as a service: beare
 ``ENGINE_SERVICE_TOKEN`` plus ``X-Oniva-Tenant`` / ``X-Oniva-Project`` taken from the recorded
 conversation binding, and ``X-Oniva-Principal`` on approval decisions.
 """
+import asyncio
 import logging
 import time
 from typing import Any, Optional
@@ -82,6 +83,17 @@ def engine_has_capability(settings: Settings, kinds: tuple[str, ...] = ()) -> bo
         _store_caps(url, caps)
     return (caps is not None and caps["apiVersion"] >= REQUIRED_API_VERSION
             and all(k in caps["taskKinds"] for k in kinds))
+
+
+async def warm_engine_capability(settings: Optional[Settings] = None) -> None:
+    """Fill the capability cache without blocking the event loop (the probe is sync I/O, so it runs in a thread).
+
+    Async request paths call this before the sync flag helpers; those then read the cache.
+    """
+    settings = settings if settings is not None else get_settings()
+    url = (settings.ENGINE_URL or "").rstrip("/")
+    if url and not _cached_caps(url)[0]:
+        await asyncio.to_thread(engine_has_capability, settings)
 
 
 def run_start_body(kind: str, conversation_id: Any, run_input: Any, *, agent: Optional[dict] = None) -> dict:

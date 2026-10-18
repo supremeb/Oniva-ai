@@ -216,3 +216,29 @@ async def test_signal_task_and_get_task_routes():
                        {"key": "approval", "payload": {"decision": "approve"}})
     assert seen[1][:2] == ("GET", "/v1/conversations/c1/tasks/t1")
     await c.aclose()
+
+
+async def test_warm_probes_in_a_thread_not_on_the_event_loop_and_fills_the_cache(health, monkeypatch):
+    import threading
+
+    idents = []
+    inner = health.handler
+
+    def handler(request):
+        idents.append(threading.get_ident())
+        return inner(request)
+
+    monkeypatch.setattr(ec, "_probe_transport", httpx.MockTransport(handler))
+    s = cfg()
+    await ec.warm_engine_capability(s)
+    assert health.calls == 1 and idents and idents[0] != threading.get_ident()
+    await ec.warm_engine_capability(s)  # fresh: no second probe
+    assert ec.engine_has_capability(s, tuple(WF_KINDS)) is True and health.calls == 1
+    health.now += 61.0  # expired: the next warm probes again, still off the loop
+    await ec.warm_engine_capability(s)
+    assert health.calls == 2 and all(i != threading.get_ident() for i in idents)
+
+
+async def test_warm_without_an_engine_url_does_nothing(health):
+    await ec.warm_engine_capability(cfg(ENGINE_URL=""))
+    assert health.calls == 0

@@ -35,6 +35,7 @@ from app.services import run_handlers
 from app.services import workflow_engine_runs as wer
 from app.services.automation_scope import bind_run_conversation, run_conversation_id
 from app.services.engine_client import EngineError, run_start_body
+from app.services.run_status import settled_status
 from app.services.webhook_service import WebhookConfig, WebhookPayload, WebhookService
 from app.services.workflow_compiler import build_run_input, compile_for_run, resolve_spec
 
@@ -402,7 +403,9 @@ async def on_finished(ref: run_handlers.RunRef, snapshot: dict) -> None:
     moves it sends the completion webhook."""
     if ref.tenant_id is None:
         return
-    run_status = snapshot.get("status") or snapshot.get("runStatus")
+    run_status = settled_status(snapshot)  # not the raw push status ("done" / "unanswered")
+    if run_status is None or run_status in ("queued", "running", "waiting", "resuming"):
+        return
     async with tenant_factory(ref.tenant_id)() as db:
         batch = await db.get(WorkflowBatch, ref.ref_id, with_for_update=True)
         if batch is None or batch.status in TERMINAL_BATCH:

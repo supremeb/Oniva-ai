@@ -115,7 +115,11 @@ async def test_execute_stream_on_the_engine_starts_one_run_and_streams_legacy_ev
         r = await c.post("/api/v1/workflows/execute-stream", json={**EXECUTE, "workflow_id": str(w.wf)})
     assert r.status_code == 200
     events = [json.loads(line[6:]) for line in r.text.splitlines() if line.startswith("data: ")]
-    assert [e["type"] for e in events][0] == "progress" and events[-1]["type"] == "complete"
+    async with w.maker() as db:
+        [row] = (await db.execute(select(WorkflowExecution))).scalars().all()
+    # The first event names the execution, so a client can follow the run before it completes.
+    assert events[0] == {"type": "started", "execution_id": str(row.id)}
+    assert [e["type"] for e in events][1] == "progress" and events[-1]["type"] == "complete"
     assert [e["node_id"] for e in events if e["type"] == "node_complete"] == ["s", "t", "o"]
     assert len(w.engine.starts) == 1
     async with w.maker() as db:

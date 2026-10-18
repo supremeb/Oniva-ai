@@ -128,7 +128,9 @@ class WorkflowExecution(Base):
         """Convert to detailed log for API response."""
         summary = self.to_log_summary()
         summary.update({
-            "input_data": self.input_data,
+            # Backend bookkeeping (``__spec``, ``__run_options`` with the webhook secret) is not for API readers.
+            "input_data": {k: v for k, v in self.input_data.items() if not str(k).startswith("__")}
+            if isinstance(self.input_data, dict) else self.input_data,
             "result": self.results,
             "execution_trace": self.execution_trace or [],
         })

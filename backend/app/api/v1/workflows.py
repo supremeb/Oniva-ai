@@ -329,12 +329,13 @@ async def _engine_run_response(
     request_key: Optional[str],
     version_id: Optional[uuid.UUID] = None,
     label: str = "Workflow",
+    webhook: Optional[Dict[str, Any]] = None,
 ):
     """Start the run on the engine and wait (bounded) for it: ``WorkflowResult`` when it finishes,
     ``202 {execution_id, status}`` while it is still going (plan 003 U15)."""
     execution, task_id = await engine_runs.start_workflow_run(
         db, workflow, workflow_spec, inputs, user_id=user_id, tenant_id=tenant_id,
-        trigger=trigger, request_key=request_key, version_id=version_id,
+        trigger=trigger, request_key=request_key, version_id=version_id, webhook=webhook,
     )
     outcome = None
     if execution.status == "running":
@@ -364,7 +365,10 @@ async def _engine_run_response(
 
 # --- Endpoints ---
 
-@router.post("/execute", response_model=WorkflowResult)
+@router.post("/execute", response_model=WorkflowResult, responses={
+    202: {"description": "The run is still going after the sync window: `{execution_id, status}`. "
+                         "Follow it at `GET /workflows/executions/{execution_id}`; a configured `webhook` is "
+                         "called once when it ends."}})
 async def execute_workflow(
     request: ExecuteWorkflowRequest,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
@@ -412,21 +416,9 @@ async def execute_workflow(
             inputs=input_variables,
             nodes_dict={n.id: n for n in request.nodes},
             user_id=user_id, tenant_id=tenant_id, trigger="manual", request_key=idempotency_key,
+            # Persisted with the run: the settle sends the completion callback once, whenever the run ends.
+            webhook=request.webhook.model_dump(exclude_none=True) if request.webhook else None,
         )
-        if request.webhook and isinstance(engine_result, WorkflowResult):
-            await get_webhook_service().send_completion_webhook(
-                config=WebhookConfig(
-                    url=request.webhook.url, secret=request.webhook.secret, headers=request.webhook.headers or {}
-                ),
-                execution_id=engine_result.execution_id or str(uuid.uuid4()),
-                tenant_id=str(tenant_id),
-                workflow_id=str(request.workflow_id) if request.workflow_id else None,
-                status=engine_result.status,
-                results=engine_result.results,
-                executed_nodes=engine_result.executed_nodes,
-                total_nodes=engine_result.total_nodes,
-                message=engine_result.message,
-            )
         return engine_result
 
     try:
@@ -561,7 +553,8 @@ async def execute_workflow_stream(
             {"nodes": [n.model_dump() for n in request.nodes], "edges": [e.model_dump() for e in request.edges]},
             dict(input_variables), user_id=user_id, tenant_id=tenant_id, trigger="manual",
         )
-        updates = workflow_stream_adapter.watch_events(engine_runs.tenant_factory(tenant_id), execution.id, task_id)
+        updates = workflow_stream_adapter.watch_events(engine_runs.tenant_factory(tenant_id), execution.id, task_id,
+                                                       announce=True)
 
         async def engine_event_stream():
             try:
@@ -1096,7 +1089,9 @@ class RunWorkflowRequest(BaseModel):
     user: Optional[str] = None  # User identifier for logging
 
 
-@router.post("/{workflow_id}/run", response_model=WorkflowResult)
+@router.post("/{workflow_id}/run", response_model=WorkflowResult, responses={
+    202: {"description": "The run is still going after the sync window: `{execution_id, status}`. "
+                         "Follow it at `GET /workflows/executions/{execution_id}`."}})
 async def run_saved_workflow(
     workflow_id: uuid.UUID,
     request: RunWorkflowRequest,
@@ -2364,6 +2359,27 @@ async def cancel_batch(
 # ============================================
 # Execution Cancellation Endpoint (Enterprise)
 # ============================================
+
+@router.get("/executions/{execution_id}", response_model=WorkflowLogDetail)
+async def get_execution(
+    execution_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
+):
+    """Status and result of one run by its id, saved or ad-hoc.
+
+    This is where a ``202 {execution_id}`` from ``/execute``, ``/{id}/run`` or a compliance template run is
+    followed up. Same shape as the log detail.
+    """
+    execution = (await db.execute(
+        select(WorkflowExecution).where(WorkflowExecution.id == execution_id,
+                                        WorkflowExecution.tenant_id == tenant_id)
+    )).scalars().first()
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    return WorkflowLogDetail(**execution.to_log_detail())
+
 
 @router.get("/executions/{execution_id}/waiting-nodes")
 async def list_waiting_nodes(

@@ -3,6 +3,15 @@ import { applyStreamEvent, emptyLiveRun, liveRunToTree } from '../workflowStream
 const run = (events: Array<Record<string, unknown>>) => events.reduce((r, e) => applyStreamEvent(r, e as { type: string }), emptyLiveRun());
 
 describe('applyStreamEvent', () => {
+  it('the first event names the execution and adds no node; a later id never replaces it', () => {
+    let r = run([{ type: 'started', execution_id: 'ex-1' }]);
+    expect(r.executionId).toBe('ex-1');
+    expect(r.order).toEqual([]);
+    r = applyStreamEvent(r, { type: 'complete', status: 'completed', execution_id: 'ex-2', results: {} });
+    expect(r.executionId).toBe('ex-1');
+    expect(emptyLiveRun().executionId).toBeNull();
+  });
+
   it('progress marks a node running and active; node_complete settles it', () => {
     let r = run([{ type: 'progress', node_id: 'a', status: 'running' }]);
     expect(r.nodes.a.status).toBe('running');

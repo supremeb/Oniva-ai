@@ -44,6 +44,7 @@ class FleetRunItem(BaseModel):
     triggered_by: Optional[dict] = None
     progress: int
     conversation_id: Optional[str] = None
+    engine: bool = False  # True when the job runs on the engine
     input_data: Optional[dict] = None
     result: Optional[dict] = None
     error: Optional[str] = None
@@ -65,6 +66,31 @@ class FleetRunsResponse(BaseModel):
 # ========================================
 # Endpoints
 # ========================================
+
+def _run_item(job: BackgroundJob, agent_info: dict) -> FleetRunItem:
+    engine_job = fleet_engine.is_engine_job(job)
+    return FleetRunItem(
+        id=str(job.id),
+        agent_id=str(job.agent_id) if job.agent_id else None,
+        agent_name=agent_info.get("name"),
+        agent_icon=agent_info.get("icon"),
+        job_type=job.job_type,
+        status=job.status,
+        trigger=job.trigger,
+        triggered_by=job.triggered_by,
+        progress=job.progress,
+        conversation_id=str(job.conversation_id) if engine_job and job.conversation_id else None,
+        engine=engine_job,
+        input_data=fleet_engine.public_input_data(job.input_data) if engine_job else job.input_data,
+        result=job.result,
+        error=job.error,
+        started_at=job.started_at.isoformat() if job.started_at else None,
+        completed_at=job.completed_at.isoformat() if job.completed_at else None,
+        created_at=job.created_at.isoformat() if job.created_at else "",
+        duration_ms=job.duration_ms,
+        total_tokens=job.total_tokens,
+    )
+
 
 @router.get(
     "/fleet/runs",
@@ -118,30 +144,7 @@ async def list_fleet_runs(
         for agent in agents_result.scalars().all():
             agent_map[str(agent.id)] = {"name": agent.name, "icon": agent.icon}
 
-    items = []
-    for job in jobs:
-        agent_info = agent_map.get(str(job.agent_id), {})
-        engine_job = fleet_engine.is_engine_job(job)
-        items.append(FleetRunItem(
-            id=str(job.id),
-            agent_id=str(job.agent_id) if job.agent_id else None,
-            agent_name=agent_info.get("name"),
-            agent_icon=agent_info.get("icon"),
-            job_type=job.job_type,
-            status=job.status,
-            trigger=job.trigger,
-            triggered_by=job.triggered_by,
-            progress=job.progress,
-            conversation_id=str(job.conversation_id) if engine_job and job.conversation_id else None,
-            input_data=fleet_engine.public_input_data(job.input_data) if engine_job else job.input_data,
-            result=job.result,
-            error=job.error,
-            started_at=job.started_at.isoformat() if job.started_at else None,
-            completed_at=job.completed_at.isoformat() if job.completed_at else None,
-            created_at=job.created_at.isoformat() if job.created_at else "",
-            duration_ms=job.duration_ms,
-            total_tokens=job.total_tokens,
-        ))
+    items = [_run_item(job, agent_map.get(str(job.agent_id), {})) for job in jobs]
 
     return FleetRunsResponse(
         items=items,
@@ -150,6 +153,36 @@ async def list_fleet_runs(
         page_size=page_size,
         has_more=(offset + page_size) < total,
     )
+
+
+@router.get(
+    "/fleet/runs/{job_id}",
+    response_model=FleetRunItem,
+    summary="Get one background agent run",
+    dependencies=[Depends(require_feature("ENABLE_FLEET_DASHBOARD"))],
+)
+async def get_fleet_run(
+    job_id: UUID,
+    user: AuthUser = Depends(get_current_user),
+    tenant_id: UUID = Depends(get_current_tenant_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """One run, same shape as a list item (``conversation_id`` is set for engine runs)."""
+    job = (await db.execute(
+        select(BackgroundJob)
+        .where(BackgroundJob.id == job_id, BackgroundJob.tenant_id == tenant_id)
+        .where(BackgroundJob.job_type == JobType.BACKGROUND_AGENT.value)
+    )).scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    agent_info = {}
+    if job.agent_id:
+        agent = (await db.execute(
+            select(CustomAgent).where(CustomAgent.id == job.agent_id, CustomAgent.tenant_id == tenant_id)
+        )).scalar_one_or_none()
+        if agent is not None:
+            agent_info = {"name": agent.name, "icon": agent.icon}
+    return _run_item(job, agent_info)
 
 
 # ========================================

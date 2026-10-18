@@ -1,6 +1,6 @@
 """Plan 003 U8: Fleet intervene is an engine steer, cancel is an engine abort (SQLite tier, fake engine)."""
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -163,3 +163,60 @@ async def test_cancel_treats_an_engine_404_as_settled(maker, factory, engine, wi
     monkeypatch.setattr(engine, "abort", gone)
     await cancel(maker, u, t, job_id)
     assert "abort_pending" not in (await reload(maker, job_id)).input_data
+
+
+class CancelDuringSubmit(Engine):
+    """The user cancels the job while the engine start is in flight (after the create, before the record)."""
+
+    def __init__(self, maker):
+        super().__init__()
+        self.maker = maker
+        self.job_id = None
+
+    async def submit(self, session, tenant, project, conversation, body, key):
+        out = await super().submit(session, tenant, project, conversation, body, key)
+        async with self.maker() as db:
+            job = await db.get(BackgroundJob, self.job_id)
+            job.status = "cancelled"
+            job.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+        return out
+
+
+@pytest.mark.parametrize("abort_down", [False, True])
+async def test_a_cancel_during_the_engine_start_does_not_orphan_the_run(
+        maker, factory, wired, monkeypatch, abort_down):  # noqa: F811
+    eng = CancelDuringSubmit(maker)
+    monkeypatch.setattr(fe, "get_engine_client", lambda: eng)
+    t, u, a, job_id = await make_job(maker)
+    eng.job_id = job_id
+    eng.abort_down = abort_down
+    await fe.start_fleet_run(factory, job_id)
+    job = await reload(maker, job_id)
+    assert job.status == "cancelled" and job.conversation_id is not None  # the run is known
+    if not abort_down:
+        assert len(eng.aborts) == 1 and eng.aborts[0][0] == job.conversation_id
+        assert "abort_pending" not in job.input_data
+    else:
+        assert job.input_data["abort_pending"] is True  # the reconciler re-issues it
+        async with factory() as db:
+            [ref] = await fe.find_stuck(db, timedelta(seconds=-1))
+        assert ref.ref_id == job_id
+        eng.abort_down = False
+        assert (await fe.start_missing(ref)).status == "already_started"
+        assert len(eng.aborts) == 1
+
+
+async def test_get_fleet_run_returns_the_list_item_shape_and_is_tenant_scoped(maker, factory, engine, wired):  # noqa: F811
+    t, u, job_id = await started(maker, factory, engine, wired)
+    async with maker() as db:
+        one = await fleet_api.get_fleet_run(job_id=job_id, user=user_for(u, t), tenant_id=t, db=db)
+        listed = await fleet_api.list_fleet_runs(user=user_for(u, t), tenant_id=t, db=db, status=None, agent_id=None,
+                                                 page=1, page_size=20)
+        assert one == listed.items[0]
+        assert one.conversation_id is not None and "engine" not in (one.input_data or {})  # bookkeeping stays hidden
+        with pytest.raises(HTTPException) as other_tenant:
+            await fleet_api.get_fleet_run(job_id=job_id, user=user_for(u, t), tenant_id=uuid.uuid4(), db=db)
+        with pytest.raises(HTTPException) as unknown:
+            await fleet_api.get_fleet_run(job_id=uuid.uuid4(), user=user_for(u, t), tenant_id=t, db=db)
+    assert other_tenant.value.status_code == 404 and unknown.value.status_code == 404

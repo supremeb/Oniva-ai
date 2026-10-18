@@ -19,7 +19,7 @@ from app.services import fleet_engine as fe
 from app.services import run_handlers
 from app.services.deep_work import engine_view
 from app.services.engine_client import get_engine_client
-from app.services.run_status import from_engine_task
+from app.services.run_status import settled_status
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +43,7 @@ def _active(view: dict) -> bool:
 
 def _outcome(snapshot: dict, view: Optional[dict]) -> str:
     """The run-status enum value for a settled run."""
-    if snapshot.get("runStatus"):
-        return snapshot["runStatus"]
-    if snapshot.get("source") == "push":
-        if snapshot.get("status") == "done":
-            return from_engine_task("terminal", outcome="done")
-        return from_engine_task("terminal", outcome="aborted" if snapshot.get("reason") == "aborted" else "faulted")
-    ended = engine_view.engine_run_state(view or {}).ended
-    return from_engine_task("terminal", outcome={"aborted": "aborted", "run_error": "faulted"}.get(ended, "done"))
+    return settled_status(snapshot, view or {}) or "completed"
 
 
 def _error_message(snapshot: dict, view: Optional[dict]) -> str:
