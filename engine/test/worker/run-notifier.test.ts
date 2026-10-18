@@ -4,8 +4,10 @@
  * usage retry policy, acks on 2xx, and keeps the row when the backend is down.
  */
 import { describe, expect, it } from "vitest";
+import { agentConfigDoc, applyAgentConfig } from "../../src/agent/prompt.js";
 import { fakeText } from "../../src/models/fake.js";
 import { MemoryStorageProvider } from "../../src/storage/memory.js";
+import { defineTask, waiting } from "../../src/tasks/define.js";
 import { RunNotifier } from "../../src/worker/run-notifier.js";
 import { memoryBackend } from "../agent/support.js";
 
@@ -196,6 +198,44 @@ describe("RunNotifier", () => {
     n.attach(w.harness);
     await n.flush();
     expect(be.calls).toHaveLength(1);
+    await w.crash();
+  });
+
+  it("does not report a child conversation that inherits the notify tag (an owned LLM-node child)", async () => {
+    const outbox = new MemoryStorageProvider();
+    const be = fakeBackend();
+    const n = notifier(outbox, be.fetchFn);
+    const fx = await memoryBackend.fixture();
+    const owner = defineTask<null, null>({
+      kind: "test_owner",
+      phases: {
+        start: async (_t, rt) => rt.commit(() => waiting({ until: fx.clock.now() + 1e9 })),
+      },
+    });
+    const w = await fx.open({ tasks: [owner] });
+    n.attach(w.harness);
+    const agent = { systemPrompt: "s", tools: [], metadata: { notify: "backend" } };
+    const parent = await w.harness.createConversation({ tenantId: "t1", projectId: "p1", agent });
+    const def = w.harness.runtime.registry.get("test_owner");
+    if (!def) throw new Error("owner task is not registered");
+    const task = await w.harness.runtime.spawn(def, {
+      conversationId: parent.id,
+      input: null as never,
+    });
+    const childId = await w.harness.runtime.commit(async (tx, ops) => {
+      const child = ops.createConversation({
+        tenantId: "t1",
+        projectId: "p1",
+        ownerTaskId: task.id,
+      });
+      (await tx.doc(agentConfigDoc, child.id)).set(applyAgentConfig(agentConfigDoc.initial, agent));
+      return child.id;
+    });
+    for (const conversationId of [childId, parent.id]) {
+      n.listener({ conversationId, submissionId: "sub-1", requestId: "req-1", status: "done" });
+    }
+    await n.flush();
+    expect(be.calls.map((c) => c.body.conversationId)).toEqual([parent.id]);
     await w.crash();
   });
 });

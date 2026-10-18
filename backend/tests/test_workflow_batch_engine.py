@@ -160,11 +160,11 @@ def item_ids(batch_id, n):
     return [be.item_execution_id(batch_id, i) for i in range(n)]
 
 
-async def prepare(w, batch_id, key_attempt=0):
+async def prepare(w, batch_id, run_attempt=0):
     """The gateway's fan-out prepare for the batch node, as the engine would call it."""
     scope = await wn.bind_run(w.factory, uuid.UUID(str(batch_id)), wn.BodyScope())
     view = await wn.load_run(lambda tid: w.factory(), w.tenant, uuid.UUID(str(batch_id)), be.NODE_ID)
-    return await wn.run_prepare(lambda tid: w.factory(), view, scope, str(batch_id), key_attempt)
+    return await wn.run_prepare(lambda tid: w.factory(), view, scope, str(batch_id), run_attempt)
 
 
 async def settle_items(w, batch_id, n, *, failed=(), running=(), cancelled=(), pending=()):
@@ -231,7 +231,7 @@ async def test_prepare_creates_item_rows_and_returns_the_parallel_limit_and_no_p
         row = await db.get(WorkflowExecution, be.item_execution_id(batch_id, 7))
     assert row.input_data["name"] == "n7" and row.input_data["__parent_run_id"] == batch_id
     assert row.workflow_id == w.wf
-    await prepare(w, batch_id, key_attempt=1)  # a node retry finds the rows
+    await prepare(w, batch_id)  # a node retry (a new key, same run attempt) finds the rows
     assert await count(w, WorkflowExecution, WorkflowExecution.id != uuid.UUID(batch_id)) == 25
 
 
@@ -588,3 +588,12 @@ async def test_fail_is_terminal_once_and_skips_the_open_items(w):
 def test_the_route_no_longer_leaves_batches_queued_forever():
     source = inspect.getsource(wf_api.execute_batch)
     assert "TODO" not in source and "Celery" not in source
+
+
+async def test_a_run_retry_prepares_item_rows_of_its_own(w):
+    batch_id = (await execute(w, 4)).json()["batch_id"]
+    await prepare(w, batch_id)
+    await prepare(w, batch_id, run_attempt=1)
+    assert await count(w, WorkflowExecution, WorkflowExecution.id != uuid.UUID(batch_id)) == 8
+    assert be.item_execution_id(batch_id, 0) == wc.fanout_item_id(uuid.UUID(batch_id), be.NODE_ID, 0)
+

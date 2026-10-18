@@ -129,6 +129,9 @@ export class RunNotifier {
     const conv = harness.conversation(event.conversationId);
     const agent = await conv.agent();
     if (agent.metadata.notify !== NOTIFY_TAG) return;
+    // A child conversation (a workflow LLM node, a subagent) inherits its parent's tag; only the run's own
+    // conversation is a run the backend knows.
+    if ((await conv.info()).ownerTaskId !== null) return;
     const usage = await conv.usage();
     const body: JsonValue = {
       kind: "run_finished",

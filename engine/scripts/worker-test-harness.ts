@@ -69,7 +69,7 @@ function timedStorage(provider: StorageProvider, samples: CommitSample[]): Stora
     sessionOfConversation: (id) => provider.sessionOfConversation(id),
     sessionOfTask: (id) => provider.sessionOfTask(id),
     enqueue: (record) => provider.enqueue(record),
-    claimPending: (claimTimeoutMs) => provider.claimPending(claimTimeoutMs),
+    claimPending: (claimTimeoutMs, kind) => provider.claimPending(claimTimeoutMs, kind),
     ack: (requestId) => provider.ack(requestId),
   };
 }

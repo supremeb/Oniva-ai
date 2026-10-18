@@ -34,6 +34,10 @@ NODE_SPECS: Dict[str, NodeSpec] = {
     "merge": _PURE,
     "variable_assigner": _PURE,
     "list_operator": _PURE,
+    # Their prepare only computes a deadline (the approval row is keyed, a replay keeps it) and their finish
+    # only turns the wake into an output, so a re-run after a crash repeats nothing.
+    "wait": _PURE,
+    "human_in_loop": _PURE,
     "iteration": NodeSpec(replay_safe=True, fanout="iteration"),
     "subworkflow": NodeSpec(replay_safe=True, fanout="subworkflow"),
     "batch": NodeSpec(replay_safe=True, fanout="batch"),  # U18: the single node of a /execute-batch run

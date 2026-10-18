@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 
 from app.config import Settings
 from app.internal_api import workflow_contract as wc
+from app.internal_api.fence import GatewayError
 from app.internal_api import workflow_nodes
 from app.internal_api.invocations import get_session_factory
 from app.internal_api.router import mount_internal_router
@@ -586,3 +587,164 @@ async def test_a_fanout_item_run_binds_to_the_root_runs_conversation_without_a_b
                                  input_data={"__parent_run_id": str(uuid.uuid4()), "__fanout": "iteration"}))
         await db.commit()
     assert (await call(wf, "t", run=str(other), body={"contractVersion": 1})).status_code == 404
+
+
+# ---- review fixes: interrupted claims, bounded fan-out replies, attempt-aware items, frozen child specs ----
+
+
+async def stale_claim(w, node, phase="prepare", *, age_s=3600, r=0, a=0):
+    """An in_flight claim for the node's call, left by a worker that died, aged ``age_s`` seconds."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.internal_api import invocations
+
+    key = f"{w.run}:{node}:r{r}:a{a}:{phase}"
+    body = {**scope(w), "contractVersion": 1}
+    async with w.maker() as db:
+        db.add(ToolInvocation(
+            id=uuid.uuid4(), tenant_id=w.tenant_a, idempotency_key=key, session_id=SESSION,
+            tool=workflow_nodes.PHASE_TOOL[phase], args_hash=invocations.args_hash(body), status="in_flight",
+            started_at=datetime.now(timezone.utc) - timedelta(seconds=age_s),
+        ))
+        await db.commit()
+    return key
+
+
+async def test_a_stale_non_replay_safe_claim_is_answered_with_a_machine_readable_interrupted_final(wf):
+    key = await stale_claim(wf, "h")
+    r = await call(wf, "h")
+    assert r.status_code == 200
+    body = wc.validate_prepare_response(r.json())
+    assert body.status == "failed" and body.error["code"] == "interrupted"
+    assert wf.counts["http"] == 0  # the effect did not run again
+    hdr = {**AUTH, "X-Engine-Session": SESSION}
+    looked = await wf.client.get(f"/internal/workflows/invocations/{key}", headers=hdr)
+    assert looked.status_code == 200 and wc.validate_prepare_response(looked.json()).error["code"] == "interrupted"
+
+
+async def test_a_stale_replay_safe_claim_is_taken_over_and_run_again(wf):
+    await stale_claim(wf, "t")
+    r = await call(wf, "t")
+    assert r.status_code == 200 and r.json()["status"] == "success"
+    assert wf.counts["template"] == 1
+
+
+async def test_a_fresh_workflow_claim_is_busy_not_taken_over(wf):
+    await stale_claim(wf, "t", age_s=1)
+    r = await call(wf, "t")
+    assert r.status_code == 503 and r.json() == {"error": "in_flight"}
+    assert wf.counts["template"] == 0
+
+
+async def test_the_startup_sweep_leaves_workflow_claims_to_begin(wf):
+    from app.services.startup_recovery import interrupt_stale_tool_invocations
+
+    await stale_claim(wf, "t")
+    await stale_claim(wf, "h")
+    await interrupt_stale_tool_invocations(wf.maker)
+    async with wf.maker() as db:
+        statuses = [s for (s,) in (await db.execute(select(ToolInvocation.status))).all()]
+    assert statuses == ["in_flight", "in_flight"]
+    # begin() decides per node: the pure one re-runs, the http one is interrupted.
+    assert (await call(wf, "t")).json()["status"] == "success"
+    assert (await call(wf, "h")).json()["error"]["code"] == "interrupted"
+
+
+async def test_a_cancelled_run_answers_skipped_and_runs_nothing(wf):
+    async with wf.maker() as db:
+        (await db.get(WorkflowExecution, wf.run)).status = "cancelled"
+        await db.commit()
+    body = (await call(wf, "t")).json()
+    assert body["status"] == "skipped" and "cancelled" in body["output"]["message"]
+    assert wf.counts["template"] == 0
+    assert (await call(wf, "it")).json()["status"] == "skipped"
+    assert await children(wf) == 0
+
+
+async def fill_results(w, attempt, results, status="completed"):
+    async with w.maker() as db:
+        for i, result in enumerate(results):
+            row = await db.get(WorkflowExecution, wc.fanout_item_id(w.run, "it", i, attempt))
+            row.status, row.results = status, result
+        await db.commit()
+
+
+async def test_fanout_finish_reply_is_bounded_and_valid_with_many_large_results(wf):
+    await set_items(wf, list(range(1000)))
+    await call(wf, "it")
+    await fill_results(wf, 0, [{"text": "x" * 400, "i": i} for i in range(1000)])
+    summary = {"count": 1000, "completed": 1000, "failed": 0, "cancelled": 0}
+    fin = {**scope(wf), "contractVersion": 1, "kind": "fanout", "fanout": summary}
+    r = await call(wf, "it", "finish", body=fin)
+    assert r.status_code == 200 and len(r.content) < wc.MAX_BODY_BYTES
+    body = wc.validate_prepare_response(r.json())
+    out = body.output
+    assert body.status == "success" and out["count"] == 1000 and out["success_count"] == 1000
+    assert out["truncated"] is True and 0 < len(out["items"]) < 1000
+    assert out["items_omitted"] == 1000 - len(out["items"])
+    assert out["items"][0]["result"] == {"text": "x" * 400, "i": 0}
+    # a replay is answered from the store, byte for byte
+    assert (await call(wf, "it", "finish", body=fin)).json() == r.json()
+
+
+async def test_a_single_huge_item_result_is_dropped_from_the_list_not_the_reply(wf):
+    await call(wf, "it")
+    await fill_results(wf, 0, [{"v": 0}, {"blob": "y" * 100_000}, {"v": 2}])
+    summary = {"count": 3, "completed": 3, "failed": 0, "cancelled": 0}
+    r = await call(wf, "it", "finish", body={**scope(wf), "contractVersion": 1, "kind": "fanout", "fanout": summary})
+    out = wc.validate_prepare_response(r.json()).output
+    assert [i["status"] for i in out["items"]] == ["completed"] * 3
+    assert out["items"][0]["result"] == {"v": 0} and out["items"][2]["result"] == {"v": 2}
+    assert out["items"][1]["result"] is None and out["items"][1]["truncated"] is True
+    assert "truncated" not in out
+
+
+async def test_an_oversize_final_becomes_a_failed_final_not_an_unparseable_reply(wf):
+    from app.schemas.classification import DataClassification
+
+    huge = workflow_nodes._final("success", {"blob": "z" * 200_000})
+    fixed = workflow_nodes._validated_final(huge, DataClassification.INTERNAL)
+    assert fixed["status"] == "failed" and "body_too_large" in fixed["error"]
+
+
+async def test_a_run_retry_gets_its_own_item_rows_and_its_finish_reads_them(wf):
+    await call(wf, "it", r=0)
+    await fill_results(wf, 0, [{"v": "old"}] * 3, status="failed")
+    await call(wf, "it", r=1)
+    assert await children(wf) == 6
+    await fill_results(wf, 1, [{"v": f"new{i}"} for i in range(3)])
+    summary = {"count": 3, "completed": 3, "failed": 0, "cancelled": 0}
+    r = await call(wf, "it", "finish", r=1, body={**scope(wf), "contractVersion": 1, "kind": "fanout", "fanout": summary})
+    out = wc.validate_prepare_response(r.json())
+    assert out.status == "success"
+    assert [i["result"] for i in out.output["items"]] == [{"v": "new0"}, {"v": "new1"}, {"v": "new2"}]
+    # attempt 0 keeps the ids it always had
+    assert wc.fanout_item_id(wf.run, "it", 1) == uuid.uuid5(wf.run, "it:1")
+
+
+def test_fanout_item_ids_match_the_engine_vectors():
+    run = uuid.UUID("11111111-2222-4333-8444-555555555555")
+    assert str(wc.fanout_item_id(run, "it", 3)) == "37932702-6532-5d4d-9214-d6018247c159"
+    assert str(wc.fanout_item_id(run, "it", 3, 1)) == "3eee08c0-175b-5dab-91f8-ceebd1a45d71"
+    assert str(wc.fanout_item_id(run, "it", 0, 2)) == "29f7125e-f475-5c69-a157-57eba33e46b6"
+
+
+async def test_a_sub_workflow_item_runs_the_child_spec_frozen_when_the_fanout_started(wf):
+    child_id = uuid.uuid4()
+    async with wf.maker() as db:
+        db.add(Workflow(id=child_id, user_id=wf.user_a, tenant_id=wf.tenant_a, name="child",
+                        spec={"nodes": [n("c1", "template", template="v1")], "edges": []}))
+        parent = await db.get(Workflow, wf.wf_id)
+        parent.spec = {**SPEC, "nodes": [*SPEC["nodes"], n("sw", "subworkflow", workflowId=str(child_id))]}
+        await db.commit()
+    assert (await call(wf, "sw")).json()["kind"] == "fanout"
+    item = wc.fanout_item_id(wf.run, "sw", 0)
+    async with wf.maker() as db:  # the child is edited while the parent run is in flight
+        (await db.get(Workflow, child_id)).spec = {"nodes": [n("c2", "template", template="v2")], "edges": []}
+        await db.commit()
+    view = await workflow_nodes.load_run(lambda tid: wf.maker(), wf.tenant_a, item, "c1")
+    assert view.node["data"]["template"] == "v1"
+    with pytest.raises(GatewayError, match="node_not_found"):
+        await workflow_nodes.load_run(lambda tid: wf.maker(), wf.tenant_a, item, "c2")
+    # the frozen copy is not a node variable
+    assert workflow_nodes.CHILD_SPECS_KEY not in view.variables

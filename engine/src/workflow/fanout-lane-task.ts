@@ -119,13 +119,18 @@ export function itemTaskId(
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The backend run id of item `index`: `uuid5(runId, "{nodeId}:{index}")` for a UUID run id. */
-export function itemRunId(runId: string, nodeId: string, index: number): string {
-  if (!UUID.test(runId)) return `${runId}:${nodeId}:i${index}`;
+/**
+ * The backend run id of item `index`: `uuid5(runId, "{nodeId}:{index}")` for a UUID run id. A run
+ * retry (`runAttempt > 0`) gets rows of its own, `uuid5(runId, "{nodeId}:r{n}:{index}")`, so it never
+ * lands on the terminal rows of an earlier attempt. The backend's `fanout_item_id` is the same function.
+ */
+export function itemRunId(runId: string, nodeId: string, index: number, runAttempt = 0): string {
+  if (!UUID.test(runId)) return `${runId}:${nodeId}:i${index}`; // its node keys carry r{n} already
+  const scoped = runAttempt > 0 ? `${nodeId}:r${runAttempt}` : nodeId;
   const namespace = Buffer.from(runId.replaceAll("-", ""), "hex");
   const hash = createHash("sha1")
     .update(namespace)
-    .update(`${nodeId}:${index}`, "utf8")
+    .update(`${scoped}:${index}`, "utf8")
     .digest()
     .subarray(0, 16);
   hash[6] = ((hash[6] as number) & 0x0f) | 0x50;
@@ -200,7 +205,7 @@ function startItem(task: State, scope: Scope, ops: TaskOps, cp: FanoutLaneCheckp
     id: taskId,
     input: {
       version: 1,
-      runId: itemRunId(input.runId, input.nodeId, index),
+      runId: itemRunId(input.runId, input.nodeId, index, input.runAttempt),
       runAttempt: input.runAttempt,
       graph: itemGraph,
       variables: null,

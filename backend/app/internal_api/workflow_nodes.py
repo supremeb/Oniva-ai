@@ -68,6 +68,7 @@ PHASE_TOOL = {"prepare": "workflow_prepare", "finish": "workflow_finish"}
 RUN_OPTIONS_KEY = "__run_options"  # retry and deadline a run started with (U19); never a node variable
 MAX_ITEM_DEPTH = 8  # fan-out item runs nest at most this deep (sub-workflow depth is 3)
 SPEC_KEY = "__spec"  # the frozen spec a run started with, kept in its input_data (U15)
+CHILD_SPECS_KEY = "__child_specs"  # {workflowId: spec} a fan-out froze for its sub-workflow / batch items
 INPUT_CLASS_KEY = "__classification"  # an iteration item's inherited input classification (U15)
 INTERRUPTED_FINAL: Dict[str, Any] = {
     "contractVersion": wc.CONTRACT_VERSION,
@@ -75,8 +76,13 @@ INTERRUPTED_FINAL: Dict[str, Any] = {
     "status": "failed",
     "output": None,
     "tokensUsed": 0,
-    "error": "The call was interrupted before its outcome was recorded.",
+    # A structured error: the engine settles a final whose ``error.code`` is "interrupted" as an unknown outcome
+    # that never retries (a retry would be a new key, so the effect could run twice).
+    "error": {"code": "interrupted", "message": "The call was interrupted before its outcome was recorded."},
 }
+# The largest serialized ``items`` list a fan-out finish returns; the rest of the 64 KiB body is the envelope.
+FANOUT_ITEMS_BUDGET = 40 * 1024
+FANOUT_ITEM_ERROR_CHARS = 1000
 
 
 def get_tenant_session_factory() -> TenantSessionFactory:
@@ -157,6 +163,15 @@ def _final(
     return body
 
 
+def _validated_final(body: Dict[str, Any], classification: DataClassification) -> Dict[str, Any]:
+    """``body`` checked against the contract (shape and the 64 KiB cap); a body the engine would refuse becomes
+    a stored failed final instead, so no replay or lookup ever returns an unparseable reply."""
+    try:
+        return wc.validate_prepare_response(body).model_dump(exclude_unset=True)
+    except wc.ContractError as exc:
+        return _final("failed", None, error=f"node output rejected: {exc.code}", classification=classification)
+
+
 def _result_to_final(result: NodeExecutionResult, input_class: DataClassification) -> Dict[str, Any]:
     classification = max(result.classification, input_class)
     body = _final(
@@ -167,10 +182,7 @@ def _result_to_final(result: NodeExecutionResult, input_class: DataClassificatio
         classification=classification,
         handles=[result.next_node_id] if result.next_node_id else None,
     )
-    try:
-        return wc.validate_prepare_response(body).model_dump(exclude_unset=True)
-    except wc.ContractError as exc:
-        return _final("failed", None, error=f"node output rejected: {exc.code}", classification=classification)
+    return _validated_final(body, classification)
 
 
 # --- request parsing -----------------------------------------------------------------------------
@@ -308,7 +320,7 @@ class RunView:
         self.user_id = execution.user_id
         self.tenant_id: uuid.UUID = execution.tenant_id
         self.trigger = execution.trigger
-        self.variables: Dict[str, Any] = {k: v for k, v in (execution.input_data or {}).items() if k not in (SPEC_KEY, RUN_OPTIONS_KEY)}
+        self.variables: Dict[str, Any] = {k: v for k, v in (execution.input_data or {}).items() if k not in (SPEC_KEY, RUN_OPTIONS_KEY, CHILD_SPECS_KEY)}
         self.inherited_classification = _stored_class(self.variables.get(INPUT_CLASS_KEY))
         self.trace: List[Dict[str, Any]] = list(execution.execution_trace or [])
         self.spec = spec
@@ -316,13 +328,26 @@ class RunView:
 
 
 async def _run_spec(db: Any, tenant: uuid.UUID, execution: WorkflowExecution, depth: int = 0) -> Optional[Dict[str, Any]]:
-    """The spec ``execution`` runs: its own frozen snapshot, else (for an iteration item) its parent's,
-    else the pinned version or the workflow's current spec."""
+    """The spec ``execution`` runs: its own frozen snapshot, else the one its parent froze for it (the parent's
+    own spec for an iteration item, the child workflow's for a sub-workflow or batch item), else the pinned
+    version or the workflow's current spec."""
     data = execution.input_data or {}
     snapshot = data.get(SPEC_KEY)
     if isinstance(snapshot, dict):
         return snapshot
     parent = data.get("__parent_run_id")
+    if parent and data.get("__fanout") in ("subworkflow", "batch") and execution.workflow_id is not None:
+        # The child workflow as it was when the fan-out started, not as it was edited since.
+        frozen = (
+            await db.execute(
+                select(WorkflowExecution.input_data).where(
+                    WorkflowExecution.id == uuid.UUID(str(parent)), WorkflowExecution.tenant_id == tenant
+                )
+            )
+        ).scalar_one_or_none()
+        child = ((frozen or {}).get(CHILD_SPECS_KEY) or {}).get(str(execution.workflow_id))
+        if isinstance(child, dict):
+            return child
     if parent and data.get("__fanout") == "iteration" and depth < 8:
         parent_row = (
             await db.execute(
@@ -427,8 +452,8 @@ def _insert_for(db: Any):
     return (pg_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert)(WorkflowExecution)
 
 
-def item_id(run: uuid.UUID, node_id: str, index: int) -> uuid.UUID:
-    return uuid.uuid5(run, f"{node_id}:{index}")
+def item_id(run: uuid.UUID, node_id: str, index: int, run_attempt: int = 0) -> uuid.UUID:
+    return wc.fanout_item_id(run, node_id, index, run_attempt)
 
 
 # --- prepare -------------------------------------------------------------------------------------
@@ -440,6 +465,7 @@ async def _prepare_fanout(
     context: NodeExecutionContext,
     kind: str,
     input_class: DataClassification = DataClassification.INTERNAL,
+    run_attempt: int = 0,
 ) -> Dict[str, Any]:
     data = view.node.get("data") or {}
     item_workflow_id = view.workflow_id
@@ -499,10 +525,12 @@ async def _prepare_fanout(
         parallel, fail_fast = 1, True
 
     if items:
+        if kind in ("subworkflow", "batch"):
+            await _freeze_child_spec(tenants, view, item_workflow_id)
         async with tenants(str(view.tenant_id)) as db:
             rows = [
                 {
-                    "id": item_id(view.execution_id, view.node["id"], i),
+                    "id": item_id(view.execution_id, view.node["id"], i, run_attempt),
                     "workflow_id": item_workflow_id,
                     "user_id": view.user_id,
                     "tenant_id": view.tenant_id,
@@ -538,6 +566,33 @@ async def _prepare_fanout(
         "itemsRef": f"run:{view.execution_id}:{view.node['id']}",
     }
     return wc.validate_prepare_response(body).model_dump(exclude_unset=True)
+
+
+async def _freeze_child_spec(tenants: TenantSessionFactory, view: RunView, workflow_id: uuid.UUID) -> None:
+    """Keep the child workflow's spec on the parent run the first time a fan-out over it starts, so an edit
+    made while the run is in flight changes nothing (U15). The first freeze wins; a replay or a run retry
+    keeps it. Stored once on the parent, not on every item row, so a 1000-item batch does not copy it 1000 times."""
+    key = str(workflow_id)
+    async with tenants(str(view.tenant_id)) as db:
+        row = (
+            await db.execute(
+                select(WorkflowExecution)
+                .where(WorkflowExecution.id == view.execution_id, WorkflowExecution.tenant_id == view.tenant_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return
+        data = dict(row.input_data or {})
+        frozen = dict(data.get(CHILD_SPECS_KEY) or {})
+        if key in frozen:
+            return
+        spec = await resolve_spec(db, view.tenant_id, workflow_id, None)
+        if spec is None:
+            return
+        frozen[key] = spec
+        row.input_data = {**data, CHILD_SPECS_KEY: frozen}
+        await db.commit()
 
 
 def _has_subgraph(compiled: Dict[str, Any], name: str) -> bool:
@@ -578,6 +633,26 @@ def _context(
     )
 
 
+async def _run_cancelled(tenants: TenantSessionFactory, view: RunView, scope: Scope) -> bool:
+    """Is this run, or the root run it fans out from, cancelled?"""
+    ids = {view.execution_id}
+    if scope.rootRunId:
+        ids.add(uuid.UUID(scope.rootRunId))
+    async with tenants(str(view.tenant_id)) as db:
+        hit = (
+            await db.execute(
+                select(WorkflowExecution.id)
+                .where(
+                    WorkflowExecution.id.in_(ids),
+                    WorkflowExecution.tenant_id == view.tenant_id,
+                    WorkflowExecution.status == "cancelled",
+                )
+                .limit(1)
+            )
+        ).first()
+    return hit is not None
+
+
 async def run_prepare(
     tenants: TenantSessionFactory,
     view: RunView,
@@ -597,6 +672,9 @@ async def run_prepare(
     executor = get_executor(node_type)
     if executor is None:
         return _final("skipped", {"message": f"No executor for node type: {node_type}"}, classification=input_class)
+    if await _run_cancelled(tenants, view, scope):
+        # A cancel can land while the engine's start (or a node call) is in flight; nothing may run for it.
+        return _final("skipped", {"message": "The run was cancelled."}, classification=input_class)
 
     inputs = predecessor_inputs(view, run_attempt)
     started = time.time()
@@ -608,7 +686,7 @@ async def run_prepare(
                 return _result_to_final(blocked, input_class)
             fanout = node_spec_for(node_type).fanout
             if fanout:
-                return await _prepare_fanout(tenants, view, context, fanout, input_class)
+                return await _prepare_fanout(tenants, view, context, fanout, input_class, run_attempt)
 
             async def base() -> Any:
                 return await executor.prepare(context, db)
@@ -636,6 +714,32 @@ async def run_prepare(
         return _final("failed", None, error=f"node prepare rejected: {exc.code}", classification=input_class)
 
 
+def _size(value: Any) -> int:
+    return len(json.dumps(value, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8"))
+
+
+def _bounded_items(items: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], bool]:
+    """The longest prefix of ``items`` that fits ``FANOUT_ITEMS_BUDGET`` serialized.
+
+    An item whose result alone does not fit is listed without it (``result: null, truncated: true``) so the
+    list still shows its status and error; the first item that does not fit even so ends the list.
+    """
+    listed: List[Dict[str, Any]] = []
+    used = 2
+    for item in items:
+        error = item["error"]
+        item = _json_safe({**item, "error": str(error)[:FANOUT_ITEM_ERROR_CHARS] if error else None})
+        cost = _size(item) + 1
+        if used + cost > FANOUT_ITEMS_BUDGET:
+            item = {**item, "result": None, "truncated": True}
+            cost = _size(item) + 1
+        if used + cost > FANOUT_ITEMS_BUDGET:
+            return listed, True
+        listed.append(item)
+        used += cost
+    return listed, False
+
+
 async def run_finish(
     tenants: TenantSessionFactory, view: RunView, scope: Scope, run_id: str, run_attempt: int, fin: wc.FinishInput
 ) -> Dict[str, Any]:
@@ -654,7 +758,7 @@ async def run_finish(
                  "error_count": summary.failed + summary.cancelled},
                 classification=input_class,
             )
-        ids = [item_id(view.execution_id, view.node["id"], i) for i in range(summary.count)]
+        ids = [item_id(view.execution_id, view.node["id"], i, run_attempt) for i in range(summary.count)]
         items: List[Dict[str, Any]] = []
         async with tenants(str(view.tenant_id)) as db:
             rows = {}
@@ -679,17 +783,22 @@ async def run_finish(
             )
         data = view.node.get("data") or {}
         failed = summary.failed + summary.cancelled
+        # The reply is one contract body (64 KiB): the counts always, the per-item list as far as it fits.
+        # Every item's full result stays in its execution row; ``truncated`` says the list was cut.
+        listed, truncated = _bounded_items(items)
         output = {
-            "items": items,
+            "items": listed,
             "count": summary.count,
             "success_count": summary.completed,
             "error_count": failed,
+            **({"truncated": True, "items_omitted": len(items) - len(listed)} if truncated else {}),
         }
         terminate = data.get("errorHandling", "terminate") == "terminate" if node_type == "iteration" else True
         if failed and terminate:
             error = summary.firstError if isinstance(summary.firstError, str) else json.dumps(summary.firstError, default=str)
-            return _final("failed", output, error=error or "fan-out failed", classification=input_class)
-        return _final("success", output, classification=input_class)
+            error = (error or "fan-out failed")[:FANOUT_ITEM_ERROR_CHARS]
+            return _validated_final(_final("failed", output, error=error, classification=input_class), input_class)
+        return _validated_final(_final("success", output, classification=input_class), input_class)
 
     executor = get_executor(node_type)
     if executor is None:
@@ -927,4 +1036,5 @@ async def get_invocation(
     stored = await invocations.completed_outcome(factory, key, session)
     if stored is None:
         raise GatewayError(404, {"error": "not_found"})
-    return _no_store(stored)
+    # A swept claim stores the tool-shaped interrupted outcome; a workflow caller reads it as a final.
+    return _no_store(stored if "contractVersion" in stored else INTERRUPTED_FINAL)
