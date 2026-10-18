@@ -202,7 +202,7 @@ async def test_create_returns_secret_once_and_stores_only_ciphertext(w):
         trigger = await db.get(WebhookTrigger, uuid.UUID(created["id"]))
         assert trigger.created_by == w.user
     config = trigger.auth_config
-    assert "secret" not in config and secret not in json.dumps(config)
+    assert config["secret"] == secret  # expand phase: the plaintext is written too (rollback to old code)
     assert webhook_secrets.decrypt_secret(config["secret_enc"]) == secret
     raw = b'{"name":"Ada"}'
     r = await w.post(trigger.url_token, None, raw=raw, headers={"x-signature": w.sign(raw, secret)})
@@ -217,11 +217,17 @@ async def test_supplied_secret_is_sealed_and_api_key_is_encrypted(w):
         t2, _ = await svc.create_trigger(tenant_id=w.tenant, created_by=w.user, workflow_id=w.wf,
                                          auth_method="api_key", auth_config={"key": "k-123", "header": "X-K"})
         await db.commit()
-    assert shown == "mine" and "secret" not in t1.auth_config and "key" not in t2.auth_config
+    assert shown == "mine" and t1.auth_config["secret"] == "mine" and t2.auth_config["key"] == "k-123"
+    assert webhook_secrets.decrypt_secret(t1.auth_config["secret_enc"]) == "mine"
     assert webhook_secrets.decrypt_secret(t2.auth_config["key_enc"]) == "k-123"
     ok = await w.post(t2.url_token, {"name": "x"}, headers={"x-k": "k-123"}, sign=False)
     bad = await w.post(t2.url_token, {"name": "x"}, headers={"x-k": "nope", "idempotency-key": "z"}, sign=False)
     assert ok.status_code == 202 and bad.status_code == 401
+
+
+def test_encrypted_value_wins_over_plaintext():
+    enc = webhook_secrets.encrypt_secret("new")
+    assert webhook_secrets.resolve_secret({"secret": "old", "secret_enc": enc}, "secret", "secret_enc") == "new"
 
 
 def test_mask_and_legacy_plaintext_resolution():
