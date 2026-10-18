@@ -4,7 +4,7 @@ import hmac
 import importlib
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -98,6 +98,13 @@ async def w(maker, factory, monkeypatch):  # noqa: F811
     monkeypatch.setattr(fe, "engine_fleet_enabled",
                         lambda tenant, settings=None: bool(((tenant.settings or {}).get("features") or {}).get("ENABLE_ENGINE_FLEET")))
     monkeypatch.setattr(wts, "_utcnow", lambda: world.clock)
+
+    class _Clock(datetime):  # row timestamps follow the test clock, so the 24 h window is testable
+        @classmethod
+        def now(cls, tz=None):
+            return world.clock
+
+    monkeypatch.setattr(wer, "datetime", _Clock)
     world.fleet_starts = []
 
     async def start_after_commit(tenant_id, job_id, **kw):
@@ -266,8 +273,31 @@ async def test_same_delivery_twice_is_one_run_and_flags_deduplicated(w):
     assert row.id == uuid.uuid5(tid, f"{key}:{bucket}")
 
 
-async def test_header_key_is_permanent_and_is_the_run_id(w):
-    tid, token = await w.add_trigger()
+TRUSTED = {"idempotency_header": "Idempotency-Key", "trust_idempotency_header": True}
+
+
+def trusted_config(**extra):
+    return {"secret_enc": webhook_secrets.encrypt_secret(SECRET), **TRUSTED, **extra}
+
+
+async def test_unsigned_header_cannot_turn_a_replayed_body_into_a_new_run(w):
+    _, token = await w.add_trigger()
+    first = await w.post(token, {"name": "Ada"})
+    replay = await w.post(token, {"name": "Ada"}, headers={"Idempotency-Key": "attacker-1"})
+    again = await w.post(token, {"name": "Ada"}, headers={"Idempotency-Key": "attacker-2"})
+    assert replay.json()["deduplicated"] is True and again.json()["deduplicated"] is True
+    assert replay.json()["execution_id"] == again.json()["execution_id"] == first.json()["execution_id"]
+    assert len(await w.executions()) == 1 and len(w.engine.starts) == 1
+    # Naming the header alone is not enough either: the trigger must vouch for it.
+    _, named = await w.add_trigger(auth_config={"secret_enc": webhook_secrets.encrypt_secret(SECRET),
+                                                "idempotency_header": "Idempotency-Key"})
+    a = await w.post(named, {"name": "Bo"})
+    b = await w.post(named, {"name": "Bo"}, headers={"Idempotency-Key": "other"})
+    assert b.json()["deduplicated"] is True and a.json()["execution_id"] == b.json()["execution_id"]
+
+
+async def test_trusted_header_key_is_permanent_and_is_the_run_id(w):
+    tid, token = await w.add_trigger(auth_config=trusted_config())
     first = await w.post(token, {"name": "Ada"}, headers={"Idempotency-Key": "evt-1"})
     assert uuid.UUID(first.json()["execution_id"]) == uuid.uuid5(tid, "evt-1")
     assert w.engine.starts[0]["key"] == f"workflow:{uuid.uuid5(tid, 'evt-1')}"
@@ -289,8 +319,7 @@ async def test_jmespath_key_is_permanent(w):
 
 
 async def test_configured_header_name_is_used(w):
-    tid, token = await w.add_trigger(auth_config={"secret_enc": webhook_secrets.encrypt_secret(SECRET),
-                                                  "idempotency_header": "X-GitHub-Delivery"})
+    tid, token = await w.add_trigger(auth_config=trusted_config(idempotency_header="X-GitHub-Delivery"))
     r = await w.post(token, {"name": "Ada"}, headers={"X-GitHub-Delivery": "gh-1"})
     assert uuid.UUID(r.json()["execution_id"]) == uuid.uuid5(tid, "gh-1")
 
@@ -307,22 +336,34 @@ async def test_body_hash_next_bucket_starts_a_new_run_same_bucket_dedupes(w):
     assert len(await w.executions()) == 2
 
 
-async def test_delivery_straddling_the_bucket_boundary_starts_a_second_run(w):
+async def test_delivery_straddling_the_bucket_boundary_still_dedupes_within_24h(w):
     _, token = await w.add_trigger()
     boundary = (int(T0.timestamp() // BUCKET) + 1) * BUCKET
     w.clock = datetime.fromtimestamp(boundary - 30, tz=timezone.utc)
     first = await w.post(token, {"name": "Ada"})
     w.clock = datetime.fromtimestamp(boundary + 30, tz=timezone.utc)
     second = await w.post(token, {"name": "Ada"})
-    assert first.json()["execution_id"] != second.json()["execution_id"]
-    assert second.json()["deduplicated"] is False and len(await w.executions()) == 2
+    assert second.json()["execution_id"] == first.json()["execution_id"]
+    assert second.json()["deduplicated"] is True and len(await w.executions()) == 1
+    w.clock = datetime.fromtimestamp(boundary - 30 + BUCKET + 60, tz=timezone.utc)  # 24 h + 1 min after the first
+    third = await w.post(token, {"name": "Ada"})
+    assert third.json()["deduplicated"] is False and len(await w.executions()) == 2
 
 
-async def test_different_idempotency_key_with_identical_body_is_a_second_run(w):
-    _, token = await w.add_trigger()
+async def test_trusted_headers_with_different_keys_and_identical_body_are_two_runs(w):
+    _, token = await w.add_trigger(auth_config=trusted_config())
     a = await w.post(token, {"name": "Ada"}, headers={"Idempotency-Key": "k-1"})
     b = await w.post(token, {"name": "Ada"}, headers={"Idempotency-Key": "k-2"})
     assert a.json()["execution_id"] != b.json()["execution_id"] and len(await w.executions()) == 2
+
+
+async def test_concurrent_identical_deliveries_are_one_run_not_a_500(w):
+    import asyncio
+
+    _, token = await w.add_trigger()
+    results = await asyncio.gather(*[w.post(token, {"name": "Ada"}) for _ in range(4)])
+    assert [r.status_code for r in results] == [202] * 4, [r.text for r in results]
+    assert len({r.json()["execution_id"] for r in results}) == 1 and len(await w.executions()) == 1
 
 
 async def test_filter_mismatch_is_200_and_starts_nothing(w):
@@ -332,13 +373,24 @@ async def test_filter_mismatch_is_200_and_starts_nothing(w):
     assert (await w.post(token, {"kind": "paid", "name": "Ada"})).status_code == 202
 
 
-async def test_engine_outage_is_502_with_the_failed_execution(w):
+async def test_engine_outage_is_accepted_and_the_queued_row_is_started_by_the_reconciler(w):
     _, token = await w.add_trigger()
     w.engine.down = True
     r = await w.post(token, {"name": "Ada"})
-    assert r.status_code == 502
+    assert r.status_code == 202 and r.json()["start_pending"] is True
     [row] = await w.executions()
-    assert row.status == "failed"
+    assert row.status == "queued" and str(row.id) == r.json()["execution_id"]
+    # The sender's retry is a duplicate of that row, not a dropped delivery: the reconciler starts it.
+    retry = await w.post(token, {"name": "Ada"})
+    assert retry.status_code == 202 and retry.json()["deduplicated"] is True
+    w.engine.down = False
+    async with w.maker() as db:
+        stuck = await wer.find_stuck(db, timedelta(seconds=-1))
+    assert [ref.ref_id for ref in stuck] == [row.id]
+    started = await wer.start_missing(stuck[0])
+    assert started.status == "started"
+    [row] = await w.executions()
+    assert row.status == "running"
 
 
 async def test_flag_off_keeps_the_pending_row_with_the_deterministic_id(w):
@@ -346,7 +398,7 @@ async def test_flag_off_keeps_the_pending_row_with_the_deterministic_id(w):
         tenant = await db.get(Tenant, w.tenant)
         tenant.settings = {"features": {}}
         await db.commit()
-    tid, token = await w.add_trigger()
+    tid, token = await w.add_trigger(auth_config=trusted_config())
     r = await w.post(token, {"name": "Ada"}, headers={"Idempotency-Key": "e1"})
     again = await w.post(token, {"name": "Ada"}, headers={"Idempotency-Key": "e1"})
     [row] = await w.executions()
@@ -379,7 +431,7 @@ async def test_unowned_trigger_is_422_and_logged(w):
 
 
 async def test_agent_trigger_starts_a_fleet_job_and_dedupes(w):
-    tid, token = await w.add_trigger(workflow_id=None, agent_id=w.agent)
+    tid, token = await w.add_trigger(workflow_id=None, agent_id=w.agent, auth_config=trusted_config())
     r = await w.post(token, {"name": "Ada"}, headers={"Idempotency-Key": "a-1"})
     assert r.status_code == 202 and r.json()["queued"] is True and r.json()["deduplicated"] is False
     job_id = uuid.UUID(r.json()["job_id"])

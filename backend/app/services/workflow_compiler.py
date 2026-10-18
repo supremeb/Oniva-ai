@@ -34,6 +34,7 @@ ITERATION_EDGE = "iteration_output"
 #: Mirrors ``MAX_WORKFLOW_NODES`` / ``MAX_SUBWORKFLOW_DEPTH`` in ``engine/src/workflow/graph.ts``.
 MAX_ENGINE_NODES = 95
 MAX_SUBWORKFLOW_DEPTH = 3
+MAX_RUN_RETRIES = 10  # run-level retries; the scheduler caps max_retries at 10 and the engine clamps the same
 #: The graph keys the engine's strict schema allows per node and per graph.
 ENGINE_NODE_KEYS = ("id", "type", "deps", "policy", "handles", "mayFanOut")
 
@@ -293,7 +294,7 @@ def build_run_input(
         "errorMode": compiled["errorMode"],
     }
     if retry is not None:
-        body["retry"] = {"max": int(retry["max"]), "delayMs": int(retry["delayMs"])}
+        body["retry"] = {"max": max(0, min(int(retry["max"]), MAX_RUN_RETRIES)), "delayMs": max(0, int(retry["delayMs"]))}
     if deadline_ms is not None:
         body["deadlineMs"] = int(deadline_ms)
     return body

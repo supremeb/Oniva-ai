@@ -520,3 +520,58 @@ async def test_workflow_execution_row_count_stays_one_per_started_run(w):
         await c.post("/api/v1/workflows/execute", json=EXECUTE, headers={"Idempotency-Key": "x"})
     async with w.maker() as db:
         assert (await db.execute(select(func.count()).select_from(EngineConversation))).scalar_one() == 1
+
+
+# ---- review fixes: reserved keys, user-scoped keys, retry clamp, insert race ----------------------------
+
+
+async def start_direct(w, user, input=None, **kw):
+    async with w.maker() as db:
+        wf = await db.get(Workflow, w.wf)
+        return await wer.start_workflow_run(db, wf, SPEC, input, user_id=user, tenant_id=w.tenant,
+                                            trigger=kw.pop("trigger", "api"), **kw)
+
+
+async def test_caller_input_cannot_set_reserved_run_keys(w):
+    from app.internal_api import workflow_nodes as wn
+
+    assert wer.SPEC_KEY == wn.SPEC_KEY and wer.RUN_OPTIONS_KEY == wn.RUN_OPTIONS_KEY
+    assert all(wer.is_reserved_input_key(k) for k in (wn.SPEC_KEY, wn.RUN_OPTIONS_KEY, wn.INPUT_CLASS_KEY))
+    hostile = {"name": "Ada", "__run_options": {"retry": {"max": 10**9, "delayMs": 0}}, "__spec": {"nodes": []},
+               "__classification": "public", "workflow_version_id": "x", "abort_pending": True, "start_attempts": 99}
+    execution, _ = await start_direct(w, w.user, hostile)
+    data = execution.input_data
+    assert data["name"] == "Ada" and data["__spec"]["nodes"] == SPEC["nodes"]
+    assert "__run_options" not in data and "__classification" not in data
+    assert not {"workflow_version_id", "abort_pending", "start_attempts"} & set(data)
+    assert "retry" not in w.engine.starts[0]["body"]["input"]
+
+
+def test_run_retries_are_clamped_in_the_run_input():
+    from app.services.workflow_compiler import MAX_RUN_RETRIES, build_run_input
+
+    compiled = {"errorMode": "stop", "nodes": [], "edges": []}
+    body = build_run_input(uuid.uuid4(), compiled, retry={"max": 10**9, "delayMs": -5})
+    assert body["retry"] == {"max": MAX_RUN_RETRIES, "delayMs": 0}
+
+
+async def test_idempotency_key_is_scoped_to_the_user(w):
+    a, _ = await start_direct(w, w.user, {"name": "A"}, request_key="k")
+    b, _ = await start_direct(w, w.other_user, {"name": "B"}, request_key="k")
+    again, _ = await start_direct(w, w.user, {"name": "A"}, request_key="k")
+    assert a.id != b.id and again.id == a.id and b.input_data["name"] == "B"
+    with pytest.raises(HTTPException) as exc:  # a forced shared id never exposes another user's run
+        await start_direct(w, w.other_user, {}, request_key="k", execution_id=a.id)
+    assert exc.value.status_code == 409
+
+
+async def test_system_keys_are_not_user_scoped(w):
+    a, _ = await start_direct(w, w.user, {}, request_key="scheduled:1", trigger="scheduled")
+    assert a.id == wer.execution_id_for(w.tenant, w.wf, "scheduled:1")
+
+
+async def test_concurrent_identical_starts_converge_on_one_row(w):
+    import asyncio
+
+    results = await asyncio.gather(*[start_direct(w, w.user, {}, request_key="race") for _ in range(4)])
+    assert len({e.id for e, _ in results}) == 1 and len(await executions(w)) == 1

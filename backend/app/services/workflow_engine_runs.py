@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, Optional
 
 from fastapi import HTTPException
 from sqlalchemy import String, cast, select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db_for_tenant
 from app.models.engine import EngineConversation
@@ -45,6 +46,10 @@ TASK_KIND = "workflow_run"
 SPEC_KEY = "__spec"
 #: Run-level options frozen at the first start (``retry`` and an absolute ``deadlineMs``), so a restarted start repeats them.
 RUN_OPTIONS_KEY = "__run_options"
+#: Starts the system makes itself: the key is not user-scoped (a trigger or schedule owns it).
+SYSTEM_TRIGGERS = ("scheduled", "webhook", "batch")
+#: ``input_data`` keys the backend owns. Caller input never sets them (any ``__*`` key, plus these).
+RESERVED_INPUT_KEYS = frozenset({"workflow_version_id", "abort_pending", "start_attempts"})
 STUCK_BATCH = 200
 TERMINAL = ("completed", "failed", "cancelled")
 #: A sync run waits this long for the engine, polling every POLL_INTERVAL_S (module constants: tests shrink them).
@@ -60,11 +65,25 @@ def request_id(execution_id: Any) -> str:
     return f"workflow:{execution_id}"
 
 
-def execution_id_for(tenant_id: Any, workflow_id: Any, request_key: Optional[str]) -> uuid.UUID:
-    """Stable per ``(tenant, workflow, client Idempotency-Key)``; a fresh id when there is no key."""
+def execution_id_for(tenant_id: Any, workflow_id: Any, request_key: Optional[str], user_id: Any = None) -> uuid.UUID:
+    """Stable per ``(tenant, workflow, [user,] client Idempotency-Key)``; a fresh id when there is no key.
+
+    A client key is scoped to its user, so two users of a tenant never share a run. System starts
+    (schedules, webhooks) pass no user.
+    """
     if not request_key:
         return uuid.uuid4()
-    return uuid.uuid5(RUN_NAMESPACE, f"execution:{tenant_id}:{workflow_id or 'adhoc'}:{request_key}")
+    scope = f"{user_id}:" if user_id is not None else ""
+    return uuid.uuid5(RUN_NAMESPACE, f"execution:{tenant_id}:{workflow_id or 'adhoc'}:{scope}{request_key}")
+
+
+def is_reserved_input_key(key: Any) -> bool:
+    return isinstance(key, str) and (key.startswith("__") or key in RESERVED_INPUT_KEYS)
+
+
+def user_variables(input: Optional[dict]) -> Dict[str, Any]:
+    """Caller input without the backend's reserved keys (spec, run options, classification, ...)."""
+    return {k: v for k, v in (input or {}).items() if not is_reserved_input_key(k)}
 
 
 def tenant_factory(tenant_id: Any) -> Callable:
@@ -195,13 +214,21 @@ async def start_workflow_run(
     await _compile(db, tenant_id, spec, workflow_id)  # refuse an invalid workflow before any row exists
 
     # ``execution_id`` lets a caller own the deterministic id (a webhook derives it from trigger and key).
-    execution_id = _uuid(execution_id) if execution_id is not None else execution_id_for(tenant_id, workflow_id, request_key)
-    existing = (await db.execute(
-        select(WorkflowExecution).where(WorkflowExecution.id == execution_id,
-                                        WorkflowExecution.tenant_id == tenant_id)
-    )).scalar_one_or_none()
+    user_scoped = trigger not in SYSTEM_TRIGGERS
+    execution_id = (_uuid(execution_id) if execution_id is not None
+                    else execution_id_for(tenant_id, workflow_id, request_key, user_id if user_scoped else None))
+
+    async def load() -> Optional[WorkflowExecution]:
+        return (await db.execute(
+            select(WorkflowExecution).where(WorkflowExecution.id == execution_id,
+                                            WorkflowExecution.tenant_id == tenant_id)
+        )).scalar_one_or_none()
+
+    existing = await load()
+    if existing is not None and user_scoped and existing.user_id != user_id:
+        raise HTTPException(status_code=409, detail="Idempotency-Key belongs to another user's run")
     if existing is None:
-        variables: Dict[str, Any] = dict(input or {})
+        variables: Dict[str, Any] = user_variables(input)
         variables[SPEC_KEY] = spec
         if version_id is not None:
             variables["workflow_version_id"] = str(version_id)
@@ -214,7 +241,16 @@ async def start_workflow_run(
             total_nodes=len(spec.get("nodes") or []), started_at=datetime.now(timezone.utc),
         )
         db.add(existing)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            # A concurrent identical start inserted the row first: it is the run.
+            await db.rollback()
+            existing = await load()
+            if existing is None:
+                raise
+            if user_scoped and existing.user_id != user_id:
+                raise HTTPException(status_code=409, detail="Idempotency-Key belongs to another user's run")
     await db.refresh(existing)
     if existing.status == "running":
         # A replay of a start that went through: the engine answers the existing run with its task id.
