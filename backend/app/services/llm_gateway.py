@@ -397,7 +397,7 @@ async def resolve_key_with_fallback(
 
     When falling back to OpenRouter, the model_id is prefixed with
     'openrouter/' so that the direct provider layer and
-    create_litellm_model() route the request through OpenRouter's proxy.
+    create_model() route the request through OpenRouter's proxy.
 
     Args:
         db: Database session
@@ -576,9 +576,6 @@ def create_model(
         )
         return OpenAIChatModel(model_name, provider=OpenAIProvider(openai_client=client))
 
-
-#: Old name, kept for callers outside plan 003 U14 until their units rename it (KTD13).
-create_litellm_model = create_model
 
 
 def normalize_model_id(model_id: str) -> str:
