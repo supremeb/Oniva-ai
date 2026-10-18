@@ -279,3 +279,63 @@ async def test_the_reconciler_applies_a_settled_run_to_a_stuck_row_once(wf, fact
     stamp = got.completed_at
     await rec.run_once()
     assert (await row(wf)).completed_at == stamp
+
+
+# ---- a settled run is not judged by its trace alone ----------------------------------------------
+
+
+def run_view(status, **nodes):
+    return {"run": {"active": False}, "tasks": {"t-run": {"kind": "workflow_run", "status": status, "nodes": nodes}}}
+
+
+def with_view(monkeypatch, view):
+    async def read(*a):
+        return view
+
+    monkeypatch.setattr(wrs, "read_snapshot", read)
+    from types import SimpleNamespace
+    monkeypatch.setattr(wrs, "get_engine_client",
+                        lambda: SimpleNamespace(directory=SimpleNamespace(default_session_id="s1")))
+
+
+def bound_ref(w):
+    return rh.RunRef(kind="workflow", ref_id=w.run, tenant_id=w.tenant_a, project_id=uuid.uuid4(),
+                     conversation_id=w.conv_a)
+
+
+def spec(*ids):
+    return {wrs.wer.SPEC_KEY: {"nodes": [{"id": i} for i in ids]}}
+
+
+async def test_a_faulted_run_task_fails_the_row_even_when_the_trace_is_clean(wf, monkeypatch):
+    await bind(wf)
+    await trace(wf, step("a"))
+    with_view(monkeypatch, run_view("faulted"))
+    await wrs.on_finished(bound_ref(wf), push("done"))
+    got = await row(wf)
+    assert got.status == "failed" and got.error
+
+
+async def test_an_aborted_run_task_cancels_the_row(wf, monkeypatch):
+    await bind(wf)
+    await trace(wf, step("a"))
+    with_view(monkeypatch, run_view("aborted"))
+    await wrs.on_finished(bound_ref(wf), push("done"))
+    assert (await row(wf)).status == "cancelled"
+
+
+async def test_a_node_missing_from_the_trace_fails_the_row_with_a_clear_error(wf, monkeypatch):
+    await bind(wf, input_data=spec("a", "b"))
+    await trace(wf, step("a"))
+    with_view(monkeypatch, run_view("done"))
+    await wrs.on_finished(bound_ref(wf), push("done"))
+    got = await row(wf)
+    assert got.status == "failed" and "b" in got.error
+
+
+async def test_a_skipped_node_without_a_step_is_not_missing(wf, monkeypatch):
+    await bind(wf, input_data=spec("a", "b"))
+    await trace(wf, step("a"))
+    with_view(monkeypatch, run_view("done", a="success", b="skipped"))
+    await wrs.on_finished(bound_ref(wf), push("done"))
+    assert (await row(wf)).status == "completed"

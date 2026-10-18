@@ -24,7 +24,10 @@ from app.models.workflow import WorkflowExecution
 from app.services import run_handlers
 from app.services import workflow_engine_runs as wer
 from app.services.deep_work import engine_view
+from app.services.deep_work.engine_view import read_snapshot
+from app.services.engine_client import get_engine_client
 from app.services.run_status import from_engine_task
+from app.services.workflow_stream_adapter import node_states, run_ended, run_task
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +181,41 @@ def _outcome(snapshot: dict) -> Optional[str]:
     return None
 
 
+async def _view_of(ref: run_handlers.RunRef, snapshot: dict) -> Optional[dict]:
+    """The engine view of the run's conversation: the snapshot's own, else read through the view path.
+
+    None when the ref carries no binding (nothing to read). An ``EngineError`` propagates, so a push whose view
+    cannot be read now is retried by the engine's outbox rather than judged by the trace alone.
+    """
+    if snapshot.get("view") is not None:
+        return snapshot["view"]
+    if ref.tenant_id is None or ref.project_id is None or ref.conversation_id is None:
+        return None
+    engine = get_engine_client()
+    session_id = ref.session_id or engine.directory.default_session_id
+    return await read_snapshot(engine, session_id, ref.tenant_id, ref.project_id, ref.conversation_id)
+
+
+def _task_error(view: Optional[dict]) -> Optional[str]:
+    found = run_task(view or {})
+    if found is None:
+        return None
+    task = found[1]
+    return _error_text(task.get("error") or (task.get("outcome") or {}).get("error"))
+
+
+def _missing_nodes(execution: WorkflowExecution, view: Optional[dict]) -> list:
+    """Graph nodes that neither recorded a step nor were skipped/blocked by the engine."""
+    spec = (execution.input_data or {}).get(wer.SPEC_KEY)
+    nodes = spec.get("nodes") if isinstance(spec, dict) else None
+    if not isinstance(nodes, list):
+        return []
+    recorded = {step["node_id"] for step in execution.execution_trace or []}
+    skipped = {n for n, st in node_states(view or {}).items() if st in ("skipped", "blocked")}
+    ids = [str(n.get("id")) for n in nodes if isinstance(n, dict) and n.get("id") is not None]
+    return [n for n in ids if n not in recorded and n not in skipped]
+
+
 async def on_finished(ref: run_handlers.RunRef, snapshot: dict) -> None:
     if ref.tenant_id is None:
         return
@@ -192,10 +230,22 @@ async def on_finished(ref: run_handlers.RunRef, snapshot: dict) -> None:
             return  # a cancelled row stays cancelled; abort_pending is start_missing's
         if execution.status == "queued":
             return  # never started: start_missing's
-        if outcome == "completed":
-            # The task ended without a finalize: judge by the nodes that did run.
+        view = await _view_of(ref, snapshot) if outcome == "completed" else None
+        ended = run_ended(view) if view is not None else None
+        if outcome == "completed" and ended == "aborted":
+            status, error = "cancelled", execution.error or "Execution cancelled"
+        elif outcome == "completed" and ended == "faulted":
+            # The run task itself faulted (e.g. its finalize could not reach the backend): not a success.
+            status, error = "failed", _task_error(view) or "The workflow run task faulted before it could finalize."
+        elif outcome == "completed":
+            # The task ended without a finalize: judge by the nodes that did run, and by the ones that did not.
             status = _status_from_summaries(_summaries_from_trace(execution))
             error = None
+            missing = _missing_nodes(execution, view)
+            if missing:
+                status = "failed"
+                error = ("The workflow run ended before these nodes recorded a result: "
+                         f"{', '.join(missing)}.")
         elif outcome == "cancelled":
             status, error = "cancelled", execution.error or "Execution cancelled"
         else:

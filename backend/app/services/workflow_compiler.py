@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Set
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.internal_api.invocations import STALE_GRACE_S
 from app.internal_api.node_specs import node_spec_for
 from app.services.workflow_validator import WorkflowValidator
 
@@ -48,11 +49,13 @@ def subgraph_name(node_id: str) -> str:
 
 def _policy(node: Dict[str, Any], fanout: bool) -> Dict[str, Any]:
     """The engine's four-field policy. Adornments: retry -> maxRetries/backoffMs, timeout -> timeoutMs,
-    try -> onError. The timeout defaults to the node type's gateway timeout."""
+    try -> onError. The timeout defaults to the node type's gateway timeout plus twice the stale-claim grace, so the
+    engine outlasts a claim left ``in_flight`` by a dead backend and sees it resolve (``interrupted``) instead
+    of timing out and retrying an effect that may have happened."""
     policy: Dict[str, Any] = {
         "maxRetries": 0,
         "backoffMs": 0,
-        "timeoutMs": node_spec_for(_node_type(node)).timeout_ms,
+        "timeoutMs": node_spec_for(_node_type(node)).timeout_ms + 2 * STALE_GRACE_S * 1000,
         "onError": "stop",
     }
     for adornment in (node.get("data") or {}).get("adornments") or []:

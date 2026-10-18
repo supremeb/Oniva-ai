@@ -90,6 +90,8 @@ export interface WorkerGatewayOptions {
 export interface WorkerWorkflowOptions {
   baseUrl: string;
   serviceToken: string;
+  /** Retry budget for a transient node gateway failure (`ENGINE_POLICY_RETRY_MS`). Default 60 s. */
+  retryMs?: number;
   fetch?: typeof fetch;
 }
 
@@ -470,6 +472,9 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
             fence: k.fence,
             sessionId,
             clock,
+            ...(options.workflow.retryMs === undefined
+              ? {}
+              : { retry: { budgetMs: options.workflow.retryMs } }),
             ...(options.workflow.fetch ? { fetch: options.workflow.fetch } : {}),
             onFenceRejected: (rejection) => {
               log("fence_rejected", { tool: "workflow", token: String(rejection.token) });
