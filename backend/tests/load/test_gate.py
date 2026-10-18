@@ -3,7 +3,16 @@ import math
 
 import pytest
 
-from tests.load.gate import evaluate_gate, percentile
+from tests.load import gate as gate_mod
+from tests.load.gate import percentile
+
+GOOD = dict(failed_runs=0, chat_errors=0, loaded_samples=60, min_loaded_samples=60,
+            http_started=5, http_done=5, expected_http_calls=5)
+
+
+def gate(*args, **overrides):
+    return gate_mod.evaluate_gate(*args, **{**GOOD, **overrides})
+
 
 SAMPLE = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
@@ -22,30 +31,52 @@ def test_percentile_matches_known_values_on_a_fixed_sample():
 
 
 def test_gate_passes_at_plus_19_percent_and_fails_at_plus_21():
-    ok = evaluate_gate(100.0, 119.0, 0, 50, 50)
+    ok = gate(100.0, 119.0, 0, 50, 50)
     assert ok.passed and ok.reasons == [] and ok.chat_p95_regression == pytest.approx(0.19)
-    bad = evaluate_gate(100.0, 121.0, 0, 50, 50)
+    bad = gate(100.0, 121.0, 0, 50, 50)
     assert not bad.passed and "regressed" in bad.reasons[0]
 
 
 def test_gate_boundary_and_improvement():
-    assert evaluate_gate(100.0, 120.0, 0, 1, 1).passed  # exactly +20% is allowed
-    assert evaluate_gate(100.0, 80.0, 0, 1, 1).passed
+    assert gate(100.0, 120.0, 0, 1, 1).passed  # exactly +20% is allowed
+    assert gate(100.0, 80.0, 0, 1, 1).passed
 
 
 def test_gate_fails_on_any_non_terminal_run():
-    r = evaluate_gate(100.0, 100.0, 1, 50, 50)
+    r = gate(100.0, 100.0, 1, 50, 50)
     assert not r.passed and any("not terminal" in x for x in r.reasons)
 
 
 def test_gate_fails_when_ledger_rows_differ_from_model_requests():
     for rows in (49, 51):
-        r = evaluate_gate(100.0, 100.0, 0, rows, 50)
+        r = gate(100.0, 100.0, 0, rows, 50)
         assert not r.passed and any("ledger rows" in x for x in r.reasons)
 
 
 def test_gate_reports_every_failure_and_rejects_missing_numbers():
-    r = evaluate_gate(100.0, 200.0, 3, 1, 2)
+    r = gate(100.0, 200.0, 3, 1, 2)
     assert not r.passed and len(r.reasons) == 3
-    assert not evaluate_gate(0.0, 10.0, 0, 1, 1).passed
-    assert not evaluate_gate(100.0, math.nan, 0, 1, 1).passed
+    assert not gate(0.0, 10.0, 0, 1, 1).passed
+    assert not gate(100.0, math.nan, 0, 1, 1).passed
+
+
+def test_gate_fails_when_every_run_failed():
+    r = gate(100.0, 100.0, 0, 50, 50, failed_runs=205)
+    assert not r.passed and any("failed" in x for x in r.reasons)
+
+
+def test_gate_fails_on_chat_errors_or_timeouts():
+    r = gate(100.0, 100.0, 0, 50, 50, chat_errors=1)
+    assert not r.passed and any("errored or timed out" in x for x in r.reasons)
+
+
+def test_gate_fails_on_http_count_mismatch():
+    for started, done in ((4, 5), (5, 4), (6, 6), (0, 0)):
+        r = gate(100.0, 100.0, 0, 50, 50, http_started=started, http_done=done)
+        assert not r.passed and any("http calls" in x for x in r.reasons)
+
+
+def test_gate_fails_on_too_few_loaded_samples():
+    r = gate(100.0, 100.0, 0, 50, 50, loaded_samples=59)
+    assert not r.passed and any("loaded chat sample" in x for x in r.reasons)
+    assert gate(100.0, 100.0, 0, 50, 50, loaded_samples=60).passed

@@ -14,6 +14,7 @@ def test_smoke_profile_runs_end_to_end(world):
     drv.print_report(result)
     assert result["workload"]["workflow_runs"] == 5 and result["workload"]["fleet_runs"] == 1
     assert result["after_drain"]["non_terminal_runs"] == 0, result["after_drain"]
+    assert result["after_drain"]["failed_runs"] == 0, result["after_drain"]
     assert result["ledger"]["rows"] == result["ledger"]["model_requests"], result["ledger"]
     # The driver must work; the latency verdict at smoke scale is informational (5 samples are too noisy to gate).
     assert result["chat_first_token"]["baseline"]["n"] == drv.PROFILES["smoke"].baseline_chat_samples

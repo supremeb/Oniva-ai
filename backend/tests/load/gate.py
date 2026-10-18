@@ -6,7 +6,10 @@ For a sorted sample ``x[0..n-1]`` and ``q`` in [0, 100], the rank is ``r = (n - 
 
 Gate (plan 003 U36): chat first-token p95 under automation load may not regress more than ``max_regression``
 (20%) against the no-load baseline, no run may be left non-terminal after the drain, and the usage ledger rows
-must equal the model requests made.
+must equal the model requests made. A gate that can pass on nothing is no gate, so it also fails on any failed run,
+on any chat turn that errored or timed out (such a turn is not dropped from the sample: it fails the gate), on fewer
+than ``min_loaded_samples`` loaded chat samples, and when the counting HTTP target saw other than one started and
+one finished call per workflow run.
 """
 import math
 from dataclasses import dataclass, field
@@ -37,8 +40,10 @@ class GateResult:
 
 
 def evaluate_gate(baseline_chat_p95_ms: float, loaded_chat_p95_ms: float, non_terminal_runs: int,
-                  ledger_rows: int, model_requests: int, max_regression: float = 0.20) -> GateResult:
-    """Pass only when all three conditions hold; every failed condition adds a reason."""
+                  ledger_rows: int, model_requests: int, *, failed_runs: int, chat_errors: int,
+                  loaded_samples: int, min_loaded_samples: int, http_started: int, http_done: int,
+                  expected_http_calls: int, max_regression: float = 0.20) -> GateResult:
+    """Pass only when every condition holds; every failed condition adds a reason."""
     reasons: list[str] = []
     regression: float | None = None
     if not (baseline_chat_p95_ms and baseline_chat_p95_ms > 0) or math.isnan(loaded_chat_p95_ms):
@@ -50,6 +55,14 @@ def evaluate_gate(baseline_chat_p95_ms: float, loaded_chat_p95_ms: float, non_te
                            f"{baseline_chat_p95_ms:.1f} ms -> {loaded_chat_p95_ms:.1f} ms")
     if non_terminal_runs != 0:
         reasons.append(f"{non_terminal_runs} run(s) not terminal after the drain")
+    if failed_runs != 0:
+        reasons.append(f"{failed_runs} run(s) ended failed or cancelled")
+    if chat_errors != 0:
+        reasons.append(f"{chat_errors} chat turn(s) errored or timed out under load")
+    if loaded_samples < min_loaded_samples:
+        reasons.append(f"only {loaded_samples} loaded chat sample(s), need at least {min_loaded_samples}")
+    if http_started != expected_http_calls or http_done != expected_http_calls:
+        reasons.append(f"http calls started/done ({http_started}/{http_done}) != expected ({expected_http_calls})")
     if ledger_rows != model_requests:
         reasons.append(f"ledger rows ({ledger_rows}) != model requests ({model_requests})")
     return GateResult(passed=not reasons, reasons=reasons, chat_p95_regression=regression)
