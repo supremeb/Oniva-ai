@@ -214,6 +214,24 @@ async def test_llm_legacy_execute_runs_the_same_prompt_through_llm_direct():
     assert captured["provider"].provider_type == "openai"
 
 
+async def test_llm_legacy_execute_surfaces_reasoning_when_cot_enabled():
+    from app.node_executors import llm_executor
+
+    c = ctx("llm", userPrompt="hi", model="openai/gpt-4o-mini")
+
+    async def complete(request, provider):
+        return llm_direct.DirectResponse(
+            content="", model="m", input_tokens=1, output_tokens=1, reasoning="step by step",
+        )
+
+    with patch("app.services.llm_gateway.resolve_key_with_fallback", AsyncMock(return_value=("k", "openai/gpt-4o-mini"))), \
+         patch.object(llm_direct, "complete", complete), \
+         patch.object(llm_executor, "settings", MagicMock(USE_COT_REASONING=True)):
+        result = await LLMExecutor().execute(c, MagicMock())
+    assert result.status == "success", result.error
+    assert result.reasoning == "step by step"
+
+
 async def test_legacy_execute_without_a_key_fails_cleanly():
     c = ctx("llm", userPrompt="hi")
     with patch("app.services.llm_gateway.resolve_key_with_fallback", AsyncMock(return_value=(None, "openai/gpt-4o-mini"))):

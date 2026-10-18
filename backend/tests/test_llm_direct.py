@@ -3,6 +3,7 @@
 Covers the request body each provider receives, the normalized response,
 streaming chunk sequences and embedding batching.
 """
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -329,3 +330,175 @@ class TestContextWindow:
         from app.config.llm_pricing import DEFAULT_CONTEXT_WINDOW, context_window_for
 
         assert context_window_for("something-unknown") == DEFAULT_CONTEXT_WINDOW
+
+
+def _anthropic_text_response():
+    return SimpleNamespace(
+        model="claude-3-haiku-20240307",
+        content=[SimpleNamespace(type="text", text="done")],
+        usage=SimpleNamespace(
+            input_tokens=1, output_tokens=1,
+            cache_read_input_tokens=0, cache_creation_input_tokens=0,
+        ),
+    )
+
+
+class TestAnthropicHistoryConversion:
+    """The Fleet tool loop sends OpenAI-shaped history; Anthropic must receive its own shape."""
+
+    @pytest.mark.asyncio
+    async def test_background_agent_tool_loop_history(self):
+        # Exact shape background_agent_executor builds after a tool-calling turn.
+        messages = [
+            {"role": "system", "content": "you are an agent"},
+            {"role": "user", "content": "find x"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "tu_1", "type": "function", "function": {"name": "search", "arguments": '{"q": "x"}'}},
+                {"id": "tu_2", "type": "function", "function": {"name": "fetch", "arguments": "not json"}},
+            ]},
+            {"role": "tool", "tool_call_id": "tu_1", "content": '{"hits": 1}'},
+            {"role": "tool", "tool_call_id": "tu_2", "content": "boom"},
+            {"role": "user", "content": "[Operator Intervention] hurry"},
+        ]
+        client = _anthropic_client(return_value=_anthropic_text_response())
+        provider = DirectProvider(provider_type="anthropic", api_key="sk-ant")
+        request = DirectRequest(messages=messages, model="claude-3-haiku-20240307")
+
+        with patch.object(llm_direct, "AsyncAnthropic", return_value=client):
+            await llm_direct.complete(request, provider)
+
+        kwargs = client.messages.create.call_args.kwargs
+        assert kwargs["system"] == "you are an agent"
+        assert kwargs["messages"] == [
+            {"role": "user", "content": "find x"},
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "tu_1", "name": "search", "input": {"q": "x"}},
+                {"type": "tool_use", "id": "tu_2", "name": "fetch", "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "tu_1", "content": '{"hits": 1}'},
+                {"type": "tool_result", "tool_use_id": "tu_2", "content": "boom"},
+                {"type": "text", "text": "[Operator Intervention] hurry"},
+            ]},
+        ]
+
+    def test_assistant_text_kept_before_tool_use_and_empty_dropped(self):
+        converted = llm_direct._to_anthropic_messages([
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "checking", "tool_calls": [
+                {"id": "a", "type": "function", "function": {"name": "t", "arguments": "{}"}},
+            ]},
+            {"role": "tool", "tool_call_id": "a", "content": "ok"},
+            {"role": "assistant", "content": ""},
+            {"role": "assistant", "content": "final"},
+        ])
+
+        assert converted[1]["content"][0] == {"type": "text", "text": "checking"}
+        assert converted[1]["content"][1]["type"] == "tool_use"
+        # The empty assistant turn disappears; the next assistant message follows the tool result.
+        assert [m["role"] for m in converted] == ["user", "assistant", "user", "assistant"]
+        assert converted[-1]["content"] == "final"
+
+    def test_consecutive_user_messages_merge(self):
+        converted = llm_direct._to_anthropic_messages([
+            {"role": "user", "content": "a"},
+            {"role": "user", "content": "b"},
+        ])
+
+        assert converted == [{"role": "user", "content": [
+            {"type": "text", "text": "a"}, {"type": "text", "text": "b"},
+        ]}]
+
+    @pytest.mark.asyncio
+    async def test_anthropic_tool_use_round_trips_to_json_arguments(self):
+        client = _anthropic_client(return_value=SimpleNamespace(
+            model="claude-3-haiku-20240307",
+            content=[SimpleNamespace(type="tool_use", id="tu_9", name="search", input={"q": "é"})],
+            usage=SimpleNamespace(
+                input_tokens=1, output_tokens=1,
+                cache_read_input_tokens=0, cache_creation_input_tokens=0,
+            ),
+        ))
+        provider = DirectProvider(provider_type="anthropic", api_key="sk-ant")
+        request = DirectRequest(messages=[{"role": "user", "content": "hi"}], model="claude-3-haiku-20240307")
+
+        with patch.object(llm_direct, "AsyncAnthropic", return_value=client):
+            response = await llm_direct.complete(request, provider)
+
+        assert response.content == ""
+        assert json.loads(response.tool_calls[0].arguments) == {"q": "é"}
+
+
+class TestOpenAIReasoning:
+    def _provider(self):
+        return DirectProvider(provider_type="openrouter", api_key="sk-or")
+
+    @pytest.mark.asyncio
+    async def test_empty_content_falls_back_to_reasoning_content(self):
+        resp = _openai_response(content=None)
+        resp.choices[0].message.reasoning_content = "the answer is 4"
+        client = _openai_client(return_value=resp)
+
+        with patch.object(llm_direct, "AsyncOpenAI", return_value=client):
+            response = await llm_direct.complete(
+                DirectRequest(messages=[{"role": "user", "content": "2+2"}], model="deepseek/deepseek-r1"),
+                self._provider(),
+            )
+
+        assert response.content == "the answer is 4"
+        assert response.reasoning == "the answer is 4"
+
+    @pytest.mark.asyncio
+    async def test_reasoning_from_model_extra_does_not_replace_content(self):
+        resp = _openai_response(content="4")
+        resp.choices[0].message.model_extra = {"reasoning": "added them"}
+        client = _openai_client(return_value=resp)
+
+        with patch.object(llm_direct, "AsyncOpenAI", return_value=client):
+            response = await llm_direct.complete(
+                DirectRequest(messages=[{"role": "user", "content": "2+2"}], model="deepseek/deepseek-r1"),
+                self._provider(),
+            )
+
+        assert response.content == "4"
+        assert response.reasoning == "added them"
+
+    @pytest.mark.asyncio
+    async def test_tool_call_turn_does_not_use_reasoning_as_content(self):
+        tool_call = SimpleNamespace(id="c", function=SimpleNamespace(name="t", arguments="{}"))
+        resp = _openai_response(content=None, tool_calls=[tool_call])
+        resp.choices[0].message.reasoning_content = "thinking"
+        client = _openai_client(return_value=resp)
+
+        with patch.object(llm_direct, "AsyncOpenAI", return_value=client):
+            response = await llm_direct.complete(
+                DirectRequest(messages=[{"role": "user", "content": "x"}], model="deepseek/deepseek-r1"),
+                self._provider(),
+            )
+
+        assert response.content == ""
+        assert response.tool_calls and response.reasoning == "thinking"
+
+
+class TestAzureClient:
+    def test_classic_azure_resource_uses_azure_client(self):
+        provider = DirectProvider(
+            provider_type="azure", api_key="k", api_base="https://res.openai.azure.com",
+        )
+
+        with patch.object(llm_direct, "AsyncAzureOpenAI") as azure_cls:
+            llm_direct._openai_client(provider)
+
+        kwargs = azure_cls.call_args.kwargs
+        assert kwargs["azure_endpoint"] == "https://res.openai.azure.com"
+        assert kwargs["api_version"] == llm_direct.AZURE_API_VERSION
+
+    def test_azure_v1_endpoint_uses_plain_client(self):
+        provider = DirectProvider(
+            provider_type="azure", api_key="k", api_base="https://res.openai.azure.com/openai/v1/",
+        )
+
+        with patch.object(llm_direct, "AsyncOpenAI") as openai_cls:
+            llm_direct._openai_client(provider)
+
+        assert openai_cls.call_args.kwargs["base_url"] == provider.api_base

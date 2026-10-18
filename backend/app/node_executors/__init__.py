@@ -374,7 +374,7 @@ async def legacy_complete(
 ) -> Dict[str, Any]:
     """One in-process completion through ``llm_direct`` (the legacy ``execute`` wrappers, until U30).
 
-    Returns ``{"text", "tokens", "model"}``. The engine path never calls this: it runs the same prompt
+    Returns ``{"text", "tokens", "model", "reasoning"}``. The engine path never calls this: it runs the same prompt
     as a child conversation under the engine policy and ledger.
     """
     import asyncio
@@ -407,6 +407,7 @@ async def legacy_complete(
         "text": response.content or "",
         "tokens": (response.input_tokens or 0) + (response.output_tokens or 0),
         "model": model_id,
+        "reasoning": response.reasoning,
     }
 
 
