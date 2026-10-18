@@ -279,6 +279,7 @@ async def test_cancelling_the_run_closes_the_open_row(wf):
         tenant_id = TENANT
         engine_conversation_id = wf.wconv.conversation_id
         input_data = {}
+        trigger = "manual"
         completed_at = None
         error = None
 
