@@ -2,7 +2,6 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING
 
-import litellm
 from pydantic_ai import Agent
 from pydantic_ai.toolsets.function import FunctionToolset
 from pydantic import BaseModel
@@ -574,13 +573,12 @@ class BaseAgent:
 
         Keeps system prompt + recitation context intact. Removes oldest messages
         first. Saves full history to session file for audit trail.
-        Uses litellm.get_model_info() for context windows — no hardcoded dict.
+        Context windows come from app.config.llm_pricing.context_window_for.
         """
-        import litellm
+        from app.config.llm_pricing import context_window_for
 
         try:
-            model_info = litellm.get_model_info(model)
-            window = model_info.get("max_input_tokens", 128_000)
+            window = context_window_for(model) or 128_000
         except Exception:
             window = 128_000
 
@@ -646,7 +644,7 @@ class BaseAgent:
                 - agent_id: Agent ID for scoped learning
         """
         from app.services.llm_gateway import (
-            resolve_all_llm_keys, create_litellm_model, resolve_model_and_key,
+            resolve_all_llm_keys, create_model, resolve_model_and_key,
         )
 
         # Pop our custom kwargs before passing to agent.run()
@@ -785,15 +783,15 @@ class BaseAgent:
                     return result
 
             # OpenRouter or no direct Anthropic key — use thinking extraction
-            result = await self._run_with_litellm_thinking(
+            result = await self._run_with_reasoning_extraction(
                 enhanced_message, deps, effective_model, api_key, **kwargs
             )
             if tenant_id:
                 await self._record_quota_usage(db, tenant_id, user_id, result)
             return result
 
-        # Create LiteLLM-backed model with resolved key
-        model = create_litellm_model(effective_model, api_key)
+        # Create native pydantic-ai model with resolved key
+        model = create_model(effective_model, api_key)
 
         # Truncate message history if it would overflow the context window
         if 'message_history' in kwargs and kwargs['message_history']:
@@ -836,7 +834,7 @@ class BaseAgent:
         The final item yielded is an AgentRunResultEvent with the complete result.
         """
         from app.services.llm_gateway import (
-            resolve_all_llm_keys, create_litellm_model, resolve_model_and_key,
+            resolve_all_llm_keys, create_model, resolve_model_and_key,
         )
 
         # Pop custom kwargs
@@ -937,7 +935,7 @@ class BaseAgent:
         if tenant_id:
             await self._check_quota(db, tenant_id, user_id, enhanced_message)
 
-        model = create_litellm_model(effective_model, api_key)
+        model = create_model(effective_model, api_key)
 
         if 'message_history' in kwargs and kwargs['message_history']:
             kwargs['message_history'] = await self._truncate_messages_if_needed(
@@ -1036,7 +1034,7 @@ class BaseAgent:
         then falls back to pydantic-ai for structured output parsing.
         We extract the thinking content and attach it to the result.
         """
-        from app.services.llm_gateway import create_litellm_model
+        from app.services.llm_gateway import create_model
 
         model_name = model_id.split("/", 1)[1] if "/" in model_id else model_id
 
@@ -1066,7 +1064,7 @@ class BaseAgent:
                     response_text += block.text
 
             # Now run through pydantic-ai for structured output
-            model = create_litellm_model(model_id, api_key)
+            model = create_model(model_id, api_key)
             result = await self.agent.run(message, deps=deps, model=model, **kwargs)
 
             # Attach the reasoning to the result
@@ -1077,11 +1075,11 @@ class BaseAgent:
         except Exception as e:
             logger.warning(f"Anthropic thinking call failed, falling back to standard: {e}")
             # Fall back to standard pydantic-ai call without thinking
-            model = create_litellm_model(model_id, api_key)
+            model = create_model(model_id, api_key)
             result = await self.agent.run(message, deps=deps, model=model, **kwargs)
             return result
 
-    async def _run_with_litellm_thinking(
+    async def _run_with_reasoning_extraction(
         self,
         message: str,
         deps: AgentDependencies,
@@ -1094,9 +1092,9 @@ class BaseAgent:
 
         OpenRouter: calls the API directly with the `reasoning` parameter
         (LiteLLM strips reasoning from responses, so we bypass it).
-        Other providers: uses litellm.acompletion with `thinking` parameter.
+        Other providers: the `thinking` parameter is dropped (debug log).
         """
-        from app.services.llm_gateway import create_litellm_model
+        from app.services.llm_gateway import create_model
 
         try:
             is_openrouter = model_id.startswith("openrouter/")
@@ -1130,29 +1128,12 @@ class BaseAgent:
                 if choices:
                     reasoning_text = choices[0].get("message", {}).get("reasoning", "") or ""
             else:
-                thinking_response = await litellm.acompletion(
-                    model=model_id,
-                    messages=[
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": message},
-                    ],
-                    api_key=api_key,
-                    max_tokens=16000,
-                    thinking={"type": "enabled", "budget_tokens": 10000},
-                )
-                choices = getattr(thinking_response, 'choices', [])
-                if choices:
-                    msg = getattr(choices[0], 'message', None)
-                    if msg:
-                        reasoning_text = (
-                            getattr(msg, 'reasoning_content', None)
-                            or getattr(msg, 'reasoning', None)
-                            or getattr(msg, 'thinking', None)
-                            or ""
-                        )
+                # `thinking` was a LiteLLM extension; native providers other than
+                # Anthropic (handled elsewhere) and OpenRouter run without it.
+                logger.debug("thinking parameter dropped for non-OpenRouter model %s", model_id)
 
             # Run through pydantic-ai for structured output (with tools, etc.)
-            model = create_litellm_model(model_id, api_key)
+            model = create_model(model_id, api_key)
             result = await self.agent.run(message, deps=deps, model=model, **kwargs)
 
             if reasoning_text:
@@ -1161,7 +1142,7 @@ class BaseAgent:
             return result
         except Exception as e:
             logger.warning(f"Thinking extraction failed, falling back to standard: {e}")
-            model = create_litellm_model(model_id, api_key)
+            model = create_model(model_id, api_key)
             result = await self.agent.run(message, deps=deps, model=model, **kwargs)
             return result
 
@@ -1195,7 +1176,7 @@ class BaseAgent:
                 - agent_id: Agent ID for scoped learning
         """
         from app.services.llm_gateway import (
-            resolve_all_llm_keys, create_litellm_model, resolve_model_and_key,
+            resolve_all_llm_keys, create_model, resolve_model_and_key,
         )
 
         # Pop our custom kwargs before passing to agent.run_stream()
@@ -1302,8 +1283,8 @@ class BaseAgent:
         if tenant_id:
             await self._check_quota(db, tenant_id, user_id, enhanced_message)
 
-        # Create LiteLLM-backed model with resolved key
-        model = create_litellm_model(effective_model, api_key)
+        # Create native pydantic-ai model with resolved key
+        model = create_model(effective_model, api_key)
 
         # Run agent with streaming and dynamic model, passing per-invocation toolset
         async with self.agent.run_stream(

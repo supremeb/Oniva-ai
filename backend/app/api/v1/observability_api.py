@@ -307,7 +307,7 @@ async def get_tool_metrics(
 
 
 def _clean_model_name(model: str) -> str:
-    """Strip provider prefixes from litellm model names for display."""
+    """Strip provider prefixes from provider-prefixed model names for display."""
     for prefix in ("openrouter/openai/", "openrouter/anthropic/", "openrouter/google/",
                    "openrouter/deepseek/", "openrouter/qwen/", "openrouter/meta-llama/",
                    "openrouter/", "anthropic/", "openai/"):
