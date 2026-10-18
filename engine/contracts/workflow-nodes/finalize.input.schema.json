@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "finalize.input.schema.json",
+  "title": "Workflow run finalize input",
+  "description": "What the workflow_run task sends to the backend finalize route when the run ends.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "status", "nodeSummaries", "attempts"],
+  "properties": {
+    "contractVersion": { "const": 1 },
+    "status": { "enum": ["completed", "failed", "cancelled"] },
+    "nodeSummaries": {
+      "type": "object",
+      "additionalProperties": { "enum": ["success", "failed", "blocked", "skipped"] }
+    },
+    "error": {},
+    "attempts": { "type": "integer", "minimum": 1 }
+  }
+}

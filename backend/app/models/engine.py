@@ -89,3 +89,9 @@ class EngineConversation(Base):
     # Sidebar pin, and archive ("delete" hides the row from listings; engine data is kept).
     pinned = Column(Boolean, nullable=False, server_default="false", default=False)
     archived_at = Column(DateTime(timezone=True), nullable=True)
+    # Automation runs (plan 003 U1): the domain row this archived conversation belongs to
+    # (``background_jobs.id`` for ``fleet``, ``workflow_executions.id`` for ``workflow``).
+    run_kind = Column(String(20), nullable=True)
+    run_ref_id = Column(UUID(as_uuid=True), nullable=True)
+
+    __table_args__ = (Index("ix_engine_conversations_run", "run_kind", "run_ref_id"),)

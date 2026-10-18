@@ -12,7 +12,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -51,6 +51,26 @@ _last_reconcile: dict[str, datetime] = {}
 
 def reset_reconcile_throttle() -> None:
     _last_reconcile.clear()
+
+
+# --- decision hooks (plan 003 U21) ---------------------------------------------
+# A ledger row whose item is not an engine tool approval (a workflow node parked on a human) is decided
+# through the same route and RBAC, but delivered by a registered hook instead of ``EngineClient.decide``.
+# Keyed by ``(row.kind, conversation.run_kind)``. The hook signature is
+# ``async def hook(*, engine, conv, row, user, decision, note) -> dict`` and raises ``EngineError`` when
+# the engine cannot take the delivery.
+DecisionHook = Callable[..., Awaitable[dict]]
+_DECISION_HOOKS: dict[tuple[str, str], DecisionHook] = {}
+
+
+def register_decision_hook(kind: str, run_kind: str, fn: DecisionHook) -> None:
+    _DECISION_HOOKS[(kind, run_kind)] = fn
+
+
+def get_decision_hook(kind: str, run_kind: Optional[str]) -> Optional[DecisionHook]:
+    if kind == "review":  # the workflow module registers itself on import; import lazily (it imports us)
+        from app.services import workflow_wait_decisions  # noqa: F401
+    return _DECISION_HOOKS.get((kind, run_kind or ""))
 
 
 # Engine rejection reasons that mean "this call is not decidable here" rather than "unknown".
@@ -246,6 +266,12 @@ class ApprovalService:
     async def decide(self, *, user: AuthUser, conv: EngineConversation, row: ToolApproval,
                      decision: str, note: Optional[str], engine: EngineClient) -> dict:
         """Decide a ledger row through the engine. Returns the engine's response body."""
+        hook = get_decision_hook(row.kind, getattr(conv, "run_kind", None))
+        if hook is not None:
+            if str(row.tenant_id) != str(user.tenant_id):
+                raise ApprovalError(404, "not_found")
+            return await self._decide_hooked(hook, user=user, conv=conv, row=row, decision=decision,
+                                             note=note, engine=engine)
         if row.kind != "tool_call" or str(row.tenant_id) != str(user.tenant_id):
             raise ApprovalError(404, "not_found")
         uid = _uuid(user.id)
@@ -283,6 +309,73 @@ class ApprovalService:
             raise
         await self._finalize_decided(row, decided_by=user, decision=decision, note=note,
                                      engine_item=result.get("approval") if isinstance(result, dict) else None)
+        return result
+
+    async def _decide_hooked(self, hook: DecisionHook, *, user: AuthUser, conv: EngineConversation,
+                             row: ToolApproval, decision: str, note: Optional[str],
+                             engine: EngineClient) -> dict:
+        """The KTD5 protocol with a hook as the delivery step. The ledger claim (``pending -> deciding``)
+        is the arbiter: only its winner delivers, so the first decision wins and a second is 409."""
+        uid = _uuid(user.id)
+        retry = False
+        if row.status == "pending":
+            expires = _aware(row.expires_at)
+            if expires is not None and expires <= _now():
+                await self._close(row, "expired", AuditAction.APPROVAL_EXPIRED,
+                                  "approval not decided before its expiry")
+                raise ApprovalError(410, "approval_expired")
+            self_approved = await self.can_decide(user, row)
+            if not await self._claim(row, uid, decision, note, self_approved):
+                await self.db.refresh(row)
+                raise ApprovalError(409, "decision_in_progress" if row.status == "deciding" else "already_decided")
+        elif row.status == "deciding":
+            retry = True
+            if row.decided_by != uid:
+                seen = _aware(row.updated_at) or _now()
+                if _now() - seen < DECIDING_STALE:
+                    raise ApprovalError(409, "decision_in_progress")
+                self_approved = await self.can_decide(user, row)  # a stuck delivery must not lock everyone out
+                res = await self.db.execute(
+                    update(ToolApproval)
+                    .where(ToolApproval.id == row.id, ToolApproval.status == "deciding",
+                           ToolApproval.updated_at == row.updated_at)
+                    .values(decided_by=uid, decision=decision, note=note, self_approved=self_approved,
+                            updated_at=_now())
+                    .execution_options(synchronize_session=False))
+                won = res.rowcount == 1
+                await self._commit(row.tenant_id)
+                await self.db.refresh(row)
+                if not won:
+                    raise ApprovalError(409, "decision_in_progress")
+            else:
+                await self.can_decide(user, row)
+                decision, note = row.decision or decision, row.note  # a retry repeats the same inputs
+        elif row.status in ("approved", "denied") and row.decided_by == uid and row.decision == decision:
+            retry = True
+            await self.can_decide(user, row)  # idempotent re-send by the decider
+        elif row.status == "expired":
+            raise ApprovalError(410, "approval_expired")
+        elif row.status == "cancelled":
+            raise ApprovalError(409, "not_waiting")
+        else:
+            raise ApprovalError(409, "already_decided")
+
+        try:
+            result = await hook(engine=engine, conv=conv, row=row, user=user, decision=decision, note=note)
+        except EngineError as e:
+            if e.status in (404, 409, 410) and not (retry and e.status == 409):
+                # The node is no longer waiting (woke on its SLA, finished, or the run is gone).
+                expires = _aware(row.expires_at)
+                if expires is not None and expires <= _now():
+                    await self._close(row, "expired", AuditAction.APPROVAL_EXPIRED, "workflow wait woke on its SLA")
+                    raise ApprovalError(410, "approval_expired") from None
+                await self._close(row, "cancelled", AuditAction.APPROVAL_CANCELLED,
+                                  "workflow node no longer waiting")
+                raise ApprovalError(409, "not_waiting") from None
+            if not (retry and e.status == 409):
+                raise  # 5xx/timeout: the row stays `deciding`; the decider may retry
+            result = {}  # a retry whose first signal already landed: the delivery is done
+        await self._finalize_decided(row, decided_by=user, decision=decision, note=note, engine_item=None)
         return result
 
     async def _reclaim_stale(self, row: ToolApproval, user: AuthUser, uid, decision: str,
@@ -652,7 +745,7 @@ class ApprovalService:
         return len(rows)
 
     async def mark_closed(self, tenant_id, *, conversation_id=None, run_id: Optional[str] = None,
-                          reason: str = "cancelled") -> int:
+                          reason: str = "cancelled", commit: bool = True) -> int:
         """Close pending and deciding rows for a root conversation or a run, without an engine call."""
         if conversation_id is None and run_id is None:
             raise ValueError("mark_closed needs a conversation_id or a run_id")
@@ -668,7 +761,7 @@ class ApprovalService:
             row.updated_at = _now()
             await self._audit(row, AuditAction.APPROVAL_CANCELLED, "cancelled", None,
                               rationale=f"approval closed: {reason}", extra={"reason": reason})
-        if rows:
+        if rows and commit:
             await self._commit(tenant_id)
         return len(rows)
 

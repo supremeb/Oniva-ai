@@ -1,0 +1,11 @@
+{
+  "contractVersion": 1,
+  "status": "failed",
+  "nodeSummaries": {
+    "n1": "success",
+    "n2": "failed",
+    "n3": "skipped"
+  },
+  "error": { "nodeId": "n2", "message": "boom" },
+  "attempts": 2
+}

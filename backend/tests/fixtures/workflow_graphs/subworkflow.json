@@ -1,0 +1,88 @@
+{
+  "errorMode": "stop",
+  "graph": {
+    "nodes": [
+      {
+        "deps": [],
+        "id": "s",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 120000
+        },
+        "type": "start"
+      },
+      {
+        "deps": [
+          {
+            "from": "s",
+            "handle": null
+          }
+        ],
+        "id": "sub",
+        "mayFanOut": true,
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 120000
+        },
+        "type": "subworkflow"
+      },
+      {
+        "deps": [
+          {
+            "from": "sub",
+            "handle": null
+          }
+        ],
+        "id": "o",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 120000
+        },
+        "type": "output"
+      }
+    ],
+    "workflows": {
+      "00000000-0000-4000-8000-0000000000c1": {
+        "nodes": [
+          {
+            "deps": [],
+            "id": "cs",
+            "policy": {
+              "backoffMs": 0,
+              "maxRetries": 0,
+              "onError": "stop",
+              "timeoutMs": 120000
+            },
+            "type": "start"
+          },
+          {
+            "deps": [
+              {
+                "from": "cs",
+                "handle": null
+              }
+            ],
+            "id": "ct",
+            "policy": {
+              "backoffMs": 0,
+              "maxRetries": 0,
+              "onError": "stop",
+              "timeoutMs": 120000
+            },
+            "type": "template"
+          }
+        ]
+      }
+    }
+  },
+  "runAttempt": 0,
+  "runId": "00000000-0000-4000-8000-000000000001",
+  "variables": {},
+  "version": 1
+}

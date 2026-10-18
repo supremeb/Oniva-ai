@@ -129,7 +129,9 @@ class InboxService:
         kind = _LEDGER_KIND.get(row.kind, "approval")
         actions: list[dict] = []
         href = f"/chat/{row.conversation_id}" if row.conversation_id else "/chat"
-        if row.kind == "tool_call" and row.conversation_id and row.tool_task_id:
+        # A `review` row is a workflow node parked on a human (plan 003 U21): it is decided on the same route,
+        # whose decision hook signals the node instead of asking the engine to decide a tool call.
+        if row.kind in ("tool_call", "review") and row.conversation_id and row.tool_task_id:
             action = {
                 "type": "decide",
                 "endpoint": f"/api/v1/engine/conversations/{row.conversation_id}/approvals/{row.tool_task_id}/decision",

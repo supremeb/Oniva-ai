@@ -108,13 +108,13 @@ export interface ToolManifestLookup {
 export const requestIdFor = (runId: string, round: number, purpose: string): string =>
   `${runId}:${round}:${purpose}`;
 
-const trimSlash = (s: string): string => s.replace(/\/+$/, "");
+export const trimSlash = (s: string): string => s.replace(/\/+$/, "");
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Short, key-free description of a thrown value. */
-function errorName(err: unknown): string {
+export function errorName(err: unknown): string {
   if (err instanceof Error) return err.name === "Error" ? err.message.slice(0, 200) : err.name;
   return "error";
 }
@@ -135,7 +135,7 @@ const ARGS_TARGET: RedactTarget = { record: "task", kind: "agent.tool", field: "
 const UNAVAILABLE: ToolVerdict = { decision: "block", reason: "policy_unavailable" };
 
 /** Network errors, timeouts and these statuses are worth another try. */
-const isTransientStatus = (status: number): boolean =>
+export const isTransientStatus = (status: number): boolean =>
   status === 408 || status === 429 || status >= 500;
 
 /** `Retry-After` as ms (delta seconds or an HTTP date), or null when absent or unusable. */
@@ -161,7 +161,7 @@ const realSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   });
 
 /** Backoff schedule and budget shared by both clients. */
-class Backoff {
+export class Backoff {
   readonly retryMs: number;
   readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   readonly now: () => number;
@@ -549,7 +549,7 @@ export class UsageReporter {
   async flushOutbox(): Promise<void> {
     const outbox = this.#outbox;
     if (!outbox) return;
-    for (const record of await outbox.claimPending(this.#claimTimeoutMs)) {
+    for (const record of await outbox.claimPending(this.#claimTimeoutMs, "usage")) {
       const job = this.#deliver(record, false).finally(() => this.#pending.delete(job));
       this.#pending.add(job);
     }

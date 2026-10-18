@@ -169,7 +169,8 @@
       "runId": "task_<id-5>",
       "startedAt": "1970-01-01T00:16:40.000Z"
     },
-    "subagents": {}
+    "subagents": {},
+    "tasks": {}
   },
   "question_answered": {
     "entries": [
@@ -401,7 +402,8 @@
     "run": {
       "active": false
     },
-    "subagents": {}
+    "subagents": {},
+    "tasks": {}
   },
   "question_expired": {
     "entries": [
@@ -618,6 +620,7 @@
     "run": {
       "active": false
     },
-    "subagents": {}
+    "subagents": {},
+    "tasks": {}
   }
 }

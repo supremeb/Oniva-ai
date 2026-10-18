@@ -1,21 +1,28 @@
 """
 Question Classifier Node Executor
-Uses LLM to classify input into categories
+Uses an LLM to classify input into categories.
+
+Plan 003 U14: ``build_prompt`` and ``parse_answer`` are pure. ``prepare`` returns an ``llm`` body,
+``finish`` maps the answer to ``selectedHandles = [label]``; ``execute`` is a thin legacy wrapper over
+the same functions (until U30).
 """
 
-from app.node_executors import BaseNodeExecutor, NodeExecutionContext, NodeExecutionResult
-from sqlalchemy.ext.asyncio import AsyncSession
-import time
 import json
-import asyncio
-from uuid import UUID
+import time
+from typing import Any, Dict, List, Optional
 
-import litellm
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.llm_gateway import (
-    resolve_key_with_fallback, normalize_model_id, get_provider_from_model,
+from app.node_executors import (
+    BaseNodeExecutor,
+    LlmKeyMissing,
+    NodeExecutionContext,
+    NodeExecutionResult,
+    PrepareResult,
+    legacy_complete,
 )
+from app.services.llm_gateway import normalize_model_id
 
 
 class ClassificationResult(BaseModel):
@@ -30,57 +37,40 @@ class ClassifierExecutor(BaseNodeExecutor):
 
     node_type = "classifier"
 
-    async def execute(
-        self,
-        context: NodeExecutionContext,
-        db: AsyncSession
-    ) -> NodeExecutionResult:
-        start_time = time.time()
+    @staticmethod
+    def _normalize_classes(classes: List[Any]) -> List[Dict[str, Any]]:
+        """Handle both dict and string class formats."""
+        normalized: List[Dict[str, Any]] = []
+        for i, c in enumerate(classes):
+            if isinstance(c, dict):
+                normalized.append(c)
+            elif isinstance(c, str):
+                normalized.append({"id": c, "name": c})
+            else:
+                normalized.append({"id": f"class_{i}", "name": str(c)})
+        return normalized
 
-        try:
-            node_data = context.node_data
+    def build_prompt(self, context: NodeExecutionContext) -> Dict[str, Any]:
+        """Pure: the classification prompt, the label set and the resolved input text.
 
-            # Get configuration
-            model_id = normalize_model_id(node_data.get("model", "openai/gpt-4o-mini"))
+        Raises ``ValueError`` when the node has no classes.
+        """
+        node_data = context.node_data
+        classes = node_data.get("classes", [])
+        instructions = node_data.get("instructions", "")
 
-            classes = node_data.get("classes", [])
-            instructions = node_data.get("instructions", "")
-            input_text_path = node_data.get("inputText", "")
+        input_text = self.substitute_variables(node_data.get("inputText", ""), context.variables, context.inputs)
+        if not input_text:
+            input_text = context.variables.get("sys.query", "")
 
-            # Get input text
-            input_text = self.substitute_variables(
-                input_text_path, context.variables, context.inputs
-            )
+        if not classes:
+            raise ValueError("No classes defined for classification")
+        classes = self._normalize_classes(classes)
 
-            if not input_text:
-                input_text = context.variables.get("sys.query", "")
-
-            if not classes:
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="failed",
-                    error="No classes defined for classification",
-                    elapsed_ms=int((time.time() - start_time) * 1000)
-                )
-
-            # Normalize classes — handle both dict and string formats
-            normalized_classes = []
-            for i, c in enumerate(classes):
-                if isinstance(c, dict):
-                    normalized_classes.append(c)
-                elif isinstance(c, str):
-                    normalized_classes.append({"id": c, "name": c})
-                else:
-                    normalized_classes.append({"id": f"class_{i}", "name": str(c)})
-            classes = normalized_classes
-
-            # Build classification prompt
-            class_list = "\n".join([
-                f"- {c.get('id', f'class_{i}')}: {c.get('name', 'Unnamed')}"
-                for i, c in enumerate(classes)
-            ])
-
-            system_prompt = f"""You are a text classifier. Classify the input text into one of these categories:
+        class_list = "\n".join(
+            f"- {c.get('id', f'class_{i}')}: {c.get('name', 'Unnamed')}" for i, c in enumerate(classes)
+        )
+        system_prompt = f"""You are a text classifier. Classify the input text into one of these categories:
 
 {class_list}
 
@@ -91,96 +81,145 @@ Respond with ONLY a JSON object in this format:
 
 Be precise and choose the most appropriate category."""
 
-            # Resolve API key via unified gateway (with OpenRouter fallback)
-            tenant_uuid = UUID(context.tenant_id) if context.tenant_id else None
-            api_key, model_id = await resolve_key_with_fallback(db, tenant_uuid, model_id)
+        return {
+            "system": system_prompt,
+            "prompt": f"Classify this text:\n\n{input_text}",
+            "classes": classes,
+            "labels": [c.get("id", f"class_{i}") for i, c in enumerate(classes)],
+            "input_text": input_text,
+            "model": normalize_model_id(node_data.get("model", "openai/gpt-4o-mini")),
+        }
 
-            if not api_key:
-                provider_type = get_provider_from_model(model_id)
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="failed",
-                    error=f"API key not configured for provider '{provider_type}'. Add your key in Settings > LLM Providers.",
-                    elapsed_ms=int((time.time() - start_time) * 1000)
-                )
+    @staticmethod
+    def _default_class(classes: List[Dict[str, Any]], node_data: Dict[str, Any]) -> Dict[str, Any]:
+        """The class an unknown label routes to: the configured default, else the first class."""
+        wanted = node_data.get("defaultClass") or node_data.get("defaultClassId")
+        for c in classes:
+            if wanted and c.get("id") == wanted:
+                return c
+        return classes[0]
 
-            # Run classification via LiteLLM
-            response = await asyncio.wait_for(
-                litellm.acompletion(
-                    model=model_id,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Classify this text:\n\n{input_text}"},
-                    ],
-                    temperature=0.1,
-                    max_tokens=200,
-                    api_key=api_key,
-                ),
-                timeout=30.0,
+    def parse_answer(self, context: NodeExecutionContext, text: str, tokens: int = 0) -> NodeExecutionResult:
+        """Pure: map the model's answer to a label. An unknown label routes to the default class."""
+        built = self.build_prompt(context)
+        classes, input_text = built["classes"], built["input_text"]
+        known = {c.get("id", "") for c in classes}
+        result_text = text or ""
+
+        try:
+            json_match = result_text
+            if "```json" in result_text:
+                json_match = result_text.split("```json")[1].split("```")[0]
+            elif "```" in result_text:
+                json_match = result_text.split("```")[1].split("```")[0]
+            classification = json.loads(json_match.strip())
+            if not isinstance(classification, dict):
+                raise json.JSONDecodeError("not an object", json_match, 0)
+        except (json.JSONDecodeError, IndexError):
+            classification = None
+            # Fallback: try to match a class name in the response
+            lowered = result_text.lower()
+            for c in classes:
+                if c.get("name", "").lower() in lowered:
+                    return self._result(
+                        context, c, 0.7, input_text, tokens, raw_response=result_text, handle=c.get("id")
+                    )
+            default = self._default_class(classes, context.node_data)
+            return self._result(
+                context, default, 0.5, input_text, tokens, raw_response=result_text, handle=default.get("id")
             )
 
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            result_text = response.choices[0].message.content or ""
+        label = classification.get("class_id", "")
+        if label in known:
+            return NodeExecutionResult(
+                node_id=context.node_id,
+                status="success",
+                output={
+                    "class_id": label,
+                    "class_name": classification.get("class_name", ""),
+                    "confidence": classification.get("confidence", 0.0),
+                    "input_text": input_text,
+                },
+                tokens_used=tokens or None,
+                next_node_id=label,
+            )
+        default = self._default_class(classes, context.node_data)
+        return self._result(
+            context, default, 0.5, input_text, tokens, raw_response=result_text, handle=default.get("id")
+        )
 
-            # Parse result
-            try:
-                json_match = result_text
-                if "```json" in result_text:
-                    json_match = result_text.split("```json")[1].split("```")[0]
-                elif "```" in result_text:
-                    json_match = result_text.split("```")[1].split("```")[0]
+    @staticmethod
+    def _result(
+        context: NodeExecutionContext,
+        cls: Dict[str, Any],
+        confidence: float,
+        input_text: str,
+        tokens: int,
+        *,
+        raw_response: str,
+        handle: Optional[str],
+    ) -> NodeExecutionResult:
+        return NodeExecutionResult(
+            node_id=context.node_id,
+            status="success",
+            output={
+                "class_id": cls.get("id", ""),
+                "class_name": cls.get("name", ""),
+                "confidence": confidence,
+                "input_text": input_text,
+                "raw_response": raw_response,
+            },
+            tokens_used=tokens or None,
+            next_node_id=handle or None,
+        )
 
-                classification = json.loads(json_match.strip())
+    async def prepare(self, context: NodeExecutionContext, db: AsyncSession) -> Any:
+        try:
+            built = self.build_prompt(context)
+        except ValueError as exc:
+            return NodeExecutionResult(node_id=context.node_id, status="failed", error=str(exc))
+        return PrepareResult.llm(
+            system=built["system"],
+            prompt=built["prompt"],
+            model=built["model"] if context.node_data.get("model") else None,
+            tier="low",
+            response_format="json",
+        )
 
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="success",
-                    output={
-                        "class_id": classification.get("class_id", ""),
-                        "class_name": classification.get("class_name", ""),
-                        "confidence": classification.get("confidence", 0.0),
-                        "input_text": input_text,
-                    },
-                    elapsed_ms=elapsed_ms,
-                    next_node_id=classification.get("class_id")
-                )
-            except json.JSONDecodeError:
-                # Fallback: try to match class name in response
-                result_lower = result_text.lower()
-                for c in classes:
-                    if c.get("name", "").lower() in result_lower:
-                        return NodeExecutionResult(
-                            node_id=context.node_id,
-                            status="success",
-                            output={
-                                "class_id": c.get("id", ""),
-                                "class_name": c.get("name", ""),
-                                "confidence": 0.7,
-                                "input_text": input_text,
-                                "raw_response": result_text,
-                            },
-                            elapsed_ms=elapsed_ms,
-                            next_node_id=c.get("id")
-                        )
+    async def finish(self, context: NodeExecutionContext, db: AsyncSession, finish_input: Any) -> NodeExecutionResult:
+        return self.parse_answer(
+            context, PrepareResult.answer_text(finish_input), PrepareResult.answer_tokens(finish_input)
+        )
 
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="success",
-                    output={
-                        "class_id": classes[0].get("id", "") if classes else "",
-                        "class_name": classes[0].get("name", "") if classes else "",
-                        "confidence": 0.5,
-                        "input_text": input_text,
-                        "raw_response": result_text,
-                    },
-                    elapsed_ms=elapsed_ms
-                )
-
-        except Exception as e:
-            elapsed_ms = int((time.time() - start_time) * 1000)
+    async def execute(self, context: NodeExecutionContext, db: AsyncSession) -> NodeExecutionResult:
+        """Legacy in-process path over the same pure functions (removed by U30)."""
+        start_time = time.time()
+        try:
+            built = self.build_prompt(context)
+            completion = await legacy_complete(
+                db,
+                context.tenant_id,
+                built["model"],
+                built["system"],
+                built["prompt"],
+                temperature=0.1,
+                max_tokens=200,
+                timeout=30.0,
+            )
+            result = self.parse_answer(context, completion["text"], completion["tokens"])
+            result.elapsed_ms = int((time.time() - start_time) * 1000)
+            return result
+        except (ValueError, LlmKeyMissing) as e:
             return NodeExecutionResult(
                 node_id=context.node_id,
                 status="failed",
                 error=str(e),
-                elapsed_ms=elapsed_ms
+                elapsed_ms=int((time.time() - start_time) * 1000),
+            )
+        except Exception as e:
+            return NodeExecutionResult(
+                node_id=context.node_id,
+                status="failed",
+                error=str(e),
+                elapsed_ms=int((time.time() - start_time) * 1000),
             )

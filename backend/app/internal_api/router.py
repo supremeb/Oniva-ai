@@ -9,7 +9,9 @@ from app.internal_api.authorize import router as authorize_router
 from app.internal_api.fence import GatewayError, gateway_error_handler
 from app.internal_api.logging import install_redaction
 from app.internal_api.models import router as models_router
+from app.internal_api.runs import router as runs_router
 from app.internal_api.tools import router as tools_router
+from app.internal_api.workflow_nodes import router as workflows_router
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,8 @@ def build_internal_router(settings: Settings) -> APIRouter:
     router.include_router(tools_router)
     router.include_router(authorize_router)
     router.include_router(models_router)
+    router.include_router(workflows_router)
+    router.include_router(runs_router)
     return router
 
 

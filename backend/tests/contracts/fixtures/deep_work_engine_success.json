@@ -251,7 +251,8 @@
               "costUsd": null
             }
           }
-        }
+        },
+        "tasks": {}
       }
     },
     {
@@ -581,7 +582,8 @@
               "costUsd": null
             }
           }
-        }
+        },
+        "tasks": {}
       }
     },
     {
@@ -1341,7 +1343,8 @@
               "costUsd": null
             }
           }
-        }
+        },
+        "tasks": {}
       }
     }
   ],
@@ -1429,7 +1432,8 @@
         "run": {
           "active": false
         },
-        "subagents": {}
+        "subagents": {},
+        "tasks": {}
       }
     },
     {

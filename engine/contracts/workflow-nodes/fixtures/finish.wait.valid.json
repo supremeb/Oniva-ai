@@ -1,0 +1,6 @@
+{
+  "contractVersion": 1,
+  "kind": "wait",
+  "signalPayload": { "approved": true },
+  "wakeReason": "signal"
+}

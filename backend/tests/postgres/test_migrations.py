@@ -12,7 +12,7 @@ def test_single_alembic_head():
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "migrations"))
     heads = ScriptDirectory.from_config(cfg).get_heads()
-    assert heads == ["113_retire_review_tickets"], heads
+    assert heads == ["121_encrypt_webhook_secrets"], heads
 
 
 def _scalar(url, sql):
@@ -29,7 +29,7 @@ def test_upgrade_head_on_empty_db(pg_migrated_url):
     assert res.returncode == 0, res.stderr[-2000:]
     assert _scalar(pg_migrated_url, "SELECT to_regclass('public.sandbox_executions')")
     assert _scalar(pg_migrated_url, "SELECT 1 FROM pg_extension WHERE extname='vector'")
-    assert _scalar(pg_migrated_url, "SELECT version_num FROM alembic_version") == "113_retire_review_tickets"
+    assert _scalar(pg_migrated_url, "SELECT version_num FROM alembic_version") == "121_encrypt_webhook_secrets"
     assert _scalar(
         pg_migrated_url,
         "SELECT character_maximum_length FROM information_schema.columns "
@@ -240,3 +240,11 @@ def test_memory_rls_is_user_scoped(pg_migrated_url):
             engine.dispose()
     assert visible_as(U1) == 2
     assert visible_as(U2) == 1  # only the shared one
+
+
+def test_tier_refuses_to_drop_protected_databases(pg_server):
+    import pytest as _pytest
+
+    for name in ("oniva", "oniva_engine", "postgres"):
+        with _pytest.raises(RuntimeError, match="protected"):
+            pg_server.recreate_db(name)

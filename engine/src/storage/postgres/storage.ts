@@ -36,6 +36,8 @@ import {
   type DocumentScanOptions,
   type EntryRecord,
   type Fence,
+  type OutboxKind,
+  outboxKindOf,
   type Page,
   type PageOptions,
   type SessionStorage,
@@ -95,22 +97,25 @@ export class PostgresStorageProvider implements StorageProvider {
    */
   async enqueue(record: UsageOutboxRecord): Promise<void> {
     await this.pool.query(
-      `INSERT INTO engine_usage_outbox (request_id, body, created_at, claimed_at)
-       VALUES ($1, $2::json, $3, $4)
+      `INSERT INTO engine_usage_outbox (request_id, kind, body, created_at, claimed_at)
+       VALUES ($1, $2, $3::json, $4, $5)
        ON CONFLICT (request_id) DO NOTHING`,
-      [record.requestId, JSON.stringify(record.body), record.createdAt, record.claimedAt],
+      [
+        record.requestId,
+        outboxKindOf(record),
+        JSON.stringify(record.body),
+        record.createdAt,
+        record.claimedAt,
+      ],
     );
   }
 
-  /**
-   * Claim rows that are unclaimed or whose claim is at least `claimTimeoutMs` old
-   * (stale), oldest first. `FOR UPDATE SKIP LOCKED` keeps concurrent claimers
-   * from taking the same row.
-   */
-  async claimPending(claimTimeoutMs: number): Promise<UsageOutboxRecord[]> {
+  /** Claim rows unclaimed or claimed at most `claimTimeoutMs` ago, oldest first. */
+  async claimPending(claimTimeoutMs: number, kind?: OutboxKind): Promise<UsageOutboxRecord[]> {
     const now = Date.now();
     const { rows } = await this.pool.query<{
       request_id: string;
+      kind: OutboxKind;
       body: JsonValue;
       created_at: string;
       claimed_at: string | null;
@@ -119,18 +124,20 @@ export class PostgresStorageProvider implements StorageProvider {
          UPDATE engine_usage_outbox SET claimed_at = $1
           WHERE request_id IN (
             SELECT request_id FROM engine_usage_outbox
-             WHERE claimed_at IS NULL OR claimed_at <= $2
+             WHERE (claimed_at IS NULL OR claimed_at <= $2)
+               AND ($3::text IS NULL OR kind = $3)
              ORDER BY created_at, request_id
              FOR UPDATE SKIP LOCKED
           )
-         RETURNING request_id, body, created_at, claimed_at
+         RETURNING request_id, kind, body, created_at, claimed_at
        )
-       SELECT request_id, body, created_at, claimed_at FROM claimed
+       SELECT request_id, kind, body, created_at, claimed_at FROM claimed
         ORDER BY created_at, request_id`,
-      [now, now - claimTimeoutMs],
+      [now, now - claimTimeoutMs, kind ?? null],
     );
     return rows.map((r) => ({
       requestId: r.request_id,
+      kind: r.kind,
       body: r.body,
       createdAt: Number(r.created_at),
       claimedAt: r.claimed_at === null ? null : Number(r.claimed_at),

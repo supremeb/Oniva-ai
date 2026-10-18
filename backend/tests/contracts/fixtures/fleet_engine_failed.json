@@ -1,0 +1,129 @@
+{
+  "events": [
+    {
+      "event": "progress",
+      "data": {
+        "job_id": "<id-1>",
+        "status": "running",
+        "progress": 0,
+        "current_step": null,
+        "message": "Progress: 0%",
+        "timestamp": "<timestamp>"
+      }
+    },
+    {
+      "event": "step",
+      "data": {
+        "step": 1,
+        "step_id": "s1",
+        "node_id": "text-1",
+        "node_type": "text_response",
+        "status": "completed",
+        "type": "text_response",
+        "content_preview": "Searching.",
+        "reasoning": null
+      }
+    },
+    {
+      "event": "step",
+      "data": {
+        "step": 2,
+        "step_id": "s2",
+        "node_id": "c1",
+        "node_type": "tool_call",
+        "node_name": "web_search",
+        "status": "completed",
+        "type": "tool_call",
+        "tool_name": "web_search",
+        "tool_args": {
+          "q": "x"
+        },
+        "tool_result_preview": "found it"
+      }
+    },
+    {
+      "event": "progress",
+      "data": {
+        "job_id": "<id-1>",
+        "status": "failed",
+        "progress": 100,
+        "current_step": null,
+        "message": "Progress: 100%",
+        "timestamp": "<timestamp>"
+      }
+    },
+    {
+      "event": "step",
+      "data": {
+        "step": 3,
+        "step_id": "s3",
+        "node_id": "usage",
+        "node_type": "usage",
+        "status": "completed",
+        "type": "usage",
+        "token_usage": {
+          "input": 30,
+          "output": 12,
+          "total": 42
+        }
+      }
+    },
+    {
+      "event": "failed",
+      "data": {
+        "job_id": "<id-1>",
+        "status": "failed",
+        "result": null,
+        "error": "The agent stopped after reaching its maximum number of steps (max_rounds).",
+        "duration_ms": "<duration>",
+        "execution_trace": [
+          {
+            "step": 1,
+            "step_id": "s1",
+            "node_id": "text-1",
+            "node_type": "text_response",
+            "status": "completed",
+            "type": "text_response",
+            "content_preview": "Searching.",
+            "reasoning": null
+          },
+          {
+            "step": 2,
+            "step_id": "s2",
+            "node_id": "c1",
+            "node_type": "tool_call",
+            "node_name": "web_search",
+            "status": "completed",
+            "type": "tool_call",
+            "tool_name": "web_search",
+            "tool_args": {
+              "q": "x"
+            },
+            "tool_result_preview": "found it"
+          },
+          {
+            "step": 3,
+            "step_id": "s3",
+            "node_id": "usage",
+            "node_type": "usage",
+            "status": "completed",
+            "type": "usage",
+            "token_usage": {
+              "input": 30,
+              "output": 12,
+              "total": 42
+            }
+          }
+        ],
+        "completed_at": "<timestamp>"
+      }
+    }
+  ],
+  "final_job": {
+    "status": "failed",
+    "progress": 100,
+    "result": null,
+    "error": "The agent stopped after reaching its maximum number of steps (max_rounds).",
+    "total_tokens": 42
+  }
+}

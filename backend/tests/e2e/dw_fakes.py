@@ -6,6 +6,7 @@ backend process that must see the sandboxes the first one created (no process-lo
 
 - ``search.log``     one line per fake ``web_search`` call: ``start <query>`` / ``done <query>``
 - ``sandbox.log``    one line per sandbox event: ``created <run>:<worker>`` / ``torn <run>:<worker>``
+- ``webhook.log``   one json line per Fleet result delivered to the agent webhook
 - ``gate``           ``web_search`` for a query containing ``GATED`` waits until this file exists
 - ``shared.json``    the fake Redis hashes and proxy tokens (locked read-modify-write)
 """
@@ -26,6 +27,7 @@ class Files:
         self.search_log = root / "search.log"
         self.sandbox_log = root / "sandbox.log"
         self.gate = root / "gate"
+        self.webhook_log = root / "webhook.log"  # one json line per Fleet delivery
         self.shared = root / "shared.json"
         self._lock = root / "shared.lock"
 

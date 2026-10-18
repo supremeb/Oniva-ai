@@ -40,7 +40,7 @@ import {
   approvalsDoc,
   type DecideApprovalInput,
 } from "./approvals.js";
-import { compactionTaskDefinition } from "./compaction.js";
+import { COMPACTION_TASK_KIND, compactionTaskDefinition } from "./compaction.js";
 import { ENTRY_KINDS, toEntryPayload } from "./context-builder.js";
 import {
   type AgentCore,
@@ -103,6 +103,8 @@ export interface HarnessOptions {
   clock?: Clock;
   settings?: Partial<AgentSettings>;
   limits?: Partial<EngineLimits>;
+  /** Extra task kinds registered after the built-ins; a duplicate kind throws when opening. */
+  tasks?: readonly TaskDefinition[];
   /** Lease fence for commits (`LeaseKeeper.fence`), for a session the harness opens. */
   fence?: FenceProvider;
   /** Stops the harness's runtime when aborted (`LeaseKeeper.signal`). */
@@ -116,7 +118,21 @@ export interface HarnessOptions {
   questionTtlMs?: number | null;
   /** Harness-level compaction settings; a conversation's `agent.compaction` overrides them. */
   compaction?: CompactionOverrides;
+  /** Registered like {@link Harness.onSettled}, before the harness settles submissions left over from a previous process. */
+  onSettled?: SettledListener;
 }
+
+/** A submission that settled: `done`, or `unanswered` with its `reason`. */
+export interface SettledEvent {
+  conversationId: string;
+  submissionId: string;
+  requestId: string;
+  status: "done" | "unanswered";
+  /** The `unanswered` reason (`aborted`, `faulted`, `model_error`, ...). Only for `unanswered`. */
+  reason?: string;
+}
+
+export type SettledListener = (event: SettledEvent) => void;
 
 export interface NewConversationInput {
   tenantId: string;
@@ -131,6 +147,13 @@ interface Waiter {
 }
 
 const SETTLED = new Set(["done", "unanswered"]);
+
+/** Task kinds the harness registers itself; any other kind is a host task. */
+const BUILT_IN_KINDS: ReadonlySet<string> = new Set([
+  GENERATION_TASK_KIND,
+  TOOL_TASK_KIND,
+  COMPACTION_TASK_KIND,
+]);
 
 /**
  * Recovery hook: for each root conversation whose run had a task in flight
@@ -160,12 +183,13 @@ async function markResumedRuns({
     }
   }
   for (const conversationId of roots) {
-    const run = live.find(
-      (t) =>
-        t.conversationId === conversationId &&
-        t.kind === GENERATION_TASK_KIND &&
-        t.parentTaskId === null,
-    );
+    // A chat run is the conversation's root generation; a host task's run
+    // (a container conversation holding no generation) is its root task.
+    const rootOf = (t: TaskRecord) =>
+      t.conversationId === conversationId && t.parentTaskId === null;
+    const run =
+      live.find((t) => rootOf(t) && t.kind === GENERATION_TASK_KIND) ??
+      live.find((t) => rootOf(t) && !BUILT_IN_KINDS.has(t.kind));
     if (!run) continue;
     tx.appendEntry({
       conversationId,
@@ -186,6 +210,7 @@ export class Harness implements AgentCore {
   readonly #ownsSession: boolean;
   readonly #report: AgentErrorReporter;
   readonly #waiters = new Map<string, Set<Waiter>>();
+  readonly #settledListeners = new Set<SettledListener>();
   readonly #unsubscribe: () => void;
   #stopped: unknown = null;
 
@@ -275,7 +300,8 @@ export class Harness implements AgentCore {
       runtime = await TaskRuntime.open(session, {
         // Subagents need no kind of their own: they run as the tool task's
         // `subagent` phase over child conversations of these same kinds.
-        tasks: [generation, toolTask, compaction],
+        // Host tasks are registered after the built-ins, so they cannot shadow one.
+        tasks: [generation, toolTask, compaction, ...(options.tasks ?? [])],
         clock,
         concurrency: settings.concurrency,
         ...(options.signal ? { signal: options.signal } : {}),
@@ -298,6 +324,7 @@ export class Harness implements AgentCore {
       unsubscribe,
     });
     harness = h;
+    if (options.onSettled) h.onSettled(options.onSettled);
     void runtime.closed.then((reason) => h.#stop(reason));
     for (const event of early.splice(0)) h.#onCommit(event);
     await h.#settleOrphans(null);
@@ -322,6 +349,18 @@ export class Harness implements AgentCore {
   /** A handle on an existing conversation (not checked until used). */
   conversation(id: string): Conversation {
     return new Conversation(this, id);
+  }
+
+  /**
+   * Call `listener` after each submission settles (`done` or `unanswered`),
+   * once per settlement. A throwing listener is reported through `onError`
+   * and never affects settlement. Returns the unsubscribe function.
+   */
+  onSettled(listener: SettledListener): () => void {
+    this.#settledListeners.add(listener);
+    return () => {
+      this.#settledListeners.delete(listener);
+    };
   }
 
   /** A handle on an existing submission, e.g. after a restart. */
@@ -422,10 +461,32 @@ export class Harness implements AgentCore {
     }
   }
 
+  #notifySettled(rec: SubmissionRecord): void {
+    if (this.#settledListeners.size === 0) return;
+    const reason =
+      rec.status === "unanswered" ? (rec.result as { reason?: unknown } | null)?.reason : undefined;
+    const event: SettledEvent = {
+      conversationId: rec.conversationId,
+      submissionId: rec.id,
+      requestId: rec.requestId,
+      status: rec.status as "done" | "unanswered",
+      ...(typeof reason === "string" ? { reason } : {}),
+    };
+    for (const listener of [...this.#settledListeners]) {
+      try {
+        listener({ ...event });
+      } catch (err) {
+        this.#report(err, { during: "settle", conversationId: rec.conversationId });
+      }
+    }
+  }
+
   #onCommit(event: CommitEvent): void {
     const b = event.batch;
     for (const s of [...(b.createSubmissions ?? []), ...(b.replaceSubmissions ?? [])]) {
-      if (SETTLED.has(s.status)) this.#resolve(s);
+      if (!SETTLED.has(s.status)) continue;
+      this.#resolve(s);
+      this.#notifySettled(s);
     }
     const ended = (b.replaceTasks ?? []).filter(
       (t) =>

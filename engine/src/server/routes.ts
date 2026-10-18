@@ -36,16 +36,25 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { type ApprovalDecisionKind, type ApprovalItem, approvalsDoc } from "../agent/approvals.js";
 import type { Harness } from "../agent/harness.js";
-import { type AgentConfigInput, parseAgentConfigInput } from "../agent/prompt.js";
+import {
+  type AgentConfigInput,
+  agentConfigDoc,
+  applyAgentConfig,
+  parseAgentConfigInput,
+} from "../agent/prompt.js";
 import { type QuestionItem, questionsDoc } from "../agent/questions.js";
 import { normalizeSubmit, type SubmitInput } from "../agent/submission.js";
 import { rootConversationId } from "../agent/taint.js";
 import { StorageRequestError } from "../core/errors.js";
-import type { JsonObject } from "../core/json.js";
+import type { JsonObject, JsonValue } from "../core/json.js";
 import type { Session } from "../session/session.js";
 import { type ConversationRecord, MAX_PAGE_LIMIT } from "../storage/types.js";
+import { SignalRejected, type TaskDefinition } from "../tasks/define.js";
 import type { WatchHub } from "../watch/stream.js";
-import { headerValue, ONIVA_HEADERS, type TenantBinding } from "./auth.js";
+import { bindingMatches, headerValue, ONIVA_HEADERS, type TenantBinding } from "./auth.js";
+
+/** The engine API version reported by `GET /v1/health` (KTD16). */
+export const ENGINE_API_VERSION = 1;
 
 /** An error answered with `status` and `{ error, reason? }`. */
 export class HttpError extends Error {
@@ -130,6 +139,15 @@ function submitInput(ctx: RouteContext, body: JsonObject): SubmitInput {
   return input;
 }
 
+/** The id of a conversation's root task of `kind`, or null. */
+function rootTaskId(ctx: RouteContext, conversationId: string, kind: string): string | null {
+  return (
+    ctx.harness.runtime
+      .tasks({ conversationId })
+      .find((t) => t.kind === kind && t.parentTaskId === null)?.id ?? null
+  );
+}
+
 /**
  * The ids of `rootId` and every conversation below it (a subagent's child
  * conversations), found by walking each conversation's owner chain.
@@ -210,6 +228,8 @@ export const ROUTES: readonly Route[] = Object.freeze([
           sessionId: ctx.harness.session.sessionId,
           ownerId: ctx.ownerId,
           owner: await ctx.isOwner(),
+          apiVersion: ENGINE_API_VERSION,
+          taskKinds: [...ctx.harness.runtime.registry.kinds()].sort(),
         },
       };
     },
@@ -365,6 +385,113 @@ export const ROUTES: readonly Route[] = Object.freeze([
         ...(note === undefined ? {} : { note: note as string | null }),
       });
       return { status: 200, body: { approval: approval as unknown as JsonObject } };
+    },
+  },
+  {
+    method: "POST",
+    pattern: "/v1/runs",
+    auth: true,
+    async handle(ctx) {
+      const body = await ctx.readJson();
+      const caller = ctx.caller();
+      const id = optionalString(body, "id");
+      if (id === undefined || id.length === 0) throw bad("id must be a non-empty string");
+      const kind = optionalString(body, "kind");
+      if (kind === undefined || kind.length === 0) throw bad("kind must be a non-empty string");
+      const def = ctx.harness.runtime.registry.get(kind);
+      if (!def) throw bad(`unknown task kind ${kind}`);
+      const agent = body.agent;
+      if (
+        agent !== undefined &&
+        (typeof agent !== "object" || agent === null || Array.isArray(agent))
+      ) {
+        throw bad("agent must be an object");
+      }
+
+      // The caller's id makes the start idempotent: a repeat returns the existing run.
+      const existing = await ctx.harness.session.reader.getConversation(id);
+      if (existing) {
+        if (!bindingMatches(existing, caller)) throw new HttpError(403, "forbidden");
+        return { status: 200, body: { conversationId: id, taskId: rootTaskId(ctx, id, kind) } };
+      }
+      const input = (body.input ?? null) as JsonValue;
+      // A kind may check its input up front (a workflow graph); nothing is created for a bad one.
+      const problem = (
+        def as { validateInput?: (input: unknown) => string | null }
+      ).validateInput?.(input);
+      if (problem) throw bad(problem);
+      let taskId: string;
+      try {
+        taskId = await ctx.harness.runtime.commit(async (tx, ops) => {
+          const conv = ops.createConversation({
+            tenantId: caller.tenantId,
+            projectId: caller.projectId,
+            id,
+          });
+          if (agent !== undefined) {
+            const draft = await tx.doc(agentConfigDoc, conv.id);
+            draft.set(applyAgentConfig(agentConfigDoc.initial, agent as AgentConfigInput));
+          }
+          return ops.spawn(def as TaskDefinition<JsonValue, JsonValue>, {
+            conversationId: conv.id,
+            parentTaskId: null,
+            input,
+          }).id;
+        });
+      } catch (err) {
+        // A concurrent create won the conversation: return its run.
+        if (err instanceof StorageRequestError) {
+          return { status: 200, body: { conversationId: id, taskId: rootTaskId(ctx, id, kind) } };
+        }
+        throw err;
+      }
+      return { status: 201, body: { conversationId: id, taskId } };
+    },
+  },
+  {
+    method: "POST",
+    pattern: "/v1/conversations/:id/tasks/:taskId/signal",
+    auth: true,
+    async handle(ctx) {
+      const body = await ctx.readJson();
+      const conv = await ctx.conversation();
+      const taskId = ctx.params.taskId as string;
+      const key = optionalString(body, "key");
+      if (key === undefined || key.length === 0) throw bad("key must be a non-empty string");
+      const task = ctx.harness.runtime.task(taskId);
+      if (!task || task.conversationId !== conv.id) {
+        throw new HttpError(404, "not_found", "task");
+      }
+      try {
+        await ctx.harness.runtime.signal(taskId, key, (body.payload ?? null) as JsonValue);
+      } catch (err) {
+        if (err instanceof SignalRejected) throw new HttpError(409, "signal_rejected");
+        throw err;
+      }
+      return { status: 200, body: { conversationId: conv.id, taskId, delivered: true } };
+    },
+  },
+  {
+    method: "GET",
+    pattern: "/v1/conversations/:id/tasks/:taskId",
+    auth: true,
+    async handle(ctx) {
+      const conv = await ctx.conversation();
+      const taskId = ctx.params.taskId as string;
+      const task = ctx.harness.runtime.task(taskId);
+      if (!task || task.conversationId !== conv.id) {
+        throw new HttpError(404, "not_found", "task");
+      }
+      return {
+        status: 200,
+        body: {
+          id: task.id,
+          kind: task.kind,
+          status: task.status,
+          phase: task.phase,
+          ...(task.outcome === null ? {} : { outcome: task.outcome as unknown as JsonObject }),
+        },
+      };
     },
   },
   {

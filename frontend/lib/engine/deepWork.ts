@@ -23,6 +23,8 @@ import type {
   EnginePhase,
   EngineWorkerState,
 } from '@/lib/types/deep-work';
+import type { RunNode } from '@/lib/run/tree';
+import type { RunStatus } from '@/lib/run/status';
 import type { ConversationView, EntryRecord, JsonValue, SubagentView, UsageTally } from './types';
 
 // ---------------------------------------------------------------------------
@@ -707,4 +709,59 @@ function shallowEqual(a: DeepWorkState, b: DeepWorkState): boolean {
 /** Pure form: a fresh adapter per call (no memoization across calls). */
 export function viewToDeepWork(view: ConversationView | null, meta: DeepWorkRunMeta = {}): DeepWorkState {
   return createDeepWorkAdapter()(view, meta);
+}
+
+// ---------------------------------------------------------------------------
+// Run tree (plan 003, U24): the same state as `RunNode`s. The adapter output
+// is unchanged; this is a pure projection for the shared RunTree component.
+// ---------------------------------------------------------------------------
+
+const WORKER_RUN_STATUS: Record<DeepWorkWorker['status'], RunStatus> = {
+  idle: 'queued',
+  researching: 'running',
+  complete: 'completed',
+  error: 'failed',
+};
+
+/** One worker as a `RunNode` (leaf of its round). */
+export function workerToRunNode(w: DeepWorkWorker): RunNode {
+  return {
+    id: w.key,
+    kind: 'worker',
+    label: w.sub_query,
+    status: WORKER_RUN_STATUS[w.status] ?? 'failed',
+    startedAt: w.startedAt,
+    endedAt: w.endedAt,
+    ...(w.status === 'error' && w.error ? { error: w.error } : {}),
+    children: [],
+  };
+}
+
+/** The run as one root `run` node: workers in order, then one node per reflection. */
+export function toRunTree(state: DeepWorkState): RunNode[] {
+  const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
+  const status: RunStatus =
+    state.status === 'completed' ? 'completed' : state.status === 'error' ? 'failed' : state.status === 'cancelled' ? 'cancelled' : state.recovering ? 'resuming' : 'running';
+  const reflections: RunNode[] = state.reflections.map((r) => ({
+    id: `reflector_${r.round}`,
+    kind: 'worker' as const,
+    label: `Reflection, round ${r.round}`,
+    status: 'completed' as const,
+    startedAt: null,
+    endedAt: null,
+    children: [],
+  }));
+  return [
+    {
+      id: 'deep_work',
+      kind: 'run',
+      label: state.plan?.title ?? 'Deep Work',
+      status,
+      startedAt: iso(state.startedAt),
+      endedAt: iso(state.endedAt),
+      ...(state.usage.totalTokens > 0 ? { usage: { inputTokens: state.usage.inputTokens, outputTokens: state.usage.outputTokens, totalTokens: state.usage.totalTokens } } : {}),
+      ...(state.error ? { error: state.error } : {}),
+      children: [...state.workers.map(workerToRunNode), ...reflections],
+    },
+  ];
 }

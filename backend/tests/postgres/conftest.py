@@ -67,6 +67,11 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+
+# Databases the tier must never drop (dev / app names), and the scratch name the migration tests use.
+PROTECTED_DATABASES = frozenset({"oniva", "oniva_engine", "postgres"})
+MIGRATED_DB = "oniva_test_migrated"
+
 class PgServer:
     """Connection info for an owner-capable Postgres server."""
 
@@ -86,6 +91,9 @@ class PgServer:
         return f"{driver}://{auth}@{self.host}:{self.port}/{dbname}"
 
     def recreate_db(self, dbname: str) -> None:
+        # Never drop a real application database: a TEST_DATABASE_URL may point at a shared dev server.
+        if dbname in PROTECTED_DATABASES:
+            raise RuntimeError(f"refusing to drop protected database {dbname!r}")
         conn = self._connect("postgres")
         try:
             cur = conn.cursor()
@@ -205,5 +213,5 @@ def pg_migrated_url(pg_server, pg_has_vector):
     if not pg_has_vector:
         pytest.skip("pgvector extension not available for this Postgres "
                     "(brew pgvector ships only for postgresql@17/18); CI runs this tier fully")
-    pg_server.recreate_db("oniva")
-    return pg_server.url("oniva")
+    pg_server.recreate_db(MIGRATED_DB)
+    return pg_server.url(MIGRATED_DB)

@@ -68,7 +68,9 @@ import {
 import { useWorkflowStore, useWorkflowActions, selectIsDirty, selectCurrentWorkflowId, selectPendingNodes, selectPendingEdges } from '@/lib/stores/workflow';
 import { toast } from 'sonner';
 import { type WorkflowNode as APINode, type WorkflowEdge as APIEdge, type WorkflowNodeType } from '@/lib/api/workflows';
-import { API_BASE_URL } from '@/lib/api';
+import { executeWorkflowStream } from '@/lib/api/workflows';
+import { applyStreamEvent, emptyLiveRun, type LiveRun } from '@/lib/run/workflowStream';
+import { isTerminal, normalizeStatus, type RunStatus } from '@/lib/run/status';
 import { NodeContextMenu } from './NodeContextMenu';
 import { useWorkflow, useUpdateWorkflow } from '@/hooks/useWorkflow';
 
@@ -338,6 +340,7 @@ export function FlowEditor({ workflowId, readOnly = false }: FlowEditorProps) {
     const showLoading = workflowId && isWorkflowLoading && !workflowData;
 
     // Context Menu State
+    const [liveRun, setLiveRun] = useState<LiveRun>(() => emptyLiveRun());
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
     const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -481,12 +484,12 @@ export function FlowEditor({ workflowId, readOnly = false }: FlowEditorProps) {
                 // Prevent duplicate hydration
                 if (useWorkflowStore.getState().lastExecutionId === latest.id) return;
 
-                const results: Record<string, { nodeId: string; status: 'pending' | 'running' | 'complete' | 'error'; result?: unknown; error?: string }> = {};
-                const statuses: Record<string, 'pending' | 'running' | 'complete' | 'error'> = {};
+                const results: Record<string, { nodeId: string; status: RunStatus; result?: unknown; error?: string }> = {};
+                const statuses: Record<string, RunStatus> = {};
                 for (const step of latest.execution_trace) {
-                    const status = step.status === 'completed' ? 'complete' as const
-                        : step.status === 'failed' ? 'error' as const
-                        : 'pending' as const;
+                    const status = normalizeStatus(step.status, 'execution_trace');
+                    // Only a settled step is restored: a one-time fetch must not paint running/waiting glow nothing will clear.
+                    if (!isTerminal(status)) continue;
                     results[step.node_id] = {
                         nodeId: step.node_id,
                         status,
@@ -740,162 +743,35 @@ export function FlowEditor({ workflowId, readOnly = false }: FlowEditorProps) {
                 targetHandle: edge.targetHandle || undefined,
             }));
 
-            // Use streaming endpoint for real-time tracing
-            const executeUrl = `${API_BASE_URL}/api/v1/workflows/execute-stream`;
-
             // Only send workflow_id if it's a valid UUID (not a local workflow)
             const isValidWorkflowId = workflowId && !workflowId.startsWith('local-');
 
-            // Read CSRF token from cookie (required for cookie-based auth POST requests)
-            const csrfMatch = document.cookie.match(/(?:^|; )csrf_token=([^;]*)/);
-            const csrfToken = csrfMatch ? decodeURIComponent(csrfMatch[1]) : undefined;
+            // Stream the run (engine events: progress, node_complete, node_skipped, error, complete) through the
+            // shared run model: the canvas, the test-run tree and the result all read the same per-node state.
+            let live = emptyLiveRun();
+            setLiveRun(live);
+            const labelOf = (nodeId: string) =>
+                ((nodes.find((n) => n.id === nodeId)?.data as Record<string, unknown> | undefined)?.label as string) || nodeId;
 
-            const response = await fetch(executeUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
-                },
-                credentials: 'include',
-                body: JSON.stringify({
-                    nodes: apiNodes,
-                    edges: apiEdges,
-                    inputs,
-                    workflow_id: isValidWorkflowId ? workflowId : null
-                })
-            });
-
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-            let finalResult: TestRunResult | null = null;
-
-            // Collect node results as they stream in for the TRACING tab
-            const collectedNodeResults: Array<{
-                nodeId: string;
-                nodeName: string;
-                status: 'success' | 'failed';
-                output?: unknown;
-                elapsedMs: number;
-            }> = [];
-            let totalElapsedMs = 0;
-
-            if (reader) {
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            try {
-                                const event = JSON.parse(line.substring(6));
-
-                                // Batch state updates to reduce re-renders
-                                switch (event.type) {
-                                    case 'node_started':
-                                        // Single batched update for node start
-                                        useWorkflowStore.setState((state) => ({
-                                            activeNodeId: event.node_id,
-                                            nodeStatusMap: { ...state.nodeStatusMap, [event.node_id]: 'running' },
-                                        }));
-                                        break;
-                                    case 'node_complete': {
-                                        // Debug logging
-                                        console.log('[SSE] node_complete event:', JSON.stringify(event, null, 2));
-                                        console.log('[SSE] event.result.output:', event.result?.output);
-
-                                        // Single batched update for node complete
-                                        useWorkflowStore.setState((state) => ({
-                                            executionResults: {
-                                                ...state.executionResults,
-                                                [event.node_id]: {
-                                                    nodeId: event.node_id,
-                                                    status: event.result.status === 'success' ? 'complete' : 'error',
-                                                    result: event.result.output,
-                                                    error: event.result.error,
-                                                },
-                                            },
-                                            nodeStatusMap: {
-                                                ...state.nodeStatusMap,
-                                                [event.node_id]: event.result.status === 'success' ? 'complete' : 'error',
-                                            },
-                                        }));
-
-                                        // Collect node result for tracing
-                                        const nodeElapsed = event.result.elapsed_ms || 0;
-                                        totalElapsedMs += nodeElapsed;
-
-                                        // Find the node to get its label
-                                        const nodeForLabel = nodes.find(n => n.id === event.node_id);
-                                        const nodeName = (nodeForLabel?.data as Record<string, unknown>)?.label as string
-                                            || event.node_id;
-
-                                        collectedNodeResults.push({
-                                            nodeId: event.node_id,
-                                            nodeName,
-                                            status: event.result.status === 'success' ? 'success' : 'failed',
-                                            output: event.result.output,
-                                            elapsedMs: nodeElapsed,
-                                        });
-                                        console.log('[SSE] collectedNodeResults after push:', JSON.stringify(collectedNodeResults, null, 2));
-                                        break;
-                                    }
-                                    case 'complete': {
-                                        // Extract final output from the results
-                                        // Look for output from LLM nodes or Output nodes
-                                        let finalOutput: unknown = "Workflow execution completed.";
-                                        const results = event.results || {};
-
-                                        // Find the last LLM or Output node result with text content
-                                        for (const nodeResult of collectedNodeResults.slice().reverse()) {
-                                            const output = nodeResult.output;
-                                            if (output && typeof output === 'object') {
-                                                const outputObj = output as Record<string, unknown>;
-                                                // Check for text/message from LLM nodes
-                                                if (outputObj.text || outputObj.message) {
-                                                    finalOutput = outputObj.text || outputObj.message;
-                                                    break;
-                                                }
-                                                // Check for content from Output nodes
-                                                if (outputObj.content) {
-                                                    finalOutput = outputObj.content;
-                                                    break;
-                                                }
-                                            }
-                                        }
-
-                                        finalResult = {
-                                            status: 'success',
-                                            output: finalOutput,
-                                            elapsedMs: totalElapsedMs,
-                                            totalTokens: 0,
-                                            nodeResults: collectedNodeResults,
-                                        };
-                                        break;
-                                    }
-                                    case 'error':
-                                        useWorkflowStore.setState({
-                                            isExecuting: false,
-                                            activeNodeId: null,
-                                        });
-                                        return {
-                                            status: 'failed',
-                                            error: event.error,
-                                            elapsedMs: totalElapsedMs,
-                                            totalTokens: 0,
-                                            nodeResults: collectedNodeResults
-                                        };
-                                }
-                            } catch {
-                                // Ignore malformed JSON lines
-                            }
+            for await (const event of executeWorkflowStream({
+                spec: { nodes: apiNodes, edges: apiEdges },
+                inputs,
+                workflowId: isValidWorkflowId ? workflowId : undefined,
+            })) {
+                live = applyStreamEvent(live, event);
+                setLiveRun(live);
+                const snapshot = live;
+                useWorkflowStore.setState((state) => {
+                    const nodeStatusMap = { ...state.nodeStatusMap };
+                    const executionResults = { ...state.executionResults };
+                    for (const [id, n] of Object.entries(snapshot.nodes)) {
+                        nodeStatusMap[id] = n.status;
+                        if (n.status !== 'running' && n.status !== 'waiting') {
+                            executionResults[id] = { nodeId: id, status: n.status, result: n.output, error: n.error };
                         }
                     }
-                }
+                    return { activeNodeId: snapshot.activeNodeId, nodeStatusMap, executionResults };
+                });
             }
 
             useWorkflowStore.setState({
@@ -903,41 +779,51 @@ export function FlowEditor({ workflowId, readOnly = false }: FlowEditorProps) {
                 activeNodeId: null,
             });
 
-            // If we collected results but didn't get a 'complete' event, build result from collected data
-            if (!finalResult && collectedNodeResults.length > 0) {
-                let finalOutput: unknown = "Workflow execution completed.";
-                // Find the last node result with text content
-                for (const nodeResult of collectedNodeResults.slice().reverse()) {
-                    const output = nodeResult.output;
-                    if (output && typeof output === 'object') {
-                        const outputObj = output as Record<string, unknown>;
-                        if (outputObj.text || outputObj.message) {
-                            finalOutput = outputObj.text || outputObj.message;
-                            break;
-                        }
-                        if (outputObj.content) {
-                            finalOutput = outputObj.content;
-                            break;
-                        }
-                    }
-                }
-                finalResult = {
-                    status: 'success',
-                    output: finalOutput,
+            // Per-node results for the TRACING tab, in the order the nodes ran.
+            const nodeResults = live.order
+                .filter((id) => live.nodes[id].status === 'completed' || live.nodes[id].status === 'failed')
+                .map((id) => ({
+                    nodeId: id,
+                    nodeName: labelOf(id),
+                    status: live.nodes[id].status === 'completed' ? ('success' as const) : ('failed' as const),
+                    output: live.nodes[id].output,
+                    elapsedMs: live.nodes[id].elapsedMs ?? 0,
+                }));
+            const totalElapsedMs = nodeResults.reduce((sum, n) => sum + n.elapsedMs, 0);
+
+            if (live.ended === 'failed' || live.ended === 'cancelled' || live.ended === 'interrupted') {
+                return {
+                    status: 'failed',
+                    error: live.error ?? (live.ended === 'cancelled' ? 'The run was cancelled.' : 'The workflow failed.'),
                     elapsedMs: totalElapsedMs,
                     totalTokens: 0,
-                    nodeResults: collectedNodeResults,
+                    nodeResults,
                 };
             }
 
-            return finalResult || {
+            // The final output is the last node result with text content (an LLM or Output node).
+            let finalOutput: unknown = 'Workflow execution completed.';
+            for (const nodeResult of nodeResults.slice().reverse()) {
+                const output = nodeResult.output;
+                if (output && typeof output === 'object') {
+                    const o = output as Record<string, unknown>;
+                    if (o.text || o.message) {
+                        finalOutput = o.text || o.message;
+                        break;
+                    }
+                    if (o.content) {
+                        finalOutput = o.content;
+                        break;
+                    }
+                }
+            }
+            return {
                 status: 'success',
-                output: "Done",
+                output: finalOutput,
                 elapsedMs: totalElapsedMs,
                 totalTokens: 0,
-                nodeResults: collectedNodeResults
+                nodeResults,
             };
-
         } catch (error) {
             useWorkflowStore.setState({
                 isExecuting: false,
@@ -1165,6 +1051,8 @@ export function FlowEditor({ workflowId, readOnly = false }: FlowEditorProps) {
                     onClose={() => setTestRunOpen(false)}
                     nodes={nodes}
                     onRun={handleTestRun}
+                    liveRun={liveRun}
+                    workflowId={workflowId}
                 />
             )}
         </div>

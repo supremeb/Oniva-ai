@@ -2,6 +2,11 @@
 Agent Node Executor
 Executes custom configured agents with their skills and connectors
 
+Plan 003 U14: on the engine, ``prepare`` returns an ``llm`` body (tool names from the agent's skills,
+filtered to the tool manifest, ``maxRounds = maxIterations``) and ``finish`` builds the node output from
+the child conversation's answer, replacing the pydantic-ai loop. Built-in agents (the ``BUILTIN_AGENTS``
+classes) still run in process from ``prepare`` until U28/U30. ``execute`` is the legacy loop.
+
 Enhanced with Vellum-inspired auto tool loop:
 - Agents automatically call tools in a loop until complete
 - Configurable max iterations to prevent runaway execution
@@ -9,7 +14,7 @@ Enhanced with Vellum-inspired auto tool loop:
 - Intermediate reasoning exposed in output
 """
 
-from app.node_executors import BaseNodeExecutor, NodeExecutionContext, NodeExecutionResult
+from app.node_executors import BaseNodeExecutor, NodeExecutionContext, NodeExecutionResult, PrepareResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, Field
@@ -18,7 +23,6 @@ from pydantic_ai.messages import ModelMessage
 from app.agents.patch_tool_calls import patch_dangling_tool_calls
 from typing import Optional, Dict, Any, List
 from uuid import UUID
-import litellm
 import os
 import time
 import logging
@@ -27,13 +31,14 @@ from app.models.custom_agent import CustomAgent
 from app.models.connector import Connector
 from app.agents.skills.registry import SkillRegistry
 from app.config import get_settings
+from app.config.llm_pricing import context_window_for
 from app.api.dependencies import BUILTIN_AGENTS
 from app.core.builtin_agents import is_builtin_agent_id, uuid_to_slug
 from app.services.agent_circuit_breaker import AgentCircuitBreaker
 from app.services.redis_ha import get_redis_service
 from app.services.llm_gateway import (
     resolve_key_with_fallback, normalize_model_id, get_provider_from_model,
-    create_litellm_model,
+    create_model,
 )
 
 logger = logging.getLogger(__name__)
@@ -209,8 +214,8 @@ class AgentExecutor(BaseNodeExecutor):
                     elapsed_ms=int((time.time() - start_time) * 1000)
                 )
 
-            # Create LiteLLM-backed pydantic-ai model (no os.environ mutation)
-            pydantic_model = create_litellm_model(model_id, api_key)
+            # pydantic-ai native model (no os.environ mutation)
+            pydantic_model = create_model(model_id, api_key)
 
             # Load connector data for agents that have connector_ids
             connectors_dict = {}
@@ -328,10 +333,9 @@ class AgentExecutor(BaseNodeExecutor):
 
                 # Get model context window for truncation budget
                 try:
-                    _model_info = litellm.get_model_info(model_id) if model_id else {}
+                    _max_input_tokens = context_window_for(model_id) if model_id else 128_000
                 except Exception:
-                    _model_info = {}
-                _max_input_tokens = _model_info.get("max_input_tokens", 128_000)
+                    _max_input_tokens = 128_000
                 _truncation_threshold = int(_max_input_tokens * 0.7)
                 _truncation_target = int(_max_input_tokens * 0.5)
 
@@ -522,6 +526,169 @@ class AgentExecutor(BaseNodeExecutor):
                 error=f"Unexpected error in agent execution: {str(e)}",
                 elapsed_ms=int((time.time() - start_time) * 1000)
             )
+
+    # --- engine path (plan 003 U14) ---------------------------------------------------------------
+
+    @staticmethod
+    async def manifest_tool_names() -> set:
+        """Names of the tools the engine is served (the tool manifest)."""
+        from app.internal_api.tools import build_manifest, ensure_skills_loaded
+
+        await ensure_skills_loaded()
+        return {t.name for t in build_manifest()}
+
+    def build_prompt(self, context: NodeExecutionContext, custom_agent: Any, manifest: set) -> Dict[str, Any]:
+        """Pure: the generation request for a custom agent.
+
+        Skills outside the manifest are dropped with a warning; ``maxRounds`` is ``maxIterations``.
+        Raises ``ValueError`` when the node has no user prompt.
+        """
+        node_data = context.node_data
+        user_prompt = self.substitute_variables(node_data.get("userPrompt", ""), context.variables, context.inputs)
+        if not user_prompt:
+            raise ValueError("User prompt not specified")
+
+        tools: List[str] = []
+        for name in custom_agent.skills or []:
+            if name in manifest:
+                tools.append(name)
+            else:
+                logger.warning("Agent node %s: skill '%s' is not in the tool manifest; dropped", context.node_id, name)
+
+        system_prompt = custom_agent.system_prompt or "You are a helpful AI assistant."
+        enable_tool_loop = node_data.get("enableToolLoop", True)
+        if enable_tool_loop and tools:
+            system_prompt += (
+                "\n\nYou have access to tools. Use them when needed to accomplish the task. "
+                "Continue using tools until you have all the information needed to provide "
+                "a complete response."
+            )
+        max_rounds = None
+        if enable_tool_loop and tools:
+            max_rounds = int(node_data.get("maxIterations", self.DEFAULT_MAX_ITERATIONS))
+        return {
+            "system": system_prompt,
+            "prompt": user_prompt,
+            "tools": tools if enable_tool_loop else [],
+            "max_rounds": max_rounds,
+            "model": normalize_model_id(custom_agent.model or "openai/gpt-4o-mini"),
+        }
+
+    def parse_answer(
+        self, context: NodeExecutionContext, custom_agent: Any, tools: List[str], model: str, text: str, tokens: int
+    ) -> NodeExecutionResult:
+        """Pure: the node result for a finished child conversation."""
+        output = AgentOutput(
+            response=text or "",
+            agent_name=custom_agent.name,
+            model=model,
+            skills_used=list(tools),
+            execution_time=0.0,
+            iterations=[],
+            total_iterations=1,
+            total_tool_calls=0,
+            reasoning=None,
+            stopped_reason="complete" if tools else "no_tool_calls",
+        )
+        return NodeExecutionResult(
+            node_id=context.node_id,
+            status="success",
+            output=output.model_dump(),
+            tokens_used=tokens or None,
+        )
+
+    async def _load_custom_agent(
+        self, context: NodeExecutionContext, db: AsyncSession
+    ) -> "tuple[Optional[Any], Optional[NodeExecutionResult]]":
+        """The active custom agent for the node, or a ``failed`` result saying why not."""
+
+        def fail(message: str) -> "tuple[None, NodeExecutionResult]":
+            return None, NodeExecutionResult(node_id=context.node_id, status="failed", error=message)
+
+        agent_id_str = context.node_data.get("agentId")
+        if not agent_id_str:
+            return fail("Agent ID not specified")
+        try:
+            agent_id = UUID(agent_id_str)
+        except ValueError:
+            return fail(
+                f"Invalid agent ID: {agent_id_str}. Expected UUID or one of: {list(BUILTIN_AGENTS.keys())}"
+            )
+        custom_agent = (await db.execute(select(CustomAgent).where(CustomAgent.id == agent_id))).scalar_one_or_none()
+        if not custom_agent:
+            return fail(f"Agent not found: {agent_id}")
+        if not custom_agent.is_active:
+            return fail(f"Agent '{custom_agent.name}' is not active")
+        return custom_agent, None
+
+    async def prepare(self, context: NodeExecutionContext, db: AsyncSession) -> Any:
+        agent_id_str = context.node_data.get("agentId")
+        if agent_id_str and is_builtin_agent_id(agent_id_str):
+            # Built-in agents are code classes with their own loops; they run in process for now.
+            return await self.execute(context, db)
+
+        custom_agent, failure = await self._load_custom_agent(context, db)
+        if failure is not None:
+            return failure
+        try:
+            redis = await get_redis_service()
+            await AgentCircuitBreaker(redis).check_health(custom_agent.id)
+            manifest = await self.manifest_tool_names()
+            built = self.build_prompt(context, custom_agent, manifest)
+        except ValueError as exc:
+            return NodeExecutionResult(node_id=context.node_id, status="failed", error=str(exc))
+
+        system = built["system"]
+        settings = get_settings()
+        if getattr(settings, "USE_AGENT_LEARNING", False):
+            try:
+                from app.services.agent_learning import get_agent_learning_service
+
+                service = get_agent_learning_service()
+                learnings = await service.search_relevant_learnings(
+                    db=db,
+                    tenant_id=custom_agent.tenant_id,
+                    query=built["prompt"],
+                    agent_id=custom_agent.id,
+                    limit=3,
+                    min_similarity=0.6,
+                )
+                if learnings:
+                    system = service.format_for_context(learnings) + "\n\n" + system
+            except Exception as e:
+                logger.warning(f"AgentExecutor learning retrieval failed: {e}")
+
+        return PrepareResult.llm(
+            system=system,
+            prompt=built["prompt"],
+            model=built["model"] if custom_agent.model else None,
+            tier="mid",
+            tools=built["tools"],
+            max_rounds=built["max_rounds"],
+            # A tool-using agent may have acted outside; re-running it is not replay-safe.
+            replay_safe=not built["tools"],
+        )
+
+    async def finish(self, context: NodeExecutionContext, db: AsyncSession, finish_input: Any) -> NodeExecutionResult:
+        agent_id_str = context.node_data.get("agentId")
+        if agent_id_str and is_builtin_agent_id(agent_id_str):
+            raise NotImplementedError("built-in agents finish in prepare")
+        custom_agent, failure = await self._load_custom_agent(context, db)
+        if failure is not None:
+            return failure
+        manifest = await self.manifest_tool_names()
+        built = self.build_prompt(context, custom_agent, manifest)
+        result = self.parse_answer(
+            context,
+            custom_agent,
+            built["tools"],
+            built["model"],
+            PrepareResult.answer_text(finish_input),
+            PrepareResult.answer_tokens(finish_input),
+        )
+        custom_agent.usage_count = (custom_agent.usage_count or 0) + 1
+        await db.commit()
+        return result
 
     @staticmethod
     def _new_tool_calls(result: Any, history_len: int) -> list:

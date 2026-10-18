@@ -1,0 +1,6 @@
+{
+  "contractVersion": 1,
+  "kind": "llm",
+  "system": "You classify.",
+  "prompt": "hello"
+}

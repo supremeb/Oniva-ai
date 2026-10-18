@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prepare.llm.schema.json",
+  "title": "Workflow node prepare result: llm",
+  "description": "One-shot LLM nodes (llm, classifier, guardrail, parameter extractor, agent) return this. The tier or model is a hint; no provider key is ever carried.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "kind", "system", "prompt", "replaySafe"],
+  "properties": {
+    "contractVersion": { "const": 1 },
+    "kind": { "const": "llm" },
+    "system": { "type": "string" },
+    "prompt": { "type": "string" },
+    "tier": { "type": "string" },
+    "model": { "type": "string" },
+    "tools": { "type": "array", "items": { "type": "string" } },
+    "maxRounds": { "type": "integer", "minimum": 1 },
+    "responseFormat": { "enum": ["text", "json"] },
+    "replaySafe": { "type": "boolean" }
+  }
+}

@@ -1,28 +1,34 @@
 """
 LLM Node Executor
-Executes LLM calls with model selection, prompts, timeout, and retry support
+Builds the node prompt and parses the answer (plan 003 U14): ``prepare`` returns an ``llm`` body, the
+engine runs it as a tool-less child conversation under its policy and ledger, and ``finish`` wraps the
+answer. Node-level token streaming and ``StatefulAgent`` wrapping are not supported on the engine path;
+the UI shows the final text. ``execute`` is a thin legacy wrapper over the same pure functions (until U30).
 
 C2 Enhancement: State machine integration for tool safety.
 When USE_STATE_MACHINE is enabled, agents are wrapped with StatefulAgent
 to enforce tool access based on current workflow state.
 """
 
-from app.node_executors import BaseNodeExecutor, NodeExecutionContext, NodeExecutionResult
+from app.node_executors import (
+    BaseNodeExecutor,
+    LlmKeyMissing,
+    NodeExecutionContext,
+    NodeExecutionResult,
+    PrepareResult,
+    legacy_complete,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 import time
 import asyncio
 import logging
 
-import litellm
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from app.config import get_settings
 from app.agents.state_machine import WorkflowState
-from uuid import UUID
-from app.services.llm_gateway import (
-    resolve_key_with_fallback, normalize_model_id, get_provider_from_model,
-)
+from app.services.llm_gateway import normalize_model_id
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -92,7 +98,7 @@ class LLMOutput(BaseModel):
 
 
 class LLMExecutor(BaseNodeExecutor):
-    """Executor for LLM node - calls language models via LiteLLM with timeout support"""
+    """Executor for LLM node - builds the prompt, parses the answer"""
 
     node_type = "llm"
 
@@ -156,140 +162,113 @@ class LLMExecutor(BaseNodeExecutor):
 
         return state_context + prompt
     
-    async def execute(
-        self,
-        context: NodeExecutionContext,
-        db: AsyncSession
-    ) -> NodeExecutionResult:
-        start_time = time.time()
+    def build_prompt(self, context: NodeExecutionContext) -> Dict[str, Any]:
+        """Pure: the system and user prompts and the model settings for this node."""
+        node_data = context.node_data
+        model_id = normalize_model_id(node_data.get("model", "openai/gpt-4o-mini"))
 
-        try:
-            node_data = context.node_data
+        # The AI step builder may generate "prompt" instead of "systemPrompt"/"userPrompt",
+        # so we check for all variants.
+        system_prompt = node_data.get("systemPrompt", "You are a helpful assistant.")
+        user_prompt = node_data.get("userPrompt", "") or node_data.get("prompt", "")
 
-            # Get model configuration
-            model_id = normalize_model_id(node_data.get("model", "openai/gpt-4o-mini"))
-            temperature = node_data.get("temperature", 0.7)
-            max_tokens = node_data.get("maxTokens", 4096)
+        system_prompt = self.substitute_variables(system_prompt, context.variables, context.inputs)
+        user_prompt = self.substitute_variables(user_prompt, context.variables, context.inputs)
 
-            logger.debug(f"LLM Executor - model_id: {model_id}")
+        # C2: Add state machine context to system prompt if enabled
+        if settings.USE_STATE_MACHINE:
+            workflow_state = self._get_workflow_state_from_context(context)
+            if workflow_state:
+                session_id = context.variables.get("sys.session_id")
+                system_prompt = self._add_state_context_to_prompt(system_prompt, workflow_state, session_id)
 
-            # Get prompts with variable substitution
-            # The AI step builder may generate "prompt" instead of "systemPrompt"/"userPrompt",
-            # so we check for all variants.
-            system_prompt = node_data.get("systemPrompt", "You are a helpful assistant.")
-            user_prompt = node_data.get("userPrompt", "") or node_data.get("prompt", "")
-
-            system_prompt = self.substitute_variables(
-                system_prompt, context.variables, context.inputs
-            )
-            user_prompt = self.substitute_variables(
-                user_prompt, context.variables, context.inputs
-            )
-
-            # C2: Add state machine context to system prompt if enabled
-            if settings.USE_STATE_MACHINE:
-                workflow_state = self._get_workflow_state_from_context(context)
-                if workflow_state:
-                    session_id = context.variables.get("sys.session_id")
-                    system_prompt = self._add_state_context_to_prompt(
-                        system_prompt, workflow_state, session_id
-                    )
-                    logger.info(
-                        f"LLM Executor - State machine enabled, "
-                        f"state: {workflow_state.value}"
-                    )
-
-            # If no user prompt, use query from inputs or variables
+        # If no user prompt, use query from inputs or variables
+        if not user_prompt:
+            user_prompt = context.variables.get("sys.query", "")
             if not user_prompt:
-                user_prompt = context.variables.get("sys.query", "")
-                if not user_prompt:
-                    for node_id, output in context.inputs.items():
-                        if isinstance(output, dict) and "query" in output:
-                            user_prompt = output["query"]
-                            break
-                        if isinstance(output, dict) and "text" in output:
-                            user_prompt = output["text"]
-                            break
+                for output in context.inputs.values():
+                    if isinstance(output, dict) and "query" in output:
+                        user_prompt = output["query"]
+                        break
+                    if isinstance(output, dict) and "text" in output:
+                        user_prompt = output["text"]
+                        break
 
-            # Resolve API key via unified gateway (with OpenRouter fallback)
-            tenant_uuid = UUID(context.tenant_id) if context.tenant_id else None
-            api_key, model_id = await resolve_key_with_fallback(db, tenant_uuid, model_id)
+        return {
+            "system": system_prompt,
+            "prompt": user_prompt,
+            "model": model_id,
+            "temperature": node_data.get("temperature", 0.7),
+            "max_tokens": node_data.get("maxTokens", 4096),
+        }
 
-            if not api_key:
-                provider_type = get_provider_from_model(model_id)
+    def parse_answer(self, context: NodeExecutionContext, text: str, tokens: int = 0) -> NodeExecutionResult:
+        """Pure: wrap the generation text as the node result."""
+        model_id = normalize_model_id(context.node_data.get("model", "openai/gpt-4o-mini"))
+        output_text = text or ""
+        return NodeExecutionResult(
+            node_id=context.node_id,
+            status="success",
+            output={"text": output_text, "model": model_id, "message": output_text},
+            tokens_used=tokens or None,
+        )
+
+    async def prepare(self, context: NodeExecutionContext, db: AsyncSession) -> Any:
+        built = self.build_prompt(context)
+        return PrepareResult.llm(
+            system=built["system"],
+            prompt=built["prompt"],
+            model=built["model"] if context.node_data.get("model") else None,
+            tier="low",
+        )
+
+    async def finish(self, context: NodeExecutionContext, db: AsyncSession, finish_input: Any) -> NodeExecutionResult:
+        return self.parse_answer(
+            context, PrepareResult.answer_text(finish_input), PrepareResult.answer_tokens(finish_input)
+        )
+
+    async def execute(self, context: NodeExecutionContext, db: AsyncSession) -> NodeExecutionResult:
+        """Legacy in-process path over the same pure functions (removed by U30)."""
+        start_time = time.time()
+        try:
+            built = self.build_prompt(context)
+            try:
+                completion = await legacy_complete(
+                    db,
+                    context.tenant_id,
+                    built["model"],
+                    built["system"],
+                    built["prompt"],
+                    temperature=built["temperature"],
+                    max_tokens=built["max_tokens"],
+                    timeout=self.LLM_TIMEOUT_SECONDS,
+                )
+            except LlmKeyMissing as exc:
                 return NodeExecutionResult(
                     node_id=context.node_id,
                     status="failed",
-                    error=f"API key not configured for provider '{provider_type}'. Add your key in Settings > LLM Providers.",
-                    elapsed_ms=int((time.time() - start_time) * 1000)
-                )
-
-            # Call LLM via LiteLLM (unified path for all providers)
-            try:
-                response = await asyncio.wait_for(
-                    litellm.acompletion(
-                        model=model_id,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        api_key=api_key,
-                    ),
-                    timeout=self.LLM_TIMEOUT_SECONDS,
+                    error=str(exc),
+                    elapsed_ms=int((time.time() - start_time) * 1000),
                 )
             except asyncio.TimeoutError:
-                elapsed_ms = int((time.time() - start_time) * 1000)
                 logger.warning(f"LLM call timed out after {self.LLM_TIMEOUT_SECONDS}s for node {context.node_id}")
                 return NodeExecutionResult(
                     node_id=context.node_id,
                     status="failed",
                     error=f"LLM call timed out after {self.LLM_TIMEOUT_SECONDS} seconds",
-                    elapsed_ms=elapsed_ms
+                    elapsed_ms=int((time.time() - start_time) * 1000),
                 )
-
-            elapsed_ms = int((time.time() - start_time) * 1000)
-
-            # Extract response — reasoning models (kimi, DeepSeek R1, QwQ)
-            # may return content in reasoning_content instead of content
-            message = response.choices[0].message
-            output_text = message.content or ""
-            if not output_text:
-                # Fallback: reasoning models via OpenRouter
-                reasoning_content = getattr(message, "reasoning_content", None)
-                if reasoning_content:
-                    output_text = reasoning_content
-                elif hasattr(message, "model_extra") and message.model_extra:
-                    output_text = message.model_extra.get("reasoning_content", "") or message.model_extra.get("reasoning", "")
-            tokens_used = getattr(response.usage, "total_tokens", None) if response.usage else None
-
-            # Extract reasoning (CoT) from response
-            reasoning = None
-            if getattr(settings, 'USE_COT_REASONING', False):
-                resp_dict = response.model_dump() if hasattr(response, "model_dump") else {}
-                reasoning = extract_thinking_from_openrouter_response(resp_dict)
-
-            return NodeExecutionResult(
-                node_id=context.node_id,
-                status="success",
-                output={
-                    "text": output_text,
-                    "model": model_id,
-                    "message": output_text,
-                },
-                elapsed_ms=elapsed_ms,
-                tokens_used=tokens_used,
-                reasoning=reasoning
-            )
-
+            result = self.parse_answer(context, completion["text"], completion["tokens"])
+            result.output["model"] = completion["model"]
+            if getattr(settings, "USE_COT_REASONING", False):
+                result.reasoning = completion.get("reasoning")
+            result.elapsed_ms = int((time.time() - start_time) * 1000)
+            return result
         except Exception as e:
-            elapsed_ms = int((time.time() - start_time) * 1000)
             logger.error(f"LLM execution failed for node {context.node_id}: {e}")
             return NodeExecutionResult(
                 node_id=context.node_id,
                 status="failed",
                 error=str(e),
-                elapsed_ms=elapsed_ms
+                elapsed_ms=int((time.time() - start_time) * 1000),
             )
-

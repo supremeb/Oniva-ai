@@ -7,7 +7,7 @@ from uuid import UUID
 from typing import Optional, Literal
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update, func, case, literal_column
+from sqlalchemy import select, update, func, case, literal_column, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -178,6 +178,14 @@ class ProjectService:
                 ProjectMember.user_id == user_id,
             )
         )
+
+        # The hidden automations project (plan 003 U1) never lists.
+        not_automation = or_(
+            Project.settings["system"].as_string().is_(None),
+            Project.settings["system"].as_string() != "automations",
+        )
+        owned = owned.where(not_automation)
+        shared = shared.where(not_automation)
 
         if not include_archived:
             owned = owned.where(Project.is_archived == False)

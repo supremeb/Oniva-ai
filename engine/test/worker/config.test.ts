@@ -8,6 +8,7 @@ import {
   DEFAULT_LEASE_TTL_MS,
   DEFAULT_SHUTDOWN_TIMEOUT_MS,
   defaultDbTimeouts,
+  requireWorkflowBackend,
   WorkerConfigError,
   workerConfigFromEnv,
   workerPoolOptions,
@@ -30,6 +31,7 @@ describe("workerConfigFromEnv", () => {
       leaseTtlMs: DEFAULT_LEASE_TTL_MS,
       leaseRetryMs: null,
       gatewayUrl: null,
+      workflowBackendUrl: null,
       approvalTtlMs: DEFAULT_APPROVAL_TTL_MS,
       questionTtlMs: DEFAULT_QUESTION_TTL_MS,
       progressIntervalMs: 100,
@@ -300,5 +302,48 @@ describe("backend policy configuration", () => {
     expect(() =>
       workerConfigFromEnv({ ...BASE, ENGINE_POLICY: "backend", ENGINE_POLICY_URL: "https://b" }),
     ).toThrow(/ENGINE_GATEWAY_TOKEN/);
+  });
+});
+
+describe("workflow backend (U35)", () => {
+  it("ENGINE_WORKFLOW_BACKEND_URL falls back to ENGINE_GATEWAY_URL and wins when set", () => {
+    expect(workerConfigFromEnv(BASE).workflowBackendUrl).toBeNull();
+    expect(
+      workerConfigFromEnv({ ...BASE, ENGINE_GATEWAY_URL: "https://g" }).workflowBackendUrl,
+    ).toBe("https://g");
+    expect(
+      workerConfigFromEnv({
+        ...BASE,
+        ENGINE_GATEWAY_URL: "https://g",
+        ENGINE_WORKFLOW_BACKEND_URL: "https://w",
+      }).workflowBackendUrl,
+    ).toBe("https://w");
+  });
+
+  it("requireWorkflowBackend returns the origin and token, or fails fast with a clear message", () => {
+    const withUrl = workerConfigFromEnv({
+      ...BASE,
+      ENGINE_GATEWAY_URL: "https://g",
+      ENGINE_GATEWAY_TOKEN: "gw",
+    });
+    expect(requireWorkflowBackend(withUrl)).toEqual({
+      baseUrl: "https://g",
+      serviceToken: "gw",
+      retryMs: 60_000,
+    });
+    expect(
+      requireWorkflowBackend(
+        workerConfigFromEnv({ ...BASE, ENGINE_WORKFLOW_BACKEND_URL: "https://w" }),
+      ),
+    ).toEqual({
+      baseUrl: "https://w",
+      serviceToken: "tok",
+      retryMs: 60_000,
+    });
+    const without = workerConfigFromEnv(BASE);
+    expect(() => requireWorkflowBackend(without)).toThrow(WorkerConfigError);
+    expect(() => requireWorkflowBackend(without)).toThrow(
+      /ENGINE_WORKFLOW_BACKEND_URL or ENGINE_GATEWAY_URL/,
+    );
   });
 });

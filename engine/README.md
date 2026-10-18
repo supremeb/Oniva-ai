@@ -29,7 +29,7 @@ Everything is exported from the package root (`src/index.ts`).
 
 | Area | Main exports |
 | --- | --- |
-| Harness | `Harness.open(storage, options)`, `harness.createConversation`, `harness.conversation(id)`, `harness.submission(id)`, `harness.decideApproval`, `harness.approvals`, `harness.answerQuestion`, `harness.questions`, `harness.waitForIdle`, `harness.close` |
+| Harness | `Harness.open(storage, options)`, `harness.createConversation`, `harness.conversation(id)`, `harness.submission(id)`, `harness.decideApproval`, `harness.approvals`, `harness.answerQuestion`, `harness.questions`, `harness.waitForIdle`, `harness.close`. `options.tasks` registers extra task kinds after the built-ins (host tasks); a duplicate kind throws at `open`. |
 | Conversations | `conversation.submit({ text, requestId?, whenBusy?: "followUp" \| "steer" \| "reject", type? })` → `Submission` (`wait()`, `record()`), `conversation.abort(reason?)`, `conversation.cancelSubmission(submissionId)` → `"cancelled" \| "not_queued" \| "unknown"`, `entries()`, `live()`, `usage()` |
 | Policy & hooks | `HostPolicy` (`resolveModelRequest`, `authorizeTool` → `allow` / `block` / `requireApproval`), `AgentHooks` |
 | Tools | `defineTool`, `ToolRegistry`, `createGatewayTools`, `createSubagentTool`, `askUserTool` |
@@ -66,13 +66,16 @@ routes also need `X-Oniva-Tenant` / `X-Oniva-Project` matching the conversation.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /v1/health` | `{ status, sessionId, ownerId, owner }` (no auth) |
+| `GET /v1/health` | `{ status, sessionId, ownerId, owner, apiVersion, taskKinds }`; `apiVersion` is the engine API version and `taskKinds` the sorted registered kinds (built-ins plus host tasks) (no auth) |
 | `POST /v1/conversations` | create (`{ id?, agent? }`) → 201 |
+| `POST /v1/runs` | start a run: `{ id, kind, input?, agent? }`; creates the conversation with the caller's `id` and spawns a root task of `kind`, conversation-owned → 201 `{ conversationId, taskId }`; a repeat `id` returns the existing run (200) and spawns nothing; an unknown `kind` is 400 |
 | `POST /v1/conversations/:id/submissions` | submit (`{ text \| content, requestId?, whenBusy?, type?, untrusted? }`; `Idempotency-Key` header works too) → 202 |
 | `PUT /v1/conversations/:id/agent` | partial agent config (`systemPrompt`, `tools`, `model`, `thinking`, `depth`, `metadata`, `compaction`, `maxRounds`, `deadlineMs`); unknown or mistyped fields → 400 and nothing committed; applies from the next model request and arrives at watchers as a patch to `/agent` → 200 `{ conversationId, agent }` |
 | `GET /v1/conversations/:id/watch` | SSE watch stream (`id:` is the cursor; resume with `Last-Event-ID` or `?cursor=`) |
 | `DELETE /v1/conversations/:id/submissions/:submissionId` | cancel a still-queued input; it settles `unanswered(withdrawn)` → 200 `{ conversationId, submissionId, cancelled: true }`; 404 unknown submission, 409 `not_queued` if it already started, was placed into a run or settled |
 | `POST /v1/conversations/:id/abort` | abort queued and running work; answers once the run is idle |
+| `POST /v1/conversations/:id/tasks/:taskId/signal` | deliver a signal to one of the conversation's tasks: `{ key, payload? }` → 200; 404 for an unknown task or one of another conversation, 409 for a duplicate key or a finished task |
+| `GET /v1/conversations/:id/tasks/:taskId` | a task's status: `{ id, kind, status, phase, outcome? }` |
 | `GET /v1/conversations/:id/approvals` | `{ conversationId, approvals: ApprovalItem[] }`: the conversation's approvals document plus those of its subagent descendants, oldest first; the decision route also finds a child's item through the root id |
 | `POST /v1/conversations/:id/approvals/:toolTaskId/decision` | `{ decision: "approve" \| "deny", note? }`, principal in `X-Oniva-Principal` |
 | `GET /v1/conversations/:id/questions` | `{ conversationId, questions: QuestionItem[] }`: the conversation's `agent.questions` document items, oldest first |
@@ -100,7 +103,11 @@ A subagent tool's model, tools and system prompt can be set per run in the paren
 
 The watch view's `run` is `{ active: boolean, runId?, startedAt? }`: `active` is true for as long as the conversation has an unfinished run, including while tools execute, approvals are pending and between model rounds (when `live` is already cleared); `runId` and `startedAt` (ISO time) accompany it while active, and when idle it is `{ active: false }`. It arrives in snapshots and as patches to `/run` when a run starts and when it ends.
 
-When the worker restarts with a task of a run in flight (the run's own generation, or a tool call or subagent task below it, however deep), the recovery commit appends one display-only `run_resumed` entry `{ runId, at }` to the run's ROOT conversation, atomically with the recovery, so each restart adds exactly one per run and clean runs add none. The context builder ignores it, so the model never sees it; it reaches clients through the watch view's `entries` like any entry. Clients use it as the "resumed after restart" cue, which a subagent's replayed read would otherwise never produce.
+When the worker restarts with a task of a run in flight (the run's own generation, or a tool call or subagent task below it, however deep; for a host-task run, any task below its root task), the recovery commit appends one display-only `run_resumed` entry `{ runId, at }` to the run's ROOT conversation, atomically with the recovery, so each restart adds exactly one per run and clean runs add none. The context builder ignores it, so the model never sees it; it reaches clients through the watch view's `entries` like any entry. Clients use it as the "resumed after restart" cue, which a subagent's replayed read would otherwise never produce.
+
+The watch view's `tasks` is keyed by task id and lists host tasks (registered through `HarnessOptions.tasks`) whose definition supplies `view(task)`: `{ kind, parentId, status, phase, label?, attempt?, waitUntil?, startedAt, endedAt?, error? }`. `status` is `pending`, `running`, `waiting`, `done`, `aborted` or `faulted`; `parentId` is the owning task (null for a root task); `label` and `attempt` come from `view`; `waitUntil` (ISO) is the deadline of a waiting task; `endedAt` and `error` (abort reason or fault message) appear once terminal. Kinds without `view` and the built-in generation, tool and compaction tasks never appear, so a plain chat has `tasks: {}`. It arrives in snapshots and as patches under `/tasks/<taskId>`. `loadConversationView` and `loadViewState` take a harness (or any source with `runtime.registry`) to know which kinds opt in; given a bare session they return `tasks: {}`.
+
+`Harness.onSettled(listener)` calls `listener({ conversationId, submissionId, requestId, status, reason? })` once after each submission settles (`done`, or `unanswered` with its `reason`, e.g. `aborted`), including submissions settled when the harness opens (pass `HarnessOptions.onSettled` to hear those), and returns an unsubscribe function. A throwing listener is reported through `onError` (`during: "settle"`) and never affects settlement.
 
 When a generation fails after streaming text (a model error), that text is kept as an `assistant` entry with `partial: true` and `message.stopReason: "error"`, written just before the `run_error` entry; its blocks are as streamed (a tool call may be incomplete and is never run). On the next turn the model sees only the partial entry's text blocks. A failure before any text (including a policy denial) writes only `run_error`.
 
@@ -134,6 +141,7 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_LEASE_TTL_MS` | `15000` | lease TTL; heartbeat every TTL/3 |
 | `ENGINE_LEASE_RETRY_MS` | TTL/3 | standby retry interval |
 | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
+| `ENGINE_WORKFLOW_BACKEND_URL` | `ENGINE_GATEWAY_URL` | backend origin of the workflow node gateway (`/internal/workflows/...`), authenticated with the gateway token. The production worker (`npm run worker`) exits 2 at startup when neither is set |
 | `ENGINE_APPROVAL_TTL_MS` | `86400000` | local-mode approval expiry only (`0`: none); under `ENGINE_POLICY=backend` the backend's `approvalTtlMs` decides and this is ignored |
 | `ENGINE_QUESTION_TTL_MS` | `604800000` | how long an `ask_user` question waits for an answer (`0`: none) |
 | `ANTHROPIC_API_KEY` | none | model key (read per request; unused under `ENGINE_POLICY=backend`) |
@@ -147,6 +155,8 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 **Backend outages.** Under `ENGINE_POLICY=backend` a backend restart or blip must not fail a long run. Both `/internal/models/policy` and `/internal/models/usage` retry network errors, timeouts, `408`, `429` and `5xx` with exponential backoff (250 ms doubling, capped at 5 s, jitter 50-100%) for up to `ENGINE_POLICY_RETRY_MS` in total. `Retry-After` on `429`/`503` replaces the computed delay (a value longer than the remaining budget ends the retrying). A policy retry reuses the request id and body, and a run abort stops it at once. Each retry logs `policy_retry` / `usage_retry`. A definitive answer is never retried: a `200 { ok: false }` denial, `401`, `403`, `422` and other `4xx`, or a malformed `200`. When the budget is spent the policy request fails the run with `run_error { kind: "network", code: "policy_unavailable", retryable: true }` (a denial stays `kind: "denied"`, `retryable: false`). A spent usage report logs `usage_failed`. The budget is checked between attempts, so one in-flight attempt may run up to `ENGINE_POLICY_TIMEOUT_MS` past it.
 
 **Durable usage outbox.** Under `ENGINE_POLICY=backend` every usage report is parked in the engine's `engine_usage_outbox` table before its first attempt and deleted only after the backend answers `2xx`, so a report survives a backend outage and a worker restart. On start, and every 30 s, the worker's flusher reclaims rows that are unclaimed or were claimed more than a minute ago (oldest first) and re-sends them with the same `requestId`; the backend ledger dedupes per `(tenant, requestId)`, so a redelivery is counted once. A report older than 7 days is logged `usage_stale` but still delivered. A definitive `4xx` (other than `408`/`429`) is logged `usage_dropped` and removed. Without an outbox (as in tests) reports are memory-only.
+
+**Run-finished push.** The same outbox carries a second row `kind`, `run_finished` (migration `004_outbox_kind.sql`; the runner accepts the gap at `003`). When a submission settles on a conversation whose agent `metadata.notify` is `"backend"` (Fleet and workflow runs; chat and Deep Work carry no tag), the worker parks `{ kind: "run_finished", conversationId, submissionId, status, reason?, usage }` under the id `run_finished:<conversationId>:<submissionId>` and posts it to `POST /internal/runs/finished` with the usage retry policy. A `2xx`, or a permanent `4xx` other than `401`/`403`, deletes the row; `401`/`403` and an exhausted retry budget keep it for the flusher (start, then every 30 s). Each flusher claims only its own kind. The backend's reconciler is the second net for a post that was never parked.
 | `ENGINE_MODEL` / `ENGINE_SUMMARY_MODEL` | Anthropic defaults | models for replies / compaction |
 | `ENGINE_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter endpoint (the production worker registers the `openrouter` provider next to `anthropic`) |
 | `ENGINE_MODEL_FIRST_BYTE_TIMEOUT_MS` | `120000` | abort an OpenRouter attempt that has produced no data event by then; retried as a `network` error |
@@ -218,6 +228,50 @@ request:
 - Reads retry 5xx, 429 and network failures with full-jitter backoff,
   honoring `Retry-After` on 429/503 within the tool's deadline. Response
   bodies over `maxResponseBytes` (default 1 MiB) are an error.
+
+## Workflow node task
+
+`createWorkflowNodeTask({ gateway, onAbort? })` (`src/workflow/node-task.ts`) is the host task kind `workflow_node`; register it through `HarnessOptions.tasks`. `createNodeGateway(...)` (`src/workflow/node-gateway.ts`) is its HTTP client for the backend node gateway (`/internal/workflows/runs/{runId}/nodes/{nodeId}/prepare|finish`, `/runs/{runId}/finalize`, `GET /invocations/{key}`). The payload shapes are the committed schemas in `contracts/workflow-nodes/`; the contract the backend must reproduce is specified by `test/support/fake-workflow-backend.ts` (`[clause:]` tags).
+
+Input: `{ version: 1, runId, runAttempt, nodeId, nodeType, policy: { maxRetries, backoffMs, timeoutMs, onError }, gateTaskId? }`. Every backend call carries `Idempotency-Key: {runId}:{nodeId}:r{runAttempt}:a{nodeAttempt}:{prepare|finish}`; a key with a stored outcome is answered without running again, so a retry (`nodeAttempt + 1`) or a run retry (`runAttempt + 1`) gets a new key. Phases:
+
+| Phase | What happens |
+|---|---|
+| `prepare` | Ask the backend. `final` ends the node; `llm` creates one child conversation owned by the node (`requestId = node:{taskId}`) and waits in `awaitChild`; `wait` parks in `awaitWake` (`durationMs` is relative to the engine clock; a signal key and `slaUntilEpochMs` are honored); `fanout` stores the request digest, signals the gate task (`gateTaskId`, key `parked`) and parks in `awaitFanout` for the `fanout-result` signal. |
+| `awaitChild`, `awaitWake`, `awaitFanout` | Gather the child's answer, the signal payload or deadline wake, or the counts-only fan-out summary and stage it for `finish`. |
+| `finish` | The node calls the backend `finish` itself under its own `...:finish` key and settles on the `final` it returns. The run task never calls `finish`. |
+
+Settling: `failed` retries while `policy.maxRetries` allows (a deadline wait of `backoffMs`); a fan-out node and an interrupted call never retry. Then `onError: "continue"` ends the task `done` with `{ status: "failed", continued: true }`, and `stop` faults it (so the run's `failFast` sees it). `timeoutMs` bounds each backend call of an attempt and ends it as `failed` with `error.code = "timeout"`. After a restart a `finish` is asked again only when the backend declared the call `replaySafe`; otherwise the engine reads the outcome stored under the key and, with none, settles the node `interrupted` (`failed`, `error.code = "interrupted"`). Checkpoints carry `version`; the previous version is upgraded in memory and a newer one faults the task with `unsupported_checkpoint_version`.
+
+## Workflow run task
+
+`createWorkflowRunTask({ gateway, onAbort? })` (`src/workflow/run-task.ts`) is the host task kind `workflow_run`: the DAG scheduler of one run. It spawns a `workflow_node` child per ready node and holds no node semantics. Input: `{ version: 1, runId, runAttempt, graph, variables, errorMode: "stop" | "continue" }`, where `graph` is the compiled `{ nodes: [{ id, type, deps: [{ from, handle? }], policy, handles? }] }` (`src/workflow/graph.ts`). `handles` lists what a branch node may select; an edge naming any other handle is invalid.
+
+`POST /v1/runs` rejects a cycle, a duplicate id, an unknown dependency or handle, and more than 95 nodes (`maxNodes` in `contracts/workflow-nodes/limits.json`) with 400 before anything is spawned (the definition's `validateInput`).
+
+| Phase | What happens |
+|---|---|
+| `start` | Resolve skips, spawn every ready node and park in `join`. |
+| `join` | `waiting({ on: wave, policy })`, `failFast` for `stop` and `allSettled` for `continue`. When the whole wave is terminal: update node states from each child's committed outcome, apply `selectedHandles` and skip propagation, then spawn the next wave or move to `finalize`. Dispatch is in waves: a slow branch delays the later nodes of a fast one. |
+| `finalize` | Call the backend `finalize` (key `{runId}:r{runAttempt}:finalize`) with `completed` or `failed`, the node summaries and the first uncaught error, then `done`. |
+
+A node is ready when every in-edge source has settled and at least one edge is live. An edge is dead when its source was skipped or blocked, did not select the edge's handle, or failed without its own `onError: "continue"`; a node with only dead in-edges is `skipped`. Under `stop` the first uncaught failure aborts the siblings in flight (`sibling_failed`, recorded `skipped`) and the run ends `failed` with that error; under `continue` the failure is recorded, its descendants are skipped, and the run ends `failed` once everything has settled. Aborting the conversation aborts the node children first, then `onAbort` calls `finalize` once with `cancelled`. The run's `view` reports `nodes: { nodeId: status }` in `view.tasks`. Checkpoints hold node ids, statuses and task ids only, carry `version`, and follow the same previous-version rule as the node task.
+
+### Fan-out, iteration and subworkflow
+
+Register `createWorkflowFanoutLaneTask()` (`workflow_fanout_lane`) and `createWorkflowGateTask()` (`workflow_gate`) next to the node and run tasks. A graph may carry, besides `nodes`, `subgraphs` (iteration bodies by name) and `workflows` (referenced workflows by id), each a self-contained graph, and marks a node that may answer `prepare` with `fanout` as `mayFanOut: true`. The node limit counts every nested graph; `workflows` nest at most 3 deep (`maxSubworkflowDepth`) and a workflow cannot appear inside itself; all are rejected with 400 at `POST /v1/runs`.
+
+- **Gate.** A wait wakes only when everything it awaits is terminal, so the run cannot learn from the node alone that it parked. For each `mayFanOut` node the run spawns a `workflow_gate` (`{nodeTaskId}:gate`) and waits on the gate. The gate ends when the node parks (it delivers `parked`) or ends for any reason, and faults when the node faulted, so `failFast` still reacts at once. On wake the run reads the node: terminal settles as usual; phase `awaitFanout` means fan-out.
+- **Lanes.** For a parked node with `count` items and `parallel` P the run spawns `min(P, count, 50)` lanes (`{runTaskId}:r{runAttempt}:{nodeId}:lane{k}`). Lane `k` runs indexes `k, k+L, …` one at a time, each as a child `workflow_run` with the deterministic id `{runTaskId}:r{runAttempt}:{nodeId}:i{i}` and the backend run id `uuid5(runId, "{nodeId}:{i}")` (the item row the fan-out `prepare` created; `{runId}:{nodeId}:i{i}` for a run id that is not a UUID). Spawning the item and checkpointing `nextIndex` are one commit, so at most P items are live at any commit, also across a restart, and a finished item never runs again. A run retry (`runAttempt + 1`) fans out afresh.
+- **Failure.** With `failFast` the first failed item ends its lane and aborts the sibling lanes (and their live items). Otherwise every item runs. An item child's own `finalize` writes its results to the backend.
+- **Result.** When the lanes are terminal the run signals the node `fanout-result` with `{ count, completed, failed, cancelled, firstError? }` and waits for the node, which calls `finish` itself under its own key. A count over 1000 items or a target the graph lacks is answered with a failure summary and no lanes.
+- **Bounded state (KTD17).** Checkpoints and signals hold counts and ids, never items or results: the run, lane and node checkpoints stay under 8 KiB and do not depend on the item count.
+
+### Run retry, deadline and worker wiring
+
+- **Retry.** `workflow_run` input may carry `retry: { max, delayMs }`. A run that ends `failed` with attempts left does not finalize: it parks on `waiting({ until: now + delayMs })` and restarts from `start` with a fresh checkpoint and `runAttempt + 1` (kept in the checkpoint's `attempt`). Node and lane task ids and node keys carry `r{runAttempt}`, so the retry re-executes nodes that failed in the earlier attempt and a fan-out starts afresh. `finalize` is called once, after the last attempt, with `attempts` (key `{runId}:r{attempt}:finalize`). A retry whose wake would not come before the deadline is not taken.
+- **Deadline.** `deadlineMs` (absolute engine-clock epoch ms) bounds every wait of the run. When reached, live nodes, gates and lanes are aborted (reason `run_deadline`, recorded `skipped`) and the run finalizes `failed` with `{ code: "deadline_exceeded" }`; a deadline failure never retries.
+- **Worker.** `startWorker({ workflow: { baseUrl, serviceToken } })` registers `workflow_run`, `workflow_node`, `workflow_fanout_lane` and `workflow_gate` (`createWorkflowTasks`, `src/workflow/tasks.ts`) with a node gateway client that carries the lease fence, so `/v1/health` `taskKinds` lists them. `scripts/worker.ts` takes the backend from `ENGINE_WORKFLOW_BACKEND_URL`, falling back to `ENGINE_GATEWAY_URL`.
 
 ## Commands
 

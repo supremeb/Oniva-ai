@@ -720,6 +720,10 @@ export interface FleetRunItem {
   trigger: string;
   triggered_by: Record<string, unknown> | null;
   progress: number;
+  /** Engine conversation of an engine-run job; null for legacy jobs. */
+  conversation_id?: string | null;
+  /** True when the job runs on the engine. Absent means "derive it from `conversation_id`". */
+  engine?: boolean;
   input_data: Record<string, unknown> | null;
   result: Record<string, unknown> | null;
   error: string | null;

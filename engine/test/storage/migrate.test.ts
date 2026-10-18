@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "vitest";
 import { uuidv7 } from "../../src/core/ids.js";
 import { loadMigrations, migrate } from "../../src/storage/postgres/migrate.js";
+import { PostgresStorageProvider } from "../../src/storage/postgres/storage.js";
 import { usePostgres } from "../support/pg.js";
 
 const env = usePostgres();
@@ -87,18 +88,47 @@ describe("migrate", () => {
     const { schema, pool, exists } = await freshSchema();
     const other = env.newPool({ options: `-c search_path=${schema}` });
     const results = await Promise.all([migrate(pool), migrate(other), migrate(pool)]);
-    assert.deepEqual(results.map((r) => r.join(",")).sort(), ["", "", "001,002"]);
+    assert.deepEqual(results.map((r) => r.join(",")).sort(), ["", "", "001,002,004"]);
     assert.equal(await exists("engine_sessions"), true);
     assert.equal(await exists("engine_usage_outbox"), true);
     const { rows } = await pool.query(
       "SELECT version, checksum FROM engine_migrations ORDER BY version",
     );
-    assert.equal(rows.length, 2);
+    assert.equal(rows.length, 3);
     assert.deepEqual(
       rows.map((r) => r.version),
-      ["001", "002"],
+      ["001", "002", "004"],
     );
     for (const r of rows) assert.match(r.checksum, /^[0-9a-f]{64}$/);
+  });
+
+  it("004 applies over 002 with a gap at 003: usage rows keep draining as kind usage", async () => {
+    const { pool } = await freshSchema();
+    const all = await loadMigrations();
+    const upto = (max: string) => all.filter((m) => m.version <= max);
+    const dir002 = await migrationsDir(
+      Object.fromEntries(upto("002").map((m) => [`${m.version}_${m.name}.sql`, m.sql])),
+    );
+    assert.deepEqual(await migrate(pool, { dir: dir002 }), ["001", "002"]);
+    await pool.query(
+      `INSERT INTO engine_usage_outbox (request_id, body, created_at, claimed_at)
+       VALUES ('old-1', '{"a":1}', 1, NULL)`,
+    );
+    // The real directory has no 003; the runner must accept the gap.
+    assert.equal(
+      all.some((m) => m.version === "003"),
+      false,
+    );
+    assert.deepEqual(await migrate(pool), ["004"]);
+    const { rows } = await pool.query("SELECT request_id, kind, body FROM engine_usage_outbox");
+    assert.deepEqual(rows, [{ request_id: "old-1", kind: "usage", body: { a: 1 } }]);
+    const provider = new PostgresStorageProvider(pool);
+    const claimed = await provider.claimPending(0, "usage");
+    assert.deepEqual(
+      claimed.map((r) => [r.requestId, r.kind]),
+      [["old-1", "usage"]],
+    );
+    await provider.ack("old-1");
   });
 
   it("detects a migration modified after being applied", async () => {

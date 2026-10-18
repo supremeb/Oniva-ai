@@ -17,7 +17,7 @@ from app.models.workflow import WorkflowExecution
 from app.models.workflow_checkpoint import WorkflowCheckpoint
 from app.node_executors import NodeExecutionContext, NodeExecutionResult
 from app.node_executors.agent_executor import AgentExecutor
-from app.node_executors.wait_executor import MAX_IN_PROCESS_WAIT_SECONDS, WaitExecutor
+from app.node_executors.wait_executor import LEGACY_IN_PROCESS_WAIT_SECONDS, WaitExecutor
 from app.services.durable_workflow_engine import DurableWorkflowEngine
 from app.services.workflow_orchestrator import WorkflowOrchestrator
 
@@ -485,7 +485,7 @@ async def test_agent_node_exits_loop_when_no_new_tool_calls():
     with patch(f"{module}.get_redis_service", AsyncMock()), \
          patch(f"{module}.AgentCircuitBreaker", return_value=SimpleNamespace(check_health=AsyncMock())), \
          patch(f"{module}.resolve_key_with_fallback", AsyncMock(return_value=("key", "openai/gpt-4o-mini"))), \
-         patch(f"{module}.create_litellm_model", return_value=object()), \
+         patch(f"{module}.create_model", return_value=object()), \
          patch(f"{module}.PydanticAgent", FakePydanticAgent), \
          patch(f"{module}.patch_dangling_tool_calls", side_effect=lambda m: m), \
          patch(f"{module}.SkillRegistry.get_skill", return_value=skill), \
@@ -530,7 +530,7 @@ async def test_wait_honours_real_duration_above_the_old_60s_cap():
 async def test_wait_rejects_durations_it_cannot_honour():
     with patch("app.node_executors.wait_executor.asyncio.sleep", new=AsyncMock()) as sleep:
         result = await _wait(waitType="duration", duration=2, durationUnit="hours")
-    assert 7200 > MAX_IN_PROCESS_WAIT_SECONDS
+    assert 7200 > LEGACY_IN_PROCESS_WAIT_SECONDS
     assert result.status == "failed"
     assert "not supported" in result.error
     sleep.assert_not_awaited()
@@ -542,3 +542,51 @@ async def test_wait_rejects_invalid_durations(duration, unit):
     result = await _wait(waitType="duration", duration=duration, durationUnit=unit)
     assert result.status == "failed"
     assert "Invalid wait duration" in result.error
+
+
+# --------------------------------------------------------------------------
+# U15: the compiled engine graph schedules like the legacy engines do
+# --------------------------------------------------------------------------
+
+def _schedule(compiled, selected):
+    """Port of the engine's ``resolveGraph``: run every ready node, branch nodes select ``selected[id]``.
+
+    Returns ``(ran, skipped)``. A node is ready when all in-edge sources settled and one edge is live; an
+    edge is dead when its source was skipped, or names a handle the source did not select.
+    """
+    nodes = {n["id"]: n for n in compiled["nodes"]}
+    state, ran = {}, []
+    while len(state) < len(nodes):
+        progressed = False
+        for node in compiled["nodes"]:
+            if node["id"] in state or not all(d["from"] in state for d in node["deps"]):
+                continue
+            live = [
+                d for d in node["deps"]
+                if state[d["from"]] == "success" and (d["handle"] is None or d["handle"] in selected.get(d["from"], []))
+            ]
+            state[node["id"]] = "success" if (live or not node["deps"]) else "skipped"
+            ran.append(node["id"]) if state[node["id"]] == "success" else None
+            progressed = True
+        assert progressed, "scheduler stuck"
+    return ran, sorted(k for k, v in state.items() if v == "skipped")
+
+
+@pytest.mark.parametrize("branch,taken,untaken", [("true", "A", "B"), ("false", "B", "A")])
+def test_compiled_graph_skips_the_untaken_branch_and_runs_the_join_once(branch, taken, untaken):
+    from app.services.workflow_compiler import compile_workflow
+
+    ran, skipped = _schedule(compile_workflow(_branch_spec()), {"c": [branch]})
+    assert ran == ["s", "c", taken, "J"] and skipped == [untaken]
+
+
+def test_compiled_graph_skips_everything_downstream_of_a_skipped_branch():
+    from app.services.workflow_compiler import compile_workflow
+
+    spec = {
+        "nodes": [_node("s", "start"), _node("c", "ifelse"), _node("A", "llm"),
+                  _node("B", "llm"), _node("B2", "llm")],
+        "edges": [_edge("s", "c"), _edge("c", "A", "true"), _edge("c", "B", "false"), _edge("B", "B2")],
+    }
+    ran, skipped = _schedule(compile_workflow(spec), {"c": ["true"]})
+    assert ran == ["s", "c", "A"] and skipped == ["B", "B2"]

@@ -1,0 +1,9 @@
+{
+  "contractVersion": 1,
+  "kind": "fanout",
+  "count": 10,
+  "parallel": 51,
+  "failFast": true,
+  "target": { "subgraph": "subgraph-1" },
+  "itemsRef": "batch:123"
+}

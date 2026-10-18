@@ -365,7 +365,14 @@ class Settings(BaseSettings):
     ENABLE_ENGINE_API: bool = False
     ENABLE_ENGINE_CHAT: bool = False  # global gate for engine-backed chat; tenants opt in via settings.features
     ENABLE_ENGINE_DEEP_WORK: bool = False  # global gate for engine-backed Deep Work; tenants opt in via settings.features
+    ENABLE_ENGINE_FLEET: bool = False  # global gate for engine-backed Fleet runs; tenants opt in via settings.features
+    ENABLE_ENGINE_WORKFLOWS: bool = False  # global gate for engine-backed workflow runs; tenants opt in via settings.features
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
+    # Run reconciler (plan 003 U5): rows stuck active for this long are checked against the engine.
+    RUN_RECONCILE_AFTER_S: int = 120
+    RUN_RECONCILE_INTERVAL_S: float = 60.0
+    RUN_START_RETRY_MAX: int = 5  # attempts of a hook's start_missing before fail(ref, "engine_start_failed")
+    RUN_START_RETRY_BASE_S: float = 30.0  # exponential backoff base between those attempts
     # ISO timestamp (the U5 deploy time). Approvals the engine created before it have no ledger row and
     # may still be decided by the legacy rule; unset disables that fallback. Removed one release after U5.
     APPROVALS_LEGACY_CUTOFF: Optional[str] = None

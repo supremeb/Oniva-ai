@@ -208,11 +208,11 @@ class StepBuilderAgent(BaseAgent):
     """
 
     def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
-        from app.services.llm_gateway import normalize_model_id, create_litellm_model
+        from app.services.llm_gateway import normalize_model_id, create_model
 
         settings = get_settings()
 
-        # Normalize model to LiteLLM format
+        # Normalize model id
         self.model = normalize_model_id(model or "openai/gpt-4o")
 
         self.name = "Step Builder"
@@ -231,8 +231,8 @@ class StepBuilderAgent(BaseAgent):
         # Store for fallback text mode
         self._api_key = resolved_key
 
-        # Create LiteLLM-backed model
-        pydantic_model = create_litellm_model(self.model, resolved_key)
+        # Create native pydantic-ai model
+        pydantic_model = create_model(self.model, resolved_key)
 
         # Create Pydantic AI agent directly (bypass BaseAgent's model handling)
         self.agent = Agent(

@@ -6,13 +6,17 @@ from sqlalchemy import select, func, desc
 from typing import Optional, AsyncGenerator
 from uuid import UUID
 from datetime import datetime
-import json
 import asyncio
+import json
+import logging
+
+import httpx
 
 from app.models.background_job import BackgroundJob, JobStatus as ModelJobStatus
 from app.models.custom_agent import CustomAgent
 from app.models.workflow import Workflow
 from app.core.database import get_db
+from app.services import fleet_engine
 from app.auth.dependencies import get_current_user, get_current_tenant_id
 from app.auth.providers.base import AuthUser
 from app.schemas.background_job import (
@@ -27,6 +31,8 @@ from app.schemas.background_job import (
     JobProgressUpdate,
     JobCompletedEvent,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -94,6 +100,11 @@ async def create_job(
                 detail="Agent not found"
             )
 
+    use_engine = bool(
+        job_data.job_type.value == "background_agent" and job_data.agent_id
+        and await fleet_engine.tenant_uses_engine_fleet(db, tenant_id)
+    )
+
     # Create job
     job = BackgroundJob(
         tenant_id=tenant_id,
@@ -103,7 +114,7 @@ async def create_job(
         job_type=job_data.job_type.value,
         status=ModelJobStatus.PENDING.value,
         trigger="manual",
-        input_data=job_data.input_data,
+        input_data=fleet_engine.mark_engine(job_data.input_data) if use_engine else job_data.input_data,
         execution_trace=[],
     )
 
@@ -111,8 +122,13 @@ async def create_job(
     await db.commit()
     await db.refresh(job)
 
-    # Spawn background agent executor for background_agent jobs
-    if job_data.job_type.value == "background_agent" and job_data.agent_id:
+    if use_engine:
+        # Engine tenants: a conversation plus one submission, no asyncio task. A start that cannot
+        # reach the engine leaves the job pending and the reconciler retries it (plan 003 U7).
+        await fleet_engine.start_after_commit(tenant_id, job.id)
+        await db.refresh(job)
+    # Spawn background agent executor for background_agent jobs (legacy path, flag off)
+    elif job_data.job_type.value == "background_agent" and job_data.agent_id:
         from app.services.background_agent_executor import run_background_agent
         asyncio.create_task(
             run_background_agent(
@@ -297,9 +313,14 @@ async def cancel_job(
             detail="Job has already completed"
         )
 
+    reason = request.reason if request and request.reason else None
+    if fleet_engine.is_engine_job(job):
+        # Stop the engine run first; an outage still cancels the job and leaves the abort for the reconciler.
+        settled = await fleet_engine.abort_run(db, job, reason)
+        fleet_engine.set_abort_pending(job, not settled)
     job.cancel()
-    if request and request.reason:
-        job.error = f"Cancelled: {request.reason}"
+    if reason:
+        job.error = f"Cancelled: {reason}"
 
     await db.commit()
     await db.refresh(job)
@@ -347,6 +368,155 @@ async def delete_job(
     await db.commit()
 
 
+_LIVE_STATUSES = (ModelJobStatus.PENDING.value, ModelJobStatus.RUNNING.value)
+
+
+class _LiveState:
+    """What the live engine phase already sent, so the row-polling phase continues without repeats."""
+
+    def __init__(self) -> None:
+        self.progress = -1
+        self.steps = 0
+
+
+async def _engine_live_events(job: BackgroundJob, tenant_id: UUID, live: _LiveState) -> AsyncGenerator[str, None]:
+    """Live view of an engine-run job: follow the engine watch and emit ``progress`` and ``step`` events.
+
+    Ends when the run settles, the watch stream ends, or the engine cannot be reached; the caller then
+    continues with the row (the ``on_finished`` hook writes the terminal state and the terminal event).
+    """
+    from app.core.database import AsyncSessionLocal, set_tenant_context
+    from app.services import fleet_run_sync as frs
+    from app.services.deep_work import engine_view
+    from app.services.engine_client import EngineError, get_engine_client
+
+    if job.conversation_id is None:
+        return
+    try:
+        async with AsyncSessionLocal() as bdb:
+            await set_tenant_context(bdb, str(tenant_id))
+            bound = await fleet_engine.binding(bdb, job)
+        if bound is None:
+            return
+        upstream = await get_engine_client().watch_stream(
+            bound[0], tenant_id, bound[1], job.conversation_id)
+    except (EngineError, OSError, TimeoutError) as e:
+        logger.warning("job %s: engine watch unavailable, polling the row: %s", job.id, e)
+        return
+
+    live.progress = job.progress or 0
+    update = JobProgressUpdate(job_id=job.id, status=job.status, progress=live.progress,
+                               message=f"Progress: {live.progress}%", timestamp=datetime.utcnow())
+    yield f"event: progress\ndata: {json.dumps(update.model_dump(), default=str)}\n\n"
+    view = None
+    buffer = ""
+    try:
+        async for raw in upstream.aiter_raw():
+            buffer += raw.decode("utf-8", "replace").replace("\r\n", "\n")
+            frames, buffer = engine_view.parse_frames(buffer)
+            for frame in frames:
+                if "snapshot" in frame:
+                    view = frame["snapshot"]
+                elif view is not None and "patch" in frame:
+                    view = engine_view.apply_patch(view, frame["patch"])
+                else:
+                    continue
+                steps = frs.build_trace(view, None)
+                for step in steps[live.steps:]:
+                    yield f"event: step\ndata: {json.dumps(step, default=str)}\n\n"
+                live.steps = max(live.steps, len(steps))
+                if not frs._active(view):
+                    return
+    except (EngineError, OSError, TimeoutError, httpx.HTTPError) as e:
+        logger.warning("job %s: engine watch dropped, polling the row: %s", job.id, e)
+    finally:
+        await upstream.aclose()
+
+
+async def _poll_events(job_id: UUID, tenant_id: UUID, last_progress: int, last_trace_count: int) -> AsyncGenerator[str, None]:
+    """Poll the job row and emit progress, step and terminal events."""
+    from app.core.database import AsyncSessionLocal, set_tenant_context
+
+
+    while True:
+        # Use a fresh session per poll to avoid RLS context loss after commit
+        async with AsyncSessionLocal() as poll_db:
+            await set_tenant_context(poll_db, str(tenant_id))
+            poll_result = await poll_db.execute(
+                select(BackgroundJob).where(BackgroundJob.id == job_id)
+            )
+            job = poll_result.scalar_one_or_none()
+            if not job:
+                break
+
+            # Snapshot values from the session-bound object
+            job_progress = job.progress
+            job_status = job.status
+            job_result = job.result
+            job_error = job.error
+            job_trace = job.execution_trace or []
+            job_completed_at = job.completed_at
+            job_duration_ms = getattr(job, 'duration_ms', None) or 0
+
+        # Check for progress updates (outside session - using snapshots)
+        if job_progress != last_progress:
+            last_progress = job_progress
+            update = JobProgressUpdate(
+                job_id=job_id,
+                status=job_status,
+                progress=job_progress,
+                message=f"Progress: {job_progress}%",
+                timestamp=datetime.utcnow(),
+            )
+            yield f"event: progress\ndata: {json.dumps(update.model_dump(), default=str)}\n\n"
+
+        # Check for new trace steps
+        if len(job_trace) > last_trace_count:
+            for step in job_trace[last_trace_count:]:
+                yield f"event: step\ndata: {json.dumps(step, default=str)}\n\n"
+            last_trace_count = len(job_trace)
+
+        # Check for completion
+        if job_status == ModelJobStatus.COMPLETED.value:
+            completed = JobCompletedEvent(
+                job_id=job_id,
+                status=job_status,
+                result=job_result,
+                duration_ms=job_duration_ms,
+                execution_trace=job_trace,
+                completed_at=job_completed_at or datetime.utcnow(),
+            )
+            yield f"event: completed\ndata: {json.dumps(completed.model_dump(), default=str)}\n\n"
+            break
+
+        if job_status == ModelJobStatus.FAILED.value:
+            failed = JobCompletedEvent(
+                job_id=job_id,
+                status=job_status,
+                error=job_error,
+                duration_ms=job_duration_ms,
+                execution_trace=job_trace,
+                completed_at=job_completed_at or datetime.utcnow(),
+            )
+            yield f"event: failed\ndata: {json.dumps(failed.model_dump(), default=str)}\n\n"
+            break
+
+        if job_status == ModelJobStatus.CANCELLED.value:
+            cancelled = JobCompletedEvent(
+                job_id=job_id,
+                status=job_status,
+                error=job_error,
+                duration_ms=job_duration_ms,
+                execution_trace=job_trace,
+                completed_at=job_completed_at or datetime.utcnow(),
+            )
+            yield f"event: cancelled\ndata: {json.dumps(cancelled.model_dump(), default=str)}\n\n"
+            break
+
+        # Wait before next poll
+        await asyncio.sleep(0.5)
+
+
 @router.get("/{job_id}/stream")
 async def stream_job_progress(
     job_id: UUID,
@@ -371,7 +541,8 @@ async def stream_job_progress(
     result = await db.execute(
         select(BackgroundJob).where(
             BackgroundJob.id == job_id,
-            BackgroundJob.user_id == user_id
+            BackgroundJob.user_id == user_id,
+            BackgroundJob.tenant_id == tenant_id
         )
     )
     job = result.scalar_one_or_none()
@@ -384,88 +555,14 @@ async def stream_job_progress(
 
     async def event_generator() -> AsyncGenerator[str, None]:
         """Generate SSE events for job progress."""
-        from app.core.database import AsyncSessionLocal, set_tenant_context
-
-        last_progress = -1
-        last_trace_count = 0
-
-        while True:
-            # Use a fresh session per poll to avoid RLS context loss after commit
-            async with AsyncSessionLocal() as poll_db:
-                await set_tenant_context(poll_db, str(tenant_id))
-                poll_result = await poll_db.execute(
-                    select(BackgroundJob).where(BackgroundJob.id == job_id)
-                )
-                job = poll_result.scalar_one_or_none()
-                if not job:
-                    break
-
-                # Snapshot values from the session-bound object
-                job_progress = job.progress
-                job_status = job.status
-                job_result = job.result
-                job_error = job.error
-                job_trace = job.execution_trace or []
-                job_completed_at = job.completed_at
-                job_duration_ms = getattr(job, 'duration_ms', None) or 0
-
-            # Check for progress updates (outside session - using snapshots)
-            if job_progress != last_progress:
-                last_progress = job_progress
-                update = JobProgressUpdate(
-                    job_id=job_id,
-                    status=job_status,
-                    progress=job_progress,
-                    message=f"Progress: {job_progress}%",
-                    timestamp=datetime.utcnow(),
-                )
-                yield f"event: progress\ndata: {json.dumps(update.model_dump(), default=str)}\n\n"
-
-            # Check for new trace steps
-            if len(job_trace) > last_trace_count:
-                for step in job_trace[last_trace_count:]:
-                    yield f"event: step\ndata: {json.dumps(step, default=str)}\n\n"
-                last_trace_count = len(job_trace)
-
-            # Check for completion
-            if job_status == ModelJobStatus.COMPLETED.value:
-                completed = JobCompletedEvent(
-                    job_id=job_id,
-                    status=job_status,
-                    result=job_result,
-                    duration_ms=job_duration_ms,
-                    execution_trace=job_trace,
-                    completed_at=job_completed_at or datetime.utcnow(),
-                )
-                yield f"event: completed\ndata: {json.dumps(completed.model_dump(), default=str)}\n\n"
-                break
-
-            if job_status == ModelJobStatus.FAILED.value:
-                failed = JobCompletedEvent(
-                    job_id=job_id,
-                    status=job_status,
-                    error=job_error,
-                    duration_ms=job_duration_ms,
-                    execution_trace=job_trace,
-                    completed_at=job_completed_at or datetime.utcnow(),
-                )
-                yield f"event: failed\ndata: {json.dumps(failed.model_dump(), default=str)}\n\n"
-                break
-
-            if job_status == ModelJobStatus.CANCELLED.value:
-                cancelled = JobCompletedEvent(
-                    job_id=job_id,
-                    status=job_status,
-                    error=job_error,
-                    duration_ms=job_duration_ms,
-                    execution_trace=job_trace,
-                    completed_at=job_completed_at or datetime.utcnow(),
-                )
-                yield f"event: cancelled\ndata: {json.dumps(cancelled.model_dump(), default=str)}\n\n"
-                break
-
-            # Wait before next poll
-            await asyncio.sleep(0.5)
+        last_progress, last_trace_count = -1, 0
+        if fleet_engine.is_engine_job(job) and job.status in _LIVE_STATUSES:
+            live = _LiveState()
+            async for chunk in _engine_live_events(job, tenant_id, live):
+                yield chunk
+            last_progress, last_trace_count = live.progress, live.steps
+        async for chunk in _poll_events(job_id, tenant_id, last_progress, last_trace_count):
+            yield chunk
 
     return StreamingResponse(
         event_generator(),

@@ -1,3 +1,4 @@
+import type { RunStatus } from '@/lib/run/status';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { Node, Edge } from '@xyflow/react';
@@ -31,12 +32,12 @@ const edgesEqual = (a: Edge[], b: Edge[]): boolean => {
 // ============ Types ============
 interface ExecutionResult {
     nodeId: string;
-    status: 'pending' | 'running' | 'complete' | 'error';
+    status: RunStatus;
     result?: unknown;
     error?: string;
 }
 
-type NodeStatus = 'pending' | 'running' | 'complete' | 'error';
+type NodeStatus = RunStatus;
 
 interface WorkflowState {
     // State
