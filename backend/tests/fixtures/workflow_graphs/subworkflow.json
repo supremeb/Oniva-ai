@@ -9,7 +9,7 @@
           "backoffMs": 0,
           "maxRetries": 0,
           "onError": "stop",
-          "timeoutMs": 60000
+          "timeoutMs": 120000
         },
         "type": "start"
       },
@@ -26,7 +26,7 @@
           "backoffMs": 0,
           "maxRetries": 0,
           "onError": "stop",
-          "timeoutMs": 60000
+          "timeoutMs": 120000
         },
         "type": "subworkflow"
       },
@@ -42,7 +42,7 @@
           "backoffMs": 0,
           "maxRetries": 0,
           "onError": "stop",
-          "timeoutMs": 60000
+          "timeoutMs": 120000
         },
         "type": "output"
       }
@@ -57,7 +57,7 @@
               "backoffMs": 0,
               "maxRetries": 0,
               "onError": "stop",
-              "timeoutMs": 60000
+              "timeoutMs": 120000
             },
             "type": "start"
           },
@@ -73,7 +73,7 @@
               "backoffMs": 0,
               "maxRetries": 0,
               "onError": "stop",
-              "timeoutMs": 60000
+              "timeoutMs": 120000
             },
             "type": "template"
           }

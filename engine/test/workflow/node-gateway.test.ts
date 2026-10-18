@@ -165,6 +165,58 @@ describe("node gateway client", () => {
     ).rejects.toMatchObject({ code: "gateway_unavailable", status: 500 });
   });
 
+  it("keeps retrying one key through an outage longer than three attempts and 503 in_flight", async () => {
+    be.script(
+      "n1",
+      "prepare",
+      { status: 503, body: { error: "in_flight" }, headers: { "retry-after": "0" } },
+      { status: 503, body: { error: "in_flight" } },
+      { status: 502 },
+      { status: 500 },
+      { status: 408 },
+    );
+    const result = await gateway({
+      clock: realClock,
+      retry: { attempts: Number.POSITIVE_INFINITY, baseDelayMs: 1, maxDelayMs: 2, budgetMs: 5_000 },
+    }).prepare(REF, KEY, BODY);
+    expect(result.kind).toBe("final");
+    expect(be.keys("prepare")).toEqual([KEY, KEY, KEY, KEY, KEY, KEY]);
+  });
+
+  it("gives up with the last failure once the retry budget is spent", async () => {
+    be.script("n1", "finish", { status: 500 }, { status: 500 }, { status: 500 }, { status: 500 });
+    await expect(
+      gateway({
+        clock: realClock,
+        retry: {
+          attempts: Number.POSITIVE_INFINITY,
+          baseDelayMs: 20,
+          maxDelayMs: 20,
+          budgetMs: 15,
+        },
+      }).finish(REF, "run-1:n1:r0:a0:finish", fixture("finish.llm.valid") as never),
+    ).rejects.toMatchObject({ code: "gateway_unavailable", status: 500 });
+    expect(be.calls("finish").length).toBeLessThan(4);
+  });
+
+  it("waits out an in_flight claim longer than the outage budget", async () => {
+    be.script(
+      "n1",
+      "prepare",
+      ...Array.from({ length: 6 }, () => ({
+        status: 503,
+        body: { error: "in_flight" },
+        headers: { "retry-after": "0" },
+      })),
+    );
+    const result = await gateway({
+      clock: realClock,
+      retry: { attempts: Number.POSITIVE_INFINITY, baseDelayMs: 10, maxDelayMs: 10, budgetMs: 15 },
+    }).prepare(REF, KEY, BODY);
+    expect(result.kind).toBe("final");
+    expect(be.keys("prepare")).toHaveLength(7);
+  });
+
   it("does not retry a definitive 4xx", async () => {
     be.script("n1", "prepare", { status: 422, body: { error: "invalid_request" } });
     await expect(gateway().prepare(REF, KEY, BODY)).rejects.toMatchObject({

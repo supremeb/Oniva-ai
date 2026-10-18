@@ -14,7 +14,7 @@ logged to ``http.log``): an HTTP node is the side effect, and ``hold`` keeps a r
   * wait (AE6): a 2 h wait survives a worker restart and ends when the test clock passes its deadline.
   * human in the loop: the decision comes through the inbox after worker and backend restarts.
   * backend restart (AE9): the backend is replaced while the run is parked; nothing runs twice. With a POST in
-    flight the same restart is an expected failure (xfail, see its reason): the engine gives up on the backend too soon.
+    flight the node gateway retries the same key through the outage and the claim, and the node ends interrupted.
   * cancel: cancelling a fan-out run aborts its children; nothing starts afterwards.
 
 Skipped unless ONIVA_E2E=1.
@@ -335,15 +335,10 @@ def test_backend_restart_mid_run_changes_nothing(world):
     assert trace_status(row) == {"s": "success", "a": "success", "w": "success", "c": "success", "o": "success"}
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Known gap (reported by U22): the engine's node gateway gives up after 3 attempts (about 2 s), shorter than a "
-    "backend restart, so the node is failed with 'the backend could not be reached' and the run task faults at "
-    "finalize (its finalize post cannot reach the backend either). The run's submission then settles as done, "
-    "and workflow_run_sync.on_finished judges a run without a finalize by its stored trace, which has no step "
-    "for the node that never recorded one: the execution is marked completed with that node missing."))
-def test_backend_restart_with_a_post_in_flight_completes_the_run_once(world):
-    """AE9: the backend is replaced while an HTTP node's POST is in flight. The POST happens once and the run
-    completes with that node's outcome recorded."""
+def test_backend_restart_with_a_post_in_flight_is_interrupted_never_repeated(world):
+    """AE9: the backend dies while an HTTP node's POST is in flight, so nobody knows whether the effect landed.
+    The engine waits out the dead backend's claim (``503 in_flight``) instead of timing out, the claim goes
+    stale and the node settles ``interrupted``: the POST is never repeated and the run never reports success."""
     w = world
     ensure_worker(w, 62)
     wf = save_workflow(w, [node("s", "start"), http_node(w, "a", "hold", "be-hold"), node("o", "output")],
@@ -352,11 +347,13 @@ def test_backend_restart_with_a_post_in_flight_completes_the_run_once(world):
     wait_for(lambda: in_flight(w, "be-hold"), "the POST in flight", 90)
     restart_backend(w)
     open_gate(w)
-    wait_for(lambda: exec_row(w, ex)["status"] in ("completed", "failed"), "the run to end", 90)
+    # The claim goes stale after the node's timeout plus the grace (~90 s); the engine's call timeout is longer.
+    wait_for(lambda: exec_row(w, ex)["status"] in ("completed", "failed"), "the run to end", 240)
     row = exec_row(w, ex)
     settle(3)
     assert starts(w, "be-hold") == 1, "the interrupted POST was repeated"
-    assert row["status"] == "completed" and trace_status(row) == {"s": "success", "a": "success", "o": "success"}, row
+    assert row["status"] == "failed" and "interrupted" in (row["error"] or ""), (row["error"], trace_status(row))
+    assert "o" not in trace_status(row), "the output ran after an interrupted node"
 
 
 # --- cancel aborts the children -------------------------------------------------------------------------------

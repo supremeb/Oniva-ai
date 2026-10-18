@@ -9,7 +9,7 @@
           "backoffMs": 0,
           "maxRetries": 0,
           "onError": "stop",
-          "timeoutMs": 60000
+          "timeoutMs": 120000
         },
         "type": "start"
       },
@@ -29,7 +29,7 @@
           "backoffMs": 0,
           "maxRetries": 0,
           "onError": "stop",
-          "timeoutMs": 60000
+          "timeoutMs": 120000
         },
         "type": "ifelse"
       },
@@ -45,7 +45,7 @@
           "backoffMs": 0,
           "maxRetries": 0,
           "onError": "stop",
-          "timeoutMs": 60000
+          "timeoutMs": 120000
         },
         "type": "template"
       },
@@ -61,7 +61,7 @@
           "backoffMs": 0,
           "maxRetries": 0,
           "onError": "stop",
-          "timeoutMs": 60000
+          "timeoutMs": 120000
         },
         "type": "template"
       },
@@ -81,7 +81,7 @@
           "backoffMs": 0,
           "maxRetries": 0,
           "onError": "stop",
-          "timeoutMs": 60000
+          "timeoutMs": 120000
         },
         "type": "merge"
       },
@@ -97,7 +97,7 @@
           "backoffMs": 0,
           "maxRetries": 0,
           "onError": "stop",
-          "timeoutMs": 60000
+          "timeoutMs": 120000
         },
         "type": "output"
       }

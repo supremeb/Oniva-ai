@@ -85,12 +85,19 @@ export interface NodeFenceRejection {
 }
 
 export interface NodeGatewayRetryOptions {
-  /** Total attempts per call (1 = no retry). Default 3. */
+  /** Cap on attempts per call (1 = no retry). Default: unlimited, bounded by `budgetMs`. */
   attempts: number;
-  /** First backoff delay; doubles per retry. Default 200. */
+  /** First backoff delay; doubles per retry. Default 250. */
   baseDelayMs: number;
-  /** Backoff cap. Default 2000. */
+  /** Backoff cap. Default 5000. */
   maxDelayMs: number;
+  /**
+   * Total time a transient failure (network, 408, 429, 5xx) is retried with the
+   * same idempotency key (`ENGINE_POLICY_RETRY_MS`, default 60 s); 0 disables
+   * retrying. A `503 in_flight` answer restarts it: the backend is up and the
+   * claim resolves on its own. The call's own timeout and abort still bound it.
+   */
+  budgetMs: number;
 }
 
 export interface NodeGatewayOptions {
@@ -159,9 +166,13 @@ export class NodeGatewayError extends Error {
   }
 }
 
-const DEFAULT_RETRY: NodeGatewayRetryOptions = { attempts: 3, baseDelayMs: 200, maxDelayMs: 2_000 };
+const DEFAULT_RETRY: NodeGatewayRetryOptions = {
+  attempts: Number.POSITIVE_INFINITY,
+  baseDelayMs: 250,
+  maxDelayMs: 5_000,
+  budgetMs: 60_000,
+};
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
-const MAX_RETRY_AFTER_MS = 60_000;
 
 type Attempt =
   | { kind: "response"; status: number; body: JsonValue | null; retryAfterMs?: number }
@@ -251,7 +262,10 @@ class NodeHttp {
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#clock = options.clock ?? realClock;
     this.#retry = { ...DEFAULT_RETRY, ...options.retry };
-    if (!Number.isSafeInteger(this.#retry.attempts) || this.#retry.attempts < 1) {
+    if (
+      this.#retry.attempts !== Number.POSITIVE_INFINITY &&
+      (!Number.isSafeInteger(this.#retry.attempts) || this.#retry.attempts < 1)
+    ) {
       throw new RangeError("node gateway retry.attempts must be a positive integer");
     }
     this.#maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
@@ -294,6 +308,8 @@ class NodeHttp {
     nullOn404: boolean,
   ): Promise<JsonValue | null> {
     const url = `${this.#base}${path}`;
+    const budgetMs = Math.max(0, this.#retry.budgetMs);
+    let budgetEnd = this.#clock.monotonic() + budgetMs;
     const text = body === undefined ? undefined : JSON.stringify(body);
     for (let attempt = 1; ; attempt++) {
       const token = this.#token();
@@ -321,12 +337,13 @@ class NodeHttp {
       }
       if (!isRetryable(res) || attempt >= this.#retry.attempts)
         throw failure(res, this.#maxResponseBytes);
-      await this.#backoff(
-        attempt,
-        signal,
-        deadline,
-        res.kind === "response" ? res.retryAfterMs : 0,
-      );
+      // `503 in_flight` is a live backend holding this key's claim, which ends in an outcome or goes
+      // stale and resolves `interrupted`: it is not an outage, so the outage budget starts over.
+      if (budgetMs > 0 && isInFlight(res)) budgetEnd = this.#clock.monotonic() + budgetMs;
+      const delay = this.#delay(attempt, res.kind === "response" ? res.retryAfterMs : undefined);
+      // The retry budget is spent: report the failure that was being retried.
+      if (this.#clock.monotonic() + delay > budgetEnd) throw failure(res, this.#maxResponseBytes);
+      await this.#backoff(delay, signal, deadline);
     }
   }
 
@@ -392,22 +409,27 @@ class NodeHttp {
     }
   }
 
+  /** Capped exponential backoff with jitter in [50%, 100%]; the server's `Retry-After` wins. */
+  #delay(attempt: number, retryAfterMs: number | undefined): number {
+    if (retryAfterMs) return retryAfterMs;
+    const { baseDelayMs, maxDelayMs } = this.#retry;
+    const capped = Math.min(maxDelayMs, baseDelayMs * 2 ** Math.min(attempt - 1, 30));
+    return Math.floor(capped * (0.5 + this.#random() * 0.5));
+  }
+
   async #backoff(
-    attempt: number,
+    delay: number,
     signal: AbortSignal | undefined,
     deadline: number | undefined,
-    retryAfterMs: number | undefined,
   ): Promise<void> {
-    const { baseDelayMs, maxDelayMs } = this.#retry;
-    const delay = retryAfterMs
-      ? deadline === undefined
-        ? Math.min(retryAfterMs, MAX_RETRY_AFTER_MS)
-        : retryAfterMs
-      : Math.floor(this.#random() * Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1)));
     if (deadline !== undefined && this.#clock.monotonic() + delay >= deadline) throw new Timeout();
     // The deadline must still fire while backing off.
     await this.#clock.sleep(delay, signal);
   }
+}
+
+function isInFlight(res: Attempt): boolean {
+  return res.kind === "response" && res.status === 503 && errorOf(res.body) === "in_flight";
 }
 
 function isRetryable(res: Attempt): boolean {

@@ -326,7 +326,11 @@ describe("workflow backend (U35)", () => {
       ENGINE_GATEWAY_URL: "https://g",
       ENGINE_GATEWAY_TOKEN: "gw",
     });
-    expect(requireWorkflowBackend(withUrl)).toEqual({ baseUrl: "https://g", serviceToken: "gw" });
+    expect(requireWorkflowBackend(withUrl)).toEqual({
+      baseUrl: "https://g",
+      serviceToken: "gw",
+      retryMs: 60_000,
+    });
     expect(
       requireWorkflowBackend(
         workerConfigFromEnv({ ...BASE, ENGINE_WORKFLOW_BACKEND_URL: "https://w" }),
@@ -334,6 +338,7 @@ describe("workflow backend (U35)", () => {
     ).toEqual({
       baseUrl: "https://w",
       serviceToken: "tok",
+      retryMs: 60_000,
     });
     const without = workerConfigFromEnv(BASE);
     expect(() => requireWorkflowBackend(without)).toThrow(WorkerConfigError);

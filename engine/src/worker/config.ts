@@ -258,8 +258,9 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
  * the worker fails at startup instead of advertising kinds it cannot serve.
  */
 export function requireWorkflowBackend(
-  config: Pick<WorkerConfig, "workflowBackendUrl" | "gatewayToken" | "serviceToken">,
-): { baseUrl: string; serviceToken: string } {
+  config: Pick<WorkerConfig, "workflowBackendUrl" | "gatewayToken" | "serviceToken"> &
+    Partial<Pick<WorkerConfig, "policyRetryMs">>,
+): { baseUrl: string; serviceToken: string; retryMs?: number } {
   if (config.workflowBackendUrl === null) {
     throw new WorkerConfigError(
       "the workflow task kinds need a backend: set ENGINE_WORKFLOW_BACKEND_URL or ENGINE_GATEWAY_URL",
@@ -268,6 +269,7 @@ export function requireWorkflowBackend(
   return {
     baseUrl: config.workflowBackendUrl,
     serviceToken: config.gatewayToken ?? config.serviceToken,
+    ...(config.policyRetryMs === undefined ? {} : { retryMs: config.policyRetryMs }),
   };
 }
 

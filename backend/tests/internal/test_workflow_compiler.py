@@ -82,8 +82,8 @@ def test_adornments_map_to_policy_and_fanout_nodes_never_retry():
     compiled = compile_workflow(spec)
     nodes = by_id(compiled)
     assert nodes["r"]["policy"] == {"maxRetries": 2, "backoffMs": 1500, "timeoutMs": 9000, "onError": "stop"}
-    assert nodes["t"]["policy"] == {"maxRetries": 0, "backoffMs": 0, "timeoutMs": 60000, "onError": "continue"}
-    assert nodes["it"]["policy"] == {"maxRetries": 0, "backoffMs": 0, "timeoutMs": 60000, "onError": "stop"}
+    assert nodes["t"]["policy"] == {"maxRetries": 0, "backoffMs": 0, "timeoutMs": 120000, "onError": "continue"}
+    assert nodes["it"]["policy"] == {"maxRetries": 0, "backoffMs": 0, "timeoutMs": 120000, "onError": "stop"}
     assert compiled["errorMode"] == "continue"
 
 
