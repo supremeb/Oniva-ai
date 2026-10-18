@@ -12,6 +12,15 @@ on:
       - "backend/app/api/v1/deep_work*.py"
       - "backend/app/services/deep_work/**"
       - "backend/app/services/engine_deep_work_agent.py"
+      - "backend/app/api/v1/fleet.py"
+      - "backend/app/api/v1/webhooks.py"
+      - "backend/app/api/v1/workflow*.py"
+      - "backend/app/services/fleet_*.py"
+      - "backend/app/services/run_reconciler.py"
+      - "backend/app/services/webhook_*.py"
+      - "backend/app/services/workflow_*.py"
+      - "backend/app/services/durable_workflow_engine.py"
+      - "backend/app/node_executors/**"
       - "backend/tests/contracts/**"
       - "frontend/e2e/**"
       - "frontend/playwright.config.ts"
@@ -30,6 +39,15 @@ on:
       - "backend/app/api/v1/deep_work*.py"
       - "backend/app/services/deep_work/**"
       - "backend/app/services/engine_deep_work_agent.py"
+      - "backend/app/api/v1/fleet.py"
+      - "backend/app/api/v1/webhooks.py"
+      - "backend/app/api/v1/workflow*.py"
+      - "backend/app/services/fleet_*.py"
+      - "backend/app/services/run_reconciler.py"
+      - "backend/app/services/webhook_*.py"
+      - "backend/app/services/workflow_*.py"
+      - "backend/app/services/durable_workflow_engine.py"
+      - "backend/app/node_executors/**"
       - "backend/tests/contracts/**"
       - "frontend/e2e/**"
       - "frontend/playwright.config.ts"
@@ -77,7 +95,7 @@ jobs:
       - run: uv python install 3.12
       - run: uv sync --frozen
         working-directory: backend
-      - run: uv run pytest -q -m e2e tests/e2e/test_engine_smoke.py tests/e2e/test_chat_engine_recovery.py tests/e2e/test_deep_work_engine_recovery.py
+      - run: uv run pytest -q -m e2e tests/e2e/test_engine_smoke.py tests/e2e/test_chat_engine_recovery.py tests/e2e/test_deep_work_engine_recovery.py tests/e2e/test_fleet_engine_recovery.py tests/e2e/test_workflow_engine_recovery.py tests/e2e/test_workflow_webhook_e2e.py
         working-directory: backend
       - run: uv run pytest -q tests/contracts
         working-directory: backend

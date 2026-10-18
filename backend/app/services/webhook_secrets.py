@@ -1,6 +1,9 @@
 """Webhook secret handling: generate, encrypt (Fernet via the shared encryption service), decrypt, mask.
 
-``auth_config`` stores ``secret_enc`` (hmac) or ``key_enc`` (api_key), never the plaintext (plan 003 KTD8).
+``auth_config`` stores ``secret_enc`` (hmac) or ``key_enc`` (api_key) (plan 003 KTD8). Expand phase of an
+expand/contract rollout: the plaintext is written alongside (migration 121 keeps it too) so a pre-change pod or
+a code rollback still verifies instead of failing open on an empty key. Readers prefer ``*_enc`` and fall back to
+the plaintext. The contract migration drops the plaintext once no old pods or rollback targets remain.
 """
 from __future__ import annotations
 
@@ -39,10 +42,11 @@ def mask(value: Optional[str]) -> str:
 
 
 def seal_auth_config(config: Optional[dict]) -> dict:
-    """Copy of ``config`` with every plaintext secret/key replaced by its encrypted ``*_enc`` twin."""
+    """Copy of ``config`` with an encrypted ``*_enc`` twin added to every plaintext secret/key (the plaintext is
+    kept during the expand phase, see the module docstring)."""
     sealed = dict(config or {})
     for plain, enc in SECRET_KEYS.items():
-        value = sealed.pop(plain, None)
+        value = sealed.get(plain)
         if value:
             sealed[enc] = encrypt_secret(str(value))
     return sealed

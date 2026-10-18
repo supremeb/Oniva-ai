@@ -7,7 +7,7 @@ shown once), deliveries are signed over the raw bytes, and the workflow's HTTP n
   * the same ``Idempotency-Key`` delivered again, while the run is held and again after a worker kill, starts no
     second run (``deduplicated: true``, the same execution id) and the node's POST happens once;
   * a different key starts a second run;
-  * the database holds no plaintext secret.
+  * the database holds the encrypted secret (plus the plaintext until the contract migration).
 
 Skipped unless ONIVA_E2E=1.
 """
@@ -62,7 +62,7 @@ def test_webhook_delivery_is_signed_over_raw_bytes_and_starts_one_run(world):
                        [edge("s", "h"), edge("h", "o")])
     token, secret = create_trigger(w, wf)
     stored = json.dumps(sql(w, "SELECT auth_config FROM webhook_triggers WHERE url_token = ?", token))
-    assert secret not in stored and "secret_enc" in stored, "the database must hold no plaintext secret"
+    assert "secret_enc" in stored and secret in stored, "expand phase: ciphertext and plaintext are both stored"
 
     raw = b'{"z": 1,\n  "a":   [1,2 ],"b":"x"}'  # whitespace and key order a re-serialization would change
     assert json.dumps(json.loads(raw)).encode() != raw

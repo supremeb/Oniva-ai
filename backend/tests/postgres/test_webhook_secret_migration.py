@@ -99,10 +99,10 @@ def test_backfill_encrypts_backfills_and_reports_exactly_the_unresolvable(seeded
     for trig, plain in ((TRIG_WF, "plain-wf"), (TRIG_AGENT, "plain-agent"), (TRIG_ORPHAN, "plain-orphan"),
                         (TRIG_OWNED, "plain-owned")):
         config = _config(eng, trig)
-        assert "secret" not in config and plain not in json.dumps(config)
+        assert config["secret"] == plain  # expand step: plaintext kept for old pods / rollback
         assert webhook_secrets.decrypt_secret(config["secret_enc"]) == plain
     key_config = _config(eng, TRIG_KEY)
-    assert "key" not in key_config and webhook_secrets.decrypt_secret(key_config["key_enc"]) == "plain-key"
+    assert key_config["key"] == "plain-key" and webhook_secrets.decrypt_secret(key_config["key_enc"]) == "plain-key"
     assert webhook_secrets.decrypt_secret(_config(eng, TRIG_CLEAN)["secret_enc"]) == "already"
     assert _config(eng, TRIG_WF)["signature_header"] == "X-Sig"
 
@@ -126,8 +126,35 @@ def test_rerun_changes_nothing_and_alembic_chains_to_head(seeded):
         assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "121_encrypt_webhook_secrets"
     assert before == {t: (_config(eng, t), _owner(eng, t)) for t in before}
 
+    # downgrade drops the *_enc twins and keeps the plaintext; upgrade restores them
     down = run_alembic(owner, "downgrade", "120_engine_runs")
-    assert down.returncode != 0 and "cannot be downgraded" in down.stderr
+    assert down.returncode == 0, down.stderr[-3000:]
+    config = _config(eng, TRIG_WF)
+    assert "secret_enc" not in config and config["secret"] == "plain-wf"
+    assert "key_enc" not in _config(eng, TRIG_KEY) and _config(eng, TRIG_KEY)["key"] == "plain-key"
+    clean = _config(eng, TRIG_CLEAN)  # ciphertext-only row: plaintext restored from it
+    assert clean["secret"] == "already" and "secret_enc" not in clean
+    up = run_alembic(owner, "upgrade", "head")
+    assert up.returncode == 0, up.stderr[-3000:]
+    assert webhook_secrets.decrypt_secret(_config(eng, TRIG_WF)["secret_enc"]) == "plain-wf"
+
+
+def test_migration_fails_when_ciphertext_does_not_decrypt_back(seeded, monkeypatch):
+    eng, _ = seeded
+    module = _load_migration()
+    monkeypatch.setattr(webhook_secrets, "encrypt_secret", lambda value: "gAAAA-not-decryptable")
+    with eng.begin() as conn:
+        conn.execute(text("UPDATE webhook_triggers SET auth_config = CAST(:c AS jsonb) WHERE id = :i"),
+                     {"c": json.dumps({"secret": "rotated"}), "i": TRIG_WF})
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        with eng.begin() as conn:
+            module.backfill(conn)
+    assert _config(eng, TRIG_WF) == {"secret": "rotated"}  # the failed transaction wrote nothing
+    monkeypatch.undo()
+    with eng.begin() as conn:
+        conn.execute(text("UPDATE webhook_triggers SET auth_config = CAST(:c AS jsonb) WHERE id = :i"),
+                     {"c": json.dumps({"secret": "plain-wf", "signature_header": "X-Sig"}), "i": TRIG_WF})
+        module.backfill(conn)
 
 
 async def test_runtime_refuses_the_unresolvable_trigger_with_422(seeded):

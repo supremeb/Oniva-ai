@@ -168,9 +168,6 @@ def test_fences_and_new_tables_are_forced_rls_with_policy(engine_db):
 
 def test_downgrade_then_upgrade_this_revision(engine_db):
     owner = engine_db["owner"]
-    # 121 (webhook secrets) is deliberately not downgradable; step over it, it touches no schema.
-    stamped = run_alembic(owner, "stamp", "120_engine_runs")
-    assert stamped.returncode == 0, stamped.stderr[-2000:]
     down = run_alembic(owner, "downgrade", "101_system_role")
     assert down.returncode == 0, down.stderr[-2000:]
     eng = create_engine(owner)

@@ -232,6 +232,24 @@ docker compose -f docker-compose.prod.yml run --rm migrate
 kubectl -n oniva delete job oniva-migrate --ignore-not-found && kubectl apply -k k8s/
 ```
 
+#### Webhook secrets: expand now, contract later
+
+`121_encrypt_webhook_secrets` is the expand step of an expand/contract rollout. It adds `secret_enc` /
+`key_enc` (Fernet) to every webhook trigger's `auth_config` and **keeps** the plaintext `secret` / `key`, so
+pods still running the previous release, or a code rollback, keep verifying signatures (previous code reads
+an absent plaintext as an empty key, which fails open). The migration decrypts what it wrote and compares it
+to the original; it fails if they differ, so run the migrate job with the same `SECRET_KEY` and
+`ENCRYPTION_SALT` as the API.
+
+- Runtime reads `*_enc` first and falls back to the plaintext.
+- New triggers write both `*_enc` and the plaintext until the contract step, so a rollback to the previous
+  release still works for triggers created in between.
+- `alembic downgrade 120_engine_runs` removes the `*_enc` keys again.
+- A later **cutover migration** drops the plaintext `secret` / `key` and stops writing them. Ship it only
+  once no old pods or rollback targets remain.
+
+Until that cutover, plaintext webhook secrets are still at rest in `webhook_triggers.auth_config`.
+
 ## Configuration
 
 ### Environment Variables
