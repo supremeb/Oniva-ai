@@ -39,6 +39,10 @@ function isResuming(entries: readonly EntryRecord[]): boolean {
 function taskNode(id: string, t: TaskView): FlatRunNode {
   let status: RunStatus = engineTaskStatus(t.status);
   if (t.status === 'done' && t.phase === 'skipped') status = 'skipped';
+  // The engine parks a task in `waiting` for children too (a run in its join phase, an LLM node in awaitChild), so
+  // only a deadline or the `awaitWake` phase (a sleep, a human gate) marks a wait as real here; any other
+  // deadline-less park is a wait on a person only when the waiting-nodes route says so (`workflowViewToRunTree`).
+  if (t.status === 'waiting' && !t.waitUntil && t.phase !== 'awaitWake') status = 'running';
   const node: FlatRunNode = {
     id,
     parentId: t.parentId,

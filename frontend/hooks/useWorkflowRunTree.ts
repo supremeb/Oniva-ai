@@ -7,7 +7,7 @@
  */
 import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useWaitingNodes, useWorkflowLogDetail } from '@/hooks/useWorkflowLogs';
+import { POLL_ACTIVE_MS, POLL_PARKED_MS, useWaitingNodes, useWorkflowLogDetail } from '@/hooks/useWorkflowLogs';
 import { fetchWorkflowLogs, type WaitingNode, type WorkflowLogDetail } from '@/lib/api/workflow-logs';
 import { EngineConversationClient } from '@/lib/engine/client';
 import { DecisionError, toDecisionError } from '@/lib/engine/approval';
@@ -23,8 +23,8 @@ const NO_WAITING: readonly WaitingNode[] = [];
  * Waiting nodes of one execution and the decision call for them. `enabled` should be true only while the run is
  * active on the engine (legacy runs have no ledger rows to wait on).
  */
-export function useWaitingDecisions(executionId: string | null, enabled: boolean) {
-  const query = useWaitingNodes(executionId, enabled);
+export function useWaitingDecisions(executionId: string | null, enabled: boolean, pollMs?: number) {
+  const query = useWaitingNodes(executionId, enabled, pollMs);
   const client = useMemo(() => new EngineConversationClient(), []);
   const { refetch } = query;
   const decide = useCallback(
@@ -45,14 +45,16 @@ export function useWaitingDecisions(executionId: string | null, enabled: boolean
 }
 
 /**
- * The execution a test run just started, found through the logs list (the stream does not carry its id), with
- * its waiting nodes. Only looks while `running`.
+ * The execution a test run just started, found through the logs list (the stream only names its execution on
+ * completion), with its waiting nodes. Only looks while `running`. Only manual runs qualify, so a scheduled or API
+ * run of the same workflow is never picked up; another manual run started within the window still could be until
+ * execute-stream reports `execution_id` in its first event (needs a backend change).
  */
 export function useTestRunWaiting(workflowId: string | null, running: boolean, sinceMs: number) {
   const valid = !!workflowId && !workflowId.startsWith('local-');
   const latest = useQuery({
     queryKey: ['test-run-latest', workflowId],
-    queryFn: () => fetchWorkflowLogs(workflowId!, { limit: 1 }),
+    queryFn: () => fetchWorkflowLogs(workflowId!, { limit: 1, trigger: 'manual' }),
     enabled: running && valid,
     staleTime: 0,
     retry: false,
@@ -60,7 +62,7 @@ export function useTestRunWaiting(workflowId: string | null, running: boolean, s
   });
   const log = latest.data?.logs[0];
   const fresh =
-    running && !!log?.engine_conversation_id && Date.parse(log.started_at ?? '') >= sinceMs - 5_000 && isActive(normalizeStatus(log.status, 'workflow_log'));
+    running && log?.trigger === 'manual' && !!log.engine_conversation_id && Date.parse(log.started_at ?? '') >= sinceMs - 5_000 && isActive(normalizeStatus(log.status, 'workflow_log'));
   return useWaitingDecisions(fresh && log ? log.id : null, fresh);
 }
 
@@ -80,10 +82,11 @@ export interface WorkflowRunTreeState {
 export function useWorkflowRunTree(workflowId: string | null, runId: string | null): WorkflowRunTreeState {
   const detail = useWorkflowLogDetail(workflowId, runId);
   const log = detail.data ?? null;
-  const active = !!log && isActive(normalizeStatus(log.status, 'workflow_log'));
+  const status = log ? normalizeStatus(log.status, 'workflow_log') : null;
+  const active = !!status && isActive(status);
   const conversationId = active ? (log?.engine_conversation_id ?? null) : null;
   const conv = useEngineConversation(conversationId);
-  const { waiting: waitingList, decide: decideNode } = useWaitingDecisions(runId, conversationId !== null);
+  const { waiting: waitingList, decide: decideNode } = useWaitingDecisions(runId, conversationId !== null, status === 'waiting' ? POLL_PARKED_MS : POLL_ACTIVE_MS);
   const adapt = useMemo(() => createWorkflowViewAdapter(), [runId]);
 
   const selected = useMemo(

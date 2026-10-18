@@ -4,7 +4,7 @@ import { Suspense, useCallback, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FleetRunList } from '@/components/fleet/FleetRunList';
 import { FleetChat } from '@/components/fleet/FleetChat';
-import { useFleetRuns } from '@/hooks/useFleetRuns';
+import { useFleetRun } from '@/hooks/useFleetRuns';
 import type { FleetRunItem } from '@/lib/models';
 import { Broadcast } from '@phosphor-icons/react';
 
@@ -38,15 +38,15 @@ function FleetPageInner() {
   const searchParams = useSearchParams();
   const runParam = searchParams.get('run');
 
-  // Run picked from the list this session (has full metadata without a lookup).
+  // Run picked from the list this session: shown at once; the live row below takes over for the conversation id
+  // (a job picked while pending has none yet) and for runs restored from the URL.
   const [picked, setPicked] = useState<SelectedRun | null>(null);
   const knownPicked = picked && picked.id === runParam ? picked : null;
 
-  // Restoring from the URL: look the run up in the unfiltered list to get its conversation.
-  const { data, isLoading } = useFleetRuns({ page: 1, page_size: 50 }, { enabled: !!runParam && !knownPicked });
-  const fromList = runParam && !knownPicked ? data?.items.find((r) => r.id === runParam) : undefined;
-  const selectedRun: SelectedRun | null = knownPicked ?? (fromList ? toSelected(fromList) : null);
+  const { data: liveRun, isLoading } = useFleetRun(runParam);
+  const selectedRun: SelectedRun | null = liveRun ? toSelected(liveRun) : knownPicked;
   const restoring = !!runParam && !selectedRun && isLoading;
+  const notFound = !!runParam && !selectedRun && !isLoading;
 
   const handleSelect = useCallback(
     (run: FleetRunItem) => {
@@ -67,7 +67,7 @@ function FleetPageInner() {
       <div className="flex-1 min-w-0 h-full overflow-hidden">
         {selectedRun ? (
           <FleetChat
-            key={selectedRun.id}
+            key={`${selectedRun.id}:${selectedRun.conversation_id ?? ''}`}
             runId={selectedRun.id}
             agentName={selectedRun.agent_name || 'Unknown Agent'}
             status={selectedRun.status}
@@ -75,6 +75,14 @@ function FleetPageInner() {
           />
         ) : restoring ? (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
+        ) : notFound ? (
+          <div className="h-full flex items-center justify-center text-muted-foreground">
+            <div className="text-center">
+              <Broadcast className="h-10 w-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">Run not found</p>
+              <p className="text-xs mt-1 opacity-60">It may have been removed, or it is not one of your team&apos;s recent runs</p>
+            </div>
+          </div>
         ) : (
           <div className="h-full flex items-center justify-center text-muted-foreground">
             <div className="text-center">

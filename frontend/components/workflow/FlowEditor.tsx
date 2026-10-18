@@ -70,7 +70,7 @@ import { toast } from 'sonner';
 import { type WorkflowNode as APINode, type WorkflowEdge as APIEdge, type WorkflowNodeType } from '@/lib/api/workflows';
 import { executeWorkflowStream } from '@/lib/api/workflows';
 import { applyStreamEvent, emptyLiveRun, type LiveRun } from '@/lib/run/workflowStream';
-import { normalizeStatus, type RunStatus } from '@/lib/run/status';
+import { isTerminal, normalizeStatus, type RunStatus } from '@/lib/run/status';
 import { NodeContextMenu } from './NodeContextMenu';
 import { useWorkflow, useUpdateWorkflow } from '@/hooks/useWorkflow';
 
@@ -488,6 +488,8 @@ export function FlowEditor({ workflowId, readOnly = false }: FlowEditorProps) {
                 const statuses: Record<string, RunStatus> = {};
                 for (const step of latest.execution_trace) {
                     const status = normalizeStatus(step.status, 'execution_trace');
+                    // Only a settled step is restored: a one-time fetch must not paint running/waiting glow nothing will clear.
+                    if (!isTerminal(status)) continue;
                     results[step.node_id] = {
                         nodeId: step.node_id,
                         status,

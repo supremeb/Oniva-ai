@@ -60,6 +60,7 @@ export function workflowViewToRunTree(view: ConversationView, opts: WorkflowView
       node.label = names[nodeId] ?? nodeId;
       const w = task?.status === 'waiting' ? waitingByNode.get(nodeId) : undefined;
       if (w) {
+        node.status = 'waiting';
         if (!node.waitUntil && w.wakeAt) node.waitUntil = w.wakeAt;
         waiting.set(n.id, w);
       }
@@ -67,6 +68,12 @@ export function workflowViewToRunTree(view: ConversationView, opts: WorkflowView
       node.label = names[n.label] ?? n.label;
     }
     flat.push(node);
+  }
+  // The run root is parked only when something under it is and nothing is still working.
+  const root = flat.find((n) => n.parentId === null && n.kind === 'run');
+  if (root && root.status === 'running' && tasks[root.id]?.status === 'waiting') {
+    const inner = flat.filter((n) => n.kind === 'node' && isActive(n.status));
+    if (inner.length > 0 && inner.every((n) => n.status === 'waiting')) root.status = 'waiting';
   }
   return { tree: buildRunTree(flat, prev), waiting };
 }
