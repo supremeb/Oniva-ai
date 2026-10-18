@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from anthropic import AsyncAnthropic
-from openai import AsyncOpenAI
+from openai import AsyncAzureOpenAI, AsyncOpenAI
 
 from app.config import get_settings
 
@@ -33,6 +33,9 @@ DEFAULT_MAX_TOKENS = 4096
 _KNOWN_PROVIDER_PREFIXES = frozenset(
     {"openai", "anthropic", "openrouter", "azure", "google", "custom"}
 )
+
+# Provider config carries no api_version; classic Azure deployments use this GA version.
+AZURE_API_VERSION = "2024-10-21"
 
 # OpenAI tool_choice strings map onto Anthropic's object form.
 _ANTHROPIC_TOOL_CHOICE: dict[str, dict[str, str]] = {
@@ -86,6 +89,8 @@ class DirectResponse:
     tool_calls: list[DirectToolCall] | None = None
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    # Reasoning/thinking text from models that expose it (DeepSeek, Kimi, QwQ via OpenRouter).
+    reasoning: str | None = None
 
 
 @dataclass
@@ -123,6 +128,75 @@ def _split_system(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict
     return ("\n".join(parts) if parts else None), rest
 
 
+def _text_blocks(content: Any) -> list[dict[str, Any]]:
+    """Normalize string or block-list content to a list of content blocks (empty text dropped)."""
+    if content is None:
+        return []
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}] if content.strip() else []
+    return [
+        block for block in content
+        if not (isinstance(block, dict) and block.get("type") == "text" and not str(block.get("text", "")).strip())
+    ]
+
+
+def _parse_tool_arguments(arguments: Any) -> dict[str, Any]:
+    """Tool-call arguments as the dict Anthropic's `tool_use.input` needs; bad JSON becomes `{}`."""
+    if isinstance(arguments, dict):
+        return arguments
+    try:
+        parsed = json.loads(arguments) if arguments else {}
+    except (TypeError, ValueError):
+        logger.warning("Unparseable tool call arguments; sending empty input")
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _to_anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert OpenAI-shaped history to the Anthropic Messages shape.
+
+    Assistant `tool_calls` become `tool_use` blocks, `role: "tool"` messages become `tool_result`
+    blocks inside a user message, empty text blocks are dropped and consecutive same-role messages
+    are merged (the API requires alternating roles).
+    """
+    converted: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "tool":
+            blocks: list[dict[str, Any]] = [{
+                "type": "tool_result",
+                "tool_use_id": message.get("tool_call_id", ""),
+                "content": message.get("content") or "",
+            }]
+            role = "user"
+        elif role == "assistant":
+            blocks = _text_blocks(message.get("content"))
+            for call in message.get("tool_calls") or []:
+                function = call.get("function", {})
+                blocks.append({
+                    "type": "tool_use",
+                    "id": call.get("id", ""),
+                    "name": function.get("name", ""),
+                    "input": _parse_tool_arguments(function.get("arguments")),
+                })
+        else:
+            role = "user"
+            blocks = _text_blocks(message.get("content"))
+        if not blocks:
+            continue
+        if converted and converted[-1]["role"] == role:
+            converted[-1]["content"].extend(blocks)
+        else:
+            converted.append({"role": role, "content": blocks})
+
+    # A lone text block stays a plain string, matching what callers send for simple turns.
+    for message in converted:
+        content = message["content"]
+        if len(content) == 1 and content[0]["type"] == "text" and len(content[0]) == 2:
+            message["content"] = content[0]["text"]
+    return converted
+
+
 def _to_anthropic_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
     """Convert OpenAI function tools to Anthropic's `{name, description, input_schema}` form."""
     if not tools:
@@ -150,7 +224,22 @@ def _to_anthropic_tool_choice(tool_choice: str | None) -> dict[str, str] | None:
     return _ANTHROPIC_TOOL_CHOICE.get(tool_choice, {"type": "auto"})
 
 
+def _is_classic_azure(provider: DirectProvider) -> bool:
+    """Classic Azure OpenAI resource URL (model = deployment name), not a `/openai/v1` endpoint."""
+    return (
+        provider.provider_type == "azure"
+        and bool(provider.api_base)
+        and "/openai/v1" not in (provider.api_base or "")
+    )
+
+
 def _openai_client(provider: DirectProvider) -> AsyncOpenAI:
+    if _is_classic_azure(provider):
+        return AsyncAzureOpenAI(
+            api_key=provider.api_key,
+            azure_endpoint=provider.api_base,
+            api_version=AZURE_API_VERSION,
+        )
     kwargs: dict[str, Any] = {"api_key": provider.api_key}
     if provider.provider_type == "openrouter":
         kwargs["base_url"] = provider.api_base or settings.OPENROUTER_BASE_URL
@@ -188,7 +277,7 @@ def _anthropic_params(request: DirectRequest) -> dict[str, Any]:
         system, messages = _split_system(messages)
     params: dict[str, Any] = {
         "model": resolve_model(request.model, "anthropic"),
-        "messages": messages,
+        "messages": _to_anthropic_messages(messages),
         "temperature": request.temperature,
         "max_tokens": request.max_tokens or DEFAULT_MAX_TOKENS,
     }
@@ -220,20 +309,36 @@ async def _complete_openai(request: DirectRequest, provider: DirectProvider) -> 
     if details is not None:
         cache_read = getattr(details, "cached_tokens", 0) or 0
 
-    raw_tool_calls = response.choices[0].message.tool_calls
+    message = response.choices[0].message
+    raw_tool_calls = message.tool_calls
     tool_calls = [
         DirectToolCall(id=tc.id, name=tc.function.name, arguments=tc.function.arguments)
         for tc in raw_tool_calls
     ] if raw_tool_calls else None
 
+    reasoning = _openai_reasoning(message)
+    # Reasoning models (kimi, DeepSeek R1, QwQ) may put the answer in the reasoning field only.
+    content = message.content or ("" if tool_calls else reasoning or "")
+
     return DirectResponse(
-        content=response.choices[0].message.content or "",
+        content=content,
         model=response.model,
         input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
         output_tokens=getattr(usage, "completion_tokens", 0) or 0,
         tool_calls=tool_calls,
         cache_read_tokens=cache_read,
+        reasoning=reasoning,
     )
+
+
+def _openai_reasoning(message: Any) -> str | None:
+    """Reasoning text an OpenAI-compatible reply carries (`reasoning_content`, or OpenRouter's `reasoning`)."""
+    extra = getattr(message, "model_extra", None) or {}
+    for name in ("reasoning_content", "reasoning"):
+        value = getattr(message, name, None) or extra.get(name)
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 async def _complete_anthropic(request: DirectRequest, provider: DirectProvider) -> DirectResponse:
@@ -241,10 +346,13 @@ async def _complete_anthropic(request: DirectRequest, provider: DirectProvider) 
     response = await client.messages.create(**_anthropic_params(request))
 
     text_parts: list[str] = []
+    thinking_parts: list[str] = []
     tool_calls: list[DirectToolCall] = []
     for block in response.content:
         block_type = getattr(block, "type", None)
-        if block_type == "text":
+        if block_type == "thinking":
+            thinking_parts.append(getattr(block, "thinking", "") or "")
+        elif block_type == "text":
             text_parts.append(getattr(block, "text", ""))
         elif block_type == "tool_use":
             tool_calls.append(DirectToolCall(
@@ -262,6 +370,7 @@ async def _complete_anthropic(request: DirectRequest, provider: DirectProvider) 
         tool_calls=tool_calls or None,
         cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
         cache_creation_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+        reasoning="".join(thinking_parts) or None,
     )
 
 

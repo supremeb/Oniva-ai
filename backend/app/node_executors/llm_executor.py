@@ -260,6 +260,8 @@ class LLMExecutor(BaseNodeExecutor):
                 )
             result = self.parse_answer(context, completion["text"], completion["tokens"])
             result.output["model"] = completion["model"]
+            if getattr(settings, "USE_COT_REASONING", False):
+                result.reasoning = completion.get("reasoning")
             result.elapsed_ms = int((time.time() - start_time) * 1000)
             return result
         except Exception as e:
