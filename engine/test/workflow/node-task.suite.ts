@@ -344,6 +344,61 @@ export function defineNodeTaskSuite(backend: AgentBackend): void {
       expect(value).toMatchObject({ status: "failed", continued: true, error: { code: "boom" } });
     });
 
+    it("a backend final with error.code interrupted never retries, even with retries left", async () => {
+      be.script("n1", "prepare", {
+        body: {
+          ...fixture("prepare.final.failed.valid"),
+          error: { code: "interrupted", message: "cut off mid-effect" },
+        },
+      });
+      const w = await open();
+      const stop = await spawn(w, { policy: { ...POLICY, maxRetries: 3 } });
+      const stopped = await w.harness.runtime.waitForTask(stop.id);
+      expect(stopped.outcome).toMatchObject({
+        type: "faulted",
+        message: expect.stringContaining("interrupted: cut off mid-effect"),
+      });
+      // One key, asked once: a retry would have been a1, a new key and a second effect.
+      expect(be.keys("prepare")).toEqual(["run-1:n1:r0:a0:prepare"]);
+
+      be.script("n2", "prepare", {
+        body: { ...fixture("prepare.final.failed.valid"), error: { code: "interrupted" } },
+      });
+      const cont = await spawn(w, {
+        nodeId: "n2",
+        policy: { ...POLICY, maxRetries: 3, onError: "continue" },
+      });
+      expect(valueOfDone(await w.harness.runtime.waitForTask(cont.id))).toMatchObject({
+        status: "failed",
+        interrupted: true,
+        continued: true,
+        attempts: 1,
+      });
+      expect(be.keys("prepare").filter((k) => k.includes(":n2:"))).toHaveLength(1);
+    });
+
+    it("a prepare the gateway cannot complete is asked again under the same key, not a new one", async () => {
+      be.script("n1", "prepare", { status: 503 }, { status: 503 });
+      const w = await open();
+      const { id } = await spawn(w, { policy: { ...POLICY, maxRetries: 2 } });
+      const value = valueOfDone(await w.harness.runtime.waitForTask(id));
+      expect(value.status).toBe("success");
+      // Every ask carried the a0 key, so a backend that had run the node answers from its claim.
+      expect(new Set(be.keys("prepare"))).toEqual(new Set(["run-1:n1:r0:a0:prepare"]));
+      expect(be.keys("prepare")).toHaveLength(3);
+      expect(be.executions("run-1:n1:r0:a0:prepare")).toBe(1);
+    });
+
+    it("same-key re-asks use the retry budget: with maxRetries 1 a second outage fails the node", async () => {
+      be.script("n1", "prepare", { status: 503 }, { status: 503 });
+      const w = await open();
+      const { id } = await spawn(w, { policy: { ...POLICY, maxRetries: 1, onError: "continue" } });
+      const value = valueOfDone(await w.harness.runtime.waitForTask(id));
+      expect(value).toMatchObject({ status: "failed", error: { code: "gateway_unavailable" } });
+      expect(be.keys("prepare")).toHaveLength(2);
+      expect(new Set(be.keys("prepare")).size).toBe(1);
+    });
+
     it("timeoutMs ends an in-flight call as failed(timeout)", async () => {
       be.script("n1", "prepare", { hang: true });
       const w = await open();
@@ -452,6 +507,24 @@ export function defineNodeTaskSuite(backend: AgentBackend): void {
       expect(be.executions("run-1:n1:r0:a0:finish")).toBe(1);
     });
 
+    it("a wait finish cut off by a restart is sent again under the same key and the node succeeds", async () => {
+      be.script("n1", "prepare", { body: fixture("prepare.wait.duration.valid") });
+      be.script("n1", "finish", { hang: true });
+      const w1 = await open();
+      const { id } = await spawn(w1);
+      await w1.harness.runtime.waitForIdle();
+      fx.clock.advance(2 * HOUR);
+      await waitFor(() => be.calls("finish").length === 1);
+      await w1.crash();
+
+      const w2 = await open();
+      const value = valueOfDone(await w2.harness.runtime.waitForTask(id));
+      expect(value.status).toBe("success");
+      expect(value.interrupted).toBeUndefined();
+      expect(be.keys("finish")).toEqual(["run-1:n1:r0:a0:finish", "run-1:n1:r0:a0:finish"]);
+      expect(be.executions("run-1:n1:r0:a0:finish")).toBe(1);
+    });
+
     describe("fan-out park", () => {
       const fanout = () => ({ body: fixture("prepare.fanout.valid") });
       const summary = {
@@ -538,6 +611,25 @@ export function defineNodeTaskSuite(backend: AgentBackend): void {
         expect(value.status).toBe("success");
         expect(be.calls("prepare")).toHaveLength(1);
         expect(be.calls("finish")).toHaveLength(1);
+      });
+
+      it("a restart after the fan-out result was staged re-sends finish under its key and the node succeeds", async () => {
+        be.script("n1", "prepare", fanout());
+        be.script("n1", "finish", { hang: true });
+        const w1 = await open();
+        const { nodeId } = await park(w1);
+        await waitFor(() => w1.harness.runtime.task(nodeId)?.phase === "awaitFanout");
+        await w1.harness.runtime.signal(nodeId, FANOUT_RESULT_SIGNAL, summary);
+        await waitFor(() => be.calls("finish").length === 1);
+        await w1.crash();
+
+        const w2 = await open();
+        const value = valueOfDone(await w2.harness.runtime.waitForTask(nodeId));
+        expect(value.status).toBe("success");
+        expect(value.interrupted).toBeUndefined();
+        expect(be.keys("finish")).toEqual(["run-1:n1:r0:a0:finish", "run-1:n1:r0:a0:finish"]);
+        expect(be.executions("run-1:n1:r0:a0:finish")).toBe(1);
+        expect(be.calls("prepare")).toHaveLength(1);
       });
 
       it("abort while parked ends the node aborted", async () => {

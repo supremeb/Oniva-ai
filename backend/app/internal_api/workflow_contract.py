@@ -13,6 +13,7 @@ malformed one is refused with a stable :class:`ContractError` code, the same cod
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
@@ -37,6 +38,18 @@ ResponseFormat = Literal["text", "json"]
 WakeReason = Literal["signal", "deadline"]
 #: The prepare kinds a ``finish`` call reports on.
 FinishKind = Literal["llm", "wait", "fanout"]
+
+
+def fanout_item_id(run: Any, node_id: str, index: int, run_attempt: int = 0) -> uuid.UUID:
+    """The execution row id of fan-out item ``index`` of ``node_id`` in ``run``.
+
+    ``uuid5(run, "{nodeId}:{index}")`` for a first attempt; a run retry (``run_attempt`` > 0) gets its own
+    rows, ``uuid5(run, "{nodeId}:r{n}:{index}")``, so it never reuses the terminal rows of an earlier
+    attempt. The engine derives the same id (``itemRunId`` in ``workflow/fanout-lane-task.ts``).
+    """
+    base = run if isinstance(run, uuid.UUID) else uuid.UUID(str(run))
+    name = f"{node_id}:{index}" if run_attempt <= 0 else f"{node_id}:r{run_attempt}:{index}"
+    return uuid.uuid5(base, name)
 
 
 class ContractError(ValueError):

@@ -64,8 +64,8 @@ def tenant_factory(tenant_id: Any) -> Callable:
 
 
 def item_execution_id(batch_id: Any, index: int) -> uuid.UUID:
-    """The item's execution row id; the same ``uuid5(run, "{nodeId}:{i}")`` the gateway's ``prepare`` uses."""
-    return uuid.uuid5(wer._uuid(batch_id), f"{NODE_ID}:{index}")
+    """The item's execution row id; the one the gateway's fan-out ``prepare`` creates (a batch has one attempt)."""
+    return wc.fanout_item_id(wer._uuid(batch_id), NODE_ID, index)
 
 
 def clamp_parallel(value: Any) -> int:

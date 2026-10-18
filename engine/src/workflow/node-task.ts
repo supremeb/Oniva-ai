@@ -31,7 +31,11 @@
  * Settling: a `failed` result retries while `policy.maxRetries` allows (a
  * deadline wait of `backoffMs`, then `prepare` again with `nodeAttempt + 1`,
  * hence a new key). A `fanout` node never retries and an interrupted call never
- * retries. Otherwise `onError: "continue"` records the failure as the task's
+ * retries; that includes a backend `final` whose `error.code` is
+ * `"interrupted"` (a claim cut off mid-effect), which a new key would run
+ * again. A `prepare` the engine could not complete (`gateway_unavailable`,
+ * `timeout`) is asked again under the SAME key, so the backend answers from its
+ * claim instead of running the node a second time; it uses the same retry budget. Otherwise `onError: "continue"` records the failure as the task's
  * `done` value (`continued: true`) and `stop` faults the task, which is how the
  * run's `failFast` wait sees the failure. Other statuses finish `done`.
  *
@@ -41,8 +45,10 @@
  *
  * Recovery: `prepare` is simply asked again (the key returns the stored
  * answer). A `finish` that this process did not just commit the intent for was
- * cut off by a restart. It runs again only when the backend declared the call
- * replay-safe (`llm.replaySafe`); otherwise the engine asks the backend for the
+ * cut off by a restart. It runs again when the call is replay-safe: the
+ * backend declared it (`llm.replaySafe`), or it is a `wait` or fan-out finish
+ * (the first records the wake, the second only reads the item rows; both are
+ * keyed, so a second send is answered, not repeated). Otherwise the engine asks the backend for the
  * outcome stored under the key and, when there is none, settles the node
  * `interrupted` (a failed result with `error.code = "interrupted"`).
  *
@@ -130,8 +136,10 @@ export interface WorkflowNodeCheckpoint {
   /** The node's own retry counter; part of the idempotency key. */
   nodeAttempt: number;
   kind?: "llm" | "wait" | "fanout";
-  /** The backend declared a re-run of `finish` after a crash safe. */
+  /** A re-run of `finish` after a crash is safe (declared by an `llm` prepare; always true for `wait` and `fanout`). */
   replaySafe?: boolean;
+  /** `prepare` asked again under the same key after a transport failure; counts against `maxRetries`. */
+  reasks?: number;
   child?: { conversationId: string; submissionId: string };
   /** The signal a `wait` node also wakes on. */
   signal?: string;
@@ -186,6 +194,7 @@ type Next = Transition<WorkflowNodeCheckpoint | null>;
 
 const SETTLED = new Set(["done", "unanswered"]);
 const PHASE_FINISH = "finish";
+const INTERRUPTED_CODE = "interrupted";
 
 /** A failed `final` the engine makes up itself (a gateway failure, a timeout, a bad child). */
 function engineFailure(code: string, message: string): PrepareFinal {
@@ -197,6 +206,17 @@ function engineFailure(code: string, message: string): PrepareFinal {
     error: { code, message },
     tokensUsed: 0,
   };
+}
+
+/** Is `final` the backend's "outcome unknown" answer for a claim cut off mid-effect? */
+function isInterrupted(final: PrepareFinal): boolean {
+  const error = final.error;
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    !Array.isArray(error) &&
+    error.code === INTERRUPTED_CODE
+  );
 }
 
 function errorMessage(error: JsonValue | undefined): string {
@@ -273,15 +293,19 @@ function decide(
   cp: WorkflowNodeCheckpoint,
   final: PrepareFinal,
   ctx: Context,
-  interrupted = false,
+  interruptedByRestart = false,
+  reask = false,
 ): Next {
   const { policy } = task.input;
   if (final.status !== "failed") return done(nodeValue(task, cp, final));
+  const interrupted = interruptedByRestart || isInterrupted(final);
   const neverRetries = interrupted || cp.fanout !== undefined || task.input.nodeType === "fanout";
-  if (!neverRetries && cp.nodeAttempt < policy.maxRetries) {
+  const reasks = (cp.reasks ?? 0) + (reask ? 1 : 0);
+  if (!neverRetries && cp.nodeAttempt + (cp.reasks ?? 0) < policy.maxRetries) {
     const retry: WorkflowNodeCheckpoint = {
       version: CHECKPOINT_VERSION,
-      nodeAttempt: cp.nodeAttempt + 1,
+      nodeAttempt: reask ? cp.nodeAttempt : cp.nodeAttempt + 1,
+      ...(reasks > 0 ? { reasks } : {}),
     };
     return policy.backoffMs > 0
       ? waiting({ until: ctx.clock.now() + policy.backoffMs, phase: "prepare", checkpoint: retry })
@@ -422,7 +446,11 @@ export function createWorkflowNodeTask(
       );
     } catch (err) {
       const failed = asFailure(err, ctx);
-      return rt.commit(() => decide(task, cp, failed, ctx));
+      // The call may have run: ask under the same key again rather than start a new one.
+      const reask =
+        err instanceof NodeGatewayError &&
+        (err.code === "gateway_unavailable" || err.code === "timeout");
+      return rt.commit(() => decide(task, cp, failed, ctx, false, reask));
     }
     switch (result.kind) {
       case "final": {
@@ -448,7 +476,7 @@ export function createWorkflowNodeTask(
               version: CHECKPOINT_VERSION,
               nodeAttempt: cp.nodeAttempt,
               kind: "wait",
-              replaySafe: false,
+              replaySafe: true,
               ...(signal === undefined ? {} : { signal }),
             },
           }),
@@ -475,7 +503,7 @@ export function createWorkflowNodeTask(
               version: CHECKPOINT_VERSION,
               nodeAttempt: cp.nodeAttempt,
               kind: "fanout",
-              replaySafe: false,
+              replaySafe: true,
               fanout: digest,
             },
           });
