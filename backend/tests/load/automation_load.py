@@ -90,7 +90,7 @@ class ChatLoad:
 
     def __init__(self, w, interval: float):
         self.w, self.interval = w, interval
-        self.samples: list[float] = []
+        self.samples: list[tuple[float, float]] = []  # (monotonic start, first-token ms)
         self.errors: list[str] = []
         self.submitted = 0
         self._stop = threading.Event()
@@ -101,8 +101,8 @@ class ChatLoad:
             started = time.monotonic()
             try:
                 self.submitted += 1
-                self.samples.append(first_token_ms(self.w))
-            except Exception as e:  # noqa: BLE001 - recorded, the gate sees the missing sample
+                self.samples.append((started, first_token_ms(self.w)))
+            except Exception as e:  # noqa: BLE001 - recorded; the gate fails on any chat error (a dropped turn would hide a stall)
                 self.errors.append(repr(e)[:200])
             self._stop.wait(max(0.0, self.interval - (time.monotonic() - started)))
 
@@ -253,11 +253,12 @@ def run_profile(w, profile: Profile, worker) -> dict:
         if non_terminal == 0:
             break
         time.sleep(2.0)
-    drain_lag_s = time.monotonic() - last_advance
-    while len(chat.samples) < profile.min_loaded_chat_samples and time.monotonic() < deadline:
-        time.sleep(0.5)
-    loaded_window_s = time.monotonic() - t_load
+    drain_done = time.monotonic()
+    drain_lag_s = drain_done - last_advance
+    loaded_window_s = drain_done - t_load
     chat.stop()
+    # only turns that started while automation was still running count as loaded; later ones ran on an idle engine
+    loaded = [ms for t0, ms in chat.samples if t0 < drain_done]
     sampler.stop()
 
     # the ledger is flushed through the outbox: wait for it to settle before comparing
@@ -272,18 +273,21 @@ def run_profile(w, profile: Profile, worker) -> dict:
     started, done = fakes.http_calls(w)
 
     base_p95 = percentile(baseline, 95)
-    loaded_p95 = percentile(chat.samples, 95)
-    gate = evaluate_gate(base_p95, loaded_p95, non_terminal + len(start_errors), ledger_rows, expected)
+    loaded_p95 = percentile(loaded, 95)
+    gate = evaluate_gate(base_p95, loaded_p95, non_terminal + len(start_errors), ledger_rows, expected,
+                         failed_runs=failed, chat_errors=len(chat.errors), loaded_samples=len(loaded),
+                         min_loaded_samples=profile.min_loaded_chat_samples, http_started=started,
+                         http_done=done, expected_http_calls=len(execution_ids))
     return {
         "profile": profile.name,
         "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d"),
         "hardware": hardware(),
         "workload": {"workflow_runs": len(execution_ids), "nodes_per_run": fakes.WORKFLOW_NODES,
                      "fleet_runs": len(job_ids), "start_errors": start_errors,
-                     "chat_baseline_samples": len(baseline), "chat_loaded_samples": len(chat.samples),
-                     "chat_errors": chat.errors[:5], "http_calls_started": started, "http_calls_done": done,
+                     "chat_baseline_samples": len(baseline), "chat_loaded_samples": len(loaded),
+                     "chat_errors": len(chat.errors), "chat_error_samples": chat.errors[:5], "http_calls_started": started, "http_calls_done": done,
                      "wall_s": round(time.monotonic() - t_begin, 1), "loaded_window_s": round(loaded_window_s, 1)},
-        "chat_first_token": {"baseline": stats(baseline), "loaded": stats(chat.samples),
+        "chat_first_token": {"baseline": stats(baseline), "loaded": stats(loaded),
                              "p95_regression": None if gate.chat_p95_regression is None
                              else round(gate.chat_p95_regression, 4)},
         "engine_commits": commit_cadence_ms(w),
