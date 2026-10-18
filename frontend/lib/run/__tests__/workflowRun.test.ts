@@ -51,6 +51,33 @@ const waiting = (over: Partial<WaitingNode> = {}): WaitingNode => ({
 const rowsOf = (t: RunNode[]) => projectRows(t);
 
 describe('workflowViewToRunTree', () => {
+  it('a run joined on children and an LLM node in awaitChild are running, not waiting', () => {
+    const v = baseView({
+      run: runTask({ status: 'waiting', phase: 'join' }),
+      llm: nodeTask('llm', { status: 'waiting', phase: 'awaitChild', endedAt: undefined }),
+    });
+    const { tree, waiting: map } = workflowViewToRunTree(v, { waiting: [] });
+    expect(tree[0].status).toBe('running');
+    expect(tree[0].children[0].status).toBe('running');
+    expect(map.size).toBe(0);
+  });
+
+  it('a node parked in awaitWake reads waiting even when the waiting-nodes route is unavailable', () => {
+    const v = baseView({ run: runTask({ status: 'waiting', phase: 'join' }), approve: nodeTask('approve', { status: 'waiting', phase: 'awaitWake', endedAt: undefined }) });
+    const { tree, waiting: map } = workflowViewToRunTree(v, { waiting: [] });
+    expect(tree[0].children[0].status).toBe('waiting');
+    expect(map.size).toBe(0);
+  });
+
+  it('the run reads waiting once every active node is parked on a person, running while any node works', () => {
+    const parked = nodeTask('approve', { status: 'waiting', phase: 'awaitWake', endedAt: undefined });
+    const working = nodeTask('llm', { status: 'waiting', phase: 'awaitChild', endedAt: undefined });
+    const only = workflowViewToRunTree(baseView({ run: runTask({ status: 'waiting', phase: 'join' }), approve: parked }), { waiting: [waiting()] });
+    expect(only.tree[0].status).toBe('waiting');
+    const both = workflowViewToRunTree(baseView({ run: runTask({ status: 'waiting', phase: 'join' }), approve: parked, llm: working }), { waiting: [waiting()] });
+    expect(both.tree[0].status).toBe('running');
+  });
+
   it('builds a run root with node children labelled by node name', () => {
     const v = baseView({ run: runTask(), a: nodeTask('a', { parentId: 'run' }), b: nodeTask('b', { parentId: 'run', status: 'running', endedAt: undefined }) });
     const { tree } = workflowViewToRunTree(v, { names: { a: 'Fetch data' } });
@@ -70,7 +97,7 @@ describe('workflowViewToRunTree', () => {
   });
 
   it('shows a waiting human node with its wake time from the waiting-nodes route and keys the decision by tree node id', () => {
-    const v = baseView({ run: runTask({ status: 'waiting' }), approve: nodeTask('approve', { status: 'waiting', phase: 'park', endedAt: undefined }) });
+    const v = baseView({ run: runTask({ status: 'waiting', phase: 'join' }), approve: nodeTask('approve', { status: 'waiting', phase: 'park', endedAt: undefined }) });
     const { tree, waiting: map } = workflowViewToRunTree(v, { waiting: [waiting()] });
     const node = tree[0].children[0];
     expect(node).toMatchObject({ status: 'waiting', waitUntil: '2026-01-02T00:00:00.000Z' });
@@ -79,7 +106,7 @@ describe('workflowViewToRunTree', () => {
 
   it('prefers the engine deadline over the route wake time and ignores waiting entries for nodes not waiting', () => {
     const v = baseView({
-      run: runTask({ status: 'waiting' }),
+      run: runTask({ status: 'waiting', phase: 'join' }),
       sleep: nodeTask('sleep', { status: 'waiting', waitUntil: '2026-01-01T01:00:00.000Z', endedAt: undefined }),
       done: nodeTask('done'),
     });
@@ -90,7 +117,7 @@ describe('workflowViewToRunTree', () => {
   });
 
   it('keeps an open-ended wait without a wake time', () => {
-    const v = baseView({ run: runTask({ status: 'waiting' }), approve: nodeTask('approve', { status: 'waiting', endedAt: undefined }) });
+    const v = baseView({ run: runTask({ status: 'waiting', phase: 'join' }), approve: nodeTask('approve', { status: 'waiting', endedAt: undefined }) });
     const { tree } = workflowViewToRunTree(v, { waiting: [waiting({ wakeAt: null })] });
     expect(tree[0].children[0].status).toBe('waiting');
     expect(tree[0].children[0].waitUntil).toBeUndefined();

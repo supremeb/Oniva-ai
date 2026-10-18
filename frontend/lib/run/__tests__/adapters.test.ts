@@ -69,7 +69,7 @@ describe('engineView adapter', () => {
     const v = view({
       run: { active: false },
       tasks: {
-        run: task({ kind: 'workflow_run', parentId: null, status: 'running', phase: 'join', label: 'Daily digest' }),
+        run: task({ kind: 'workflow_run', parentId: null, status: 'waiting', phase: 'join', label: 'Daily digest' }),
         n1: task({ label: 'fetch', status: 'done' }),
         n2: task({ label: 'branch A', status: 'done', phase: 'skipped' }),
         n3: task({ label: 'branch B', status: 'done', phase: 'skipped' }),

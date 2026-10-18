@@ -79,7 +79,7 @@ it('a waiting node shows its wake time and decide approves through the engine de
   mockDetail.mockResolvedValue(log({ status: 'waiting' }));
   mockWaiting.mockResolvedValue([waitingNode]);
   decide.mockResolvedValue({});
-  setConv(view({ run: task({ kind: 'workflow_run', parentId: null, status: 'waiting' }), approve: task({ label: 'approve', status: 'waiting' }) }));
+  setConv(view({ run: task({ kind: 'workflow_run', parentId: null, status: 'waiting' }), approve: task({ label: 'approve', status: 'waiting', phase: 'awaitWake' }) }));
   const { result } = renderHook(() => useWorkflowRunTree('wf', 'ex-1'), { wrapper: wrapper() });
   await waitFor(() => expect(result.current.waiting.size).toBe(1));
   const [node] = result.current.tree[0].children;
@@ -94,7 +94,7 @@ it('a 403 from the decision route becomes the "you cannot decide this" error', a
   mockDetail.mockResolvedValue(log({ status: 'waiting' }));
   mockWaiting.mockResolvedValue([waitingNode]);
   decide.mockRejectedValue({ status: 403, data: { detail: 'forbidden' } });
-  setConv(view({ run: task({ kind: 'workflow_run', parentId: null, status: 'waiting' }), approve: task({ label: 'approve', status: 'waiting' }) }));
+  setConv(view({ run: task({ kind: 'workflow_run', parentId: null, status: 'waiting' }), approve: task({ label: 'approve', status: 'waiting', phase: 'awaitWake' }) }));
   const { result } = renderHook(() => useWorkflowRunTree('wf', 'ex-1'), { wrapper: wrapper() });
   await waitFor(() => expect(result.current.waiting.size).toBe(1));
   const w = [...result.current.waiting.values()][0];
@@ -106,7 +106,7 @@ it('a 403 from the decision route becomes the "you cannot decide this" error', a
 it('a waiting-nodes failure (403/404) hides the controls instead of breaking the tree', async () => {
   mockDetail.mockResolvedValue(log({ status: 'waiting' }));
   mockWaiting.mockRejectedValue({ status: 403 });
-  setConv(view({ run: task({ kind: 'workflow_run', parentId: null, status: 'waiting' }), approve: task({ label: 'approve', status: 'waiting' }) }));
+  setConv(view({ run: task({ kind: 'workflow_run', parentId: null, status: 'waiting' }), approve: task({ label: 'approve', status: 'waiting', phase: 'awaitWake' }) }));
   const { result } = renderHook(() => useWorkflowRunTree('wf', 'ex-1'), { wrapper: wrapper() });
   await waitFor(() => expect(result.current.log).not.toBeNull());
   await waitFor(() => expect(mockWaiting).toHaveBeenCalled());
@@ -127,7 +127,7 @@ it('an undecidable item (no task id) rejects with the not-indexed copy', async (
 
 describe('useTestRunWaiting', () => {
   const since = Date.parse(T0);
-  const latest = (over: Record<string, unknown> = {}) => ({ logs: [{ id: 'ex-9', status: 'running', started_at: T0, engine_conversation_id: 'conv-9', ...over }], next_cursor: null, limit: 1, has_more: false });
+  const latest = (over: Record<string, unknown> = {}) => ({ logs: [{ id: 'ex-9', status: 'running', started_at: T0, trigger: 'manual', engine_conversation_id: 'conv-9', ...over }], next_cursor: null, limit: 1, has_more: false });
 
   it('finds the execution the test run just started and reads its waiting nodes', async () => {
     mockLogs.mockResolvedValue(latest());
@@ -143,11 +143,13 @@ describe('useTestRunWaiting', () => {
     await waitFor(() => expect(mockLogs).toHaveBeenCalled());
     mockLogs.mockResolvedValue(latest({ engine_conversation_id: null }));
     const legacy = renderHook(() => useTestRunWaiting('wf', true, since), { wrapper: wrapper() });
+    mockLogs.mockResolvedValue(latest({ trigger: 'scheduled' }));
+    const scheduled = renderHook(() => useTestRunWaiting('wf', true, since), { wrapper: wrapper() });
     const idle = renderHook(() => useTestRunWaiting('wf', false, since), { wrapper: wrapper() });
     const local = renderHook(() => useTestRunWaiting('local-1', true, since), { wrapper: wrapper() });
     await waitFor(() => expect(mockLogs.mock.calls.length).toBeGreaterThanOrEqual(2));
     expect(mockWaiting).not.toHaveBeenCalled();
-    expect([old, legacy, idle, local].every((h) => h.result.current.waiting.length === 0)).toBe(true);
+    expect([old, legacy, scheduled, idle, local].every((h) => h.result.current.waiting.length === 0)).toBe(true);
     expect(mockLogs).not.toHaveBeenCalledWith('local-1', expect.anything());
   });
 });
