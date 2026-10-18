@@ -137,6 +137,17 @@ describe('useTestRunWaiting', () => {
     expect(mockWaiting).toHaveBeenCalledWith('ex-9');
   });
 
+  it('uses the execution id from the stream and never looks through the logs list', async () => {
+    mockLogs.mockResolvedValue(latest({ id: 'ex-other' }));
+    mockWaiting.mockResolvedValue([waitingNode]);
+    const { result } = renderHook(() => useTestRunWaiting('wf', true, since, 'ex-known'), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.waiting).toHaveLength(1));
+    expect(mockWaiting).toHaveBeenCalledWith('ex-known');
+    expect(mockLogs).not.toHaveBeenCalled();
+    const idle = renderHook(() => useTestRunWaiting('wf', false, since, 'ex-known'), { wrapper: wrapper() });
+    expect(idle.result.current.waiting).toHaveLength(0);
+  });
+
   it('ignores an older run, a legacy run, and does nothing when not running or for a local workflow', async () => {
     mockLogs.mockResolvedValue(latest({ started_at: '2025-12-31T00:00:00.000Z' }));
     const old = renderHook(() => useTestRunWaiting('wf', true, since), { wrapper: wrapper() });

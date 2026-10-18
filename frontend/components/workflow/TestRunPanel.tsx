@@ -34,7 +34,7 @@ export function TestRunPanel({ isOpen, onClose, nodes, onRun, liveRun, workflowI
     const [isRunning, setIsRunning] = useState(false);
     const [result, setResult] = useState<TestRunResult | null>(null);
     const startedAtRef = useRef(0);
-    const { waiting, decide } = useTestRunWaiting(workflowId, isRunning, startedAtRef.current);
+    const { waiting, decide } = useTestRunWaiting(workflowId, isRunning, startedAtRef.current, liveRun?.executionId ?? null);
     const { tree, waiting: waitingByNode } = useMemo(() => {
         const names: Record<string, string> = {};
         for (const n of nodes) {

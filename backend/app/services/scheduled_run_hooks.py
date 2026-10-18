@@ -144,6 +144,19 @@ def _ref(row: ScheduledWorkflowExecution) -> run_handlers.RunRef:
     return run_handlers.RunRef(kind=KIND, ref_id=row.id, tenant_id=row.tenant_id)
 
 
+async def _linked_terminal(session, cutoff, quiet) -> list:
+    """Claimed rows whose linked execution already ended: a lost finish (e.g. a cancel) that never reached the row."""
+    rows = (await session.execute(
+        select(ScheduledWorkflowExecution)
+        .join(WorkflowExecution, WorkflowExecution.id == ScheduledWorkflowExecution.workflow_execution_id)
+        .where(ScheduledWorkflowExecution.status.in_(("pending", "running")),
+               WorkflowExecution.status.in_(wer.TERMINAL),
+               quiet < cutoff)
+        .order_by(quiet).limit(STUCK_BATCH)
+    )).scalars().all()
+    return [_ref(r) for r in rows]
+
+
 async def find_stuck(session, older_than: timedelta) -> list:
     """Claimed executions (``pending``/``running``) of engine tenants with no ``WorkflowExecution`` yet."""
     cutoff = datetime.now(timezone.utc) - older_than
@@ -156,8 +169,9 @@ async def find_stuck(session, older_than: timedelta) -> list:
                quiet < cutoff)
         .order_by(quiet).limit(STUCK_BATCH)
     )).all()
+    linked = await _linked_terminal(session, cutoff, quiet)
     if not candidates:
-        return []
+        return linked
     ids = {row.id: wer.execution_id_for(row.tenant_id, workflow_id, request_key(row.id))
            for row, workflow_id in candidates}
     started = set((await session.execute(
@@ -172,13 +186,21 @@ async def find_stuck(session, older_than: timedelta) -> list:
             flags[row.tenant_id] = await wer.tenant_uses_engine_workflows(session, row.tenant_id)
         if flags[row.tenant_id]:
             refs.append(_ref(row))
-    return refs
+    return refs + linked
 
 
 async def start_missing(ref: run_handlers.RunRef) -> run_handlers.StartResult:
     if ref.tenant_id is None:
         return run_handlers.StartResult.failed("tenant_unknown")
     async with wer.tenant_factory(ref.tenant_id)() as db:
+        row = await db.get(ScheduledWorkflowExecution, ref.ref_id)
+        if row is not None and row.workflow_execution_id is not None and row.status in ("pending", "running"):
+            execution = await db.get(WorkflowExecution, row.workflow_execution_id)
+            if execution is not None and execution.status in wer.TERMINAL:  # a finish that never reached the row
+                from app.services import workflow_run_sync
+                await workflow_run_sync.finish_scheduled(db, execution, execution.status)
+                await db.commit()
+                return run_handlers.StartResult.already_started()
         return await start_scheduled(db, ref.ref_id)
 
 

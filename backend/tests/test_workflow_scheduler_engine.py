@@ -251,3 +251,40 @@ async def test_dispatch_immediate_on_an_engine_tenant_starts_without_a_task_or_s
         WorkflowSchedulerDaemon._instance = None
     assert len(w.engine.starts) == 1 and not d._active_tasks
     assert (await sched(w, eid)).status == "running"
+
+
+async def test_cancelling_a_scheduled_engine_run_ends_its_scheduled_row_and_unblocks_the_schedule(w):
+    sid = await add_schedule(w)
+    eid = await add_exec(w, sid, "pending")
+    await start(w, eid)
+    [ex] = await wf_execs(w)
+    async with w.maker() as db:
+        row = await db.get(WorkflowExecution, ex.id)
+        assert await wer.cancel_workflow_run(db, row, "stop", engine=w.engine) is True
+        await db.commit()
+    got = await sched(w, eid)
+    assert got.status == "failed" and got.completed_at is not None
+    async with w.maker() as db:
+        s = await db.get(ScheduledWorkflow, sid)
+    assert s.last_run_status == "failed" and s.last_run_at is not None
+
+
+async def test_find_stuck_heals_a_scheduled_row_whose_execution_ended_without_finishing_it(w):
+    sid = await add_schedule(w)
+    eid = await add_exec(w, sid, "pending")
+    await start(w, eid)
+    [ex] = await wf_execs(w)
+    async with w.maker() as db:  # the execution ended, the finish never reached the scheduled row
+        row = await db.get(WorkflowExecution, ex.id)
+        wer.settle(row, "cancelled", error="Execution cancelled by user")
+        sr = await db.get(ScheduledWorkflowExecution, eid)
+        sr.started_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        await db.commit()
+    async with w.maker() as db:
+        refs = await srh.find_stuck(db, timedelta(seconds=60))
+    assert [r.ref_id for r in refs] == [eid]
+    assert (await srh.start_missing(refs[0])).status == "already_started"
+    assert (await sched(w, eid)).status == "failed"
+    async with w.maker() as db:
+        assert await srh.find_stuck(db, timedelta(seconds=60)) == []
+    assert len(w.engine.starts) == 1  # nothing was started again

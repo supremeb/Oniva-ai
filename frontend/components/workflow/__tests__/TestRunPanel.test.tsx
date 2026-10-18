@@ -55,9 +55,14 @@ describe('TestRunPanel on the run model', () => {
 
   it('only looks for waiting nodes while a run is going', async () => {
     render(<TestRunPanel isOpen onClose={jest.fn()} nodes={nodes} onRun={() => new Promise(() => {})} liveRun={emptyLiveRun()} workflowId="wf" />);
-    expect(mockWaiting).toHaveBeenLastCalledWith('wf', false, expect.any(Number));
+    expect(mockWaiting).toHaveBeenLastCalledWith('wf', false, expect.any(Number), null);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /start run/i })); });
-    expect(mockWaiting).toHaveBeenLastCalledWith('wf', true, expect.any(Number));
+    expect(mockWaiting).toHaveBeenLastCalledWith('wf', true, expect.any(Number), null);
+  });
+
+  it('hands the execution id the stream reported to the waiting-node lookup', async () => {
+    await startRun(() => new Promise(() => {}), { ...emptyLiveRun(), executionId: 'ex-7' });
+    expect(mockWaiting).toHaveBeenLastCalledWith('wf', true, expect.any(Number), 'ex-7');
   });
 
   it('the result keeps showing Completed or Failed', async () => {

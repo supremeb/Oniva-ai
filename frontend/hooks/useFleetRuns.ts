@@ -6,7 +6,8 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { getFleetRuns } from '@/lib/api/fleet';
+import { APIError } from '@/lib/api';
+import { getFleetRun, getFleetRuns } from '@/lib/api/fleet';
 import type { FleetRunItem, FleetRunsResponse } from '@/lib/models';
 
 export interface UseFleetRunsParams {
@@ -24,21 +25,14 @@ export function useFleetRuns(params?: UseFleetRunsParams, options?: { enabled?: 
   });
 }
 
-const FIND_PAGE_SIZE = 100;
-const FIND_MAX_PAGES = 10;
-
-/**
- * Find one run by id. The fleet API has no single-run route, so scan the newest-first list page by page (bounded);
- * `null` means the run is not in the tenant's newest runs (gone, or someone else's).
- */
+/** Find one run by id; `null` means it is gone or someone else's (404). */
 export async function findFleetRun(runId: string): Promise<FleetRunItem | null> {
-  for (let page = 1; page <= FIND_MAX_PAGES; page++) {
-    const res = await getFleetRuns({ page, page_size: FIND_PAGE_SIZE });
-    const hit = res.items.find((r) => r.id === runId);
-    if (hit) return hit;
-    if (page * FIND_PAGE_SIZE >= res.total || res.items.length === 0) break;
+  try {
+    return await getFleetRun(runId);
+  } catch (e) {
+    if (e instanceof APIError && e.status === 404) return null;
+    throw e;
   }
-  return null;
 }
 
 /**

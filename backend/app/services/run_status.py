@@ -63,3 +63,24 @@ def from_engine_task(status: str, wake: Optional[Any] = None, resumed: bool = Fa
     if resumed and mapped == "running":
         return "resuming"
     return mapped
+
+
+def settled_status(snapshot: dict, view: Optional[dict] = None) -> Optional[str]:
+    """The run status a settled snapshot stands for (shared by the Fleet, workflow and batch read models).
+
+    Order: the snapshot's own ``runStatus``; a push (``done`` is completed, ``aborted`` cancelled, anything else
+    faulted); else how the engine view ended. ``None`` when none of them applies.
+    """
+    status = snapshot.get("runStatus")
+    if status:
+        return status
+    if snapshot.get("source") == "push":
+        if snapshot.get("status") == "done":
+            return from_engine_task("terminal", outcome="done")
+        return from_engine_task("terminal", outcome="aborted" if snapshot.get("reason") == "aborted" else "faulted")
+    view = view if view is not None else snapshot.get("view")
+    if view is not None:
+        from app.services.deep_work import engine_view  # lazy: keep this module a leaf
+        ended = engine_view.engine_run_state(view).ended
+        return from_engine_task("terminal", outcome={"aborted": "aborted", "run_error": "faulted"}.get(ended, "done"))
+    return None

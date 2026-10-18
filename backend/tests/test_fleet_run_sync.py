@@ -201,3 +201,21 @@ async def test_registry_has_fleet_on_finished_and_the_reconciler_settles_a_stuck
     await rec.run_once()
     assert (await reload(maker, job_id)).status == "completed"
     assert len(delivered) == 1
+
+
+async def test_find_stuck_returns_quiet_running_engine_jobs_and_the_reconciler_settles_them(
+        maker, factory, engine, wired, delivered):  # noqa: F811
+    t, u, job_id = await started(maker, factory, engine, wired)
+    async with factory() as db:
+        assert await fe.find_stuck(db, timedelta(seconds=120)) == []  # just started: not quiet yet
+        [ref] = await fe.find_stuck(db, timedelta(seconds=-1))
+    assert ref.ref_id == job_id and ref.conversation_id is not None
+    # A run that is still going is left alone, whatever the hook is asked ...
+    await frs.on_finished(ref, {"source": "reconcile", "view": view_for(job_id, active=True)})
+    assert (await reload(maker, job_id)).status == "running"
+    # ... and a run that ended without a push is settled from its view.
+    await frs.on_finished(ref, {"source": "reconcile", "view": view_for(job_id)})
+    job = await reload(maker, job_id)
+    assert job.status == "completed" and delivered == [(job_id, "All done.")]
+    async with factory() as db:
+        assert await fe.find_stuck(db, timedelta(seconds=-1)) == []

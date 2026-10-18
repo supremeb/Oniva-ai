@@ -34,7 +34,7 @@ from app.models.engine import EngineConversation
 from app.models.tenant import Tenant
 from app.services import run_handlers
 from app.services.automation_scope import bind_run_conversation
-from app.services.engine_client import EngineError, get_engine_client
+from app.services.engine_client import EngineError, get_engine_client, warm_engine_capability
 from app.services.feature_flags import engine_fleet_enabled
 from app.services.fleet_engine_agent import (
     build_fleet_agent_config,
@@ -67,6 +67,7 @@ async def tenant_uses_engine_fleet(db, tenant_id: Any) -> bool:
     """True when this tenant's Fleet runs start on the engine. Any failure reads as off."""
     try:
         tenant = await db.get(Tenant, _uuid(tenant_id))
+        await warm_engine_capability()  # the flag check below reads the cache instead of probing on the loop
         return tenant is not None and engine_fleet_enabled(tenant) is True
     except Exception:
         logger.warning("engine fleet flag lookup failed for tenant %s", tenant_id, exc_info=True)
@@ -161,9 +162,18 @@ async def start_fleet_run(factory: Callable, job_id: Any, *, engine: Any = None,
         attempts = await _record_failure(factory, job_id, error)
         return run_handlers.StartResult.failed(error, attempts=attempts)
 
+    orphaned = False
     async with factory() as db:
         job = await db.get(BackgroundJob, job_id)
-        if job is not None and job.status == JobStatus.PENDING.value:
+        if job is not None and job.status == JobStatus.CANCELLED.value and job.conversation_id is None:
+            # Cancelled while the start was in flight: the engine run exists and nothing else knows it. Record the
+            # conversation (so the abort finds it) and keep the abort pending until it goes through.
+            job.conversation_id = conversation_id
+            job.session_id = str(job.id)
+            job.input_data = {**mark_engine(job.input_data)}
+            set_abort_pending(job, True)
+            orphaned = True
+        elif job is not None and job.status == JobStatus.PENDING.value:
             job.conversation_id = conversation_id
             job.session_id = str(job.id)
             job.input_data = {**mark_engine(job.input_data)}
@@ -171,6 +181,12 @@ async def start_fleet_run(factory: Callable, job_id: Any, *, engine: Any = None,
             job.error = None
             job.status = JobStatus.RUNNING.value
             job.started_at = datetime.now(timezone.utc)
+    if orphaned:
+        async with factory() as db:
+            job = await db.get(BackgroundJob, job_id)
+            if job is not None and await abort_run(db, job, job.error, engine=engine):
+                set_abort_pending(job, False)
+        return run_handlers.StartResult.already_started()
     task_id = sub.get("taskId") if isinstance(sub, dict) else None
     return run_handlers.StartResult.started(task_id)
 
@@ -265,7 +281,7 @@ def _ref(job: BackgroundJob) -> run_handlers.RunRef:
 
 
 async def find_stuck(session, older_than: timedelta) -> list:
-    """Pending engine jobs that never got a conversation recorded and have been quiet long enough."""
+    """Pending engine jobs with no conversation recorded, running ones whose settle was lost, and cancelled ones with an unsent abort."""
     cutoff = datetime.now(timezone.utc) - older_than
     rows = (await session.execute(
         select(BackgroundJob).where(
@@ -286,7 +302,19 @@ async def find_stuck(session, older_than: timedelta) -> list:
             cast(BackgroundJob.input_data, String).like("%abort_pending%"),
         ).order_by(BackgroundJob.completed_at).limit(STUCK_BATCH)
     )).scalars().all()
-    return refs + [_ref(j) for j in aborting if (j.input_data or {}).get("abort_pending")]
+    # Running engine jobs whose settle push was lost: the reconciler reads the engine view and settles them
+    # (``on_finished`` leaves a still-active run alone).
+    running = (await session.execute(
+        select(BackgroundJob).where(
+            BackgroundJob.status == JobStatus.RUNNING.value,
+            BackgroundJob.job_type == JobType.BACKGROUND_AGENT.value,
+            BackgroundJob.conversation_id.is_not(None),
+            BackgroundJob.started_at < cutoff,
+            cast(BackgroundJob.input_data, String).like(f"%{ENGINE_MARK}%"),
+        ).order_by(BackgroundJob.started_at).limit(STUCK_BATCH)
+    )).scalars().all()
+    return (refs + [_ref(j) for j in aborting if (j.input_data or {}).get("abort_pending")]
+            + [_ref(j) for j in running if (j.input_data or {}).get("engine") == ENGINE_MARK])
 
 
 async def _retry_abort(ref: run_handlers.RunRef) -> run_handlers.StartResult:

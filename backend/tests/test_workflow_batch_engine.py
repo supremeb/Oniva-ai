@@ -186,10 +186,15 @@ async def settle_items(w, batch_id, n, *, failed=(), running=(), cancelled=(), p
         await db.commit()
 
 
+async def finished_raw(w, batch_id, snapshot):
+    batch = await batch_of(w, batch_id)
+    await be.on_finished(rh.RunRef(kind="batch", ref_id=batch.id, tenant_id=batch.tenant_id), snapshot)
+
+
 async def finished(w, batch_id, status="completed"):
     batch = await batch_of(w, batch_id)
     ref = rh.RunRef(kind="batch", ref_id=batch.id, tenant_id=batch.tenant_id)
-    await be.on_finished(ref, {"source": "push", "status": status})
+    await be.on_finished(ref, {"runStatus": status})
 
 
 # ---- start ------------------------------------------------------------------------------------------
@@ -588,3 +593,31 @@ async def test_fail_is_terminal_once_and_skips_the_open_items(w):
 def test_the_route_no_longer_leaves_batches_queued_forever():
     source = inspect.getsource(wf_api.execute_batch)
     assert "TODO" not in source and "Celery" not in source
+
+
+async def test_a_raw_push_status_maps_through_the_run_status_not_the_push_word(w):
+    batch_id = (await execute(w, 3)).json()["batch_id"]
+    await prepare(w, batch_id)
+    await settle_items(w, batch_id, 3)
+    await finished_raw(w, batch_id, {"source": "push", "status": "done"})
+    assert (await batch_of(w, batch_id)).status == BatchStatus.COMPLETED
+    other = (await execute(w, 2)).json()["batch_id"]
+    await prepare(w, other)
+    await settle_items(w, other, 2, failed=(0, 1))
+    await finished_raw(w, other, {"source": "push", "status": "unanswered", "reason": "boom"})
+    failed = await batch_of(w, other)
+    assert failed.status == BatchStatus.FAILED and failed.error_message == "boom"
+
+
+async def test_the_runs_finalize_settles_the_batch_without_the_reconciler(w):
+    from app.services import workflow_run_sync as wrs
+
+    batch_id = (await execute(w, 3, webhook_url="https://hooks.example.com/b", webhook_secret=SECRET)).json()["batch_id"]
+    await prepare(w, batch_id)
+    await settle_items(w, batch_id, 3)
+    body = SimpleNamespace(status="completed", nodeSummaries={}, error=None, attempts=1)
+    assert await wrs.finalize(lambda tid: w.factory(), w.tenant, batch_id, body) is True
+    batch = await batch_of(w, batch_id)
+    assert batch.status == BatchStatus.COMPLETED and batch.completed_count == 3 and len(w.hooks) == 1
+    assert await wrs.finalize(lambda tid: w.factory(), w.tenant, batch_id, body) is False  # a replay moves nothing
+    assert len(w.hooks) == 1
