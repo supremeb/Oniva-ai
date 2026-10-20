@@ -6,6 +6,7 @@ clicks Execute and this SSE endpoint streams per-node progress in real time.
 
 import asyncio
 import json
+from contextlib import asynccontextmanager, nullcontext
 import logging
 import time
 from typing import Any, Dict, Optional
@@ -23,6 +24,8 @@ from app.core.database import AsyncSessionLocal, get_db, set_tenant_context
 from app.models.agent_chat_session import AgentChatSession
 from app.models.workflow import Workflow
 from app.services.sse_builder import create_sse_builder
+from app.services import workflow_engine_runs as engine_runs
+from app.services import workflow_stream_adapter
 from app.services.workflow_orchestrator import WorkflowOrchestrator
 
 logger = logging.getLogger(__name__)
@@ -117,6 +120,27 @@ async def execute_workflow_stream(
     workflow_spec = workflow.spec
     workflow_name = workflow.name
     input_variables = request.inputs
+    use_engine = await engine_runs.tenant_uses_engine_workflows(db, tenant_id)
+    engine_start = None
+    if use_engine:
+        # Engine tenants: start the run before the stream opens, so an invalid workflow (400) or an
+        # unavailable engine (502) is a proper error response (plan 003 U15).
+        started, started_task = await engine_runs.start_workflow_run(
+            db, workflow, workflow_spec, dict(input_variables or {}),
+            user_id=user_id, tenant_id=tenant_id, trigger="agent_chat",
+        )
+        engine_start = (started.id, started_task)
+
+    @asynccontextmanager
+    async def _legacy_session():
+        async with AsyncSessionLocal() as exec_db:
+            await set_tenant_context(exec_db, str(tenant_id))
+            # Also set user context for audit logging
+            await exec_db.execute(
+                text("SELECT set_config('app.current_user_id', :uid, true)"),
+                {"uid": str(user_id)},
+            )
+            yield exec_db
 
     async def _stream_workflow_execution():
         """Generator that streams SSE events for workflow execution."""
@@ -124,32 +148,31 @@ async def execute_workflow_stream(
         start_time = time.time()
 
         try:
-            # Create a SEPARATE AsyncSession for workflow execution
-            # to avoid RLS context destruction (documented gotcha)
-            async with AsyncSessionLocal() as exec_db:
-                await set_tenant_context(exec_db, str(tenant_id))
-                # Also set user context for audit logging
-                await exec_db.execute(
-                    text(
-                        "SELECT set_config('app.current_user_id', :uid, true)"
-                    ),
-                    {"uid": str(user_id)},
-                )
+            # Legacy runs use a SEPARATE AsyncSession for workflow execution
+            # to avoid RLS context destruction (documented gotcha). Engine runs need none.
+            async with (_legacy_session() if engine_start is None else nullcontext()) as exec_db:
+                if engine_start is not None:
+                    execution_id, task_id = engine_start
+                    events = workflow_stream_adapter.watch_events(
+                        engine_runs.tenant_factory(tenant_id), execution_id, task_id,
+                        timeout_s=_DEFAULT_EXECUTION_TIMEOUT,
+                    )
+                else:
+                    orchestrator = WorkflowOrchestrator(
+                        db=exec_db,
+                        user_id=str(user_id),
+                        tenant_id=tenant_id,
+                        trigger="agent_chat",
+                    )
+                    events = orchestrator.execute_workflow_stream(
+                        workflow_spec=workflow_spec,
+                        input_variables=input_variables,
+                        workflow_id=workflow_uuid,
+                        save_logs=True,
+                    )
 
-                orchestrator = WorkflowOrchestrator(
-                    db=exec_db,
-                    user_id=str(user_id),
-                    tenant_id=tenant_id,
-                    trigger="agent_chat",
-                )
-
-                # Stream orchestrator events, translating to SSE
-                async for event in orchestrator.execute_workflow_stream(
-                    workflow_spec=workflow_spec,
-                    input_variables=input_variables,
-                    workflow_id=workflow_uuid,
-                    save_logs=True,
-                ):
+                # Stream run events, translating to SSE
+                async for event in events:
                     event_type = event.get("type")
                     elapsed_ms = int((time.time() - start_time) * 1000)
 

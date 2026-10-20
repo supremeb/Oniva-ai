@@ -184,6 +184,16 @@ export type MessagePart =
           timeout?: number;
           defaultOptionId?: string;
           includeOther?: boolean;
+          /** Engine `ask_user` questions: the tool task the answer route is keyed by (equals `id`). */
+          toolTaskId?: string;
+          status?: 'pending' | 'answered' | 'expired';
+          allowFreeText?: boolean;
+          /** The recorded answer, once answered. */
+          answer?: { optionIds: string[]; text: string | null } | null;
+          /** UI hint only (owner or admin); the server decides. */
+          canDecide?: boolean;
+          /** Epoch ms after which a pending question is expired. */
+          expiresAt?: number | null;
       }
     | {
           type: 'approval';
@@ -192,6 +202,8 @@ export type MessagePart =
           description?: string;
           riskLevel?: 'low' | 'medium' | 'high' | 'critical';
           items?: ApprovalItem[];
+          /** Short hash of the canonical arguments, so an approver can match what they saw. */
+          argumentsHash?: string;
           status?: 'pending' | 'approved' | 'rejected' | 'expired';
           /** Engine approvals: the tool task the decision route is keyed by (equals `id`). */
           toolTaskId?: string;
@@ -708,6 +720,10 @@ export interface FleetRunItem {
   trigger: string;
   triggered_by: Record<string, unknown> | null;
   progress: number;
+  /** Engine conversation of an engine-run job; null for legacy jobs. */
+  conversation_id?: string | null;
+  /** True when the job runs on the engine. Absent means "derive it from `conversation_id`". */
+  engine?: boolean;
   input_data: Record<string, unknown> | null;
   result: Record<string, unknown> | null;
   error: string | null;

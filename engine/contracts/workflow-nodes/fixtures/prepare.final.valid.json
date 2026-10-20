@@ -1,0 +1,8 @@
+{
+  "contractVersion": 1,
+  "kind": "final",
+  "status": "success",
+  "output": { "text": "all done" },
+  "tokensUsed": 12,
+  "selectedHandles": ["true"]
+}

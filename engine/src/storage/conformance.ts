@@ -710,6 +710,29 @@ export function defineStorageConformanceSuite(
         }
       });
 
+      it("claims by kind: a usage flusher never takes run_finished rows, and a missing kind reads as usage", async () => {
+        const p = fixture.provider;
+        const usage = record(`req-${uuidv7()}`, { createdAt: 10 });
+        const finished = record(`req-${uuidv7()}`, { createdAt: 20, kind: "run_finished" });
+        await p.enqueue(usage);
+        await p.enqueue(finished);
+        try {
+          const onlyUsage = await p.claimPending(0, "usage");
+          assert.deepEqual(
+            onlyUsage.map((r) => [r.requestId, r.kind]),
+            [[usage.requestId, "usage"]],
+          );
+          const onlyFinished = await p.claimPending(0, "run_finished");
+          assert.deepEqual(
+            onlyFinished.map((r) => [r.requestId, r.kind]),
+            [[finished.requestId, "run_finished"]],
+          );
+        } finally {
+          await p.ack(usage.requestId);
+          await p.ack(finished.requestId);
+        }
+      });
+
       it("reclaims a row past the claim timeout, then ack removes it", async () => {
         const p = fixture.provider;
         const stale = record(`req-${uuidv7()}`, { createdAt: 10, claimedAt: 20 });

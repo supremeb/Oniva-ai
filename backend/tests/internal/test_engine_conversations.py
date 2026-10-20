@@ -51,6 +51,19 @@ class FakeDB:
     async def flush(self):
         pass
 
+    async def execute(self, stmt):  # the approval ledger is empty here: decisions use the legacy path
+        class _Result:
+            def scalars(self):
+                return self
+
+            def first(self):
+                return None
+
+            def all(self):
+                return []
+
+        return _Result()
+
 
 class Stream(httpx.AsyncByteStream):
     def __init__(self, chunks, state):
@@ -75,7 +88,7 @@ class Env:
         self.respond = None  # optional override(request) -> Response
         self.db = FakeDB()
         self.current = user()
-        cfg = settings(ENABLE_ENGINE_API=enabled)
+        cfg = settings(ENABLE_ENGINE_API=enabled, APPROVALS_LEGACY_CUTOFF="2026-10-01T00:00:00+00:00")
         self.client = EngineClient(cfg, transport=httpx.MockTransport(self._handle))
         self.app = FastAPI()
         ec.mount_engine_conversations(self.app, cfg)
@@ -94,6 +107,8 @@ class Env:
                                   stream=Stream([b"id: 1\ndata: a\n\n", b"id: 2\ndata: b\n\n"], self.state))
         if req.url.path.endswith("/submissions"):
             return httpx.Response(202, json={"submissionId": "s1"})
+        if req.method == "GET" and req.url.path.endswith("/approvals"):  # legacy item, before the cutoff
+            return httpx.Response(200, json={"approvals": [{"toolTaskId": "t1", "requestedAt": 0}]})
         if req.url.path.endswith("/decision"):
             return httpx.Response(200, json={"approval": {}})
         if req.method == "DELETE":
@@ -233,6 +248,31 @@ def test_write_submission_does_not_set_a_title(env):
     assert env.touched and env.titled == []
 
 
+def test_submit_marks_non_text_content_untrusted(env):
+    cid = env.seed()
+    r = env.http.post(f"/api/v1/engine/conversations/{cid}/submissions",
+                      json={"content": [{"type": "text", "text": "look"},
+                                        {"type": "image", "url": "https://x/i.png"}]})
+    assert r.status_code == 202
+    sent = json.loads(env.calls[0].content)
+    assert sent["untrusted"] is True
+    assert sent["content"] == [{"type": "text", "text": "look"},
+                               {"type": "image", "url": "https://x/i.png"}]
+
+
+def test_submit_text_only_content_is_not_untrusted(env):
+    cid = env.seed()
+    env.http.post(f"/api/v1/engine/conversations/{cid}/submissions",
+                  json={"content": [{"type": "text", "text": "hi"}]})
+    assert "untrusted" not in json.loads(env.calls[0].content)
+
+
+def test_plain_text_submit_is_not_untrusted(env):
+    cid = env.seed()
+    env.http.post(f"/api/v1/engine/conversations/{cid}/submissions", json={"text": "hi"})
+    assert "untrusted" not in json.loads(env.calls[0].content)
+
+
 def test_watch_streams_through_and_forwards_resume(env):
     cid = env.seed()
     with env.http.stream("GET", f"/api/v1/engine/conversations/{cid}/watch?cursor=5",
@@ -302,7 +342,7 @@ def test_decision_carries_verified_principal_ignoring_body(env, who):
         f"/api/v1/engine/conversations/{cid}/approvals/t1/decision",
         json={"decision": "approve", "note": "ok", "principal": "attacker"})
     assert r.status_code == 200
-    req = env.calls[0]
+    req = env.calls[-1]
     assert req.headers["x-oniva-principal"] == env.current.id
     assert json.loads(req.content) == {"decision": "approve", "note": "ok"}
     assert req.url.path.endswith("/approvals/t1/decision")

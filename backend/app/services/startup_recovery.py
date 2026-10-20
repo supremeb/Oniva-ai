@@ -51,8 +51,15 @@ async def interrupt_stale_tool_invocations(session_factory) -> int:
     A claim older than the longest tool timeout plus grace belongs to a worker that died mid-effect.
     Reconcile must not say "did not run" for it, so it is answered as unknown; idempotent tools are
     left to re-run on their next call.
+
+    Workflow node claims (``workflow_prepare`` / ``workflow_finish``) are not swept: whether a stale one is
+    taken over or answered interrupted depends on the node (its replay safety and its own timeout, up to
+    300 s for an agent), which ``invocations.begin`` knows and this one threshold does not.
     """
     from app.internal_api.invocations import interrupt_stale
     from app.internal_api.tools import idempotent_tool_names, stale_after_seconds
+    from app.internal_api.workflow_nodes import PHASE_TOOL
 
-    return await interrupt_stale(session_factory, stale_after_seconds(), idempotent_tool_names())
+    return await interrupt_stale(
+        session_factory, stale_after_seconds(), idempotent_tool_names() | set(PHASE_TOOL.values())
+    )

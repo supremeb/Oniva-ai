@@ -73,6 +73,9 @@ class WorkflowExecution(Base):
     # DBOS workflow UUID for tracking
     dbos_workflow_uuid = Column(UUID(as_uuid=True), unique=True, nullable=True)
 
+    # Engine conversation that runs this execution (plan 003 U1); null for legacy runs.
+    engine_conversation_id = Column(UUID(as_uuid=True), nullable=True)
+
     # Execution details
     status = Column(String(50), default='pending', index=True)  # 'pending', 'running', 'completed', 'failed', 'cancelled'
     trigger = Column(String(50), default='manual')  # 'manual', 'api', 'scheduled'
@@ -115,6 +118,7 @@ class WorkflowExecution(Base):
             "nodes_executed": self.nodes_executed or 0,
             "total_nodes": self.total_nodes,
             "error": self.error,
+            "engine_conversation_id": str(self.engine_conversation_id) if self.engine_conversation_id else None,
             "progress": 100 if self.status in ['completed', 'failed'] else (
                 int((self.nodes_executed / self.total_nodes) * 100) if self.total_nodes > 0 else 0
             ),
@@ -124,7 +128,9 @@ class WorkflowExecution(Base):
         """Convert to detailed log for API response."""
         summary = self.to_log_summary()
         summary.update({
-            "input_data": self.input_data,
+            # Backend bookkeeping (``__spec``, ``__run_options`` with the webhook secret) is not for API readers.
+            "input_data": {k: v for k, v in self.input_data.items() if not str(k).startswith("__")}
+            if isinstance(self.input_data, dict) else self.input_data,
             "result": self.results,
             "execution_trace": self.execution_trace or [],
         })

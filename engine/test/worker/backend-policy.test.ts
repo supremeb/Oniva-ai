@@ -7,6 +7,8 @@ import { ManualClock } from "../../src/core/clock.js";
 import { Context } from "../../src/core/context.js";
 import { fakeText, fakeToolCall } from "../../src/models/fake.js";
 import { MemoryStorageProvider } from "../../src/storage/memory.js";
+import { createGatewayTools } from "../../src/tools/gateway.js";
+import { argsHash } from "../../src/worker/args-hash.js";
 import {
   BackendPolicyClient,
   requestIdFor,
@@ -157,7 +159,7 @@ describe("BackendPolicyClient", () => {
     expect(lines.join("\n")).not.toContain("sk-secret-123");
   });
 
-  it("is the host policy's model resolution when configured, with approval still local", async () => {
+  it("is the host policy's model resolution and tool decision when configured", async () => {
     const gw = await start();
     const policy = workerHostPolicy({
       modelDefaults: {
@@ -168,7 +170,7 @@ describe("BackendPolicyClient", () => {
         apiKey: () => "local-key",
       },
       gateway: { requiresApproval: (n) => n === "danger" },
-      approvalTtlMs: null,
+      approvalTtlMs: 1,
       clock: new ManualClock(),
       backend: client(gw),
     });
@@ -179,8 +181,13 @@ describe("BackendPolicyClient", () => {
       ok: false,
       code: "policy_unavailable",
     });
-    const req = { toolName: "danger" } as Any;
-    expect(await policy.authorizeTool(req)).toMatchObject({ decision: "requireApproval" });
+    // The local manifest flag and local TTL are ignored: the backend decides.
+    gw.scriptAuthorize({ decision: "requireApproval", reason: "r", approvalTtlMs: null });
+    expect(await policy.authorizeTool(toolReq({ toolName: "danger" }))).toEqual({
+      decision: "requireApproval",
+      reason: "r",
+    });
+    expect(gw.authorizeRequests()).toHaveLength(1);
   });
 });
 
@@ -660,6 +667,424 @@ describe("UsageReporter", () => {
     await run(gw, rep);
     await waitFor(() => true);
     expect(gw.usageRequests()).toHaveLength(0);
+  });
+});
+
+// ---- tool authorization (U5) ----------------------------------------------------------
+
+function toolReq(over: Record<string, unknown> = {}): Any {
+  return {
+    conversation: CONVERSATION,
+    agent: {},
+    runId: "run-1",
+    toolCallId: "c1",
+    toolName: "deploy",
+    toolTaskId: "task-1",
+    toolSource: "gateway",
+    taint: { tainted: false, total: 0, sources: [] },
+    arguments: { service: "api" },
+    replay: "unsafe",
+    ...over,
+  };
+}
+
+const READ = {
+  describe: (n: string) => (n === "lookup" ? { sideEffect: "none" as const } : undefined),
+};
+
+describe("BackendPolicyClient.authorizeTool", () => {
+  it("allows a manifest read and an internal native tool with no round trip", async () => {
+    const gw = await start();
+    const c = client(gw);
+    expect(await c.authorizeTool(toolReq({ toolName: "lookup" }), READ)).toEqual({
+      decision: "allow",
+    });
+    for (const name of ["update_todo", "complete_task", "present_plan"]) {
+      expect(
+        await c.authorizeTool(toolReq({ toolName: name, toolSource: "native" }), READ),
+      ).toEqual({
+        decision: "allow",
+      });
+    }
+    expect(gw.authorizeRequests()).toHaveLength(0);
+  });
+
+  it("allows a subagent-spawn tool (flagged internal) with no round trip", async () => {
+    const gw = await start();
+    const v = await client(gw).authorizeTool(
+      toolReq({ toolName: "research_worker", toolSource: "native", toolInternal: true }),
+      READ,
+    );
+    expect(v).toEqual({ decision: "allow" });
+    expect(gw.authorizeRequests()).toHaveLength(0);
+  });
+
+  it("sends ask_user so the question is indexed", async () => {
+    const gw = await start();
+    const v = await client(gw).authorizeTool(
+      toolReq({ toolName: "ask_user", toolSource: "native", arguments: { question: "which?" } }),
+      READ,
+    );
+    expect(v).toEqual({ decision: "allow" });
+    expect(gw.authorizeRequests()).toHaveLength(1);
+    expect(gw.authorizeRequests()[0]?.body).toMatchObject({
+      toolName: "ask_user",
+      toolSource: "native",
+    });
+  });
+
+  it("sends a non-allowlisted native tool as native and honours the answer", async () => {
+    const gw = await start();
+    gw.scriptAuthorize({
+      decision: "requireApproval",
+      reason: "not allowlisted",
+      approvalTtlMs: 1000,
+    });
+    const v = await client(gw, { clock: new ManualClock(5_000) }).authorizeTool(
+      toolReq({ toolName: "mystery", toolSource: "native" }),
+      READ,
+    );
+    expect(v).toEqual({ decision: "requireApproval", reason: "not allowlisted", expiresAt: 6_000 });
+    expect(gw.authorizeRequests()[0]?.body).toMatchObject({ toolSource: "native" });
+  });
+
+  it("posts the KTD2 body with redacted arguments and the hash of the unredacted ones", async () => {
+    const gw = await start();
+    const args = {
+      code: "print(1)",
+      api_key: "sk-live-abcdefghijklmnop",
+      nested: { password: "hunter2hunter2" },
+    };
+    const conv = { ...CONVERSATION, id: "child", rootId: "conv-1", agentRole: "research_worker" };
+    const taint = {
+      tainted: true,
+      total: 1,
+      sources: [{ kind: "tool_result", name: "browse_url", ref: "c0", at: 7 }],
+    };
+    await client(gw).authorizeTool(toolReq({ arguments: args, conversation: conv, taint }), {
+      describe: () => ({ sideEffect: "write" }),
+    });
+    const [r] = gw.authorizeRequests();
+    expect(r?.headers.authorization).toBe(`Bearer ${gw.serviceToken}`);
+    const body = r?.body as Any;
+    expect(body).toMatchObject({
+      requestId: "run-1:c1",
+      tenantId: "t1",
+      projectId: "p1",
+      conversationId: "conv-1",
+      engineConversationId: "child",
+      agentRole: "research_worker",
+      runId: "run-1",
+      toolCallId: "c1",
+      toolTaskId: "task-1",
+      toolName: "deploy",
+      toolSource: "gateway",
+      sideEffect: "write",
+      replay: "unsafe",
+      taint: { tainted: true, sources: taint.sources },
+    });
+    const text = JSON.stringify(body);
+    expect(text).not.toContain("sk-live-abcdefghijklmnop");
+    expect(text).not.toContain("hunter2hunter2");
+    expect(body.arguments.code).toBe("print(1)");
+    expect(body.argumentsHash).toBe(argsHash(args));
+    expect(body.argumentsHash).not.toBe(argsHash(body.arguments));
+  });
+
+  it("maps allow, block and requireApproval (expiry from the backend TTL on the injected clock)", async () => {
+    const gw = await start();
+    const clock = new ManualClock(1_000);
+    const c = client(gw, { clock });
+    gw.scriptAuthorize(
+      { decision: "allow" },
+      { decision: "block", code: "tainted_external_write", reason: "Blocked: rule of two" },
+      { decision: "requireApproval", reason: "needs an admin", approvalTtlMs: 604_800_000 },
+      { decision: "requireApproval", reason: "no expiry", approvalTtlMs: null },
+    );
+    const call = (n: number) => c.authorizeTool(toolReq({ toolCallId: `c${n}` }), READ);
+    expect(await call(1)).toEqual({ decision: "allow" });
+    expect(await call(2)).toEqual({ decision: "block", reason: "Blocked: rule of two" });
+    expect(await call(3)).toEqual({
+      decision: "requireApproval",
+      reason: "needs an admin",
+      expiresAt: 1_000 + 604_800_000,
+    });
+    expect(await call(4)).toEqual({ decision: "requireApproval", reason: "no expiry" });
+  });
+
+  it("a repeated call is answered the same and the request id is runId:toolCallId", async () => {
+    const gw = await start();
+    gw.scriptAuthorize({ decision: "requireApproval", reason: "r", approvalTtlMs: 5 });
+    const c = client(gw, { clock: new ManualClock(10) });
+    const a = await c.authorizeTool(toolReq(), READ);
+    const b = await c.authorizeTool(toolReq(), READ);
+    expect(b).toEqual(a);
+    expect(gw.authorizeRequests().map((r) => (r.body as Any).requestId)).toEqual([
+      "run-1:c1",
+      "run-1:c1",
+    ]);
+  });
+
+  it("blocks with policy_unavailable once the retry budget is spent, with no local fallback", async () => {
+    const gw = await start();
+    gw.defaultAuthorize = { status: 500 };
+    const lines: Array<[string, Any]> = [];
+    const c = client(gw, {
+      ...virtualTime(),
+      retryMs: 2000,
+      baseDelayMs: 100,
+      log: (e, f) => lines.push([e, f]),
+    });
+    expect(await c.authorizeTool(toolReq(), READ)).toEqual({
+      decision: "block",
+      reason: "policy_unavailable",
+    });
+    expect(gw.authorizeRequests().length).toBeGreaterThan(1);
+    expect(lines.some(([e]) => e === "policy_retry")).toBe(true);
+  });
+
+  it("retries 5xx twice then allows, with the same request id and body each time", async () => {
+    const gw = await start();
+    gw.scriptAuthorize({ status: 500 }, { status: 503 }, { decision: "allow" });
+    const lines: Array<[string, Any]> = [];
+    const c = client(gw, { ...virtualTime(), retryMs: 60_000, log: (e, f) => lines.push([e, f]) });
+    expect(await c.authorizeTool(toolReq(), READ)).toEqual({ decision: "allow" });
+    const posts = gw.authorizeRequests();
+    expect(posts).toHaveLength(3);
+    expect(new Set(posts.map((p) => JSON.stringify(p.body))).size).toBe(1);
+    expect(lines.filter(([e]) => e === "policy_retry")).toHaveLength(2);
+    expect(lines.find(([e]) => e === "policy_retry")?.[1]).toMatchObject({ requestId: "run-1:c1" });
+  });
+
+  it("retries a dropped connection and a timeout", async () => {
+    const gw = await start();
+    gw.scriptAuthorize({ reset: true }, { hang: true }, { decision: "allow" });
+    const c = client(gw, { ...virtualTime(), retryMs: 60_000, timeoutMs: 50 });
+    expect(await c.authorizeTool(toolReq(), READ)).toEqual({ decision: "allow" });
+    expect(gw.authorizeRequests()).toHaveLength(3);
+  });
+
+  it("blocks at once on a 403 or 401, without retry", async () => {
+    for (const status of [401, 403, 404, 422]) {
+      const gw = await start();
+      gw.scriptAuthorize({ status });
+      const c = client(gw, { ...virtualTime(), retryMs: 60_000 });
+      expect(await c.authorizeTool(toolReq(), READ)).toEqual({
+        decision: "block",
+        reason: "policy_unavailable",
+      });
+      expect(gw.authorizeRequests()).toHaveLength(1);
+    }
+  });
+
+  it("blocks at once on a malformed body, without retry", async () => {
+    const bodies: Any[] = [
+      { nonsense: true },
+      { decision: "maybe" },
+      { decision: "requireApproval", approvalTtlMs: "soon" },
+      { decision: "requireApproval", reason: "r" },
+      [],
+    ];
+    for (const body of bodies) {
+      const gw = await start();
+      gw.scriptAuthorize({ status: 200, body });
+      const c = client(gw, { ...virtualTime(), retryMs: 60_000 });
+      expect(await c.authorizeTool(toolReq(), READ)).toEqual({
+        decision: "block",
+        reason: "policy_unavailable",
+      });
+      expect(gw.authorizeRequests()).toHaveLength(1);
+    }
+  });
+
+  it("never logs arguments or response bodies", async () => {
+    const gw = await start();
+    gw.scriptAuthorize(
+      { status: 500, body: { detail: "body-secret-xyz" } },
+      { status: 200, body: { x: "body-secret-xyz" } },
+    );
+    const lines: string[] = [];
+    const c = client(gw, {
+      ...virtualTime(),
+      retryMs: 60_000,
+      log: (e, f) => lines.push(JSON.stringify({ e, f })),
+    });
+    await c.authorizeTool(toolReq({ arguments: { code: "arg-secret-abc" } }), READ);
+    expect(lines.join("\n")).not.toContain("body-secret-xyz");
+    expect(lines.join("\n")).not.toContain("arg-secret-abc");
+  });
+});
+
+describe("tool authorization through the harness", () => {
+  const TTL = 604_800_000;
+
+  async function setup(
+    gw: FakeGateway,
+    retry: Partial<ConstructorParameters<typeof BackendPolicyClient>[0]> = {},
+  ) {
+    const fx = await memoryBackend.fixture();
+    const toolset = await createGatewayTools({
+      baseUrl: gw.baseUrl,
+      serviceToken: gw.serviceToken,
+      fence: () => null,
+    });
+    const policy = workerHostPolicy({
+      modelDefaults: {
+        provider: "fake",
+        model: "m",
+        summaryModel: "m",
+        maxTokens: 10,
+        apiKey: () => "k",
+      },
+      gateway: toolset,
+      approvalTtlMs: 1,
+      clock: fx.clock,
+      backend: client(gw, { clock: fx.clock, ...virtualTime(), retryMs: 60_000, ...retry }),
+    });
+    const open = () => fx.open({ tools: toolset.tools, policy });
+    return { fx, open };
+  }
+
+  async function gatewayWithDeploy(): Promise<FakeGateway> {
+    const gw = await FakeGateway.start([
+      {
+        name: "deploy",
+        description: "Deploy",
+        parameters: { type: "object", properties: { service: { type: "string" } } },
+        sideEffect: "write",
+        timeoutMs: 5000,
+      },
+    ]);
+    gateways.push(gw);
+    return gw;
+  }
+
+  const AGENT = { systemPrompt: "s", tools: ["deploy"] };
+  const entries = async (conv: Any) =>
+    (await conv.entries()).filter((e: Any) => e.kind === "tool_result").map((e: Any) => e.payload);
+
+  async function converse(w: Any) {
+    const conv = await w.harness.createConversation({
+      tenantId: "t1",
+      projectId: "p1",
+      agent: AGENT,
+    });
+    return { conv, sub: await conv.submit({ text: "deploy" }) };
+  }
+
+  it("backend allow: the write tool runs once", async () => {
+    const gw = await gatewayWithDeploy();
+    const { fx, open } = await setup(gw);
+    fx.provider.enqueue(fakeToolCall("deploy", { service: "api" }, { id: "c1" }), fakeText("done"));
+    const w = await open();
+    const { sub } = await converse(w);
+    expect((await sub.wait()).status).toBe("done");
+    expect(gw.effects("deploy")).toBe(1);
+    expect(gw.authorizeRequests()).toHaveLength(1);
+    await w.crash();
+  });
+
+  it("requireApproval with a TTL: expiresAt is now + TTL and the task waits on approval", async () => {
+    const gw = await gatewayWithDeploy();
+    gw.defaultAuthorize = {
+      decision: "requireApproval",
+      reason: "needs admin",
+      approvalTtlMs: TTL,
+    };
+    const { fx, open } = await setup(gw);
+    fx.provider.enqueue(fakeToolCall("deploy", { service: "api" }, { id: "c1" }));
+    const w = await open();
+    const { conv } = await converse(w);
+    await waitFor(async () => (await w.harness.approvals(conv.id)).length > 0);
+    await w.harness.waitForIdle();
+    const [item] = await w.harness.approvals(conv.id);
+    expect(item).toMatchObject({
+      status: "pending",
+      reason: "needs admin",
+      expiresAt: fx.clock.now() + TTL,
+    });
+    const task = w.harness.runtime.tasks().find((t: Any) => t.kind === "agent.tool");
+    expect(task?.status).toBe("waiting");
+    expect(task?.waiting?.signal).toBe("approval");
+    expect(gw.effects("deploy")).toBe(0);
+    await w.crash();
+  });
+
+  it("requireApproval with a null TTL: the item never expires", async () => {
+    const gw = await gatewayWithDeploy();
+    gw.defaultAuthorize = { decision: "requireApproval", approvalTtlMs: null };
+    const { fx, open } = await setup(gw);
+    fx.provider.enqueue(fakeToolCall("deploy", { service: "api" }, { id: "c1" }));
+    const w = await open();
+    const { conv } = await converse(w);
+    await waitFor(async () => (await w.harness.approvals(conv.id)).length > 0);
+    await w.harness.waitForIdle();
+    expect((await w.harness.approvals(conv.id))[0]?.expiresAt).toBeNull();
+    fx.clock.advance(10 * TTL);
+    await w.harness.waitForIdle();
+    expect((await w.harness.approvals(conv.id))[0]?.status).toBe("pending");
+    await w.crash();
+  });
+
+  it("backend block: the tool result is blocked and carries the backend reason", async () => {
+    const gw = await gatewayWithDeploy();
+    gw.defaultAuthorize = { decision: "block", code: "x", reason: "Blocked: rule of two" };
+    const { fx, open } = await setup(gw);
+    fx.provider.enqueue(fakeToolCall("deploy", { service: "api" }, { id: "c1" }), fakeText("ok"));
+    const w = await open();
+    const { conv, sub } = await converse(w);
+    await sub.wait();
+    const [r] = await entries(conv);
+    expect(r.status).toBe("blocked");
+    expect(r.content).toContain("Blocked: rule of two");
+    expect(gw.effects("deploy")).toBe(0);
+    await w.crash();
+  });
+
+  it("backend down beyond the budget: blocked with policy_unavailable, nothing ran", async () => {
+    const gw = await gatewayWithDeploy();
+    gw.defaultAuthorize = { status: 503 };
+    const { fx, open } = await setup(gw, { retryMs: 2000 });
+    fx.provider.enqueue(fakeToolCall("deploy", { service: "api" }, { id: "c1" }), fakeText("ok"));
+    const w = await open();
+    const { conv, sub } = await converse(w);
+    await sub.wait();
+    const [r] = await entries(conv);
+    expect(r.status).toBe("blocked");
+    expect(r.content).toContain("policy_unavailable");
+    expect(gw.effects("deploy")).toBe(0);
+    await w.crash();
+  });
+
+  it("backend 5xx twice then allow: one effective call", async () => {
+    const gw = await gatewayWithDeploy();
+    gw.scriptAuthorize({ status: 500 }, { status: 500 }, { decision: "allow" });
+    const { fx, open } = await setup(gw);
+    fx.provider.enqueue(fakeToolCall("deploy", { service: "api" }, { id: "c1" }), fakeText("ok"));
+    const w = await open();
+    const { sub } = await converse(w);
+    await sub.wait();
+    expect(gw.effects("deploy")).toBe(1);
+    expect(gw.authorizeRequests()).toHaveLength(3);
+    await w.crash();
+  });
+
+  it("a reopen mid-wait does not call authorize again for a task already waiting", async () => {
+    const gw = await gatewayWithDeploy();
+    gw.defaultAuthorize = { decision: "requireApproval", approvalTtlMs: TTL };
+    const { fx, open } = await setup(gw);
+    fx.provider.enqueue(fakeToolCall("deploy", { service: "api" }, { id: "c1" }));
+    const w1 = await open();
+    const { conv } = await converse(w1);
+    await waitFor(async () => (await w1.harness.approvals(conv.id)).length > 0);
+    await w1.harness.waitForIdle();
+    expect(gw.authorizeRequests()).toHaveLength(1);
+    await w1.crash();
+    const w2 = await open();
+    await w2.harness.waitForIdle();
+    expect((await w2.harness.approvals(conv.id))[0]?.status).toBe("pending");
+    expect(gw.authorizeRequests()).toHaveLength(1);
+    await w2.crash();
   });
 });
 

@@ -65,6 +65,40 @@ export interface ApprovalsState {
   items: ApprovalItem[];
 }
 
+export interface QuestionOptionItem {
+  id: string;
+  label: string;
+  description: string | null;
+}
+
+export interface QuestionAnswerRecord {
+  optionIds: string[];
+  text: string | null;
+  principal: string;
+  answeredAt: number;
+}
+
+/** An `ask_user` question (engine/src/agent/questions.ts `QuestionItem`). */
+export interface QuestionItem {
+  id: string;
+  toolTaskId: string;
+  runId: string;
+  toolCallId: string;
+  question: string;
+  options: QuestionOptionItem[];
+  multiSelect: boolean;
+  allowFreeText: boolean;
+  requestedAt: number;
+  expiresAt: number | null;
+  status: 'pending' | 'answered' | 'expired' | 'cancelled';
+  answer: QuestionAnswerRecord | null;
+  closedAt: number | null;
+}
+
+export interface QuestionsState {
+  items: QuestionItem[];
+}
+
 export interface UsageTally {
   requests: number;
   inputTokens: number;
@@ -105,11 +139,32 @@ export interface SubagentView {
   usage: UsageTally;
 }
 
+/** A host task as the view shows it (engine/src/watch/view.ts `TaskView`): workflow runs and their nodes. */
+export interface TaskView {
+  kind: string;
+  /** The owning task, or null for a root task of the conversation. */
+  parentId: string | null;
+  status: 'pending' | 'running' | 'waiting' | 'done' | 'aborted' | 'faulted';
+  phase: string;
+  label?: string;
+  attempt?: number;
+  /** A workflow run's `{ nodeId: status }` summary (success, failed, blocked, skipped). */
+  nodes?: { [nodeId: string]: string };
+  /** ISO deadline of a waiting task that has one. */
+  waitUntil?: string;
+  startedAt: string;
+  endedAt?: string;
+  /** The abort reason or fault message of an aborted or faulted task. */
+  error?: string;
+}
+
 export interface ConversationView {
   entries: EntryRecord[];
   live: LiveState;
   inbox: InboxState;
   approvals: ApprovalsState;
+  /** Always present after parsing; `{ items: [] }` when an older engine omits it. */
+  questions: QuestionsState;
   usage: UsageTotals;
   agent: { [key: string]: JsonValue };
   toolOutput: { [toolTaskId: string]: ToolOutputState };
@@ -117,6 +172,8 @@ export interface ConversationView {
   run?: RunView;
   /** Subagent children by the parent's tool task id. Absent on older engines. */
   subagents?: { [toolTaskId: string]: SubagentView };
+  /** Host tasks by task id (workflow runs and nodes). Absent on older engines. */
+  tasks?: { [taskId: string]: TaskView };
 }
 
 export interface RunView {
@@ -195,8 +252,16 @@ export function parseConversationView(raw: unknown): ConversationView {
   if ('subagents' in raw && raw.subagents !== undefined && (!isObj(raw.subagents) || !isJson(raw.subagents))) {
     throw new WireError('view.subagents');
   }
+  if ('tasks' in raw && raw.tasks !== undefined && (!isObj(raw.tasks) || !isJson(raw.tasks))) {
+    throw new WireError('view.tasks');
+  }
   // Skeleton verified above; the engine's zod schemas own the leaves.
-  return raw as unknown as ConversationView;
+  if ('questions' in raw && raw.questions !== undefined) {
+    if (!isObj(raw.questions) || !Array.isArray(raw.questions.items)) throw new WireError('view.questions');
+    return raw as unknown as ConversationView;
+  }
+  // Older engines have no questions document.
+  return { ...raw, questions: { items: [] } } as unknown as ConversationView;
 }
 
 export function parseWatchFrame(raw: unknown): WatchFrame {

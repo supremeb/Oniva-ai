@@ -27,7 +27,8 @@
       "sideEffect": "write",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     },
     {
       "name": "dw_get_learnings",
@@ -61,7 +62,8 @@
       "sideEffect": "none",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": true
     },
     {
       "name": "dw_get_report",
@@ -74,7 +76,8 @@
       "sideEffect": "none",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": true
     },
     {
       "name": "dw_record_reflection",
@@ -139,7 +142,8 @@
       "sideEffect": "write",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     },
     {
       "name": "dw_save_learnings",
@@ -166,7 +170,8 @@
       "sideEffect": "write",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     },
     {
       "name": "dw_start_round",
@@ -193,7 +198,8 @@
       "sideEffect": "write",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     },
     {
       "name": "dw_write_section",
@@ -216,7 +222,8 @@
       "sideEffect": "write",
       "idempotent": true,
       "timeoutMs": 30000,
-      "requiresApproval": false
+      "requiresApproval": false,
+      "untrustedOutput": false
     }
   ]
 }

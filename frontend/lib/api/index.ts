@@ -253,3 +253,4 @@ export * from './artifacts';
 export * from './compliance';
 export * from './knowledge-bases';
 export * from './schedules';
+export * from './inbox';

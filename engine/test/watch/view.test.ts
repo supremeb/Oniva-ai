@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { COMPACTION_TASK_KIND, compactionDoc } from "../../src/agent/compaction.js";
 import { GENERATION_TASK_KIND } from "../../src/agent/generation.js";
 import { toolOutputDoc } from "../../src/agent/progress.js";
+import { questionsDoc } from "../../src/agent/questions.js";
 import { TOOL_TASK_KIND } from "../../src/agent/tool-task.js";
 import { newId } from "../../src/core/ids.js";
 import type { CommitEvent } from "../../src/session/publish.js";
@@ -288,5 +289,82 @@ describe("view run", () => {
     const g = task("other", GENERATION_TASK_KIND);
     expect(applyCommitToView(state, conversationId, ev({ createTasks: [g] }))).toEqual([]);
     expect(state.view.run).toEqual({ active: false });
+  });
+});
+
+describe("view questions", () => {
+  const item = (n: number, status: "pending" | "answered" = "pending") => ({
+    id: `ques_${n}`,
+    toolTaskId: `task_${n}`,
+    runId: "r",
+    toolCallId: `c${n}`,
+    question: "Which colour?",
+    options: [],
+    multiSelect: false,
+    allowFreeText: true,
+    requestedAt: 1,
+    expiresAt: null,
+    status,
+    answer: null,
+    closedAt: null,
+  });
+  const change = (conversationId: string, before: unknown, after: unknown): CommitEvent => ({
+    sessionId: "sess-q",
+    seq: 1,
+    batch: {},
+    documents: [{ kind: questionsDoc.kind, scopeId: conversationId, before, after }] as never,
+  });
+
+  async function bare() {
+    const storage = await new MemoryStorageProvider().open("sess-q");
+    const conversationId = newId("conversation");
+    await storage.commit(
+      {
+        createConversations: [
+          { id: conversationId, tenantId: "t", projectId: "p", ownerTaskId: null, createdAt: 1 },
+        ],
+      },
+      null,
+    );
+    const { session } = sessionOver(storage, true);
+    return { session, conversationId };
+  }
+
+  it("is an empty member when the conversation has no questions document", async () => {
+    const { session, conversationId } = await bare();
+    const state = await loadViewState(session, conversationId);
+    expect(state.view.questions).toEqual({ items: [] });
+  });
+
+  it("patches /questions/items/<n> when a question opens and when it is answered", async () => {
+    const { session, conversationId } = await bare();
+    const state = await loadViewState(session, conversationId);
+    const opened = applyCommitToView(
+      state,
+      conversationId,
+      change(conversationId, null, { items: [item(0)] }),
+    );
+    expect(opened).toEqual([{ op: "add", path: "/questions/items/0", value: item(0) }]);
+    const answered = applyCommitToView(
+      state,
+      conversationId,
+      change(conversationId, { items: [item(0)] }, { items: [item(0, "answered")] }),
+    );
+    expect(answered).toEqual([
+      { op: "replace", path: "/questions/items/0/status", value: "answered" },
+    ]);
+    expect(state.view.questions.items[0]?.status).toBe("answered");
+  });
+
+  it("ignores another conversation's questions", async () => {
+    const { session, conversationId } = await bare();
+    const state = await loadViewState(session, conversationId);
+    const res = applyCommitToView(
+      state,
+      conversationId,
+      change("other", null, { items: [item(0)] }),
+    );
+    expect(res).toEqual([]);
+    expect(state.view.questions.items).toEqual([]);
   });
 });

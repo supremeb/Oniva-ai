@@ -5,7 +5,6 @@ Provides endpoints for:
 - Basic audit event queries (legacy)
 - Cryptographically-signed compliance audit logs
 - Workflow replay for compliance review
-- Human-in-loop review queue
 
 Part of Phase 3: State Machine & Compliance
 """
@@ -29,14 +28,9 @@ from app.config import get_settings
 
 # Phase 3 imports
 from app.services.audit_logger import get_audit_logger
+from app.services.audit_chain import AuditChain
 from app.services.workflow_replay import WorkflowReplayService
-from app.services.review_queue import (
-    ReviewQueueService,
-    ReviewTicketCreate,
-    ReviewDecisionInput,
-    ReviewTicketResponse,
-    ReviewQueueStats,
-)
+from app.models.tool_approval import ToolApproval
 
 settings = get_settings()
 
@@ -222,6 +216,20 @@ class VerifyEntryResponse(BaseModel):
     verified_at: datetime
 
 
+class AuditChainBreak(BaseModel):
+    """First broken link in a tenant's audit chain."""
+    seq: int
+    reason: str
+
+
+class AuditChainVerifyResponse(BaseModel):
+    """Result of verifying a tenant's entire signed audit chain."""
+    ok: bool
+    checked: int
+    legacy_unchained: int
+    first_break: Optional[AuditChainBreak] = None
+
+
 class WorkflowReplayResponse(BaseModel):
     """Response for workflow replay."""
     workflow_id: str
@@ -252,27 +260,6 @@ class WorkflowIntegrityResponse(BaseModel):
     all_signatures_valid: bool
     issues: List[Dict[str, Any]]
     verified_at: str
-
-
-class CreateReviewTicketRequest(BaseModel):
-    """Request to create a review ticket."""
-    title: str
-    description: str
-    risk_level: str = Field(pattern="^(low|medium|high|critical)$")
-    priority: str = Field(default="normal", pattern="^(low|normal|high|urgent)$")
-    review_type: str = Field(pattern="^(compliance|decision|output|data_access)$")
-    review_data: Dict[str, Any] = Field(default_factory=dict)
-    workflow_id: Optional[str] = None
-    session_id: Optional[str] = None
-    agent_id: str
-    audit_log_id: Optional[str] = None
-    sla_hours: Optional[int] = None
-
-
-class SubmitReviewDecisionRequest(BaseModel):
-    """Request to submit a review decision."""
-    decision: str = Field(pattern="^(approved|rejected|escalated)$")
-    notes: Optional[str] = None
 
 
 # =============================================================================
@@ -385,6 +372,21 @@ async def verify_compliance_audit_entry(
     )
 
 
+@router.get("/chain/verify", response_model=AuditChainVerifyResponse)
+async def verify_audit_chain(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    """
+    Verify the tenant's whole signed audit chain.
+
+    Recomputes every entry's hash and signature and checks the links between them. Entries
+    written before the chain existed are reported as ``legacy_unchained`` and never rewritten.
+    """
+    chain = AuditChain(db)
+    return AuditChainVerifyResponse(**await chain.verify_chain(tenant_id))
+
+
 # =============================================================================
 # Phase 3: Workflow Replay Endpoints
 # =============================================================================
@@ -487,98 +489,6 @@ async def verify_workflow_integrity(
     return WorkflowIntegrityResponse(**result)
 
 
-# =============================================================================
-# Phase 3: Human Review Queue Endpoints
-# =============================================================================
-
-@router.get("/reviews", response_model=List[ReviewTicketResponse])
-async def list_review_tickets(
-    status_filter: Optional[str] = Query(None, alias="status"),
-    priority: Optional[str] = None,
-    risk_level: Optional[str] = None,
-    assigned_to: Optional[str] = None,
-    workflow_id: Optional[str] = None,
-    include_completed: bool = False,
-    limit: int = Query(default=50, le=200),
-    offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
-):
-    """
-    List human-in-loop review tickets with filters.
-
-    By default returns only pending/in-progress tickets.
-    """
-    review_service = ReviewQueueService(db)
-
-    status_list = [status_filter] if status_filter else None
-    priority_list = [priority] if priority else None
-    risk_list = [risk_level] if risk_level else None
-
-    tickets = await review_service.list_tickets(
-        tenant_id=str(tenant_id),
-        status=status_list,
-        priority=priority_list,
-        risk_level=risk_list,
-        assigned_to=assigned_to,
-        workflow_id=workflow_id,
-        include_completed=include_completed,
-        limit=limit,
-        offset=offset,
-    )
-
-    return tickets
-
-
-@router.post("/reviews", response_model=ReviewTicketResponse, status_code=201)
-async def create_review_ticket(
-    request: CreateReviewTicketRequest,
-    db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
-    user_id: str = Depends(get_current_user_id),
-    user: AuthUser = Depends(require_role("owner", "admin", "member")),
-):
-    """
-    Create a new human review ticket.
-
-    Used by agents when they need human approval for high-risk decisions.
-    """
-    review_service = ReviewQueueService(db)
-
-    ticket = await review_service.create_ticket(
-        tenant_id=str(tenant_id),
-        data=ReviewTicketCreate(
-            title=request.title,
-            description=request.description,
-            risk_level=request.risk_level,
-            priority=request.priority,
-            review_type=request.review_type,
-            review_data=request.review_data,
-            workflow_id=request.workflow_id,
-            session_id=request.session_id,
-            agent_id=request.agent_id,
-            audit_log_id=request.audit_log_id,
-            sla_hours=request.sla_hours,
-        ),
-        requested_by=str(user_id),
-    )
-
-    return ticket
-
-
-@router.get("/reviews/stats", response_model=ReviewQueueStats)
-async def get_review_queue_statistics(
-    db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
-):
-    """Get statistics for the human review queue."""
-    review_service = ReviewQueueService(db)
-
-    stats = await review_service.get_queue_stats(str(tenant_id))
-
-    return stats
-
-
 class ComplianceStatsResponse(BaseModel):
     """Aggregated compliance statistics for the dashboard."""
     total_audit_logs: int
@@ -600,10 +510,14 @@ async def get_compliance_stats(
     and chain integrity into a single response.
     """
     audit_logger = get_audit_logger(db)
-    review_service = ReviewQueueService(db)
 
-    # Get review queue stats
-    queue_stats = await review_service.get_queue_stats(str(tenant_id))
+    # Open review items now live in the approvals ledger (kind='review').
+    pending_reviews = (await db.execute(
+        select(func.count()).select_from(ToolApproval).where(
+            ToolApproval.kind == "review",
+            ToolApproval.status.in_(("pending", "deciding")),
+        )
+    )).scalar() or 0
 
     # Get audit log counts
     from app.models.compliance_audit_log import ComplianceAuditLog as ComplianceAuditLogModel
@@ -646,9 +560,9 @@ async def get_compliance_stats(
 
     return ComplianceStatsResponse(
         total_audit_logs=total_audit_logs,
-        pending_reviews=queue_stats.total_pending + queue_stats.total_in_review,
+        pending_reviews=pending_reviews,
         chain_integrity=chain_integrity,
-        risk_distribution=queue_stats.by_risk_level,
+        risk_distribution={},
         recent_activity={
             "last_24h": last_24h,
             "last_7d": last_7d,
@@ -657,108 +571,8 @@ async def get_compliance_stats(
     )
 
 
-@router.get("/reviews/{ticket_id}", response_model=ReviewTicketResponse)
-async def get_review_ticket_by_id(
-    ticket_id: str,
-    db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
-):
-    """Get a single review ticket by ID."""
-    review_service = ReviewQueueService(db)
-
-    ticket = await review_service.get_ticket(ticket_id, str(tenant_id))
-
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Review ticket not found")
-
-    return ticket
-
-
-@router.post("/reviews/{ticket_id}/assign", response_model=ReviewTicketResponse)
-async def assign_review_ticket(
-    ticket_id: str,
-    assignee_id: str = Query(..., description="User ID to assign ticket to"),
-    db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
-    user: AuthUser = Depends(require_role("owner", "admin")),
-):
-    """Assign a review ticket to a user."""
-    review_service = ReviewQueueService(db)
-
-    ticket = await review_service.assign_ticket(ticket_id, str(tenant_id), assignee_id)
-
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Review ticket not found")
-
-    return ticket
-
-
-@router.post("/reviews/{ticket_id}/start", response_model=ReviewTicketResponse)
-async def start_ticket_review(
-    ticket_id: str,
-    db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
-    user_id: str = Depends(get_current_user_id),
-    user: AuthUser = Depends(require_role("owner", "admin", "member")),
-):
-    """Mark a ticket as being actively reviewed."""
-    review_service = ReviewQueueService(db)
-
-    ticket = await review_service.start_review(ticket_id, str(tenant_id), str(user_id))
-
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Review ticket not found")
-
-    return ticket
-
-
-@router.post("/reviews/{ticket_id}/decision", response_model=ReviewTicketResponse)
-async def submit_ticket_review_decision(
-    ticket_id: str,
-    request: SubmitReviewDecisionRequest,
-    db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
-    user_id: str = Depends(get_current_user_id),
-    user: AuthUser = Depends(require_role("owner", "admin")),
-):
-    """Submit a review decision (approve, reject, or escalate)."""
-    review_service = ReviewQueueService(db)
-
-    ticket = await review_service.submit_decision(
-        ticket_id=ticket_id,
-        tenant_id=str(tenant_id),
-        reviewer_id=str(user_id),
-        decision=ReviewDecisionInput(
-            decision=request.decision,
-            notes=request.notes,
-        ),
-    )
-
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Review ticket not found")
-
-    return ticket
-
-
-@router.post("/reviews/check-sla", response_model=List[ReviewTicketResponse])
-async def check_review_sla_breaches(
-    db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
-):
-    """
-    Check for and update SLA breaches.
-
-    Returns list of tickets that have breached their SLA.
-    """
-    review_service = ReviewQueueService(db)
-
-    breached = await review_service.check_sla_breaches(str(tenant_id))
-
-    return breached
-
-
 # =============================================================================
-# Generic event lookup (must be LAST to avoid catching /reviews, /compliance, etc.)
+# Generic event lookup (must be LAST to avoid catching /compliance, etc.)
 # =============================================================================
 
 @router.get("/{event_id}", response_model=AuditEventResponse)

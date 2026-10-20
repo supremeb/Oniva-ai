@@ -96,8 +96,15 @@ class FakeDB:
     async def flush(self):
         pass
 
-    async def execute(self, *a, **k):  # touch / title updates after a submit
-        return None
+    async def execute(self, *a, **k):  # touch / title updates after a submit; empty approval ledger
+        class _Empty:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return []
+
+        return _Empty()
 
 
 class Env:

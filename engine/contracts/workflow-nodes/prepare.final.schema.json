@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prepare.final.schema.json",
+  "title": "Workflow node prepare result: final",
+  "description": "The node's prepare phase finished in the backend; nothing is left to run.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "kind", "status", "output", "tokensUsed"],
+  "properties": {
+    "contractVersion": { "const": 1 },
+    "kind": { "const": "final" },
+    "status": { "enum": ["success", "failed", "blocked", "skipped"] },
+    "output": {},
+    "error": {},
+    "tokensUsed": { "type": "integer", "minimum": 0 },
+    "classification": { "type": "string" },
+    "selectedHandles": { "type": "array", "items": { "type": "string" } }
+  }
+}

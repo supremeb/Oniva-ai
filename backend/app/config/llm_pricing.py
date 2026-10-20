@@ -173,3 +173,39 @@ def calculate_cost_with_cache(
         + cache_read_tokens * cache_read
         + cache_write_tokens * cache_write
     ) / 1_000_000
+
+
+# Maximum input tokens (context window) per model. Conservative when unknown.
+_MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
+    "gpt-4": 8_192,
+    "gpt-4-turbo": 128_000,
+    "gpt-4o": 128_000,
+    "gpt-4o-mini": 128_000,
+    "openai/gpt-4o": 128_000,
+    "openai/gpt-4o-mini": 128_000,
+    "claude-3-5-sonnet": 200_000,
+    "claude-3-opus": 200_000,
+    "claude-3-haiku": 200_000,
+    "claude-sonnet-4-5": 200_000,
+    "claude-haiku-4-5": 200_000,
+    "claude-opus-4-5": 200_000,
+    "claude-opus-5-5": 200_000,
+    "claude-sonnet-5-5": 200_000,
+    "claude-haiku-5-5": 200_000,
+    "deepseek/deepseek-v4.1-flash": 128_000,
+}
+
+# The window assumed for a model the table does not know.
+DEFAULT_CONTEXT_WINDOW = 128_000
+
+
+def context_window_for(model: str) -> int:
+    """Maximum input tokens for `model`, or a conservative default when unknown."""
+    parts = model.split("/")
+    # Try the full id, then each progressively shorter suffix (so a doubly
+    # prefixed OpenRouter id like "openrouter/anthropic/claude-opus-5.5" resolves).
+    for start in range(len(parts)):
+        candidate = re.sub(r"(?<=\d)\.(?=\d)", "-", "/".join(parts[start:]))
+        if candidate in _MODEL_CONTEXT_WINDOWS:
+            return _MODEL_CONTEXT_WINDOWS[candidate]
+    return DEFAULT_CONTEXT_WINDOW

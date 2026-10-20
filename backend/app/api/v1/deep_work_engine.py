@@ -326,6 +326,8 @@ async def clarify(body, db: AsyncSession, user_id, tenant_id) -> dict:
         result = IntakeResult(action="proceed", enriched_query=body.query)
     if result.action == "proceed" and result.enriched_query:
         await dws.update_run(factory, tenant_id, run.conversation_id, enriched_query=result.enriched_query)
+    if result.action != "proceed":  # the clarification waits for the user: the inbox lists it until plan
+        await dws.set_awaiting_input(factory, tenant_id, run.conversation_id, result.model_dump())
     return {**result.model_dump(), "session_id": str(run.id), "conversation_id": str(run.conversation_id)}
 
 
@@ -373,6 +375,7 @@ async def plan(body, db: AsyncSession, user_id, tenant_id) -> dict:
     raw = result.model_dump()
     await dws.update_run(factory, tenant_id, run.conversation_id, plan=raw, phase="plan",
                          enriched_query=body.enriched_query)
+    await dws.clear_awaiting_input(factory, tenant_id, run.conversation_id)
     return {
         "title": result.title or body.query[:80],
         "steps": [t.sub_query for t in result.sub_queries],

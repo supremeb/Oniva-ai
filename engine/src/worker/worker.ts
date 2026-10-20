@@ -32,6 +32,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Pool } from "pg";
+import { askUserTool } from "../agent/ask-user-tool.js";
 import { type AgentSettings, Harness } from "../agent/harness.js";
 import type { AgentHooks } from "../agent/hooks.js";
 import type { HostPolicy } from "../agent/policy.js";
@@ -47,9 +48,13 @@ import { defaultOwnerId, LeaseKeeper, PostgresLeases } from "../storage/postgres
 import { migrate } from "../storage/postgres/migrate.js";
 import { PostgresStorageProvider } from "../storage/postgres/storage.js";
 import type { StorageProvider } from "../storage/types.js";
+import type { TaskDefinition } from "../tasks/define.js";
 import { createGatewayTools, type GatewayToolset } from "../tools/gateway.js";
 import type { ToolDefinition } from "../tools/registry.js";
+import { createNodeGateway } from "../workflow/node-gateway.js";
+import { createWorkflowTasks } from "../workflow/tasks.js";
 import { BackendPolicyClient, UsageReporter } from "./backend-policy.js";
+import { RunNotifier } from "./run-notifier.js";
 
 export type WorkerLog = (event: string, fields?: Record<string, unknown>) => void;
 
@@ -81,6 +86,15 @@ export interface WorkerGatewayOptions {
   fetch?: typeof fetch;
 }
 
+/** The backend serving the workflow node gateway (U35). */
+export interface WorkerWorkflowOptions {
+  baseUrl: string;
+  serviceToken: string;
+  /** Retry budget for a transient node gateway failure (`ENGINE_POLICY_RETRY_MS`). Default 60 s. */
+  retryMs?: number;
+  fetch?: typeof fetch;
+}
+
 export interface WorkerOptions {
   /** Pool on the engine schema; the caller owns (and ends) it. */
   pool: Pool;
@@ -106,12 +120,22 @@ export interface WorkerOptions {
   backendPolicy?: WorkerBackendPolicyOptions | null;
   /** Approval expiry for gateway tools that require approval; null for none. */
   approvalTtlMs?: number | null;
+  /** `ask_user` question expiry; null or `0` for none. Default 7 days. */
+  questionTtlMs?: number | null;
   /** Register a subagent tool under this name. */
   subagentTool?: string | null;
   /** Register a subagent tool under each of these names (with `subagentTool`, deduplicated). */
   subagentTools?: readonly string[];
   // biome-ignore lint/suspicious/noExplicitAny: tools with any argument type
   tools?: ToolDefinition<any>[];
+  /** Host task kinds registered after the harness's built-ins (KTD3). */
+  hostTasks?: readonly TaskDefinition[];
+  /**
+   * Register `workflow_run`, `workflow_node`, `workflow_fanout_lane` and
+   * `workflow_gate` (U35). Their node gateway client carries the lease fence, so
+   * a rejected token fences the worker like a rejected tool call does.
+   */
+  workflow?: WorkerWorkflowOptions | null;
   /** Engine clock (approval expiry, deadlines, throttling). Leases use the database clock. */
   clock?: Clock;
   settings?: Partial<AgentSettings>;
@@ -150,16 +174,21 @@ export interface WorkerHandle {
 }
 
 /**
- * The host policy a worker runs with: the model defaults decide every model
- * request, and a gateway tool that asks for approval requires one.
+ * The host policy a worker runs with. Without a backend the model defaults
+ * decide every model request and a gateway tool that asks for approval
+ * requires one (local development, `approvalTtlMs` applies). With a backend,
+ * model requests and every tool call that is not a manifest read or an
+ * internal native tool are decided by Python.
  */
 export function workerHostPolicy(options: {
   modelDefaults: WorkerModelDefaults;
-  gateway: Pick<GatewayToolset, "requiresApproval"> | null;
+  gateway:
+    | (Pick<GatewayToolset, "requiresApproval"> & Partial<Pick<GatewayToolset, "describe">>)
+    | null;
   approvalTtlMs: number | null;
   clock: Clock;
   /** Resolves model requests instead of `modelDefaults`; no local fallback. */
-  backend?: Pick<BackendPolicyClient, "resolveModelRequest"> | null;
+  backend?: Pick<BackendPolicyClient, "resolveModelRequest" | "authorizeTool"> | null;
 }): HostPolicy {
   const { modelDefaults: d, gateway, approvalTtlMs, clock, backend } = options;
   return {
@@ -176,6 +205,10 @@ export function workerHostPolicy(options: {
       };
     },
     authorizeTool(request) {
+      // With a backend the worker holds no tool policy: Python decides, the
+      // manifest only spares the round trip for reads. `approvalTtlMs` is the
+      // local-mode value; the backend's TTL applies otherwise.
+      if (backend) return backend.authorizeTool(request, gateway);
       if (gateway?.requiresApproval(request.toolName)) {
         return {
           decision: "requireApproval",
@@ -257,6 +290,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
     ? new BackendPolicyClient({
         ...options.backendPolicy,
         supportedProviders: () => options.models.names(),
+        clock,
         log,
       })
     : null;
@@ -268,6 +302,23 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       })
     : null;
   usageReporter?.startFlushing();
+  // Run-finished push (phase 6 U5): only conversations tagged notify=backend are reported.
+  const runNotifier = options.backendPolicy
+    ? new RunNotifier({
+        baseUrl: options.backendPolicy.baseUrl,
+        serviceToken: options.backendPolicy.serviceToken,
+        ...(options.backendPolicy.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: options.backendPolicy.timeoutMs }),
+        ...(options.backendPolicy.retryMs === undefined
+          ? {}
+          : { retryMs: options.backendPolicy.retryMs }),
+        ...(options.backendPolicy.fetch ? { fetch: options.backendPolicy.fetch } : {}),
+        outbox: new PostgresStorageProvider(pool),
+        log,
+      })
+    : null;
+  runNotifier?.startFlushing();
 
   const currentOwner = async (): Promise<string | null> => {
     const lease = await leases.current(sessionId);
@@ -346,6 +397,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       await step("engine", engine?.close(), left());
       await step("harness", harness?.close(), left());
       await step("usage", usageReporter?.close(), left());
+      await step("run_finished", runNotifier?.close(), left());
       if (exit.reason !== "lease_lost") await step("lease", keeper?.release(), closeTimeoutMs);
       state = exit.reason === "lease_lost" ? "lost" : "stopped";
       log("exited", { reason: exit.reason });
@@ -397,9 +449,12 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
   }
 
   async function serve(k: LeaseKeeper, gateway: GatewayToolset | null): Promise<void> {
+    // `ask_user` is native: always registered, usable only by conversations
+    // whose agent tools list it. A caller-supplied tool of that name wins.
+    const supplied = [...(gateway?.tools ?? []), ...(options.tools ?? [])];
     const tools = [
-      ...(gateway?.tools ?? []),
-      ...(options.tools ?? []),
+      ...supplied,
+      ...(supplied.some((t) => t.name === askUserTool.name) ? [] : [askUserTool]),
       ...[
         ...new Set([
           ...(options.subagentTool ? [options.subagentTool] : []),
@@ -407,12 +462,35 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
         ]),
       ].map((name) => createSubagentTool({ name })),
     ];
+    const tasks: TaskDefinition[] = [...(options.hostTasks ?? [])];
+    if (options.workflow) {
+      tasks.push(
+        ...createWorkflowTasks(
+          createNodeGateway({
+            baseUrl: options.workflow.baseUrl,
+            serviceToken: options.workflow.serviceToken,
+            fence: k.fence,
+            sessionId,
+            clock,
+            ...(options.workflow.retryMs === undefined
+              ? {}
+              : { retry: { budgetMs: options.workflow.retryMs } }),
+            ...(options.workflow.fetch ? { fetch: options.workflow.fetch } : {}),
+            onFenceRejected: (rejection) => {
+              log("fence_rejected", { tool: "workflow", token: String(rejection.token) });
+              k.fenceNow("the workflow node gateway rejected this worker's fence token");
+            },
+          }),
+        ),
+      );
+    }
     const base = new PostgresStorageProvider(pool);
     const storage = options.wrapStorage ? options.wrapStorage(base) : base;
     const h = await Harness.open(storage, {
       sessionId,
       models: options.models,
       tools,
+      ...(options.questionTtlMs === undefined ? {} : { questionTtlMs: options.questionTtlMs }),
       policy: workerHostPolicy({
         modelDefaults: options.modelDefaults,
         gateway,
@@ -423,6 +501,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       clock,
       fence: k.fence,
       signal: k.signal,
+      ...(tasks.length > 0 ? { tasks } : {}),
       ...(options.settings ? { settings: options.settings } : {}),
       ...(options.redact ? { redact: options.redact } : {}),
       ...(options.hooks || usageReporter
@@ -433,9 +512,11 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
             ],
           }
         : {}),
+      ...(runNotifier ? { onSettled: runNotifier.listener } : {}),
       onError: (err, info) => log("engine_error", { ...info, error: logErrorText(err) }),
     });
     harness = h;
+    runNotifier?.attach(h);
     void h.runtime.closed.then((reason) => onEngineStopped(k, reason));
     engine = createEngineServer({
       harness: h,

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GenerativeO } from '@/components/ui/GenerativeO';
 import { ChatError } from './shared';
@@ -87,7 +88,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
     const client = useMemo(() => clientProp ?? new EngineConversationClient(), [clientProp]);
     const [conversationId, setConversationId] = useState<string | null>(initialConversationId);
     const conv = useEngineConversation(conversationId, { client, watcher: watcherOptions });
-    const { view, connection, pending, error, submit, retry, abort, decide, cancelSubmission } = conv;
+    const { view, connection, pending, error, submit, retry, abort, decide, answerQuestion, cancelSubmission } = conv;
     const { cost, active: costActive, liveTokens, refresh: refreshCost } = useConversationCost(conversationId, view, costFetcher);
 
     const draftKey = conversationId ?? NEW_DRAFT_KEY;
@@ -175,8 +176,13 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         () => ({
             onApprove: (toolTaskId: string) => decide(toolTaskId, 'approve').catch((e) => { throw toDecisionError(e); }),
             onReject: (toolTaskId: string) => decide(toolTaskId, 'deny').catch((e) => { throw toDecisionError(e); }),
+            // Same lifecycle for questions: the card stays disabled until the questions document changes.
+            onQuestionAnswer: (toolTaskId: string, a: { optionIds: string[]; otherValue?: string }) =>
+                answerQuestion(toolTaskId, { optionIds: a.optionIds, ...(a.otherValue !== undefined ? { text: a.otherValue } : {}) }).catch((e) => {
+                    throw toDecisionError(e);
+                }),
         }),
-        [decide]
+        [decide, answerQuestion]
     );
 
     // Per-turn cost under the last assistant message of each run.
@@ -205,6 +211,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
     );
 
     const running = isRunActive(view);
+    const hasPendingApproval = view?.approvals.items.some((a) => a.status === 'pending') ?? false;
     const awaitingApproval = running && (view?.approvals.items.some((a) => a.status === 'pending') ?? false);
     const runState: EngineRunState = awaitingApproval ? 'awaiting_approval' : running ? 'running' : 'idle';
     useEffect(() => {
@@ -447,6 +454,18 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                 <div className="px-6 pb-5 pt-3">
                     {createError && <ChatError message={createError} onDismiss={() => setCreateError(null)} className="mb-3 max-w-[680px] mx-auto" />}
                     <ConnectionBanner connection={connection} error={error} stalledAfterSeconds={Math.round((watcherOptions?.stalledAfterMs ?? 45_000) / 1000)} />
+                    {hasPendingApproval && (
+                        <div
+                            data-testid="approval-banner"
+                            role="status"
+                            className="mb-3 max-w-[680px] mx-auto flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-neutral-800"
+                        >
+                            <span>Awaiting approval before the agent continues.</span>
+                            <Link href="/inbox" className="font-medium underline underline-offset-2">
+                                Open inbox
+                            </Link>
+                        </div>
+                    )}
                     {composer}
                 </div>
             }

@@ -1,0 +1,64 @@
+{
+  "events": [
+    {
+      "event": "progress",
+      "data": {
+        "job_id": "<id-1>",
+        "status": "running",
+        "progress": 0,
+        "current_step": null,
+        "message": "Progress: 0%",
+        "timestamp": "<timestamp>"
+      }
+    },
+    {
+      "event": "step",
+      "data": {
+        "step": 1,
+        "step_id": "s1",
+        "node_id": "text-1",
+        "node_type": "text_response",
+        "status": "completed",
+        "type": "text_response",
+        "content_preview": "Searching.",
+        "reasoning": null
+      }
+    },
+    {
+      "event": "step",
+      "data": {
+        "step": 2,
+        "step_id": "s2",
+        "node_id": "c1",
+        "node_type": "tool_call",
+        "node_name": "web_search",
+        "status": "completed",
+        "type": "tool_call",
+        "tool_name": "web_search",
+        "tool_args": {
+          "q": "x"
+        },
+        "tool_result_preview": "found it"
+      }
+    },
+    {
+      "event": "cancelled",
+      "data": {
+        "job_id": "<id-1>",
+        "status": "cancelled",
+        "result": null,
+        "error": "Cancelled: stop",
+        "duration_ms": "<duration>",
+        "execution_trace": [],
+        "completed_at": "<timestamp>"
+      }
+    }
+  ],
+  "final_job": {
+    "status": "cancelled",
+    "progress": 0,
+    "result": null,
+    "error": "Cancelled: stop",
+    "total_tokens": 0
+  }
+}

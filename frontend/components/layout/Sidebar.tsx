@@ -29,7 +29,9 @@ import {
     BookOpenText,
     CalendarBlank,
     Broadcast,
+    Tray,
 } from '@phosphor-icons/react';
+import { useInboxCount } from '@/hooks/useInbox';
 import { UserProfileMenu } from '@/components/layout/UserProfileMenu';
 
 // ============ Types ============
@@ -58,6 +60,7 @@ const navGroups: NavItem[][] = [
     // Operate
     [
         { name: 'Chat', href: '/chat', icon: ChatCircle },
+        { name: 'Needs attention', href: '/inbox', icon: Tray },
         { name: 'Fleet', href: '/fleet', icon: Broadcast, featureFlag: 'ENABLE_FLEET_DASHBOARD' },
         { name: 'Schedules', href: '/schedules', icon: CalendarBlank },
     ],
@@ -79,10 +82,12 @@ const bottomNavigation: NavItem[] = [
 // ============ Components ============
 const NavItem = memo(function NavItem({
     item,
-    isActive
+    isActive,
+    badge = 0,
 }: {
     item: NavItem;
     isActive: boolean;
+    badge?: number;
 }) {
     return (
         <Tooltip delayDuration={0}>
@@ -90,7 +95,7 @@ const NavItem = memo(function NavItem({
                 <Link
                     href={item.href}
                     className={cn(
-                        'flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-100',
+                        'relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-100',
                         isActive
                             ? 'bg-primary/10 text-primary'
                             : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -100,6 +105,17 @@ const NavItem = memo(function NavItem({
                         className="h-[18px] w-[18px]"
                         weight={isActive ? 'fill' : 'regular'}
                     />
+                    {badge > 0 && (
+                        <span
+                            data-testid="nav-badge"
+                            className="absolute -right-1 -top-1 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 text-primary-foreground"
+                        >
+                            <span aria-hidden="true">{badge > 99 ? '99+' : badge}</span>
+                            <span className="sr-only">
+                                {badge} {badge === 1 ? 'item needs' : 'items need'} attention
+                            </span>
+                        </span>
+                    )}
                 </Link>
             </TooltipTrigger>
             <TooltipContent side="right" sideOffset={8}>
@@ -115,6 +131,7 @@ function SidebarComponent() {
     const [isNavigating, setIsNavigating] = useState(false);
     const previousPathnameRef = useRef(pathname);
     const features = useFeatures();
+    const inboxTotal = useInboxCount();
 
     // Detect navigation - only animate briefly when path actually changes
     useEffect(() => {
@@ -158,7 +175,7 @@ function SidebarComponent() {
                                         const isActive = pathname === item.href ||
                                             (item.href !== '/' && pathname.startsWith(item.href));
                                         return (
-                                            <NavItem key={item.name} item={item} isActive={isActive} />
+                                            <NavItem key={item.name} item={item} isActive={isActive} badge={item.href === '/inbox' ? inboxTotal : 0} />
                                         );
                                     })}
                                 </div>

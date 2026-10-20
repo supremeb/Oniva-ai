@@ -15,6 +15,8 @@ import {
   type DocumentScanOptions,
   type EntryRecord,
   type Fence,
+  type OutboxKind,
+  outboxKindOf,
   type Page,
   type PageOptions,
   type SessionStorage,
@@ -95,13 +97,17 @@ export class MemoryStorageProvider implements StorageProvider {
 
   async enqueue(record: UsageOutboxRecord): Promise<void> {
     if (!this.#usageOutbox.has(record.requestId)) {
-      this.#usageOutbox.set(record.requestId, structuredClone(record));
+      this.#usageOutbox.set(record.requestId, {
+        ...structuredClone(record),
+        kind: outboxKindOf(record),
+      });
     }
   }
 
-  async claimPending(claimTimeoutMs: number): Promise<UsageOutboxRecord[]> {
+  async claimPending(claimTimeoutMs: number, kind?: OutboxKind): Promise<UsageOutboxRecord[]> {
     const now = Date.now();
     const due = [...this.#usageOutbox.values()]
+      .filter((r) => kind === undefined || outboxKindOf(r) === kind)
       .filter((r) => r.claimedAt === null || r.claimedAt <= now - claimTimeoutMs)
       .sort((a, b) => a.createdAt - b.createdAt || (a.requestId < b.requestId ? -1 : 1));
     return due.map((r) => {

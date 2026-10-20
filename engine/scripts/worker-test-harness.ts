@@ -14,6 +14,8 @@
  *   request is delivered whatever the worker did meanwhile (it is detached
  *   from the caller's abort signal, and the process waits for it before
  *   exiting, as bytes already handed to the kernel would still arrive);
+ * - the workflow task kinds are registered against the backend node gateway (`ENGINE_WORKFLOW_BACKEND_URL`,
+ *   else `ENGINE_GATEWAY_URL`);
  * - storage commits are timed for the load scenario.
  *
  * Test-only routes (bearer token required): `GET|POST /v1/test/clock`
@@ -25,7 +27,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { ModelRegistry } from "../src/models/stream.js";
 import { bearerMatches, headerValue } from "../src/server/auth.js";
 import type { CommitBatch, SessionStorage, StorageProvider } from "../src/storage/types.js";
-import { createWorkerPool, WorkerConfigError, workerConfigFromEnv } from "../src/worker/config.js";
+import {
+  createWorkerPool,
+  requireWorkflowBackend,
+  WorkerConfigError,
+  workerConfigFromEnv,
+} from "../src/worker/config.js";
 import { startWorker, type WorkerLog } from "../src/worker/worker.js";
 import { ScriptedModel } from "../test/support/scripted-model.js";
 import { SharedTestClock } from "../test/support/shared-clock.js";
@@ -62,7 +69,7 @@ function timedStorage(provider: StorageProvider, samples: CommitSample[]): Stora
     sessionOfConversation: (id) => provider.sessionOfConversation(id),
     sessionOfTask: (id) => provider.sessionOfTask(id),
     enqueue: (record) => provider.enqueue(record),
-    claimPending: (claimTimeoutMs) => provider.claimPending(claimTimeoutMs),
+    claimPending: (claimTimeoutMs, kind) => provider.claimPending(claimTimeoutMs, kind),
     ack: (requestId) => provider.ack(requestId),
   };
 }
@@ -208,7 +215,15 @@ async function main(): Promise<number> {
             retryMs: config.policyRetryMs,
           }
         : null,
+    // The workflow task kinds (workflow_run, workflow_node, workflow_fanout_lane, workflow_gate), served by the
+    // backend's node gateway; registered whenever a backend URL is configured (ENGINE_WORKFLOW_BACKEND_URL or
+    // ENGINE_GATEWAY_URL), with the same gateway-invoke delay as the tool gateway.
+    workflow:
+      config.workflowBackendUrl === null
+        ? null
+        : { ...requireWorkflowBackend(config), fetch: delayedFetch(pauses) },
     approvalTtlMs: config.approvalTtlMs,
+    questionTtlMs: config.questionTtlMs,
     subagentTool: config.subagentTool,
     subagentTools: config.subagentTools,
     clock,

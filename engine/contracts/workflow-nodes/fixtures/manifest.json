@@ -1,0 +1,87 @@
+{
+  "cases": [
+    { "file": "prepare.final.valid.json", "schema": "prepare.response", "valid": true },
+    { "file": "prepare.final.failed.valid.json", "schema": "prepare.response", "valid": true },
+    { "file": "prepare.llm.valid.json", "schema": "prepare.response", "valid": true },
+    { "file": "prepare.wait.duration.valid.json", "schema": "prepare.response", "valid": true },
+    { "file": "prepare.wait.until.valid.json", "schema": "prepare.response", "valid": true },
+    { "file": "prepare.fanout.valid.json", "schema": "prepare.response", "valid": true },
+    { "file": "prepare.fanout.workflow.valid.json", "schema": "prepare.response", "valid": true },
+    { "file": "finish.llm.valid.json", "schema": "finish.input", "valid": true },
+    { "file": "finish.wait.valid.json", "schema": "finish.input", "valid": true },
+    { "file": "finish.fanout.valid.json", "schema": "finish.input", "valid": true },
+    { "file": "finalize.valid.json", "schema": "finalize.input", "valid": true },
+    {
+      "file": "prepare.unknown-kind.invalid.json",
+      "schema": "prepare.response",
+      "valid": false,
+      "code": "invalid_body"
+    },
+    {
+      "file": "prepare.wait.both-durations.invalid.json",
+      "schema": "prepare.response",
+      "valid": false,
+      "code": "invalid_body"
+    },
+    {
+      "file": "prepare.wait.no-duration.invalid.json",
+      "schema": "prepare.response",
+      "valid": false,
+      "code": "invalid_body"
+    },
+    {
+      "file": "prepare.fanout.parallel.invalid.json",
+      "schema": "prepare.response",
+      "valid": false,
+      "code": "invalid_body"
+    },
+    {
+      "file": "prepare.final.missing-tokens.invalid.json",
+      "schema": "prepare.response",
+      "valid": false,
+      "code": "invalid_body"
+    },
+    {
+      "file": "prepare.llm.missing-replay-safe.invalid.json",
+      "schema": "prepare.response",
+      "valid": false,
+      "code": "invalid_body"
+    },
+    {
+      "file": "prepare.wrong-version.invalid.json",
+      "schema": "prepare.response",
+      "valid": false,
+      "code": "invalid_body"
+    },
+    {
+      "file": "prepare.too-large.invalid.json",
+      "schema": "prepare.response",
+      "valid": false,
+      "code": "body_too_large"
+    },
+    {
+      "file": "finish.unknown-kind.invalid.json",
+      "schema": "finish.input",
+      "valid": false,
+      "code": "invalid_body"
+    },
+    {
+      "file": "finish.fanout.missing-completed.invalid.json",
+      "schema": "finish.input",
+      "valid": false,
+      "code": "invalid_body"
+    },
+    {
+      "file": "finalize.running-status.invalid.json",
+      "schema": "finalize.input",
+      "valid": false,
+      "code": "invalid_body"
+    },
+    {
+      "file": "finalize.zero-attempts.invalid.json",
+      "schema": "finalize.input",
+      "valid": false,
+      "code": "invalid_body"
+    }
+  ]
+}

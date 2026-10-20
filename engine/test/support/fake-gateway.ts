@@ -112,6 +112,35 @@
  * a spent usage report logs `usage_failed` and is dropped
  * (engine client: usage-exhausted-dropped).
  *
+ * Tool authorization (the backend's `/internal/tools/authorize`; the real
+ * contract lives in `backend/app/internal_api/authorize.py`). Same bearer
+ * token; not fenced. `POST /internal/tools/authorize` with `{ requestId,
+ * tenantId, projectId, conversationId, engineConversationId?, agentRole?,
+ * runId, toolCallId, toolTaskId, toolName, toolSource: "gateway" | "native",
+ * arguments, argumentsHash, sideEffect?, replay, taint: { tainted, sources } }`
+ * asks whether one tool call may run. The answer is `200` with
+ * `Cache-Control: no-store` [clause:authorize-no-store]:
+ * - `{ decision: "allow" }` [clause:authorize-allow-shape];
+ * - `{ decision: "block", code, reason }` [clause:authorize-block-shape];
+ * - `{ decision: "requireApproval", reason, approvalId, approvalTtlMs,
+ *   requiredRole }`, where `approvalTtlMs` is the backend's approval lifetime
+ *   in ms or `null` for none (the engine turns it into an expiry on its own
+ *   clock) [clause:authorize-require-approval-shape].
+ * The same `(tenantId, requestId)` posted again is answered with the same
+ * decision and creates no second approval [clause:authorize-repeat-same]. A
+ * body missing `requestId`, `tenantId`, `runId`, `toolCallId`, `toolName` or
+ * a valid `toolSource`, or whose `arguments` is not an object, is `422 {
+ * error: "invalid_request" }` [clause:authorize-invalid-422]. The engine
+ * never sends credentials in `arguments` (they are redacted) while
+ * `argumentsHash` is the hash of the unredacted arguments (see
+ * `test/support/args-hash-vectors.json`).
+ * Outages are retried like the model routes, with `requestId`
+ * `runId:toolCallId` on every attempt (engine client: authorize-retry-transient);
+ * a 401/403, any other 4xx or a malformed body blocks the call at once
+ * (engine client: authorize-no-retry-definitive); once the retry budget is spent
+ * the call is blocked with reason `policy_unavailable`, never run
+ * (engine client: authorize-fail-closed).
+ *
  * Test controls: per-tool effect counters ({@link FakeGateway.effects}),
  * scripted failures and delays, stored outcomes by key, the per-session fence
  * high-water mark, and a log of every request with its headers.
@@ -182,6 +211,7 @@ const MANIFEST = "/internal/tools/manifest";
 const INVOKE = /^\/internal\/tools\/([^/]+)\/invoke$/;
 const POLICY = "/internal/models/policy";
 const USAGE = "/internal/models/usage";
+const AUTHORIZE = "/internal/tools/authorize";
 const INVOCATION = /^\/internal\/tools\/invocations\/([^/]+)$/;
 
 /** What the fake answers a model policy request with. */
@@ -191,6 +221,20 @@ export type FakePolicy =
   | { status: number; body?: JsonValue; headers?: Record<string, string> }
   | { hang: true }
   /** Drop the connection without answering (a restarting backend). */
+  | { reset: true };
+
+/** What the fake answers a tool authorization request with. */
+export type FakeAuthorize =
+  | { decision: "allow" }
+  | { decision: "block"; code?: string; reason: string }
+  | {
+      decision: "requireApproval";
+      reason?: string;
+      approvalTtlMs: number | null;
+      requiredRole?: string;
+    }
+  | { status: number; body?: JsonValue; headers?: Record<string, string> }
+  | { hang: true }
   | { reset: true };
 
 export class FakeGateway {
@@ -208,6 +252,11 @@ export class FakeGateway {
   #manifestFailures: number[] = [];
   readonly #policyScripts: FakePolicy[] = [];
   #usageFailures: number[] = [];
+  readonly #authorizeScripts: FakeAuthorize[] = [];
+  readonly #authorizeDecided = new Map<string, JsonValue>();
+  #approvals = 0;
+  /** The answer when no script is queued. Default: allow. */
+  defaultAuthorize: FakeAuthorize = { decision: "allow" };
   /** Usage rows recorded, once per `(tenantId, requestId)`. */
   readonly usage: JsonObject[] = [];
   /** The answer when no script is queued. Default: allow with the key `fake-key`. */
@@ -269,6 +318,17 @@ export class FakeGateway {
   scriptPolicy(...answers: FakePolicy[]): this {
     this.#policyScripts.push(...answers);
     return this;
+  }
+
+  /** Queue answers for the next authorize requests (then `defaultAuthorize`). */
+  scriptAuthorize(...answers: FakeAuthorize[]): this {
+    this.#authorizeScripts.push(...answers);
+    return this;
+  }
+
+  /** Authorize requests received (including repeats), in order. */
+  authorizeRequests(): FakeRequest[] {
+    return this.requests.filter((r) => r.method === "POST" && r.path === AUTHORIZE);
   }
 
   /** Fail the next usage posts with these statuses (nothing is recorded). */
@@ -340,6 +400,7 @@ export class FakeGateway {
     }
     if (req.method === "POST" && path === POLICY) return this.#policy(res, body);
     if (req.method === "POST" && path === USAGE) return this.#recordUsage(res, body);
+    if (req.method === "POST" && path === AUTHORIZE) return this.#authorize(res, body);
     const invoke = INVOKE.exec(path);
     if (!(req.method === "POST" && invoke)) {
       const session = header(req, "x-engine-session");
@@ -401,6 +462,59 @@ export class FakeGateway {
       },
       headers,
     );
+  }
+
+  #authorize(res: ServerResponse, body: JsonValue | null): void {
+    const b = body && typeof body === "object" && !Array.isArray(body) ? body : null;
+    const text = (v: JsonValue | undefined): v is string => typeof v === "string" && v !== "";
+    if (
+      !b ||
+      !text(b.requestId) ||
+      !text(b.tenantId) ||
+      !text(b.runId) ||
+      !text(b.toolCallId) ||
+      !text(b.toolName) ||
+      (b.toolSource !== "gateway" && b.toolSource !== "native") ||
+      typeof b.arguments !== "object" ||
+      b.arguments === null ||
+      Array.isArray(b.arguments)
+    ) {
+      send(res, 422, { error: "invalid_request" });
+      return;
+    }
+    const key = `${b.tenantId}/${b.requestId}`;
+    const headers = { "cache-control": "no-store" };
+    const decided = this.#authorizeDecided.get(key);
+    if (decided) {
+      send(res, 200, decided, headers);
+      return;
+    }
+    const answer = this.#authorizeScripts.shift() ?? this.defaultAuthorize;
+    if ("hang" in answer) return;
+    if ("reset" in answer) {
+      res.socket?.destroy();
+      return;
+    }
+    if ("status" in answer) {
+      send(res, answer.status, answer.body ?? { error: "scripted" }, answer.headers);
+      return;
+    }
+    let out: JsonValue;
+    if (answer.decision === "allow") out = { decision: "allow" };
+    else if (answer.decision === "block") {
+      out = { decision: "block", code: answer.code ?? "blocked", reason: answer.reason };
+    } else {
+      this.#approvals += 1;
+      out = {
+        decision: "requireApproval",
+        reason: answer.reason ?? `${b.toolName} requires approval`,
+        approvalId: `appr-fake-${this.#approvals}`,
+        approvalTtlMs: answer.approvalTtlMs,
+        requiredRole: answer.requiredRole ?? "admin",
+      };
+    }
+    this.#authorizeDecided.set(key, out);
+    send(res, 200, out, headers);
   }
 
   #recordUsage(res: ServerResponse, body: JsonValue | null): void {

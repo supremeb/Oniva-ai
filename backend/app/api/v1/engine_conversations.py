@@ -22,7 +22,10 @@ from app.auth.providers.base import AuthUser
 from app.config import Settings
 from app.core.database import get_db
 from app.models.engine import EngineConversation
+from app.models.project import Project
 from app.models.tenant import Tenant
+from app.services.approval_service import ApprovalError, ApprovalService
+from app.services.automation_scope import is_automation_project
 from app.services.engine_chat_agent import AgentUnavailable, Selections, build_engine_chat_agent
 from app.services.chat_service import set_engine_conversation_title, touch_engine_conversation
 from app.services.feature_flags import engine_chat_enabled
@@ -92,6 +95,18 @@ class DecisionBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
     decision: Literal["approve", "deny"]
     note: Optional[str] = None
+
+
+class AnswerPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    optionIds: Optional[list[str]] = None
+    text: Optional[str] = None
+
+
+class AnswerBody(BaseModel):
+    # Extra keys (e.g. a client-supplied principal) are ignored on purpose (R16).
+    model_config = ConfigDict(extra="ignore")
+    answer: AnswerPayload
 
 
 def _is_admin(user: AuthUser) -> bool:
@@ -228,6 +243,12 @@ async def submit(
 ):
     conv = await _binding(db, conversation_id, user)
     payload = body.model_dump(exclude_none=True)
+    # Any content part that is not text (e.g. an image) is untrusted input: the
+    # engine taints the conversation so policy can require approval on what follows.
+    if isinstance(body.content, list) and any(
+        not (isinstance(part, dict) and part.get("type") == "text") for part in body.content
+    ):
+        payload["untrusted"] = True
     key = idempotency_key or body.requestId or str(uuid.uuid4())
     payload["requestId"] = body.requestId or key
     try:
@@ -283,10 +304,13 @@ async def abort(
 ):
     conv = await _binding(db, conversation_id, user)
     try:
-        return await engine.abort(conv.session_id, conv.tenant_id, conv.project_id,
-                                  conv.conversation_id, body.reason if body else None)
+        result = await engine.abort(conv.session_id, conv.tenant_id, conv.project_id,
+                                    conv.conversation_id, body.reason if body else None)
     except EngineError as e:
         raise _engine_http_error(e) from None
+    # The engine accepted: nothing it was waiting on can be decided any more (KTD11).
+    await ApprovalService(db).mark_closed(conv.tenant_id, conversation_id=conv.conversation_id, reason="aborted")
+    return result
 
 
 @router.delete("/{conversation_id}/submissions/{submission_id}")
@@ -306,23 +330,114 @@ async def cancel_submission(
         raise _engine_http_error(e) from None
 
 
+def _legacy_cutoff_ms(request: Request) -> Optional[float]:
+    raw = getattr(getattr(request.app.state, "engine_chat_settings", None), "APPROVALS_LEGACY_CUTOFF", None)
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        logger.error("APPROVALS_LEGACY_CUTOFF is not an ISO timestamp; legacy fallback disabled")
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp() * 1000
+
+
+async def _may_decide_for_automation(db: AsyncSession, conv: EngineConversation, user: AuthUser) -> bool:
+    """A run's conversation lives in the tenant's hidden automation project, which nobody joins: tenant admins and
+    owners (the ledger row still decides who may decide what) are let in for those, so a workflow review that
+    its requester cannot approve himself can be decided by an admin."""
+    if user.role not in ("admin", "owner") or conv.run_kind is None:
+        return False
+    project = await db.get(Project, conv.project_id)
+    return project is not None and is_automation_project(project.settings)
+
+
 @router.post("/{conversation_id}/approvals/{tool_task_id}/decision")
 async def decide_approval(
     conversation_id: UUID,
     tool_task_id: str,
     body: DecisionBody,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: AuthUser = Depends(get_current_user),
     engine: EngineClient = Depends(get_engine_client),
 ):
-    # Owner or tenant admin only (checked in _binding); the principal is the verified user.
-    conv = await _binding(db, conversation_id, user)
+    """Decide a tool-call approval. The ledger row decides who may (KTD4); the engine decides what runs.
+
+    Legacy fallback (KTD3, delete one release after U5 ships together with
+    ``APPROVALS_LEGACY_CUTOFF``): an approval created before the ledger existed has no row. It may
+    still be decided by the conversation owner, a tenant admin or owner, but only when the engine
+    item's ``requestedAt`` is before the cutoff. A missing row for anything newer, or an unset
+    cutoff, is 409 ``approval_not_indexed``.
+    """
+    conv = await db.get(EngineConversation, conversation_id)
+    if conv is None or str(conv.tenant_id) != str(user.tenant_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if await ProjectService(db).get_user_role(conv.project_id, UUID(str(user.id)), conv.tenant_id) is None \
+            and not await _may_decide_for_automation(db, conv, user):
+        raise HTTPException(status_code=403, detail="Not allowed on this conversation")
+    svc = ApprovalService(db)
+    row = await svc.get_by_task(conv.tenant_id, conv.conversation_id, tool_task_id)
     try:
-        return await engine.decide(conv.session_id, conv.tenant_id, conv.project_id,
-                                   conv.conversation_id, tool_task_id, body.decision, body.note,
-                                   principal=str(user.id))
+        if row is not None:
+            return await svc.decide(user=user, conv=conv, row=row, decision=body.decision,
+                                    note=body.note, engine=engine)
+        return await _decide_legacy(request, conv, user, tool_task_id, body, engine)
+    except ApprovalError as e:
+        raise HTTPException(e.status, e.code) from None
     except EngineError as e:
         raise _engine_http_error(e) from None
+
+
+@router.post("/{conversation_id}/questions/{tool_task_id}/answer")
+async def answer_question(
+    conversation_id: UUID,
+    tool_task_id: str,
+    body: AnswerBody,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    engine: EngineClient = Depends(get_engine_client),
+):
+    """Answer an ``ask_user`` question. The conversation's owner or a tenant admin or owner may; the
+    ledger row carries the protocol state and the audit entry (U11)."""
+    conv = await db.get(EngineConversation, conversation_id)
+    if conv is None or str(conv.tenant_id) != str(user.tenant_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if await ProjectService(db).get_user_role(conv.project_id, UUID(str(user.id)), conv.tenant_id) is None:
+        raise HTTPException(status_code=403, detail="Not allowed on this conversation")
+    svc = ApprovalService(db)
+    row = await svc.get_by_task(conv.tenant_id, conv.conversation_id, tool_task_id)
+    try:
+        if row is None:
+            raise ApprovalError(404, "question_not_found")
+        return await svc.answer(user=user, conv=conv, row=row,
+                                answer=body.answer.model_dump(exclude_none=True), engine=engine)
+    except ApprovalError as e:
+        raise HTTPException(e.status, e.code) from None
+    except EngineError as e:
+        raise _engine_http_error(e) from None
+
+
+async def _decide_legacy(request: Request, conv: EngineConversation, user: AuthUser, tool_task_id: str,
+                         body: DecisionBody, engine: EngineClient) -> dict:
+    if str(conv.user_id) != str(user.id) and user.role not in ("admin", "owner"):
+        raise ApprovalError(403, "not_authorized")
+    cutoff = _legacy_cutoff_ms(request)
+    if cutoff is None:
+        logger.warning("approval_not_indexed tenant=%s conversation=%s task=%s (no cutoff)",
+                       conv.tenant_id, conv.conversation_id, tool_task_id)
+        raise ApprovalError(409, "approval_not_indexed")
+    items = await engine.approvals(conv.session_id, conv.tenant_id, conv.project_id, conv.conversation_id)
+    item = next((i for i in items if i.get("toolTaskId") == tool_task_id), None)
+    requested_at = item.get("requestedAt") if item else None
+    if not isinstance(requested_at, (int, float)) or requested_at >= cutoff:
+        logger.warning("approval_not_indexed tenant=%s conversation=%s task=%s",
+                       conv.tenant_id, conv.conversation_id, tool_task_id)
+        raise ApprovalError(409, "approval_not_indexed")
+    return await engine.decide(conv.session_id, conv.tenant_id, conv.project_id, conv.conversation_id,
+                               tool_task_id, body.decision, body.note, principal=str(user.id))
 
 
 def mount_engine_conversations(app: FastAPI, settings: Settings) -> bool:

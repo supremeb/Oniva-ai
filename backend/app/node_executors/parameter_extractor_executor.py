@@ -2,6 +2,9 @@
 Parameter Extractor Node Executor
 Uses LLM to extract structured parameters from unstructured text
 
+Plan 003 U14: ``build_prompt`` and ``parse_answer`` are pure; ``prepare`` returns an ``llm`` body (or a
+``final`` for the regex strategy) and ``finish`` parses the answer. ``execute`` is a thin legacy wrapper.
+
 Features:
 - LLM-powered extraction with JSON schema validation
 - Multiple extraction strategies: LLM, regex, combined
@@ -9,21 +12,22 @@ Features:
 - Configurable fallback behavior
 """
 
-from app.node_executors import BaseNodeExecutor, NodeExecutionContext, NodeExecutionResult
+from app.node_executors import (
+    BaseNodeExecutor,
+    NodeExecutionContext,
+    NodeExecutionResult,
+    PrepareResult,
+    legacy_complete,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 import time
 import json
 import re
 import logging
-import asyncio
 from typing import Any, Dict, List, Optional
-from uuid import UUID
 
-import litellm
 from app.config import get_settings
-from app.services.llm_gateway import (
-    resolve_key_with_fallback, normalize_model_id, get_provider_from_model,
-)
+from app.services.llm_gateway import normalize_model_id
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -38,140 +42,158 @@ class ParameterExtractorExecutor(BaseNodeExecutor):
     LLM_TIMEOUT_SECONDS = 30.0
     DEFAULT_MODEL = "openai/gpt-4o-mini"
 
+    def build_prompt(self, context: NodeExecutionContext) -> Dict[str, Any]:
+        """Pure: the extraction prompt. Raises ``ValueError`` when the node cannot run."""
+        node_data = context.node_data
+        input_ref = node_data.get("inputText", "")
+        parameters = node_data.get("parameters", [])
+        input_text = self._resolve_input(input_ref, context.variables, context.inputs)
+        if not input_text:
+            raise ValueError(f"Input text not found: {input_ref}")
+        if not parameters:
+            raise ValueError("No parameters defined for extraction")
+        return {
+            "system": (
+                "You are a precise data extraction assistant. Extract structured information from text "
+                "and return valid JSON only."
+            ),
+            "prompt": self._build_extraction_prompt(input_text, parameters, node_data.get("instructions", "")),
+            "input_text": input_text,
+            "model": normalize_model_id(node_data.get("model", self.DEFAULT_MODEL)),
+        }
+
+    def parse_answer(
+        self, context: NodeExecutionContext, text: Optional[str], *, parse_failure_is_error: bool = True
+    ) -> NodeExecutionResult:
+        """Pure: turn the model's answer (``None``: no answer) into the node result.
+
+        Invalid JSON from an ``llm`` strategy node is a ``failed`` result with the parse error and the
+        raw text kept, so the engine retry policy may re-ask. ``combined`` falls back to regex.
+        """
+        node_data = context.node_data
+        parameters = node_data.get("parameters", [])
+        strict_mode = node_data.get("strictMode", False)
+        strategy = node_data.get("extractionStrategy", "llm")  # llm, regex, combined
+        input_text = self._resolve_input(node_data.get("inputText", ""), context.variables, context.inputs) or ""
+
+        extracted: Dict[str, Any] = {}
+        method = "none"
+
+        if strategy in ("llm", "combined"):
+            parsed = self._try_parse_json(text, parameters) if text is not None else None
+            if parsed is not None:
+                extracted, method = parsed, "llm"
+            elif strategy == "llm":
+                if text is not None and parse_failure_is_error:
+                    return NodeExecutionResult(
+                        node_id=context.node_id,
+                        status="failed",
+                        error="Could not parse JSON from the model answer",
+                        output={"raw_text": text},
+                    )
+                extracted, method = self._regex_extract(input_text, parameters), "regex_fallback"
+
+        if strategy == "regex" or (strategy == "combined" and not extracted):
+            extracted, method = self._regex_extract(input_text, parameters), "regex"
+
+        # Combined: fill missing LLM values from regex
+        if strategy == "combined":
+            regex_extracted = self._regex_extract(input_text, parameters)
+            for param in parameters:
+                name = param.get("name", "")
+                if extracted.get(name) is None and regex_extracted.get(name) is not None:
+                    extracted[name] = regex_extracted[name]
+                    method = "combined"
+
+        # Defaults for missing parameters
+        for param in parameters:
+            name = param.get("name", "")
+            default = param.get("defaultValue")
+            if extracted.get(name) is None:
+                extracted[name] = self._coerce_type(default, param.get("type", "string")) if default is not None else None
+
+        validation_errors = []
+        if strict_mode:
+            for param in parameters:
+                if param.get("required", False) and extracted.get(param.get("name", "")) is None:
+                    validation_errors.append(f"Required parameter '{param.get('name', '')}' not found")
+        if validation_errors and strict_mode:
+            return NodeExecutionResult(
+                node_id=context.node_id, status="failed", error="; ".join(validation_errors)
+            )
+
+        return NodeExecutionResult(
+            node_id=context.node_id,
+            status="success",
+            output={
+                "output": extracted,
+                "parameters": extracted,
+                "extraction_count": len([v for v in extracted.values() if v is not None]),
+                "total_parameters": len(parameters),
+                "extraction_method": method,
+                "validation_warnings": validation_errors if not strict_mode else [],
+            },
+        )
+
+    async def prepare(self, context: NodeExecutionContext, db: AsyncSession) -> Any:
+        try:
+            built = self.build_prompt(context)
+        except ValueError as exc:
+            return NodeExecutionResult(node_id=context.node_id, status="failed", error=str(exc))
+        if context.node_data.get("extractionStrategy", "llm") == "regex":
+            return self.parse_answer(context, None)
+        return PrepareResult.llm(
+            system=built["system"],
+            prompt=built["prompt"],
+            model=built["model"] if context.node_data.get("model") else None,
+            tier="low",
+            response_format="json",
+        )
+
+    async def finish(self, context: NodeExecutionContext, db: AsyncSession, finish_input: Any) -> NodeExecutionResult:
+        result = self.parse_answer(context, PrepareResult.answer_text(finish_input))
+        tokens = PrepareResult.answer_tokens(finish_input)
+        if tokens:
+            result.tokens_used = tokens
+        return result
+
     async def execute(
         self,
         context: NodeExecutionContext,
         db: AsyncSession
     ) -> NodeExecutionResult:
+        """Legacy in-process path over the same pure functions (removed by U30)."""
         start_time = time.time()
-
         try:
-            node_data = context.node_data
-            input_ref = node_data.get("inputText", "")
-            parameters = node_data.get("parameters", [])
-            model = node_data.get("model", self.DEFAULT_MODEL)
-            instructions = node_data.get("instructions", "")
-            strict_mode = node_data.get("strictMode", False)
-            extraction_strategy = node_data.get("extractionStrategy", "llm")  # llm, regex, combined
-
-            # Resolve input text
-            input_text = self._resolve_input(input_ref, context.variables, context.inputs)
-
-            if not input_text:
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="failed",
-                    error=f"Input text not found: {input_ref}",
-                    elapsed_ms=int((time.time() - start_time) * 1000)
-                )
-
-            if not parameters:
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="failed",
-                    error="No parameters defined for extraction",
-                    elapsed_ms=int((time.time() - start_time) * 1000)
-                )
-
-            # Extract parameters based on strategy
-            extracted = {}
-            extraction_method = "none"
-
-            if extraction_strategy in ["llm", "combined"]:
-                # Try LLM-based extraction first
+            built = self.build_prompt(context)
+            text: Optional[str] = None
+            tokens = 0
+            if context.node_data.get("extractionStrategy", "llm") in ("llm", "combined"):
                 try:
-                    extracted = await self._extract_with_llm(
-                        input_text,
-                        parameters,
-                        instructions,
-                        model,
+                    completion = await legacy_complete(
                         db,
-                        context.user_id,
-                        tenant_id=context.tenant_id,
+                        context.tenant_id,
+                        built["model"],
+                        built["system"],
+                        built["prompt"],
+                        temperature=0.1,
+                        max_tokens=2048,
+                        timeout=self.LLM_TIMEOUT_SECONDS,
                     )
-                    extraction_method = "llm"
-                    logger.info(f"LLM extraction successful for node {context.node_id}")
+                    text, tokens = completion["text"] or "{}", completion["tokens"]
                 except Exception as e:
                     logger.warning(f"LLM extraction failed for node {context.node_id}: {e}")
-                    if extraction_strategy == "llm":
-                        # LLM-only mode, fall back to regex
-                        extracted = await self._extract_with_regex(
-                            input_text, parameters, instructions
-                        )
-                        extraction_method = "regex_fallback"
-
-            if extraction_strategy == "regex" or (extraction_strategy == "combined" and not extracted):
-                # Use regex-based extraction
-                extracted = await self._extract_with_regex(
-                    input_text, parameters, instructions
-                )
-                extraction_method = "regex"
-
-            # If combined strategy, merge LLM results with regex for missing values
-            if extraction_strategy == "combined":
-                regex_extracted = await self._extract_with_regex(
-                    input_text, parameters, instructions
-                )
-                for param in parameters:
-                    name = param.get("name", "")
-                    if name not in extracted or extracted.get(name) is None:
-                        if name in regex_extracted and regex_extracted[name] is not None:
-                            extracted[name] = regex_extracted[name]
-                            extraction_method = "combined"
-
-            # Apply default values for missing parameters
-            for param in parameters:
-                name = param.get("name", "")
-                default = param.get("defaultValue")
-                param_type = param.get("type", "string")
-
-                if name not in extracted or extracted.get(name) is None:
-                    if default is not None:
-                        extracted[name] = self._coerce_type(default, param_type)
-                    else:
-                        extracted[name] = None
-
-            # Validate required parameters
-            validation_errors = []
-            if strict_mode:
-                for param in parameters:
-                    if param.get("required", False):
-                        param_name = param.get("name", "")
-                        if param_name not in extracted or extracted[param_name] is None:
-                            validation_errors.append(f"Required parameter '{param_name}' not found")
-
-            if validation_errors and strict_mode:
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="failed",
-                    error="; ".join(validation_errors),
-                    elapsed_ms=int((time.time() - start_time) * 1000)
-                )
-
-            elapsed_ms = int((time.time() - start_time) * 1000)
-
-            return NodeExecutionResult(
-                node_id=context.node_id,
-                status="success",
-                output={
-                    "output": extracted,
-                    "parameters": extracted,
-                    "extraction_count": len([v for v in extracted.values() if v is not None]),
-                    "total_parameters": len(parameters),
-                    "extraction_method": extraction_method,
-                    "validation_warnings": validation_errors if not strict_mode else [],
-                },
-                elapsed_ms=elapsed_ms
-            )
-
+            result = self.parse_answer(context, text, parse_failure_is_error=False)
+            result.tokens_used = tokens or None
+            result.elapsed_ms = int((time.time() - start_time) * 1000)
+            return result
         except Exception as e:
-            elapsed_ms = int((time.time() - start_time) * 1000)
             logger.error(f"Parameter extraction failed for node {context.node_id}: {e}")
             return NodeExecutionResult(
                 node_id=context.node_id,
                 status="failed",
                 error=str(e),
-                elapsed_ms=elapsed_ms
+                elapsed_ms=int((time.time() - start_time) * 1000),
             )
 
     def _resolve_input(self, input_ref: str, variables: dict, inputs: dict) -> Optional[str]:
@@ -271,80 +293,34 @@ Ensure the response is valid JSON only, with no additional text or explanation."
 
         return prompt
 
-    async def _extract_with_llm(
-        self,
-        text: str,
-        parameters: List[Dict],
-        instructions: str,
-        model: str,
-        db: AsyncSession,
-        user_id: str,
-        tenant_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Extract parameters using LLM via LiteLLM"""
-
-        prompt = self._build_extraction_prompt(text, parameters, instructions)
-        model_id = normalize_model_id(model)
-
-        # Resolve API key via unified gateway (with OpenRouter fallback)
-        tenant_uuid = UUID(tenant_id) if tenant_id else None
-        api_key, model_id = await resolve_key_with_fallback(db, tenant_uuid, model_id)
-
-        if not api_key:
-            provider_type = get_provider_from_model(model_id)
-            raise ValueError(f"API key not configured for provider '{provider_type}'")
-
-        response = await asyncio.wait_for(
-            litellm.acompletion(
-                model=model_id,
-                messages=[
-                    {"role": "system", "content": "You are a precise data extraction assistant. Extract structured information from text and return valid JSON only."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                max_tokens=2048,
-                api_key=api_key,
-            ),
-            timeout=self.LLM_TIMEOUT_SECONDS,
-        )
-
-        output_text = response.choices[0].message.content or "{}"
-
-        # Parse JSON response
-        extracted = self._parse_llm_response(output_text, parameters)
-        return extracted
-
-    def _parse_llm_response(self, response_text: str, parameters: List[Dict]) -> Dict[str, Any]:
-        """Parse LLM response and extract JSON values"""
-        # Try to find JSON in the response
-        response_text = response_text.strip()
-
-        # Try direct JSON parse first
+    def _try_parse_json(self, response_text: str, parameters: List[Dict]) -> Optional[Dict[str, Any]]:
+        """The coerced JSON object in the answer, or None when there is none."""
+        response_text = (response_text or "").strip()
         try:
             data = json.loads(response_text)
-            return self._coerce_extracted_values(data, parameters)
+            if isinstance(data, dict):
+                return self._coerce_extracted_values(data, parameters)
         except json.JSONDecodeError:
             pass
 
-        # Try to extract JSON from markdown code blocks
-        json_patterns = [
-            r'```json\s*([\s\S]*?)\s*```',
-            r'```\s*([\s\S]*?)\s*```',
-            r'\{[\s\S]*\}',
-        ]
-
-        for pattern in json_patterns:
+        for pattern in (r'```json\s*([\s\S]*?)\s*```', r'```\s*([\s\S]*?)\s*```', r'\{[\s\S]*\}'):
             match = re.search(pattern, response_text)
             if match:
                 try:
-                    json_str = match.group(1) if match.lastindex else match.group(0)
-                    data = json.loads(json_str)
-                    return self._coerce_extracted_values(data, parameters)
+                    data = json.loads(match.group(1) if match.lastindex else match.group(0))
+                    if isinstance(data, dict):
+                        return self._coerce_extracted_values(data, parameters)
                 except (json.JSONDecodeError, IndexError):
                     continue
+        return None
 
-        logger.warning(f"Could not parse JSON from LLM response: {response_text[:200]}")
-        return {}
+    def _parse_llm_response(self, response_text: str, parameters: List[Dict]) -> Dict[str, Any]:
+        """Parse an answer into values ({} when there is no JSON object)."""
+        parsed = self._try_parse_json(response_text, parameters)
+        if parsed is None:
+            logger.warning(f"Could not parse JSON from LLM response: {(response_text or '')[:200]}")
+            return {}
+        return parsed
 
     def _coerce_extracted_values(self, data: Dict, parameters: List[Dict]) -> Dict[str, Any]:
         """Coerce extracted values to their specified types"""
@@ -367,6 +343,9 @@ Ensure the response is valid JSON only, with no additional text or explanation."
         instructions: str
     ) -> Dict[str, Any]:
         """Extract parameters from text using pattern matching (fallback)"""
+        return self._regex_extract(text, parameters)
+
+    def _regex_extract(self, text: str, parameters: List[Dict]) -> Dict[str, Any]:
         extracted = {}
 
         for param in parameters:

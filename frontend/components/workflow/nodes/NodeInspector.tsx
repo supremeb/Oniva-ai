@@ -19,7 +19,7 @@ export function NodeInspector({ id, children }: NodeInspectorProps) {
     const nodeStatus = useWorkflowStore((state) => state.nodeStatusMap[id]);
     const executionResult = useWorkflowStore((state) => state.executionResults[id]);
 
-    if (nodeStatus !== 'complete' || !executionResult) {
+    if (nodeStatus !== 'completed' || !executionResult) {
         return <>{children}</>;
     }
 

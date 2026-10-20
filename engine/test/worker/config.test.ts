@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_QUESTION_TTL_MS } from "../../src/agent/questions.js";
 import { ManualClock } from "../../src/core/clock.js";
 import {
   assertNotTestHarnessInProduction,
@@ -7,6 +8,7 @@ import {
   DEFAULT_LEASE_TTL_MS,
   DEFAULT_SHUTDOWN_TIMEOUT_MS,
   defaultDbTimeouts,
+  requireWorkflowBackend,
   WorkerConfigError,
   workerConfigFromEnv,
   workerPoolOptions,
@@ -29,7 +31,9 @@ describe("workerConfigFromEnv", () => {
       leaseTtlMs: DEFAULT_LEASE_TTL_MS,
       leaseRetryMs: null,
       gatewayUrl: null,
+      workflowBackendUrl: null,
       approvalTtlMs: DEFAULT_APPROVAL_TTL_MS,
+      questionTtlMs: DEFAULT_QUESTION_TTL_MS,
       progressIntervalMs: 100,
       dbSchema: null,
       subagentTool: null,
@@ -127,6 +131,13 @@ describe("workerConfigFromEnv", () => {
       /identifier/,
     );
     expect(workerConfigFromEnv({ ...BASE, ENGINE_APPROVAL_TTL_MS: "0" }).approvalTtlMs).toBeNull();
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_QUESTION_TTL_MS: "0" }).questionTtlMs).toBeNull();
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_QUESTION_TTL_MS: "5000" }).questionTtlMs).toBe(
+      5000,
+    );
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_QUESTION_TTL_MS: "-1" })).toThrow(
+      WorkerConfigError,
+    );
   });
 
   it("refuses the test harness flag in production only", () => {
@@ -199,6 +210,9 @@ describe("workerHostPolicy", () => {
       conversation: { id: "c", tenantId: "t", projectId: "p" },
       runId: "r",
       toolCallId: "x",
+      toolTaskId: "task-x",
+      toolSource: "gateway" as const,
+      taint: { tainted: false, total: 0, sources: [] },
       arguments: {},
       replay: "unsafe" as const,
       // biome-ignore lint/suspicious/noExplicitAny: agent config is not consulted
@@ -210,6 +224,18 @@ describe("workerHostPolicy", () => {
       expiresAt: 1500,
     });
     expect(policy.authorizeTool({ ...req, toolName: "safe" })).toEqual({ decision: "allow" });
+  });
+
+  it("local mode (no backend) makes no HTTP call and keeps the local rule for native tools", () => {
+    const policy = workerHostPolicy({
+      modelDefaults: defaults,
+      gateway: { requiresApproval: () => false },
+      approvalTtlMs: 500,
+      clock: new ManualClock(),
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: only the tool name is read locally
+    const req = { toolName: "mystery", toolSource: "native" } as any;
+    expect(policy.authorizeTool(req)).toEqual({ decision: "allow" });
   });
 
   it("routes models by purpose and denies without a key", () => {
@@ -276,5 +302,48 @@ describe("backend policy configuration", () => {
     expect(() =>
       workerConfigFromEnv({ ...BASE, ENGINE_POLICY: "backend", ENGINE_POLICY_URL: "https://b" }),
     ).toThrow(/ENGINE_GATEWAY_TOKEN/);
+  });
+});
+
+describe("workflow backend (U35)", () => {
+  it("ENGINE_WORKFLOW_BACKEND_URL falls back to ENGINE_GATEWAY_URL and wins when set", () => {
+    expect(workerConfigFromEnv(BASE).workflowBackendUrl).toBeNull();
+    expect(
+      workerConfigFromEnv({ ...BASE, ENGINE_GATEWAY_URL: "https://g" }).workflowBackendUrl,
+    ).toBe("https://g");
+    expect(
+      workerConfigFromEnv({
+        ...BASE,
+        ENGINE_GATEWAY_URL: "https://g",
+        ENGINE_WORKFLOW_BACKEND_URL: "https://w",
+      }).workflowBackendUrl,
+    ).toBe("https://w");
+  });
+
+  it("requireWorkflowBackend returns the origin and token, or fails fast with a clear message", () => {
+    const withUrl = workerConfigFromEnv({
+      ...BASE,
+      ENGINE_GATEWAY_URL: "https://g",
+      ENGINE_GATEWAY_TOKEN: "gw",
+    });
+    expect(requireWorkflowBackend(withUrl)).toEqual({
+      baseUrl: "https://g",
+      serviceToken: "gw",
+      retryMs: 60_000,
+    });
+    expect(
+      requireWorkflowBackend(
+        workerConfigFromEnv({ ...BASE, ENGINE_WORKFLOW_BACKEND_URL: "https://w" }),
+      ),
+    ).toEqual({
+      baseUrl: "https://w",
+      serviceToken: "tok",
+      retryMs: 60_000,
+    });
+    const without = workerConfigFromEnv(BASE);
+    expect(() => requireWorkflowBackend(without)).toThrow(WorkerConfigError);
+    expect(() => requireWorkflowBackend(without)).toThrow(
+      /ENGINE_WORKFLOW_BACKEND_URL or ENGINE_GATEWAY_URL/,
+    );
   });
 });

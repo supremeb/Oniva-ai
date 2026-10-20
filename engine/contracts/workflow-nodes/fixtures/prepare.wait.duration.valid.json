@@ -1,0 +1,5 @@
+{
+  "contractVersion": 1,
+  "kind": "wait",
+  "durationMs": 7200000
+}

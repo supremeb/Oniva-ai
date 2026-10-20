@@ -18,10 +18,10 @@ import asyncio
 import logging
 from typing import Optional
 
-import litellm
-
 from app.config import get_settings
+from app.services import llm_direct
 from app.services.chunking import ChunkResult
+from app.services.llm_direct import DirectProvider, DirectRequest
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -44,6 +44,26 @@ for the purposes of improving search retrieval of the chunk. Answer only with th
 nothing else."""
 
 
+def _context_request(document_text: str, chunk_text: str, model: str) -> DirectRequest:
+    """Build the cache-marked Anthropic request for one chunk."""
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": CONTEXT_PROMPT_TEMPLATE.format(
+                        document_text=document_text,
+                        chunk_text=chunk_text,
+                    ),
+                    "cache_control": {"type": "ephemeral"},
+                },
+            ],
+        },
+    ]
+    return DirectRequest(messages=messages, model=model, max_tokens=150, temperature=0)
+
+
 async def _generate_single_context(
     document_text: str,
     chunk_text: str,
@@ -51,33 +71,13 @@ async def _generate_single_context(
     is_first_chunk: bool,
 ) -> Optional[str]:
     """Generate context for a single chunk using Claude with prompt caching."""
+    provider = DirectProvider(provider_type="anthropic", api_key=settings.ANTHROPIC_API_KEY)
     try:
-        # Build messages with cache_control for the document
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": CONTEXT_PROMPT_TEMPLATE.format(
-                            document_text=document_text,
-                            chunk_text=chunk_text,
-                        ),
-                        "cache_control": {"type": "ephemeral"},
-                    },
-                ],
-            },
-        ]
-
-        response = await litellm.acompletion(
-            model=model,
-            messages=messages,
-            max_tokens=150,
-            temperature=0,
-            api_key=settings.ANTHROPIC_API_KEY,
+        response = await llm_direct.complete(
+            _context_request(document_text, chunk_text, model), provider,
         )
 
-        content = response.choices[0].message.content
+        content = response.content
         if not content or not content.strip():
             logger.warning("Empty context response from LLM")
             return None
@@ -97,29 +97,10 @@ async def _generate_single_context(
 
             # Retry once
             try:
-                messages = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": CONTEXT_PROMPT_TEMPLATE.format(
-                                    document_text=document_text,
-                                    chunk_text=chunk_text,
-                                ),
-                                "cache_control": {"type": "ephemeral"},
-                            },
-                        ],
-                    },
-                ]
-                response = await litellm.acompletion(
-                    model=model,
-                    messages=messages,
-                    max_tokens=150,
-                    temperature=0,
-                    api_key=settings.ANTHROPIC_API_KEY,
+                response = await llm_direct.complete(
+                    _context_request(document_text, chunk_text, model), provider,
                 )
-                content = response.choices[0].message.content
+                content = response.content
                 return content.strip() if content else None
             except Exception as retry_e:
                 logger.warning(f"Context generation retry failed: {retry_e}")

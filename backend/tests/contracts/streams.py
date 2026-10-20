@@ -368,3 +368,98 @@ async def run_workflow_scenario(scenario: str) -> dict:
             sse.append(ev)
     pins.close()
     return {"orchestrator_events": raw, "sse_events": sse_events(sse)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Engine-run workflow stream (plan 003 U17): scripted watch views -> legacy events
+# ─────────────────────────────────────────────────────────────────────────────
+
+RUN_TASK_ID = "run-task-1"
+
+
+def run_view(nodes: dict, *, running: tuple = (), status: str = "running") -> dict:
+    """A watch view holding one ``workflow_run`` task (``nodes`` = its summary map) and the running node children."""
+    tasks: dict = {RUN_TASK_ID: {"kind": "workflow_run", "parentId": None, "status": status, "phase": "dispatch",
+                                 "label": "run", "attempt": 1, "startedAt": "2026-10-17T10:00:00.000Z",
+                                 "nodes": dict(nodes)}}
+    for i, node_id in enumerate(running):
+        tasks[f"node-task-{node_id}"] = {"kind": "workflow_node", "parentId": RUN_TASK_ID, "status": "running",
+                                         "phase": "prepare", "label": node_id, "attempt": 1,
+                                         "startedAt": f"2026-10-17T10:00:0{i + 1}.000Z"}
+    return {"entries": [], "run": {"active": status == "running"}, "inbox": {"queue": []}, "subagents": {},
+            "tasks": tasks}
+
+
+def snapshot_frames(views: list, first_cursor: int = 1) -> list:
+    return [{"cursor": first_cursor + i, "snapshot": v} for i, v in enumerate(views)]
+
+
+class ScriptedWatch:
+    """An open watch response: yields the scripted frames, then ends (or raises ``fail``)."""
+
+    def __init__(self, frames: list, fail: Exception | None = None):
+        self.frames, self.fail, self.closed = frames, fail, False
+
+    async def aiter_raw(self):
+        for frame in self.frames:
+            yield f"id: {frame.get('cursor')}\ndata: {json.dumps(frame)}\n\n".encode()
+        if self.fail is not None:
+            raise self.fail
+
+    async def aclose(self):
+        self.closed = True
+
+
+class ScriptedEngine:
+    """Engine stand-in for the watch: hands out the scripted responses in order, recording ``Last-Event-ID``."""
+
+    def __init__(self, *watches):
+        self.watches = list(watches)
+        self.resumes: list = []
+        self.opened: list = []
+
+    async def watch_stream(self, session_id, tenant_id, project_id, conversation_id, last_event_id=None, cursor=None):
+        self.resumes.append(last_event_id)
+        if not self.watches:
+            from app.services.engine_client import EngineError
+            raise EngineError(502, "engine_unreachable")
+        item = self.watches.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        self.opened.append(item)
+        return item
+
+    async def get_task(self, session_id, tenant_id, project_id, conversation_id, task_id):
+        return {"status": "running"}
+
+
+ENGINE_STREAM_SCENARIOS: dict = {
+    # node ids match workflow_success.json so the event order can be compared with the legacy stream
+    "success": {
+        "trace": [("start-1", "success", {"query": ""}, None), ("tmpl-1", "success", {"output": "Hello Oniva"}, None),
+                  ("out-1", "success", {"content": "Hello Oniva"}, None)],
+        "views": [
+            run_view({"start-1": "pending", "tmpl-1": "pending", "out-1": "pending"}, running=("start-1",)),
+            run_view({"start-1": "success", "tmpl-1": "pending", "out-1": "pending"}, running=("tmpl-1",)),
+            run_view({"start-1": "success", "tmpl-1": "success", "out-1": "pending"}, running=("out-1",)),
+            run_view({"start-1": "success", "tmpl-1": "success", "out-1": "success"}),
+            run_view({"start-1": "success", "tmpl-1": "success", "out-1": "success"}, status="done"),
+        ],
+    },
+    "failure": {
+        "trace": [("start-1", "success", {"query": ""}, None), ("n2", "failed", None, "boom")],
+        "views": [
+            run_view({"start-1": "success", "n2": "pending", "n3": "pending"}, running=("n2",)),
+            run_view({"start-1": "success", "n2": "failed", "n3": "skipped"}),
+            run_view({"start-1": "success", "n2": "failed", "n3": "skipped"}, status="done"),
+        ],
+    },
+    "skipped": {
+        "trace": [("start-1", "success", {"query": ""}, None), ("a", "success", {"output": "x"}, None)],
+        "views": [
+            run_view({"start-1": "pending", "a": "pending", "b": "pending"}, running=("start-1",)),
+            run_view({"start-1": "success", "a": "success", "b": "skipped"}),
+            run_view({"start-1": "success", "a": "success", "b": "skipped"}, status="done"),
+        ],
+    },
+}

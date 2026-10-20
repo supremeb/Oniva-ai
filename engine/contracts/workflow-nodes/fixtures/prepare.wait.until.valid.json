@@ -1,0 +1,7 @@
+{
+  "contractVersion": 1,
+  "kind": "wait",
+  "untilEpochMs": 1760000000000,
+  "signal": "approval.decided",
+  "slaUntilEpochMs": 1760003600000
+}

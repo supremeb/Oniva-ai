@@ -42,17 +42,19 @@ import logging
 import re
 import time
 from typing import Any, Dict, List, Optional
-from uuid import UUID
 
-import litellm
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 import jsonschema
 
-from app.node_executors import BaseNodeExecutor, NodeExecutionContext, NodeExecutionResult
-from app.services.llm_gateway import (
-    resolve_key_with_fallback, normalize_model_id,
+from app.node_executors import (
+    BaseNodeExecutor,
+    NodeExecutionContext,
+    NodeExecutionResult,
+    PrepareResult,
+    legacy_complete,
 )
+from app.services.llm_gateway import normalize_model_id
 
 logger = logging.getLogger(__name__)
 
@@ -97,68 +99,82 @@ class GuardrailExecutor(BaseNodeExecutor):
 
     node_type = "guardrail"
 
-    async def _evaluate_llm_rule(
-        self,
-        rule: Dict[str, Any],
-        content: str,
-        model_id: str,
-        api_key: str,
-    ) -> RuleResult:
-        """Evaluate content using LLM via LiteLLM"""
-        start_time = time.time()
+    def _judge_llm_rule(self, rule: Dict[str, Any], response_text: Optional[str], duration_ms: int = 0) -> RuleResult:
+        """Pure: judge one LLM rule against the model's answer (``None`` means no answer arrived)."""
         rule_name = rule.get("name", "llm_check")
-
-        try:
-            eval_prompt = rule.get("prompt", "Is this content appropriate?")
-            expected_value = rule.get("expectedValue", "YES")
-
-            system_prompt = (
-                "You are an evaluator. Answer concisely based on the evaluation criteria. "
-                "Respond with exactly the expected format specified."
-            )
-
-            full_prompt = f"{eval_prompt}\n\nContent to evaluate:\n{content}"
-
-            response = await litellm.acompletion(
-                model=model_id,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": full_prompt},
-                ],
-                temperature=0.1,
-                max_tokens=100,
-                api_key=api_key,
-            )
-
-            response_text = response.choices[0].message.content or ""
-            response_clean = response_text.strip().upper()
-
-            expected_clean = expected_value.strip().upper()
-            passed = expected_clean in response_clean or response_clean == expected_clean
-            score = 1.0 if passed else 0.0
-
-            return RuleResult(
-                rule_name=rule_name,
-                rule_type="llm",
-                passed=passed,
-                score=score,
-                weight=rule.get("weight", 1.0),
-                details=f"Expected '{expected_value}', got '{response_text}'",
-                raw_output=response_text,
-                duration_ms=int((time.time() - start_time) * 1000)
-            )
-
-        except Exception as e:
-            logger.error(f"LLM rule evaluation failed: {e}")
+        expected_value = rule.get("expectedValue", "YES")
+        if response_text is None:
             return RuleResult(
                 rule_name=rule_name,
                 rule_type="llm",
                 passed=False,
                 score=0.0,
                 weight=rule.get("weight", 1.0),
-                details=f"Evaluation error: {str(e)}",
-                duration_ms=int((time.time() - start_time) * 1000)
+                details="Evaluation error: no answer for this rule",
+                duration_ms=duration_ms,
             )
+        response_clean = response_text.strip().upper()
+        expected_clean = str(expected_value).strip().upper()
+        passed = expected_clean in response_clean or response_clean == expected_clean
+        return RuleResult(
+            rule_name=rule_name,
+            rule_type="llm",
+            passed=passed,
+            score=1.0 if passed else 0.0,
+            weight=rule.get("weight", 1.0),
+            details=f"Expected '{expected_value}', got '{response_text}'",
+            raw_output=response_text,
+            duration_ms=duration_ms,
+        )
+
+    def build_prompt(self, context: NodeExecutionContext) -> Optional[Dict[str, Any]]:
+        """Pure: one prompt that asks every ``llm`` rule's question, or None when no rule needs a model."""
+        rules = context.node_data.get("rules", [])
+        llm_rules = [r for r in rules if r.get("type", "regex") == "llm"]
+        if not llm_rules:
+            return None
+        _, content_str = self._extract_content(context)
+        questions = "\n\n".join(
+            f"{i}. {r.get('prompt', 'Is this content appropriate?')}" for i, r in enumerate(llm_rules, 1)
+        )
+        system = (
+            "You are an evaluator. Answer concisely based on the evaluation criteria. "
+            "Respond with exactly the expected format specified."
+        )
+        prompt = (
+            f"Content to evaluate:\n---\n{content_str}\n---\n\n"
+            f"Answer each numbered question about the content, in the format the question asks for.\n\n"
+            f"{questions}\n\n"
+            f'Respond with ONLY a JSON object: {{"answers": ["<answer 1>", "<answer 2>", ...]}} '
+            f"with exactly {len(llm_rules)} answer(s), in order."
+        )
+        return {
+            "system": system,
+            "prompt": prompt,
+            "count": len(llm_rules),
+            "model": normalize_model_id(context.node_data.get("model", "gpt-4o-mini")),
+        }
+
+    @staticmethod
+    def parse_llm_answers(text: str, count: int) -> List[Optional[str]]:
+        """Pure: the per-rule answers from the model's JSON reply (a lone rule also accepts plain text)."""
+        raw = (text or "").strip()
+        candidate = raw
+        if "```json" in raw:
+            candidate = raw.split("```json")[1].split("```")[0]
+        elif "```" in raw:
+            candidate = raw.split("```")[1].split("```")[0]
+        try:
+            data = json.loads(candidate.strip())
+            answers = data.get("answers") if isinstance(data, dict) else data
+            if isinstance(answers, list):
+                out = [None if a is None else str(a) for a in answers[:count]]
+                return out + [None] * (count - len(out))
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        if count == 1 and raw:
+            return [raw]
+        return [None] * count
 
     async def _evaluate_regex_rule(
         self,
@@ -444,161 +460,176 @@ class GuardrailExecutor(BaseNodeExecutor):
                 duration_ms=int((time.time() - start_time) * 1000)
             )
 
+    def _extract_content(self, context: NodeExecutionContext) -> tuple:
+        """The content to evaluate: the first predecessor's output, else the ``_input`` variable."""
+        content = None
+        for input_value in context.inputs.values():
+            if isinstance(input_value, dict):
+                content = (
+                    input_value.get("response") or
+                    input_value.get("output") or
+                    input_value.get("result") or
+                    input_value.get("text") or
+                    input_value
+                )
+            else:
+                content = input_value
+            break
+
+        if content is None:
+            content = context.variables.get("_input", "")
+        return content, str(content) if not isinstance(content, str) else content
+
+    async def _evaluate(
+        self,
+        context: NodeExecutionContext,
+        llm_answers: Optional[List[Optional[str]]],
+        *,
+        reject_status: str,
+        tokens: int = 0,
+    ) -> NodeExecutionResult:
+        """Evaluate every rule (LLM rules from ``llm_answers``) and build the node result."""
+        node_data = context.node_data
+        rules = node_data.get("rules", [])
+        failure_action = node_data.get("failureAction", "reject")
+        failure_threshold = node_data.get("failureThreshold", 0.7)
+        content, content_str = self._extract_content(context)
+
+        if not rules:
+            return NodeExecutionResult(
+                node_id=context.node_id,
+                status="success",
+                output=GuardrailOutput(
+                    passed=True,
+                    score=1.0,
+                    failure_action=failure_action,
+                    rule_results=[],
+                    total_rules=0,
+                    passed_rules=0,
+                    failed_rules=0,
+                    input_data=content,
+                    message="No rules configured - passed by default",
+                ).model_dump(),
+            )
+
+        rule_results: List[RuleResult] = []
+        llm_index = 0
+        for rule in rules:
+            rule_type = rule.get("type", "regex")
+            if rule_type == "llm":
+                answer = None
+                if llm_answers is not None and llm_index < len(llm_answers):
+                    answer = llm_answers[llm_index]
+                llm_index += 1
+                rule_results.append(self._judge_llm_rule(rule, answer))
+            elif rule_type == "regex":
+                rule_results.append(await self._evaluate_regex_rule(rule, content_str))
+            elif rule_type == "schema":
+                rule_results.append(await self._evaluate_schema_rule(rule, content))
+            elif rule_type == "threshold":
+                rule_results.append(await self._evaluate_threshold_rule(rule, content))
+            elif rule_type == "length":
+                rule_results.append(await self._evaluate_length_rule(rule, content))
+            elif rule_type == "contains":
+                rule_results.append(await self._evaluate_contains_rule(rule, content))
+            else:
+                logger.warning(f"Unknown rule type: {rule_type}")
+
+        total_weight = sum(r.weight for r in rule_results)
+        if total_weight > 0:
+            weighted_score = sum(r.score * r.weight for r in rule_results) / total_weight
+        else:
+            weighted_score = 1.0
+
+        passed = weighted_score >= failure_threshold
+        passed_count = sum(1 for r in rule_results if r.passed)
+        failed_count = len(rule_results) - passed_count
+
+        if passed:
+            message = f"All guardrails passed (score: {weighted_score:.2f})"
+        else:
+            failed_names = [r.rule_name for r in rule_results if not r.passed]
+            message = f"Guardrails failed (score: {weighted_score:.2f}). Failed rules: {', '.join(failed_names)}"
+
+        output = GuardrailOutput(
+            passed=passed,
+            score=weighted_score,
+            failure_action=failure_action,
+            rule_results=rule_results,
+            total_rules=len(rule_results),
+            passed_rules=passed_count,
+            failed_rules=failed_count,
+            input_data=content,
+            message=message,
+        )
+
+        if not passed and failure_action == "reject":
+            return NodeExecutionResult(
+                node_id=context.node_id,
+                status=reject_status,
+                output=output.model_dump(),
+                error=message,
+                tokens_used=tokens or None,
+            )
+        return NodeExecutionResult(
+            node_id=context.node_id,
+            status="success",
+            output=output.model_dump(),
+            tokens_used=tokens or None,
+        )
+
+    async def prepare(self, context: NodeExecutionContext, db: AsyncSession) -> Any:
+        """Rules that need no model are decided here; ``llm`` rules become one generation."""
+        built = self.build_prompt(context)
+        if built is None:
+            return await self._evaluate(context, None, reject_status="blocked")
+        return PrepareResult.llm(
+            system=built["system"],
+            prompt=built["prompt"],
+            model=built["model"] if context.node_data.get("model") else None,
+            tier="low",
+            response_format="json",
+        )
+
+    async def finish(self, context: NodeExecutionContext, db: AsyncSession, finish_input: Any) -> NodeExecutionResult:
+        """A reject verdict is ``blocked`` (with the reason); a pass is ``success``."""
+        built = self.build_prompt(context)
+        answers = (
+            self.parse_llm_answers(PrepareResult.answer_text(finish_input), built["count"]) if built else None
+        )
+        return await self._evaluate(
+            context, answers, reject_status="blocked", tokens=PrepareResult.answer_tokens(finish_input)
+        )
+
     async def execute(
         self,
         context: NodeExecutionContext,
         db: AsyncSession
     ) -> NodeExecutionResult:
-        """Execute guardrail evaluation"""
+        """Legacy in-process path over the same functions (removed by U30); a reject stays ``failed``."""
         start_time = time.time()
-
         try:
-            node_data = context.node_data
-
-            # Get configuration
-            rules = node_data.get("rules", [])
-            failure_action = node_data.get("failureAction", "reject")
-            failure_threshold = node_data.get("failureThreshold", 0.7)
-            model_id = node_data.get("model", "gpt-4o-mini")
-
-            # Get content to evaluate from inputs
-            content = None
-            for input_key, input_value in context.inputs.items():
-                if isinstance(input_value, dict):
-                    # Try common output fields
-                    content = (
-                        input_value.get("response") or
-                        input_value.get("output") or
-                        input_value.get("result") or
-                        input_value.get("text") or
-                        input_value
+            built = self.build_prompt(context)
+            answers = None
+            tokens = 0
+            if built is not None:
+                try:
+                    completion = await legacy_complete(
+                        db,
+                        context.tenant_id,
+                        built["model"],
+                        built["system"],
+                        built["prompt"],
+                        temperature=0.1,
+                        max_tokens=100 * built["count"],
                     )
-                else:
-                    content = input_value
-                break
-
-            if content is None:
-                content = context.variables.get("_input", "")
-
-            # Convert to string for text-based rules
-            content_str = str(content) if not isinstance(content, str) else content
-
-            if not rules:
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="success",
-                    output=GuardrailOutput(
-                        passed=True,
-                        score=1.0,
-                        failure_action=failure_action,
-                        rule_results=[],
-                        total_rules=0,
-                        passed_rules=0,
-                        failed_rules=0,
-                        input_data=content,
-                        message="No rules configured - passed by default"
-                    ).model_dump(),
-                    elapsed_ms=int((time.time() - start_time) * 1000)
-                )
-
-            # Get LLM configuration if needed
-            model_id = normalize_model_id(model_id)
-            tenant_uuid = UUID(context.tenant_id) if context.tenant_id else None
-            api_key, model_id = await resolve_key_with_fallback(db, tenant_uuid, model_id)
-
-            # Evaluate all rules
-            rule_results: List[RuleResult] = []
-
-            for rule in rules:
-                rule_type = rule.get("type", "regex")
-
-                if rule_type == "llm":
-                    if not api_key:
-                        rule_results.append(RuleResult(
-                            rule_name=rule.get("name", "llm_check"),
-                            rule_type="llm",
-                            passed=False,
-                            score=0.0,
-                            weight=rule.get("weight", 1.0),
-                            details="No API key available for LLM evaluation"
-                        ))
-                    else:
-                        result = await self._evaluate_llm_rule(
-                            rule, content_str, model_id, api_key
-                        )
-                        rule_results.append(result)
-
-                elif rule_type == "regex":
-                    result = await self._evaluate_regex_rule(rule, content_str)
-                    rule_results.append(result)
-
-                elif rule_type == "schema":
-                    result = await self._evaluate_schema_rule(rule, content)
-                    rule_results.append(result)
-
-                elif rule_type == "threshold":
-                    result = await self._evaluate_threshold_rule(rule, content)
-                    rule_results.append(result)
-
-                elif rule_type == "length":
-                    result = await self._evaluate_length_rule(rule, content)
-                    rule_results.append(result)
-
-                elif rule_type == "contains":
-                    result = await self._evaluate_contains_rule(rule, content)
-                    rule_results.append(result)
-
-                else:
-                    logger.warning(f"Unknown rule type: {rule_type}")
-
-            # Calculate weighted score
-            total_weight = sum(r.weight for r in rule_results)
-            if total_weight > 0:
-                weighted_score = sum(r.score * r.weight for r in rule_results) / total_weight
-            else:
-                weighted_score = 1.0
-
-            # Determine pass/fail
-            passed = weighted_score >= failure_threshold
-            passed_count = sum(1 for r in rule_results if r.passed)
-            failed_count = len(rule_results) - passed_count
-
-            # Build summary message
-            if passed:
-                message = f"All guardrails passed (score: {weighted_score:.2f})"
-            else:
-                failed_names = [r.rule_name for r in rule_results if not r.passed]
-                message = f"Guardrails failed (score: {weighted_score:.2f}). Failed rules: {', '.join(failed_names)}"
-
-            output = GuardrailOutput(
-                passed=passed,
-                score=weighted_score,
-                failure_action=failure_action,
-                rule_results=rule_results,
-                total_rules=len(rule_results),
-                passed_rules=passed_count,
-                failed_rules=failed_count,
-                input_data=content,
-                message=message
-            )
-
-            # Determine node status based on failure action
-            if not passed and failure_action == "reject":
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="failed",
-                    output=output.model_dump(),
-                    error=message,
-                    elapsed_ms=int((time.time() - start_time) * 1000)
-                )
-
-            return NodeExecutionResult(
-                node_id=context.node_id,
-                status="success",
-                output=output.model_dump(),
-                elapsed_ms=int((time.time() - start_time) * 1000)
-            )
-
+                    answers = self.parse_llm_answers(completion["text"], built["count"])
+                    tokens = completion["tokens"]
+                except Exception as e:
+                    logger.error(f"LLM rule evaluation failed: {e}")
+            result = await self._evaluate(context, answers, reject_status="failed", tokens=tokens)
+            result.elapsed_ms = int((time.time() - start_time) * 1000)
+            return result
         except Exception as e:
             logger.exception(f"Guardrail execution failed: {e}")
             return NodeExecutionResult(

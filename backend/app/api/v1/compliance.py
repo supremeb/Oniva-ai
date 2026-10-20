@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
@@ -20,6 +20,8 @@ from app.templates.compliance import get_compliance_templates, get_template_by_i
 from app.services.compliance_engine import (
     ComplianceEngine,
 )
+from app.services import workflow_engine_runs as engine_runs
+from app.services import workflow_stream_adapter
 from app.services.workflow_orchestrator import WorkflowOrchestrator
 from app.models.compliance_execution import (
     ComplianceExecution,
@@ -162,12 +164,15 @@ async def get_compliance_template(
     )
 
 
-@router.post("/templates/{template_id}/execute", response_model=ComplianceExecutionResponse)
+@router.post("/templates/{template_id}/execute", response_model=ComplianceExecutionResponse, responses={
+    202: {"description": "The run is still going after the sync window: `{execution_id, status}`. "
+                         "Follow it at `GET /workflows/executions/{execution_id}`."}})
 async def execute_compliance_template(
     template_id: str,
     request: ExecuteTemplateRequest,
     db: AsyncSession = Depends(get_db),
-    user_id: uuid.UUID = Depends(get_current_user_id)
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """
     Execute a compliance workflow template with provided inputs.
@@ -177,6 +182,29 @@ async def execute_compliance_template(
 
     if not template:
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+
+    if await engine_runs.tenant_uses_engine_workflows(db, tenant_id):
+        # Engine tenants: the template runs as an engine workflow run (plan 003 U15).
+        execution, task_id = await engine_runs.start_workflow_run(
+            db, None, template["spec"], dict(request.inputs or {}),
+            user_id=user_id, tenant_id=tenant_id, trigger="compliance",
+        )
+        outcome = await engine_runs.await_finished(db, execution, task_id)
+        await db.refresh(execution)
+        if outcome is None and execution.status not in engine_runs.TERMINAL:
+            # Past the sync window: the run goes on; follow it at GET /workflows/executions/{execution_id}.
+            return JSONResponse(status_code=202, content={"execution_id": str(execution.id), "status": execution.status})
+        results = engine_runs.results_from_trace(execution)
+        return ComplianceExecutionResponse(
+            execution_id=str(execution.id),
+            template_id=template_id,
+            template_name=template["name"],
+            status=engine_runs.outcome_status(outcome) if outcome is not None else execution.status,
+            results=results,
+            executed_nodes=engine_runs.executed_count(results),
+            total_nodes=execution.total_nodes or len(template["spec"].get("nodes") or []),
+            timestamp=datetime.utcnow().isoformat(),
+        )
 
     try:
         # Create orchestrator and execute
@@ -209,7 +237,8 @@ async def execute_compliance_template_stream(
     template_id: str,
     request: ExecuteTemplateRequest,
     db: AsyncSession = Depends(get_db),
-    user_id: uuid.UUID = Depends(get_current_user_id)
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """
     Execute a compliance workflow template with streaming progress updates.
@@ -220,14 +249,23 @@ async def execute_compliance_template_stream(
     if not template:
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
 
-    orchestrator = WorkflowOrchestrator(db=db, user_id=str(user_id))
+    if await engine_runs.tenant_uses_engine_workflows(db, tenant_id):
+        # Started before the stream opens so a bad workflow (400) or engine outage (502) is a real error.
+        execution, task_id = await engine_runs.start_workflow_run(
+            db, None, template["spec"], dict(request.inputs or {}),
+            user_id=user_id, tenant_id=tenant_id, trigger="compliance",
+        )
+        updates = workflow_stream_adapter.watch_events(engine_runs.tenant_factory(tenant_id), execution.id, task_id)
+    else:
+        orchestrator = WorkflowOrchestrator(db=db, user_id=str(user_id))
+        updates = orchestrator.execute_workflow_stream(
+            workflow_spec=template["spec"],
+            input_variables=request.inputs
+        )
 
     async def event_stream():
         try:
-            async for update in orchestrator.execute_workflow_stream(
-                workflow_spec=template["spec"],
-                input_variables=request.inputs
-            ):
+            async for update in updates:
                 yield f"data: {json.dumps(update)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"

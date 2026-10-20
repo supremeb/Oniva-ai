@@ -1,0 +1,69 @@
+{
+  "events": [
+    {
+      "type": "progress",
+      "node_id": "start-1",
+      "status": "running"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "start-1",
+      "result": {
+        "status": "success",
+        "output": {
+          "query": ""
+        },
+        "error": null
+      }
+    },
+    {
+      "type": "progress",
+      "node_id": "a",
+      "status": "running"
+    },
+    {
+      "type": "node_complete",
+      "node_id": "a",
+      "result": {
+        "status": "success",
+        "output": {
+          "output": "x"
+        },
+        "error": null
+      }
+    },
+    {
+      "type": "node_skipped",
+      "node_id": "b",
+      "status": "skipped"
+    },
+    {
+      "type": "complete",
+      "status": "completed",
+      "results": {
+        "start-1": {
+          "status": "success",
+          "output": {
+            "query": ""
+          },
+          "error": null
+        },
+        "a": {
+          "status": "success",
+          "output": {
+            "output": "x"
+          },
+          "error": null
+        },
+        "b": {
+          "status": "skipped",
+          "output": null,
+          "error": null
+        }
+      },
+      "executed_nodes": 2,
+      "total_nodes": 3,
+      "execution_id": "<id-1>"
+    }
+  ]
+}

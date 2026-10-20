@@ -37,6 +37,10 @@ class NodeExecutionContext(BaseModel):
     workflow_id: Optional[str] = None  # Workflow definition ID
     workflow_run_id: Optional[str] = None  # Workflow execution run ID
     db: Optional[Any] = None  # AsyncSession for database operations
+    # Engine-run identity (plan 003 U21): the node's own engine task, which a parked node is signalled on,
+    # and the run attempt it belongs to. Absent for the legacy in-process orchestrator.
+    node_task_id: Optional[str] = None
+    run_attempt: Optional[int] = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -104,24 +108,9 @@ class BaseNodeExecutor(ABC):
         Returns:
             NodeExecutionResult with classification field set
         """
-        from app.config import get_settings
-        settings = get_settings()
-
-        if self.makes_external_calls and settings.USE_DATA_CLASSIFICATION:
-            if not input_classification.can_export_to_external():
-                # Log violation asynchronously (non-blocking)
-                await self._log_export_violation_async(context, input_classification)
-
-                return NodeExecutionResult(
-                    node_id=context.node_id,
-                    status="blocked",
-                    error=(
-                        f"Export Control: {input_classification.display_name} data "
-                        f"cannot be sent to external APIs. Node type '{self.node_type}' "
-                        f"makes external calls and requires PUBLIC or INTERNAL data."
-                    ),
-                    classification=input_classification,
-                )
+        blocked = await self.export_block(context, input_classification)
+        if blocked is not None:
+            return blocked
 
         # Execute the node
         result = await self.execute(context, db)
@@ -132,6 +121,54 @@ class BaseNodeExecutor(ABC):
             result.classification = input_classification
 
         return result
+
+    async def export_block(
+        self,
+        context: NodeExecutionContext,
+        input_classification: DataClassification,
+    ) -> Optional[NodeExecutionResult]:
+        """A ``blocked`` result (and an audit entry) when this node may not receive the data, else None."""
+        from app.config import get_settings
+
+        if self.makes_external_calls and get_settings().USE_DATA_CLASSIFICATION:
+            if not input_classification.can_export_to_external():
+                await self._log_export_violation_async(context, input_classification)
+                return NodeExecutionResult(
+                    node_id=context.node_id,
+                    status="blocked",
+                    error=(
+                        f"Export Control: {input_classification.display_name} data "
+                        f"cannot be sent to external APIs. Node type '{self.node_type}' "
+                        f"makes external calls and requires PUBLIC or INTERNAL data."
+                    ),
+                    classification=input_classification,
+                )
+        return None
+
+    async def prepare(
+        self,
+        context: NodeExecutionContext,
+        db: AsyncSession,
+    ) -> Any:
+        """Node gateway ``prepare`` hook (plan 003 U13, KTD4).
+
+        Returns a ``NodeExecutionResult`` (wrapped as ``final`` by the gateway) or a U33 prepare body
+        (``llm``/``wait``/``fanout`` dict). The default wraps ``execute``; export control and
+        adornments are applied by the gateway around this call.
+        """
+        return await self.execute(context, db)
+
+    async def finish(
+        self,
+        context: NodeExecutionContext,
+        db: AsyncSession,
+        finish_input: Any,
+    ) -> NodeExecutionResult:
+        """Node gateway ``finish`` hook: turn a generation answer / wake / fan-out summary into a result.
+
+        Executors whose ``prepare`` can return ``llm`` or ``wait`` override this (U14, U15).
+        """
+        raise NotImplementedError(f"node type '{self.node_type}' has no finish step")
 
     async def _log_export_violation_async(
         self,
@@ -236,6 +273,144 @@ class BaseNodeExecutor(ABC):
         return result
 
 
+class PrepareResult:
+    """Builders for the U33 ``prepare`` bodies and readers for the ``finish`` input (plan 003 U14).
+
+    One-shot LLM nodes split into a pure ``build_prompt`` and a pure ``parse_answer``: ``prepare``
+    returns ``PrepareResult.llm(...)`` and ``finish`` runs ``parse_answer`` over
+    ``PrepareResult.answer_text(fin)``. The tier or model is a hint only; the engine policy picks the
+    key, and no provider key ever leaves the backend.
+    """
+
+    @staticmethod
+    def llm(
+        *,
+        system: str,
+        prompt: str,
+        replay_safe: bool = True,
+        tier: Optional[str] = None,
+        model: Optional[str] = None,
+        tools: Optional[list] = None,
+        max_rounds: Optional[int] = None,
+        response_format: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        body: Dict[str, Any] = {
+            "contractVersion": 1,
+            "kind": "llm",
+            "system": system,
+            "prompt": prompt,
+            "replaySafe": replay_safe,
+        }
+        if model:
+            body["model"] = model
+        elif tier:
+            body["tier"] = tier
+        if tools:
+            body["tools"] = list(tools)
+        if max_rounds:
+            body["maxRounds"] = max_rounds
+        if response_format:
+            body["responseFormat"] = response_format
+        return body
+
+    @staticmethod
+    def wait(
+        *,
+        duration_ms: Optional[int] = None,
+        until_epoch_ms: Optional[int] = None,
+        signal: Optional[str] = None,
+        sla_until_epoch_ms: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """A ``wait`` body: exactly one of a relative duration or an absolute wake time (KTD7)."""
+        body: Dict[str, Any] = {"contractVersion": 1, "kind": "wait"}
+        if duration_ms is not None:
+            body["durationMs"] = int(duration_ms)
+        if until_epoch_ms is not None:
+            body["untilEpochMs"] = int(until_epoch_ms)
+        if signal is not None:
+            body["signal"] = signal
+        if sla_until_epoch_ms is not None:
+            body["slaUntilEpochMs"] = int(sla_until_epoch_ms)
+        return body
+
+    @staticmethod
+    def answer_text(fin: Any) -> str:
+        """The generation answer text from a ``finish`` input (a string, or ``{"text": ...}``)."""
+        answer = getattr(fin, "answer", fin)
+        if isinstance(answer, dict):
+            for key in ("text", "answer", "content", "output"):
+                if isinstance(answer.get(key), str):
+                    return answer[key]
+            return json.dumps(answer, default=str)
+        if answer is None:
+            return ""
+        return answer if isinstance(answer, str) else json.dumps(answer, default=str)
+
+    @staticmethod
+    def answer_tokens(fin: Any) -> int:
+        answer = getattr(fin, "answer", fin)
+        if isinstance(answer, dict):
+            for key in ("tokensUsed", "tokens_used", "totalTokens"):
+                value = answer.get(key)
+                if isinstance(value, int) and value >= 0:
+                    return value
+        return 0
+
+
+class LlmKeyMissing(ValueError):
+    """No API key for the model's provider (legacy in-process path only)."""
+
+
+async def legacy_complete(
+    db: AsyncSession,
+    tenant_id: Optional[str],
+    model: str,
+    system: str,
+    prompt: str,
+    *,
+    temperature: float = 0.7,
+    max_tokens: Optional[int] = None,
+    timeout: float = 60.0,
+) -> Dict[str, Any]:
+    """One in-process completion through ``llm_direct`` (the legacy ``execute`` wrappers, until U30).
+
+    Returns ``{"text", "tokens", "model", "reasoning"}``. The engine path never calls this: it runs the same prompt
+    as a child conversation under the engine policy and ledger.
+    """
+    import asyncio
+    from uuid import UUID
+
+    from app.services import llm_direct
+    from app.services.llm_gateway import get_provider_from_model, normalize_model_id, resolve_key_with_fallback
+
+    model_id = normalize_model_id(model)
+    tenant_uuid = UUID(tenant_id) if tenant_id else None
+    api_key, model_id = await resolve_key_with_fallback(db, tenant_uuid, model_id)
+    provider_type = get_provider_from_model(model_id)
+    if not api_key:
+        raise LlmKeyMissing(
+            f"API key not configured for provider '{provider_type}'. Add your key in Settings > LLM Providers."
+        )
+    response = await asyncio.wait_for(
+        llm_direct.complete(
+            llm_direct.DirectRequest(
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+                model=model_id,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            ),
+            llm_direct.DirectProvider(provider_type=provider_type, api_key=api_key),
+        ),
+        timeout=timeout,
+    )
+    return {
+        "text": response.content or "",
+        "tokens": (response.input_tokens or 0) + (response.output_tokens or 0),
+        "model": model_id,
+        "reasoning": response.reasoning,
+    }
+
+
 # Registry of all node executors
 _executor_registry: Dict[str, BaseNodeExecutor] = {}
 
@@ -282,6 +457,7 @@ from app.node_executors.ocr_executor import OCRExecutor
 from app.node_executors.notification_executor import NotificationExecutor
 from app.node_executors.webhook_trigger_executor import WebhookTriggerExecutor
 from app.node_executors.subworkflow_executor import SubWorkflowExecutor
+from app.node_executors.batch_executor import BatchExecutor
 from app.node_executors.human_in_loop_executor import HumanInLoopExecutor
 
 # Phase 3 Extension: Spreadsheet processing
@@ -322,6 +498,7 @@ register_executor(OCRExecutor())
 register_executor(NotificationExecutor())
 register_executor(WebhookTriggerExecutor())
 register_executor(SubWorkflowExecutor())
+register_executor(BatchExecutor())
 register_executor(HumanInLoopExecutor())
 register_executor(SpreadsheetExecutor())
 

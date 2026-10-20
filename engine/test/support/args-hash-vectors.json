@@ -1,0 +1,89 @@
+{
+  "description": "Shared canonical-form vectors: engine/src/worker/args-hash.ts and backend/app/services/tool_policy.py::canonical_args_hash must both reproduce canonical and hash for each case.",
+  "cases": [
+    {
+      "name": "empty object",
+      "value": {},
+      "canonical": "{}",
+      "hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "key order",
+      "value": {
+        "b": 1,
+        "a": 2
+      },
+      "canonical": "{\"a\":2,\"b\":1}",
+      "hash": "d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"
+    },
+    {
+      "name": "nested objects sorted",
+      "value": {
+        "z": {
+          "y": 1,
+          "x": {
+            "c": true,
+            "b": null
+          }
+        },
+        "a": [
+          {
+            "d": 1,
+            "c": 2
+          }
+        ]
+      },
+      "canonical": "{\"a\":[{\"c\":2,\"d\":1}],\"z\":{\"x\":{\"b\":null,\"c\":true},\"y\":1}}",
+      "hash": "8dac0e874b7016b3d088fc63448da82678da9fa62475f96d59cdfb8a3c235acc"
+    },
+    {
+      "name": "unicode",
+      "value": {
+        "name": "Zoë 日本語 🎉",
+        "kéy": "é"
+      },
+      "canonical": "{\"kéy\":\"é\",\"name\":\"Zoë 日本語 🎉\"}",
+      "hash": "1ef43fe61693c353f25fb5f94f8483f5b86025e358e7c03185395b4b71700613"
+    },
+    {
+      "name": "numbers",
+      "value": {
+        "int": 42,
+        "neg": -7,
+        "float": 1.5,
+        "whole_float": 1,
+        "exp": 1e21,
+        "small": 1e-7,
+        "zero": 0,
+        "big": 123456789012
+      },
+      "canonical": "{\"big\":123456789012,\"exp\":1e+21,\"float\":1.5,\"int\":42,\"neg\":-7,\"small\":1e-7,\"whole_float\":1,\"zero\":0}",
+      "hash": "05828e26b60f5f89d18b2a5469b03dd93bb51c7b427b9b7d8d7867f979d330c0"
+    },
+    {
+      "name": "strings with escapes",
+      "value": {
+        "s": "line\nbreak \"quoted\" back\\slash tab\t"
+      },
+      "canonical": "{\"s\":\"line\\nbreak \\\"quoted\\\" back\\\\slash tab\\t\"}",
+      "hash": "2e2996d1affa48cbef27265b51ee0c3f470cfd7e57705c9af0875efcc42079de"
+    },
+    {
+      "name": "arrays keep order",
+      "value": {
+        "list": [3, 1, 2, "a", null, false]
+      },
+      "canonical": "{\"list\":[3,1,2,\"a\",null,false]}",
+      "hash": "cb9c93a25f572e0b2c745df431ccf802cf27a224a466a9b9ec57a76ba34d254c"
+    },
+    {
+      "name": "empty nested",
+      "value": {
+        "a": {},
+        "b": []
+      },
+      "canonical": "{\"a\":{},\"b\":[]}",
+      "hash": "aeeba1e56a144077f89e26c930dad7cf933e9383cfb8e33ddff618233b29be76"
+    }
+  ]
+}

@@ -839,3 +839,94 @@ async def test_historical_v2_session_opens_read_only_with_its_files_and_stale_ru
     # no stream, cancel falls to 404 for a legacy session
     assert (await w.http.get(f"/api/v1/deep-work/engine/{sid}/stream")).status_code in (404, 405)
     assert (await w.http.post(f"/api/v1/deep-work/engine/{sid}/cancel")).status_code == 404
+
+
+# --- inbox support: awaiting_input and closing approvals (Approvals & Policy U7) -----------------------------------------
+
+
+ASK = {"action": "ask", "questions": [{"text": "Which region?"}]}
+
+
+async def test_clarify_ask_persists_awaiting_input_and_plan_clears_it(w):
+    w.engine.answers.append(json.dumps(ASK))
+    r = await w.http.post("/api/v1/deep-work/engine/clarify", json={"query": "compare vendor pricing", "project_id": str(w.pa)})
+    sid = r.json()["session_id"]
+    run = await run_of(w, sid)
+    assert run.awaiting_input["action"] == "ask" and run.awaiting_input["questions"][0]["text"] == "Which region?"
+    w.engine.answers.append(json.dumps(PLAN))
+    r = await w.http.post("/api/v1/deep-work/engine/plan", json={
+        "query": "compare vendor pricing", "enriched_query": "vendor study", "session_id": sid})
+    assert r.status_code == 200
+    assert (await run_of(w, sid)).awaiting_input is None
+
+
+async def test_clarify_proceed_leaves_nothing_awaiting(w):
+    sid, _ = await new_session(w)
+    assert (await run_of(w, sid)).awaiting_input is None
+
+
+@pytest.fixture
+def ledger(w, monkeypatch):
+    from tests.test_approval_service import FakeAudit
+    from app.services.approval_service import ApprovalService
+    audit = FakeAudit()
+    monkeypatch.setattr(dws, "_approvals", lambda db: ApprovalService(db, audit=audit))
+    w.audit = audit
+
+    async def add(cid, task="t1"):
+        async with w.factory() as db:
+            await ApprovalService(db, audit=audit).record_pending(
+                tenant_id=w.ta, conversation_id=cid, tool_task_id=task, tool_name="execute_python",
+                requested_by=w.ua)
+
+    async def status(task="t1"):
+        from app.models.tool_approval import ToolApproval
+        async with w.factory() as db:
+            return (await db.execute(select(ToolApproval.status).where(ToolApproval.tool_task_id == task))).scalar_one()
+
+    w.add_row, w.row_status = add, status
+    return w
+
+
+async def test_cancel_closes_the_runs_pending_approvals(ledger):
+    w = ledger
+    sid, cid = await started(w)
+    await w.add_row(uuid.UUID(cid))
+    assert (await w.http.post(f"/api/v1/deep-work/engine/{sid}/cancel")).status_code == 200
+    assert await w.row_status() == "cancelled"
+    assert [e.action for e in w.audit.entries] == ["approval_cancelled"]
+
+
+@pytest.mark.parametrize("terminal", ["completed", "failed"])
+async def test_complete_and_fail_close_pending_approvals(ledger, terminal):
+    w = ledger
+    sid, cid = await started(w)
+    await w.add_row(uuid.UUID(cid))
+    run = await run_of(w, sid)
+    await dws.update_run(w.factory, w.ta, run.conversation_id, status=terminal)
+    assert await w.row_status() == "cancelled"
+
+
+async def test_locked_run_terminal_transition_and_reconcile_close_approvals(ledger):
+    w = ledger
+    sid, cid = await started(w)
+    await w.add_row(uuid.UUID(cid), "t1")
+    async with dws.run_lock(w.factory, w.ta, uuid.UUID(cid)) as locked:
+        locked.advance(status="completed")
+    assert await w.row_status("t1") == "cancelled"
+    sid2, cid2 = await started(w)
+    await w.add_row(uuid.UUID(cid2), "t2")
+
+    async def ended():
+        return dws.EngineRunState(active=False, ended="run_error", error="x")
+
+    await dws.reconcile(w.factory, w.ta, uuid.UUID(cid2), ended)
+    assert await w.row_status("t2") == "cancelled"
+
+
+async def test_non_terminal_update_leaves_approvals_pending(ledger):
+    w = ledger
+    sid, cid = await started(w)
+    await w.add_row(uuid.UUID(cid))
+    await dws.update_run(w.factory, w.ta, uuid.UUID(cid), phase="research", round=1)
+    assert await w.row_status() == "pending"

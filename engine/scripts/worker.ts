@@ -14,6 +14,7 @@
 import {
   assertNotTestHarnessInProduction,
   createWorkerPool,
+  requireWorkflowBackend,
   WorkerConfigError,
   workerConfigFromEnv,
 } from "../src/worker/config.js";
@@ -27,9 +28,11 @@ const log: WorkerLog = (event, fields = {}) => {
 
 async function main(): Promise<number> {
   let config: ReturnType<typeof workerConfigFromEnv>;
+  let workflow: ReturnType<typeof requireWorkflowBackend>;
   try {
     assertNotTestHarnessInProduction(process.env);
     config = workerConfigFromEnv(process.env);
+    workflow = requireWorkflowBackend(config);
   } catch (err) {
     if (err instanceof WorkerConfigError) {
       process.stderr.write(`engine worker: ${err.message}\n`);
@@ -72,7 +75,9 @@ async function main(): Promise<number> {
             retryMs: config.policyRetryMs,
           }
         : null,
+    workflow,
     approvalTtlMs: config.approvalTtlMs,
+    questionTtlMs: config.questionTtlMs,
     subagentTool: config.subagentTool,
     subagentTools: config.subagentTools,
     settings: { progressIntervalMs: config.progressIntervalMs },

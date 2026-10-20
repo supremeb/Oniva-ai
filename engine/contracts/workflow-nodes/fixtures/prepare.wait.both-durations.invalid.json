@@ -1,0 +1,6 @@
+{
+  "contractVersion": 1,
+  "kind": "wait",
+  "durationMs": 1000,
+  "untilEpochMs": 1760000000000
+}

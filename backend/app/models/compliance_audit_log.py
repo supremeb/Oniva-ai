@@ -6,7 +6,7 @@ Supports SEC/FINRA 7-year retention requirements with:
 - Blockchain-style hash chaining
 - Tamper-evident logging
 """
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Index, func, Integer
+from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Index, func, Integer, BigInteger
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -32,6 +32,16 @@ class AuditAction(str, Enum):
     EXPORT_BLOCKED = 'export_blocked'
     EXPORT_ALLOWED = 'export_allowed'
     CLASSIFICATION_DOWNGRADE_REQUESTED = 'classification_downgrade_requested'
+
+    # Approvals and policy (Phase 5)
+    APPROVAL_REQUESTED = 'approval_requested'
+    APPROVAL_DECIDED = 'approval_decided'
+    APPROVAL_EXPIRED = 'approval_expired'
+    APPROVAL_CANCELLED = 'approval_cancelled'
+    TOOL_POLICY_BLOCK = 'tool_policy_block'
+    QUESTION_ANSWERED = 'question_answered'
+    RULE_OF_TWO_CHANGED = 'rule_of_two_changed'
+    APPROVAL_SETTINGS_CHANGED = 'approval_settings_changed'
 
 
 class ComplianceAuditLog(Base):
@@ -89,6 +99,15 @@ class ComplianceAuditLog(Base):
     previous_hash = Column(String(64), nullable=True)  # SHA-256 of previous entry
     entry_hash = Column(String(64), nullable=False)  # SHA-256 of this entry
 
+    # Per-tenant chain position (KTD9). NULL for rows written before the chain existed.
+    seq = Column(BigInteger, nullable=True)
+    signing_key_id = Column(String(64), nullable=True)
+
+    # Actor snapshot captured at write time (survives user deletion; covered by the entry hash,
+    # unlike the mutable user_id pointer).
+    actor_email = Column(String(255), nullable=True)
+    actor_name = Column(String(255), nullable=True)
+
     # Additional context
     extra_metadata = Column(JSONB, nullable=False, default=dict)
 
@@ -118,6 +137,7 @@ class ComplianceAuditLog(Base):
         Index('ix_compliance_audit_logs_agent_time', 'agent_id', 'created_at'),
         Index('ix_compliance_audit_logs_retention', 'retention_until'),
         Index('ix_compliance_audit_logs_entry_hash', 'entry_hash'),
+        Index('uq_compliance_audit_logs_tenant_seq', 'tenant_id', 'seq', unique=True),
     )
 
     def __repr__(self):
@@ -167,6 +187,34 @@ class ComplianceAuditLog(Base):
             'previous_hash': self.previous_hash,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class AuditChainHead(Base):
+    """
+    Per-tenant cache of the audit chain head (KTD9).
+
+    Rebuildable from the last committed ``compliance_audit_logs`` row; the unique
+    ``(tenant_id, seq)`` index on the log is what actually makes a fork impossible.
+    """
+    __tablename__ = 'audit_chain_heads'
+
+    tenant_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('tenants.id', ondelete='CASCADE'),
+        primary_key=True,
+    )
+    seq = Column(BigInteger, nullable=False, default=0)
+    head_hash = Column(Text, nullable=True)
+    key_id = Column(Text, nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    def __repr__(self):
+        return f"<AuditChainHead(tenant_id='{self.tenant_id}', seq={self.seq})>"
 
 
 class WorkflowStateLog(Base):

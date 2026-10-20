@@ -1,0 +1,9 @@
+{
+  "contractVersion": 1,
+  "kind": "fanout",
+  "count": 1,
+  "parallel": 1,
+  "failFast": false,
+  "target": { "workflowId": "wf-1" },
+  "itemsRef": "workflow:456"
+}

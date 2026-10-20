@@ -1,0 +1,626 @@
+{
+  "question_pending": {
+    "entries": [
+      {
+        "id": "ent_<id-1>",
+        "conversationId": "conv_<id-2>",
+        "taskId": null,
+        "kind": "user",
+        "payload": {
+          "submissionId": "subm_<id-3>",
+          "content": "deploy it",
+          "requestId": "subm_<id-3>"
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-4>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-5>",
+        "kind": "system",
+        "payload": {
+          "text": "s",
+          "tools": [
+            "ask_user"
+          ],
+          "fingerprint": "e52a221a4742e3586ea7ec676144b7ac586e22c32a38fa414a06fb8c1d441b03"
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-6>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-5>",
+        "kind": "assistant",
+        "payload": {
+          "runId": "task_<id-5>",
+          "round": 0,
+          "message": {
+            "role": "assistant",
+            "provider": "fake",
+            "model": "fake-1",
+            "blocks": [
+              {
+                "type": "tool_call",
+                "id": "call_ask_1",
+                "name": "ask_user",
+                "arguments": {
+                  "question": "Which environments should I deploy to?",
+                  "options": [
+                    {
+                      "id": "staging",
+                      "label": "Staging"
+                    },
+                    {
+                      "id": "prod",
+                      "label": "Production",
+                      "description": "customer facing"
+                    }
+                  ],
+                  "multiSelect": true,
+                  "allowFreeText": true
+                }
+              }
+            ],
+            "stopReason": "tool_use"
+          },
+          "usage": {
+            "inputTokens": 3,
+            "outputTokens": 54,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        "createdAt": 1000000
+      }
+    ],
+    "live": {
+      "runId": null,
+      "taskId": null,
+      "message": null
+    },
+    "inbox": {
+      "queue": [],
+      "placed": []
+    },
+    "approvals": {
+      "items": []
+    },
+    "questions": {
+      "items": [
+        {
+          "id": "ques_<id-7>",
+          "toolTaskId": "task_<id-8>",
+          "runId": "task_<id-5>",
+          "toolCallId": "call_ask_1",
+          "question": "Which environments should I deploy to?",
+          "options": [
+            {
+              "id": "staging",
+              "label": "Staging",
+              "description": null
+            },
+            {
+              "id": "prod",
+              "label": "Production",
+              "description": "customer facing"
+            }
+          ],
+          "multiSelect": true,
+          "allowFreeText": true,
+          "requestedAt": 1000000,
+          "expiresAt": 2800000,
+          "status": "pending",
+          "answer": null,
+          "closedAt": null
+        }
+      ]
+    },
+    "usage": {
+      "requests": 1,
+      "total": {
+        "requests": 1,
+        "inputTokens": 3,
+        "outputTokens": 54,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "costUsd": null
+      },
+      "byModel": {
+        "fake/fake-1": {
+          "requests": 1,
+          "inputTokens": 3,
+          "outputTokens": 54,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "costUsd": null
+        }
+      },
+      "byPurpose": {
+        "generation": {
+          "requests": 1,
+          "inputTokens": 3,
+          "outputTokens": 54,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "costUsd": null
+        }
+      }
+    },
+    "agent": {
+      "systemPrompt": "s",
+      "tools": [
+        "ask_user"
+      ],
+      "model": null,
+      "thinking": null,
+      "depth": 0,
+      "metadata": {},
+      "compaction": null,
+      "maxRounds": null,
+      "deadlineMs": null
+    },
+    "toolOutput": {},
+    "compaction": {
+      "running": false
+    },
+    "run": {
+      "active": true,
+      "runId": "task_<id-5>",
+      "startedAt": "1970-01-01T00:16:40.000Z"
+    },
+    "subagents": {},
+    "tasks": {}
+  },
+  "question_answered": {
+    "entries": [
+      {
+        "id": "ent_<id-1>",
+        "conversationId": "conv_<id-2>",
+        "taskId": null,
+        "kind": "user",
+        "payload": {
+          "submissionId": "subm_<id-3>",
+          "content": "deploy it",
+          "requestId": "subm_<id-3>"
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-4>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-5>",
+        "kind": "system",
+        "payload": {
+          "text": "s",
+          "tools": [
+            "ask_user"
+          ],
+          "fingerprint": "e52a221a4742e3586ea7ec676144b7ac586e22c32a38fa414a06fb8c1d441b03"
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-6>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-5>",
+        "kind": "assistant",
+        "payload": {
+          "runId": "task_<id-5>",
+          "round": 0,
+          "message": {
+            "role": "assistant",
+            "provider": "fake",
+            "model": "fake-1",
+            "blocks": [
+              {
+                "type": "tool_call",
+                "id": "call_ask_1",
+                "name": "ask_user",
+                "arguments": {
+                  "question": "Which environments should I deploy to?",
+                  "options": [
+                    {
+                      "id": "staging",
+                      "label": "Staging"
+                    },
+                    {
+                      "id": "prod",
+                      "label": "Production",
+                      "description": "customer facing"
+                    }
+                  ],
+                  "multiSelect": true,
+                  "allowFreeText": true
+                }
+              }
+            ],
+            "stopReason": "tool_use"
+          },
+          "usage": {
+            "inputTokens": 3,
+            "outputTokens": 54,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-9>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-8>",
+        "kind": "tool_result",
+        "payload": {
+          "runId": "task_<id-5>",
+          "toolCallId": "call_ask_1",
+          "toolName": "ask_user",
+          "status": "ok",
+          "content": "Staging\nand the canary",
+          "isError": false,
+          "details": {
+            "questionId": "ques_<id-7>",
+            "optionIds": [
+              "staging"
+            ],
+            "text": "and the canary",
+            "principal": "user:alice",
+            "answeredAt": 1000000
+          },
+          "terminate": false,
+          "attempts": 0
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-10>",
+        "conversationId": "conv_<id-2>",
+        "taskId": "task_<id-11>",
+        "kind": "assistant",
+        "payload": {
+          "runId": "task_<id-5>",
+          "round": 1,
+          "message": {
+            "role": "assistant",
+            "provider": "fake",
+            "model": "fake-1",
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Done."
+              }
+            ],
+            "stopReason": "end_turn"
+          },
+          "usage": {
+            "inputTokens": 62,
+            "outputTokens": 2,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        "createdAt": 1000000
+      }
+    ],
+    "live": {
+      "runId": null,
+      "taskId": null,
+      "message": null
+    },
+    "inbox": {
+      "queue": [],
+      "placed": []
+    },
+    "approvals": {
+      "items": []
+    },
+    "questions": {
+      "items": [
+        {
+          "id": "ques_<id-7>",
+          "toolTaskId": "task_<id-8>",
+          "runId": "task_<id-5>",
+          "toolCallId": "call_ask_1",
+          "question": "Which environments should I deploy to?",
+          "options": [
+            {
+              "id": "staging",
+              "label": "Staging",
+              "description": null
+            },
+            {
+              "id": "prod",
+              "label": "Production",
+              "description": "customer facing"
+            }
+          ],
+          "multiSelect": true,
+          "allowFreeText": true,
+          "requestedAt": 1000000,
+          "expiresAt": 2800000,
+          "status": "answered",
+          "answer": {
+            "optionIds": [
+              "staging"
+            ],
+            "text": "and the canary",
+            "principal": "user:alice",
+            "answeredAt": 1000000
+          },
+          "closedAt": 1000000
+        }
+      ]
+    },
+    "usage": {
+      "requests": 2,
+      "total": {
+        "requests": 2,
+        "inputTokens": 65,
+        "outputTokens": 56,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "costUsd": null
+      },
+      "byModel": {
+        "fake/fake-1": {
+          "requests": 2,
+          "inputTokens": 65,
+          "outputTokens": 56,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "costUsd": null
+        }
+      },
+      "byPurpose": {
+        "generation": {
+          "requests": 2,
+          "inputTokens": 65,
+          "outputTokens": 56,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "costUsd": null
+        }
+      }
+    },
+    "agent": {
+      "systemPrompt": "s",
+      "tools": [
+        "ask_user"
+      ],
+      "model": null,
+      "thinking": null,
+      "depth": 0,
+      "metadata": {},
+      "compaction": null,
+      "maxRounds": null,
+      "deadlineMs": null
+    },
+    "toolOutput": {},
+    "compaction": {
+      "running": false
+    },
+    "run": {
+      "active": false
+    },
+    "subagents": {},
+    "tasks": {}
+  },
+  "question_expired": {
+    "entries": [
+      {
+        "id": "ent_<id-12>",
+        "conversationId": "conv_<id-13>",
+        "taskId": null,
+        "kind": "user",
+        "payload": {
+          "submissionId": "subm_<id-14>",
+          "content": "deploy it",
+          "requestId": "subm_<id-14>"
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-15>",
+        "conversationId": "conv_<id-13>",
+        "taskId": "task_<id-16>",
+        "kind": "system",
+        "payload": {
+          "text": "s",
+          "tools": [
+            "ask_user"
+          ],
+          "fingerprint": "e52a221a4742e3586ea7ec676144b7ac586e22c32a38fa414a06fb8c1d441b03"
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-17>",
+        "conversationId": "conv_<id-13>",
+        "taskId": "task_<id-16>",
+        "kind": "assistant",
+        "payload": {
+          "runId": "task_<id-16>",
+          "round": 0,
+          "message": {
+            "role": "assistant",
+            "provider": "fake",
+            "model": "fake-1",
+            "blocks": [
+              {
+                "type": "tool_call",
+                "id": "call_ask_1",
+                "name": "ask_user",
+                "arguments": {
+                  "question": "Which environments should I deploy to?",
+                  "options": [
+                    {
+                      "id": "staging",
+                      "label": "Staging"
+                    },
+                    {
+                      "id": "prod",
+                      "label": "Production",
+                      "description": "customer facing"
+                    }
+                  ],
+                  "multiSelect": true,
+                  "allowFreeText": true
+                }
+              }
+            ],
+            "stopReason": "tool_use"
+          },
+          "usage": {
+            "inputTokens": 3,
+            "outputTokens": 54,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        "createdAt": 1000000
+      },
+      {
+        "id": "ent_<id-18>",
+        "conversationId": "conv_<id-13>",
+        "taskId": "task_<id-19>",
+        "kind": "tool_result",
+        "payload": {
+          "runId": "task_<id-16>",
+          "toolCallId": "call_ask_1",
+          "toolName": "ask_user",
+          "status": "question_expired",
+          "content": "The question expired before the user answered. Continue without an answer.",
+          "isError": true,
+          "details": null,
+          "terminate": false,
+          "attempts": 0
+        },
+        "createdAt": 2800000
+      },
+      {
+        "id": "ent_<id-20>",
+        "conversationId": "conv_<id-13>",
+        "taskId": "task_<id-21>",
+        "kind": "assistant",
+        "payload": {
+          "runId": "task_<id-16>",
+          "round": 1,
+          "message": {
+            "role": "assistant",
+            "provider": "fake",
+            "model": "fake-1",
+            "blocks": [
+              {
+                "type": "text",
+                "text": "Done."
+              }
+            ],
+            "stopReason": "end_turn"
+          },
+          "usage": {
+            "inputTokens": 75,
+            "outputTokens": 2,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          }
+        },
+        "createdAt": 2800000
+      }
+    ],
+    "live": {
+      "runId": null,
+      "taskId": null,
+      "message": null
+    },
+    "inbox": {
+      "queue": [],
+      "placed": []
+    },
+    "approvals": {
+      "items": []
+    },
+    "questions": {
+      "items": [
+        {
+          "id": "ques_<id-22>",
+          "toolTaskId": "task_<id-19>",
+          "runId": "task_<id-16>",
+          "toolCallId": "call_ask_1",
+          "question": "Which environments should I deploy to?",
+          "options": [
+            {
+              "id": "staging",
+              "label": "Staging",
+              "description": null
+            },
+            {
+              "id": "prod",
+              "label": "Production",
+              "description": "customer facing"
+            }
+          ],
+          "multiSelect": true,
+          "allowFreeText": true,
+          "requestedAt": 1000000,
+          "expiresAt": 2800000,
+          "status": "expired",
+          "answer": null,
+          "closedAt": 2800000
+        }
+      ]
+    },
+    "usage": {
+      "requests": 2,
+      "total": {
+        "requests": 2,
+        "inputTokens": 78,
+        "outputTokens": 56,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "costUsd": null
+      },
+      "byModel": {
+        "fake/fake-1": {
+          "requests": 2,
+          "inputTokens": 78,
+          "outputTokens": 56,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "costUsd": null
+        }
+      },
+      "byPurpose": {
+        "generation": {
+          "requests": 2,
+          "inputTokens": 78,
+          "outputTokens": 56,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "costUsd": null
+        }
+      }
+    },
+    "agent": {
+      "systemPrompt": "s",
+      "tools": [
+        "ask_user"
+      ],
+      "model": null,
+      "thinking": null,
+      "depth": 0,
+      "metadata": {},
+      "compaction": null,
+      "maxRounds": null,
+      "deadlineMs": null
+    },
+    "toolOutput": {},
+    "compaction": {
+      "running": false
+    },
+    "run": {
+      "active": false
+    },
+    "subagents": {},
+    "tasks": {}
+  }
+}

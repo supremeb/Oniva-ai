@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prepare.response.schema.json",
+  "title": "Workflow node prepare response",
+  "description": "The four prepare shapes as one discriminated union on kind.",
+  "oneOf": [
+    { "$ref": "prepare.final.schema.json" },
+    { "$ref": "prepare.llm.schema.json" },
+    { "$ref": "prepare.wait.schema.json" },
+    { "$ref": "prepare.fanout.schema.json" }
+  ]
+}

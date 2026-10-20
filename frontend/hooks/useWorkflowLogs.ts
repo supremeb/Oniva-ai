@@ -10,9 +10,11 @@
 
 import { useQuery, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isActive, normalizeStatus, type RunStatus } from '@/lib/run/status';
 import {
   fetchWorkflowLogs,
   fetchWorkflowLogDetail,
+  fetchWaitingNodes,
   fetchMonitoringMetrics,
   fetchTopWorkflows,
   fetchRecentFailures,
@@ -25,6 +27,22 @@ import {
 } from '@/lib/api/workflow-logs';
 
 // ============================================
+// Polling cadence
+// ============================================
+
+/** Poll interval while a run is moving (running, resuming, queued). */
+export const POLL_ACTIVE_MS = 3_000;
+/** Poll interval while every unfinished run is parked (an approval, a sleep): nothing changes until it wakes. */
+export const POLL_PARKED_MS = 20_000;
+
+/** How often to refresh while the given run statuses are on screen; `false` when all are finished. */
+export function pollIntervalFor(statuses: readonly RunStatus[]): number | false {
+  const active = statuses.filter(isActive);
+  if (active.length === 0) return false;
+  return active.every((s) => s === 'waiting') ? POLL_PARKED_MS : POLL_ACTIVE_MS;
+}
+
+// ============================================
 // Log List Hooks
 // ============================================
 
@@ -33,7 +51,7 @@ import {
  *
  * Features:
  * - 30s stale time to reduce unnecessary refetches
- * - Auto-refetch every 3s when there are running jobs
+ * - Auto-refetch every 3s while a run is moving (20s when all are waiting)
  * - Prefetches next page using cursor
  */
 export function useWorkflowLogs(
@@ -52,11 +70,8 @@ export function useWorkflowLogs(
     staleTime: 30_000, // 30 seconds
     gcTime: 5 * 60 * 1000, // 5 minutes (formerly cacheTime)
     refetchInterval: (query) => {
-      // Poll more frequently if there are running jobs
-      const hasRunning = query.state.data?.logs.some(
-        (log) => log.status === 'running'
-      );
-      return hasRunning ? 3_000 : false; // 3s when running, disabled otherwise
+      // 3s while any run is moving, 20s when every unfinished run is waiting, off when all are finished
+      return pollIntervalFor((query.state.data?.logs ?? []).map((log) => normalizeStatus(log.status, 'workflow_log')));
     },
   });
 
@@ -118,6 +133,26 @@ export function useWorkflowLogDetail(
     enabled: isValidWorkflowId && !!runId,
     staleTime: 30_000,
     gcTime: 5 * 60 * 1000,
+    // An unfinished run keeps refreshing (its trace grows and its status settles); a finished one stops.
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status ? pollIntervalFor([normalizeStatus(status, 'workflow_log')]) : false;
+    },
+  });
+}
+
+/**
+ * Nodes of a run parked on a human decision (plan 003 U21). Polls while enabled; an error (403 for someone who
+ * may not see the run, 404) simply yields no waiting nodes.
+ */
+export function useWaitingNodes(executionId: string | null, enabled: boolean, pollMs: number = POLL_ACTIVE_MS) {
+  return useQuery({
+    queryKey: ['workflow-waiting-nodes', executionId],
+    queryFn: () => fetchWaitingNodes(executionId!),
+    enabled: enabled && !!executionId,
+    staleTime: 0,
+    retry: false,
+    refetchInterval: pollMs,
   });
 }
 

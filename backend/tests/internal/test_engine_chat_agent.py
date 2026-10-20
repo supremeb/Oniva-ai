@@ -52,23 +52,23 @@ def compose(sel: Selections, **kw):
 def test_custom_prompt_and_exactly_the_agents_skills():
     built = compose(Selections())
     assert built.agent["systemPrompt"].startswith("Custom prompt.")
-    assert built.agent["tools"] == ["read_file", "summarize_document"]
+    assert built.agent["tools"] == ["ask_user", "read_file", "summarize_document"]
     assert "model" not in built.agent  # the policy endpoint decides per request
 
 
 def test_selected_connectors_add_the_connector_tools():
     built = compose(Selections(connector_ids=[CONN]))
     assert built.agent["tools"] == [
-        "get_connector_schema", "invoke_connector_tool", "list_available_connectors",
+        "ask_user", "get_connector_schema", "invoke_connector_tool", "list_available_connectors",
         "read_file", "summarize_document"]
     assert built.agent["metadata"]["allowedConnectorIds"] == [CONN]
 
 
 def test_web_search_off_removes_web_tools_even_if_enabled_skills():
     built = compose(Selections(), agent_skills=["web_search", "browse_url", "read_file"],)
-    assert built.agent["tools"] == ["read_file"]
+    assert built.agent["tools"] == ["ask_user", "read_file"]
     on = compose(Selections(web_search=True), agent_skills=["read_file"])
-    assert on.agent["tools"] == ["browse_url", "read_file", "web_search"]
+    assert on.agent["tools"] == ["ask_user", "browse_url", "read_file", "web_search"]
     assert "Web search is enabled" in on.agent["systemPrompt"]
     assert "Web search is enabled" not in built.agent["systemPrompt"]
 
@@ -99,8 +99,18 @@ def test_agent_and_project_knowledge_bases_are_included():
 
 def test_interactive_only_and_unknown_skills_are_not_served():
     built = compose(Selections(skill_ids=["ask_user", "write_file"]))
-    assert "ask_user" not in built.agent["tools"] and "write_file" in built.agent["tools"]
-    assert built.dropped["skill_ids"] == ["ask_user"]
+    assert "write_file" in built.agent["tools"]
+    assert built.dropped["skill_ids"] == ["ask_user"]  # a selection never grants it; the builder does
+
+
+def test_ask_user_is_offered_to_top_level_chat_but_not_to_agent_role_conversations():
+    top = compose(Selections())
+    assert top.agent["tools"].count("ask_user") == 1
+    worker = compose_agent_config(inputs(), Selections(), MANIFEST, NOW, agent_role="research_worker")
+    assert "ask_user" not in worker.agent["tools"]
+    explicit = compose_agent_config(inputs(), Selections(skill_ids=["ask_user"]), MANIFEST, NOW,
+                                    agent_role="research_worker")
+    assert "ask_user" not in explicit.agent["tools"]
 
 
 def test_skill_uuids_map_to_names():
@@ -140,7 +150,7 @@ async def test_build_uses_loader_and_manifest():
         None, tenant_id=TENANT_A, user=user(role="admin"), project_id=PROJECT,
         selections=Selections(), loader=loader, manifest=MANIFEST, now=NOW)
     assert seen["is_admin"] is True and str(seen["project_id"]) == PROJECT
-    assert built.agent["tools"] == ["read_file", "summarize_document"]
+    assert built.agent["tools"] == ["ask_user", "read_file", "summarize_document"]
 
 
 def test_project_context_matches_legacy_text():

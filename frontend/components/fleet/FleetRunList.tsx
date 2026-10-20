@@ -4,18 +4,12 @@ import { useState } from 'react';
 import { Broadcast, ArrowClockwise } from '@phosphor-icons/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useFleetRuns } from '@/hooks/useFleetRuns';
+import { RunStatusBadge } from '@/components/run/RunStatusBadge';
+import { normalizeStatus } from '@/lib/run/status';
 import type { FleetRunItem } from '@/lib/models';
 import { cn } from '@/lib/utils';
 
 type Tab = 'running' | 'attention' | 'completed' | 'all';
-
-const STATUS_DOT: Record<string, string> = {
-  running: 'bg-blue-500 animate-pulse',
-  pending: 'bg-yellow-500 animate-pulse',
-  completed: 'bg-green-500',
-  failed: 'bg-red-500',
-  cancelled: 'bg-gray-400',
-};
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -119,6 +113,7 @@ export function FleetRunList({ selectedId, onSelect }: FleetRunListProps) {
           data?.items.map((run) => (
             <button
               key={run.id}
+              data-testid={`fleet-run-${run.id}`}
               onClick={() => onSelect(run)}
               className={cn(
                 'w-full text-left px-4 py-2.5 border-b border-border transition-colors',
@@ -128,12 +123,12 @@ export function FleetRunList({ selectedId, onSelect }: FleetRunListProps) {
               )}
             >
               <div className="flex items-center gap-2">
-                <span className={cn('w-2 h-2 rounded-full shrink-0', STATUS_DOT[run.status] || 'bg-gray-400')} />
                 <span className="text-sm font-medium truncate">
                   {run.agent_name || 'Unknown Agent'}
                 </span>
+                <RunStatusBadge status={normalizeStatus(run.status, 'fleet run')} className="ml-auto shrink-0" />
               </div>
-              <div className="flex items-center gap-2 mt-0.5 ml-4">
+              <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-[11px] text-muted-foreground">{run.trigger}</span>
                 <span className="text-[11px] text-muted-foreground">—</span>
                 <span className="text-[11px] text-muted-foreground">{timeAgo(run.created_at)}</span>

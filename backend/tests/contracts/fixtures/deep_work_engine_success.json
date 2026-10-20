@@ -145,6 +145,9 @@
         "approvals": {
           "items": []
         },
+        "questions": {
+          "items": []
+        },
         "usage": {
           "requests": 2,
           "total": {
@@ -248,7 +251,8 @@
               "costUsd": null
             }
           }
-        }
+        },
+        "tasks": {}
       }
     },
     {
@@ -451,6 +455,9 @@
         "approvals": {
           "items": []
         },
+        "questions": {
+          "items": []
+        },
         "usage": {
           "requests": 3,
           "total": {
@@ -575,7 +582,8 @@
               "costUsd": null
             }
           }
-        }
+        },
+        "tasks": {}
       }
     },
     {
@@ -1169,6 +1177,9 @@
         "approvals": {
           "items": []
         },
+        "questions": {
+          "items": []
+        },
         "usage": {
           "requests": 10,
           "total": {
@@ -1332,7 +1343,8 @@
               "costUsd": null
             }
           }
-        }
+        },
+        "tasks": {}
       }
     }
   ],
@@ -1351,6 +1363,9 @@
           "placed": []
         },
         "approvals": {
+          "items": []
+        },
+        "questions": {
           "items": []
         },
         "usage": {
@@ -1417,7 +1432,8 @@
         "run": {
           "active": false
         },
-        "subagents": {}
+        "subagents": {},
+        "tasks": {}
       }
     },
     {

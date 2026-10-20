@@ -59,9 +59,12 @@ SCRIPT = {
 
 
 def _with_deep_work_rules(script: dict) -> dict:
-    from tests.e2e import dw_script
+    from tests.e2e import approval_script, dw_script, fleet_script, workflow_script
 
-    return {**script, "rules": [*script["rules"], *dw_script.build()["rules"]]}
+    # The approval rules refine tool_result rules of the generic chat ones (e2e_write), so they come first.
+    return {**script, "rules": [*approval_script.build()["rules"], *script["rules"],
+                                *fleet_script.build()["rules"], *dw_script.build()["rules"],
+                                *workflow_script.build()["rules"]]}
 
 
 _FLOOR = 20000
@@ -200,7 +203,10 @@ def stack():
 
         w.tmp = tmp
         w.backend_port, w.engine_port = int(os.environ.get("E2E_BACKEND_PORT") or free_port()), free_port()
-        w.tenant, w.user, w.project = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        w.tenant, w.user, w.project, w.agent = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        # Approvals e2e identities (see backend_app.py): all in w.tenant except the stranger.
+        w.admin, w.viewer, w.outsider = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        w.other_tenant, w.stranger, w.other_project = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         w.db = tmp / "backend.db"
         w.effects, w.gate, w.script = tmp / "effects.txt", tmp / "gate", tmp / "script.json"
         w.script.write_text(json.dumps(_with_deep_work_rules(SCRIPT)))
@@ -216,7 +222,14 @@ def stack():
         env = {**base, "PYTHONPATH": str(BACKEND), "E2E_PORT": str(w.backend_port), "E2E_DB": str(w.db),
                "E2E_INFO": str(info), "E2E_EFFECTS": str(w.effects), "E2E_GATE": str(w.gate),
                "E2E_TENANT_ID": str(w.tenant), "E2E_USER_ID": str(w.user), "E2E_PROJECT_ID": str(w.project),
-               "E2E_SECRET_KEY": SECRET_KEY, "E2E_DW_DIR": str(w.dw_dir),
+               "E2E_SECRET_KEY": SECRET_KEY, "E2E_DW_DIR": str(w.dw_dir), "E2E_AGENT_ID": str(w.agent),
+               "E2E_ADMIN_ID": str(w.admin), "E2E_VIEWER_ID": str(w.viewer), "E2E_OUTSIDER_ID": str(w.outsider),
+               "E2E_OTHER_TENANT_ID": str(w.other_tenant), "E2E_STRANGER_ID": str(w.stranger),
+               "E2E_OTHER_PROJECT_ID": str(w.other_project), "E2E_UNATTENDED": str(tmp / "unattended.txt"),
+               # Fleet on the engine: the tenant opt-in is seeded; this is the global condition.
+               "ENABLE_ENGINE_FLEET": "true",
+               # Workflows on the engine; the HTTP node may post to this backend's counting target.
+               "ENABLE_ENGINE_WORKFLOWS": "true", "HTTP_NODE_ALLOWED_URLS": f"http://127.0.0.1:{w.backend_port}/e2e/",
                # Deep Work on the engine: tenant opt-in is seeded; these are the global conditions.
                "ENABLE_ENGINE_API": "true", "ENABLE_ENGINE_DEEP_WORK": "true", "ENABLE_DEEP_WORK": "true",
                "ENABLE_SANDBOX": "true", "E2B_API_KEY": "e2b-FAKE-e2e", "SANDBOX_PROXY_URL": "http://proxy.invalid",
@@ -251,6 +264,7 @@ def stack():
             return second
 
         w.start_second_backend = start_second_backend
+        w.worker_n = 0
         w.worker_env = {**base, "ENGINE_PORT": str(w.engine_port), "ENGINE_HOST": "127.0.0.1",
                         "DATABASE_URL": w.pg_url, "ENGINE_SESSION_ID": SESSION,
                         "ENGINE_SERVICE_TOKEN": SERVICE_TOKEN, "ENGINE_GATEWAY_URL": w.backend_url,
@@ -285,6 +299,7 @@ def world():
 
 
 def _start_worker(w: World, n: int) -> Proc:
+    w.worker_n = n
     worker = Proc(["npm", "run", "--silent", "worker:test"], w.worker_env, ENGINE, w.tmp / f"worker{n}.log")
     w.procs.append(worker)
 
@@ -294,6 +309,44 @@ def _start_worker(w: World, n: int) -> Proc:
         return r.status_code == 200 and r.json().get("owner") is True
     wait_for(owner, "the worker to own the session lease", 90)
     return worker
+
+
+def restart_backend(w: World) -> Proc:
+    """Kill the backend (SIGKILL) and start a new process on the same port, database and engine."""
+    w.backend.kill(signal.SIGKILL)
+    info = w.tmp / f"info-restart-{len(w.procs)}.json"
+    env = {**w.backend_env, "E2E_SEED": "0", "E2E_INFO": str(info)}
+    backend = Proc([sys.executable, "-m", "tests.e2e.backend_app"], env, BACKEND, w.tmp / f"backend-restart-{len(w.procs)}.log")
+    w.procs.append(backend)
+    w.backend = backend
+
+    def ready():
+        assert backend.p.poll() is None, backend.tail()
+        return info.exists() and httpx.get(f"{w.backend_url}/internal/ping", headers={
+            "Authorization": f"Bearer {GATEWAY_TOKEN}"}).status_code == 200
+    wait_for(ready, "the restarted backend", 90)
+    return backend
+
+
+def sql_write(w: World, query: str, *args) -> int:
+    con = sqlite3.connect(w.db, timeout=30)
+    try:
+        cur = con.execute(query, args)
+        con.commit()
+        return cur.rowcount
+    finally:
+        con.close()
+
+
+def mark_unattended(w: World, conversation_id: str) -> None:
+    """Treat a conversation as one no human owns (an unattended run): the backend's authorize sees no approver."""
+    with (w.tmp / "unattended.txt").open("a") as f:
+        f.write(conversation_id + "\n")
+
+
+def as_user(name: str) -> dict:
+    """Headers that make the e2e backend authenticate as one of its seeded users (default: the member)."""
+    return {"X-E2E-User": name}
 
 
 def sql(w: World, query: str, *args):

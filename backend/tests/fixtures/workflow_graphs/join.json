@@ -1,0 +1,110 @@
+{
+  "errorMode": "stop",
+  "graph": {
+    "nodes": [
+      {
+        "deps": [],
+        "id": "s",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 120000
+        },
+        "type": "start"
+      },
+      {
+        "deps": [
+          {
+            "from": "s",
+            "handle": null
+          }
+        ],
+        "handles": [
+          "true",
+          "false"
+        ],
+        "id": "c",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 120000
+        },
+        "type": "ifelse"
+      },
+      {
+        "deps": [
+          {
+            "from": "c",
+            "handle": "true"
+          }
+        ],
+        "id": "a",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 120000
+        },
+        "type": "template"
+      },
+      {
+        "deps": [
+          {
+            "from": "c",
+            "handle": "false"
+          }
+        ],
+        "id": "b",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 120000
+        },
+        "type": "template"
+      },
+      {
+        "deps": [
+          {
+            "from": "a",
+            "handle": null
+          },
+          {
+            "from": "b",
+            "handle": null
+          }
+        ],
+        "id": "j",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 120000
+        },
+        "type": "merge"
+      },
+      {
+        "deps": [
+          {
+            "from": "j",
+            "handle": null
+          }
+        ],
+        "id": "o",
+        "policy": {
+          "backoffMs": 0,
+          "maxRetries": 0,
+          "onError": "stop",
+          "timeoutMs": 120000
+        },
+        "type": "output"
+      }
+    ]
+  },
+  "runAttempt": 0,
+  "runId": "00000000-0000-4000-8000-000000000001",
+  "variables": {},
+  "version": 1
+}

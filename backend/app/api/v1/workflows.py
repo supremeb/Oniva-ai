@@ -10,8 +10,8 @@ import uuid
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Depends, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Depends, Header, Query
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 import sqlalchemy as sa
@@ -23,6 +23,9 @@ from app.models.workflow_permission import WorkflowPermission, GranteeType, Perm
 from app.services.workflow_validator import WorkflowValidator
 from app.services.workflow_orchestrator import WorkflowOrchestrator
 from app.services.durable_workflow_engine import DurableWorkflowEngine
+from app.services import workflow_engine_runs as engine_runs
+from app.services import workflow_batch_engine as batch_engine
+from app.services import workflow_stream_adapter
 from app.services.webhook_service import (
     WebhookConfig, get_webhook_service
 )
@@ -141,6 +144,8 @@ class WorkflowResult(BaseModel):
     total_nodes: int = 0
     # NEW: Structured outputs from Output nodes
     outputs: List[WorkflowOutputNode] = []
+    # Set for runs that execute on the engine (plan 003 U15)
+    execution_id: Optional[str] = None
 
 
 class WorkflowListItem(BaseModel):
@@ -311,11 +316,62 @@ async def _require_execute_permission(
         raise HTTPException(status_code=403, detail="You need execute permission to run this workflow")
 
 
+async def _engine_run_response(
+    db: AsyncSession,
+    *,
+    workflow: Any,
+    workflow_spec: Dict[str, Any],
+    inputs: Dict[str, Any],
+    nodes_dict: Dict[str, Any],
+    user_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    trigger: str,
+    request_key: Optional[str],
+    version_id: Optional[uuid.UUID] = None,
+    label: str = "Workflow",
+    webhook: Optional[Dict[str, Any]] = None,
+):
+    """Start the run on the engine and wait (bounded) for it: ``WorkflowResult`` when it finishes,
+    ``202 {execution_id, status}`` while it is still going (plan 003 U15)."""
+    execution, task_id = await engine_runs.start_workflow_run(
+        db, workflow, workflow_spec, inputs, user_id=user_id, tenant_id=tenant_id,
+        trigger=trigger, request_key=request_key, version_id=version_id, webhook=webhook,
+    )
+    outcome = None
+    if execution.status == "running":
+        outcome = await engine_runs.await_finished(db, execution, task_id)
+        if outcome is None:
+            return JSONResponse(status_code=202, content={"execution_id": str(execution.id), "status": "running"})
+        await db.refresh(execution)
+        status_value = engine_runs.outcome_status(outcome)
+    elif execution.status in engine_runs.TERMINAL:
+        status_value = execution.status
+    else:  # queued: the start has not gone through yet; the reconciler owns it
+        return JSONResponse(status_code=202, content={"execution_id": str(execution.id), "status": execution.status})
+    results = engine_runs.results_from_trace(execution)
+    outputs = _extract_workflow_outputs(results=results, nodes_dict=nodes_dict)
+    executed = engine_runs.executed_count(results)
+    total = execution.total_nodes or len(nodes_dict)
+    return WorkflowResult(
+        status=status_value,
+        message=f"{label} executed: {executed}/{total} nodes",
+        results=results,
+        executed_nodes=executed,
+        total_nodes=total,
+        outputs=outputs,
+        execution_id=str(execution.id),
+    )
+
+
 # --- Endpoints ---
 
-@router.post("/execute", response_model=WorkflowResult)
+@router.post("/execute", response_model=WorkflowResult, responses={
+    202: {"description": "The run is still going after the sync window: `{execution_id, status}`. "
+                         "Follow it at `GET /workflows/executions/{execution_id}`; a configured `webhook` is "
+                         "called once when it ends."}})
 async def execute_workflow(
     request: ExecuteWorkflowRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
@@ -343,6 +399,27 @@ async def execute_workflow(
         await _require_execute_permission(
             request.workflow_id, user_id, user.role, tenant_id, db
         )
+
+    if await engine_runs.tenant_uses_engine_workflows(db, tenant_id):
+        # Engine tenants: an engine run, no in-process orchestrator (plan 003 U15). Errors map to
+        # 400 (invalid workflow) and 502 (engine unavailable) instead of the legacy blanket 500.
+        input_variables = dict(request.inputs or {})
+        if "sys.query" not in input_variables and "query" in input_variables:
+            input_variables["sys.query"] = input_variables["query"]
+        engine_result = await _engine_run_response(
+            db,
+            workflow=request.workflow_id,
+            workflow_spec={
+                "nodes": [n.model_dump() for n in request.nodes],
+                "edges": [e.model_dump() for e in request.edges],
+            },
+            inputs=input_variables,
+            nodes_dict={n.id: n for n in request.nodes},
+            user_id=user_id, tenant_id=tenant_id, trigger="manual", request_key=idempotency_key,
+            # Persisted with the run: the settle sends the completion callback once, whenever the run ends.
+            webhook=request.webhook.model_dump(exclude_none=True) if request.webhook else None,
+        )
+        return engine_result
 
     try:
         # Convert inputs to workflow variables
@@ -464,16 +541,36 @@ async def execute_workflow_stream(
             request.workflow_id, user_id, user.role, tenant_id, db
         )
 
+    input_variables = request.inputs or {}
+    if "query" in input_variables and "sys.query" not in input_variables:
+        input_variables["sys.query"] = input_variables["query"]
+
+    if await engine_runs.tenant_uses_engine_workflows(db, tenant_id):
+        # Engine tenants (plan 003 U17): start the run before the stream opens, so an invalid workflow (400)
+        # or an unavailable engine (502) is a real error response, then follow the engine watch.
+        execution, task_id = await engine_runs.start_workflow_run(
+            db, request.workflow_id,
+            {"nodes": [n.model_dump() for n in request.nodes], "edges": [e.model_dump() for e in request.edges]},
+            dict(input_variables), user_id=user_id, tenant_id=tenant_id, trigger="manual",
+        )
+        updates = workflow_stream_adapter.watch_events(engine_runs.tenant_factory(tenant_id), execution.id, task_id,
+                                                       announce=True)
+
+        async def engine_event_stream():
+            try:
+                async for update in updates:
+                    yield f"data: {json.dumps(update)}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e) or type(e).__name__})}\n\n"
+
+        return StreamingResponse(engine_event_stream(), media_type="text/event-stream")
+
     orchestrator = WorkflowOrchestrator(
         db=db,
         user_id=str(user_id),
         tenant_id=tenant_id,
         trigger="manual"
     )
-    
-    input_variables = request.inputs or {}
-    if "query" in input_variables and "sys.query" not in input_variables:
-        input_variables["sys.query"] = input_variables["query"]
 
     async def event_stream():
         try:
@@ -992,10 +1089,13 @@ class RunWorkflowRequest(BaseModel):
     user: Optional[str] = None  # User identifier for logging
 
 
-@router.post("/{workflow_id}/run", response_model=WorkflowResult)
+@router.post("/{workflow_id}/run", response_model=WorkflowResult, responses={
+    202: {"description": "The run is still going after the sync window: `{execution_id, status}`. "
+                         "Follow it at `GET /workflows/executions/{execution_id}`."}})
 async def run_saved_workflow(
     workflow_id: uuid.UUID,
     request: RunWorkflowRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
@@ -1105,6 +1205,21 @@ async def run_saved_workflow(
     # Convert spec to node/edge objects
     nodes = [WorkflowNode(**n) for n in workflow_spec.get("nodes", [])]
     edges = [WorkflowEdge(**e) for e in workflow_spec.get("edges", [])]
+
+    if await engine_runs.tenant_uses_engine_workflows(db, tenant_id):
+        # Engine tenants: an engine run of exactly the resolved spec (plan 003 U15).
+        input_variables = dict(request.inputs or {})
+        if "sys.query" not in input_variables and "query" in input_variables:
+            input_variables["sys.query"] = input_variables["query"]
+        return await _engine_run_response(
+            db,
+            workflow=workflow,
+            workflow_spec={"nodes": [n.model_dump() for n in nodes], "edges": [e.model_dump() for e in edges]},
+            inputs=input_variables,
+            nodes_dict={n.id: n for n in nodes},
+            user_id=user_id, tenant_id=tenant_id, trigger="api", request_key=idempotency_key,
+            version_id=resolved_version_id, label=f"Workflow '{workflow.name}'",
+        )
 
     # Execute the workflow
     try:
@@ -1447,6 +1562,8 @@ class WorkflowLogSummary(BaseModel):
     total_nodes: Optional[int] = None
     error: Optional[str]
     progress: int
+    # Engine conversation that runs this execution (plan 003 U26): the UI follows its watch while the run is live.
+    engine_conversation_id: Optional[str] = None
 
 
 class WorkflowLogDetail(WorkflowLogSummary):
@@ -1922,7 +2039,7 @@ class BatchExecutionInput(BaseModel):
 class BatchExecuteRequest(BaseModel):
     """Request to execute workflows in batch."""
     workflow_id: uuid.UUID = Field(..., description="Workflow to execute")
-    executions: List[BatchExecutionInput] = Field(..., min_length=1, max_length=1000)
+    executions: List[BatchExecutionInput] = Field(..., min_length=1)  # the 1000 cap is a 400 in the handler
     parallel_limit: Optional[int] = Field(10, ge=1, le=50, description="Max parallel executions")
     name: Optional[str] = Field(None, max_length=255, description="Batch name")
     webhook_url: Optional[str] = Field(None, description="Webhook URL for completion notification")
@@ -1980,9 +2097,17 @@ async def execute_batch(
     - Progress tracking and status monitoring
     - Optional webhook notification on completion
 
-    The batch is queued for background processing. Use GET /batches/{id}
+    With the engine workflows flag on, the batch is one engine run: a single fan-out node over the items with
+    ``parallel = parallel_limit`` (clamped to the engine's maximum) and ``failFast`` off. Use GET /batches/{id}
     to monitor progress.
     """
+    # Validate batch size before spending quota on it
+    if len(request.executions) > batch_engine.MAX_ITEMS:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum 1000 executions per batch"
+        )
+
     # Inline quota check — dynamic estimated_usage from batch size
     quota_svc = QuotaService(db)
     await quota_svc.check_and_raise(
@@ -1991,13 +2116,6 @@ async def execute_batch(
         QuotaType.EXECUTIONS,
         estimated_usage=len(request.executions),
     )
-
-    # Validate batch size
-    if len(request.executions) > 1000:
-        raise HTTPException(
-            status_code=400,
-            detail="Maximum 1000 executions per batch"
-        )
 
     # SSRF validation on webhook URL if provided
     if request.webhook_url:
@@ -2024,12 +2142,21 @@ async def execute_batch(
             detail="Workflow not found"
         )
 
+    use_engine = await engine_runs.tenant_uses_engine_workflows(db, tenant_id)
+    if use_engine:
+        try:
+            await batch_engine.compile_batch(db, tenant_id, request.workflow_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    parallel_limit = batch_engine.clamp_parallel(request.parallel_limit or 10)
+
     # Create batch record
     batch = WorkflowBatch(
         tenant_id=tenant_id,
         workflow_id=request.workflow_id,
         name=request.name or f"Batch execution of {workflow.name}",
-        parallel_limit=request.parallel_limit or 10,
+        parallel_limit=parallel_limit,
         total_count=len(request.executions),
         pending_count=len(request.executions),
         status=BatchStatus.QUEUED,
@@ -2049,6 +2176,8 @@ async def execute_batch(
             status=BatchItemStatus.PENDING
         )
         db.add(item)
+    if use_engine:
+        db.add(batch_engine.new_execution(batch, user.id))
 
     await db.commit()
 
@@ -2057,15 +2186,18 @@ async def execute_batch(
         f"for workflow {request.workflow_id}"
     )
 
-    # TODO: Queue background task for batch processing
-    # For now, return immediately with queued status
-    # In production, integrate with Celery/BackgroundJobs
+    status = "queued"
+    if use_engine:
+        # A start the engine could not take stays queued; the reconciler's ``start_missing`` retries it.
+        started = await batch_engine.start_batch_run(engine_runs.tenant_factory(tenant_id), batch.id)
+        if started.status != "failed":
+            status = "running"
 
     return BatchExecuteResponse(
         batch_id=batch.id,
-        status="queued",
+        status=status,
         total_count=len(request.executions),
-        message=f"Batch queued with {len(request.executions)} executions"
+        message=f"Batch {status} with {len(request.executions)} executions"
     )
 
 
@@ -2090,6 +2222,8 @@ async def get_batch_status(
             status_code=404,
             detail="Batch not found"
         )
+
+    await batch_engine.refresh_progress(db, batch)
 
     return BatchStatusResponse(
         id=batch.id,
@@ -2132,6 +2266,8 @@ async def list_batch_items(
             status_code=404,
             detail="Batch not found"
         )
+
+    await batch_engine.refresh_progress(db, batch)
 
     # Query items
     items_query = select(WorkflowBatchItem).where(
@@ -2177,8 +2313,8 @@ async def cancel_batch(
     """
     Cancel a running or queued batch.
 
-    Pending items will be marked as skipped.
-    Running items will complete but no new items will start.
+    Pending items will be marked as skipped. For an engine batch the run is aborted (running items stop
+    too); items that already finished keep their results.
     """
     query = select(WorkflowBatch).where(
         WorkflowBatch.id == batch_id,
@@ -2199,20 +2335,19 @@ async def cancel_batch(
             detail=f"Cannot cancel batch in {batch.status.value} status"
         )
 
-    # Update batch status
-    batch.status = BatchStatus.CANCELLED
-    batch.completed_at = datetime.now(timezone.utc)
-
-    # Mark pending items as skipped
-    from sqlalchemy import update
-    await db.execute(
-        update(WorkflowBatchItem)
-        .where(
-            WorkflowBatchItem.batch_id == batch_id,
-            WorkflowBatchItem.status == BatchItemStatus.PENDING
+    if not await batch_engine.cancel_batch_run(db, batch):
+        # No engine run (created with the flag off): nothing is running, so skip the pending items.
+        batch.status = BatchStatus.CANCELLED
+        batch.completed_at = datetime.now(timezone.utc)
+        from sqlalchemy import update
+        await db.execute(
+            update(WorkflowBatchItem)
+            .where(
+                WorkflowBatchItem.batch_id == batch_id,
+                WorkflowBatchItem.status == BatchItemStatus.PENDING
+            )
+            .values(status=BatchItemStatus.SKIPPED)
         )
-        .values(status=BatchItemStatus.SKIPPED)
-    )
 
     await db.commit()
 
@@ -2224,6 +2359,72 @@ async def cancel_batch(
 # ============================================
 # Execution Cancellation Endpoint (Enterprise)
 # ============================================
+
+@router.get("/executions/{execution_id}", response_model=WorkflowLogDetail)
+async def get_execution(
+    execution_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
+):
+    """Status and result of one run by its id, saved or ad-hoc.
+
+    This is where a ``202 {execution_id}`` from ``/execute``, ``/{id}/run`` or a compliance template run is
+    followed up. Same shape as the log detail.
+    """
+    execution = (await db.execute(
+        select(WorkflowExecution).where(WorkflowExecution.id == execution_id,
+                                        WorkflowExecution.tenant_id == tenant_id)
+    )).scalars().first()
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    return WorkflowLogDetail(**execution.to_log_detail())
+
+
+@router.get("/executions/{execution_id}/waiting-nodes")
+async def list_waiting_nodes(
+    execution_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
+) -> Dict[str, Any]:
+    """Nodes of a run parked on a human decision (plan 003 U21), for the canvas.
+
+    Each has the node id, the wake time (the SLA, or null when open-ended), the approval ledger id and the
+    ids the decision route needs (``POST /engine/conversations/{conversationId}/approvals/{taskId}/decision``).
+    The run's owner and anyone who may decide approvals see them; another tenant's run is a 404.
+    """
+    from app.auth.permissions import has_permission
+    from app.models.tool_approval import OPEN_STATUSES, ToolApproval
+
+    execution = (await db.execute(select(WorkflowExecution).where(
+        WorkflowExecution.id == execution_id, WorkflowExecution.tenant_id == tenant_id))).scalar_one_or_none()
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    if str(execution.user_id) != str(user.id) and not has_permission(user.role, "approvals:decide"):
+        raise HTTPException(status_code=403, detail="You don't have access to this execution")
+    rows = (await db.execute(
+        select(ToolApproval).where(
+            ToolApproval.tenant_id == tenant_id, ToolApproval.run_id == str(execution_id),
+            ToolApproval.kind == "review", ToolApproval.status.in_(OPEN_STATUSES),
+        ).order_by(ToolApproval.created_at, ToolApproval.id))).scalars().all()
+    return {
+        "executionId": str(execution_id),
+        "nodes": [
+            {
+                "nodeId": (row.arguments_preview or {}).get("nodeId"),
+                "kind": "human_in_loop",
+                "title": row.tool_name,
+                "status": row.status,
+                "wakeAt": row.expires_at.isoformat() if row.expires_at else None,
+                "approvalId": str(row.id),
+                "conversationId": str(row.conversation_id) if row.conversation_id else None,
+                "taskId": row.tool_task_id,
+            }
+            for row in rows
+        ],
+    }
+
 
 @router.post("/{execution_id}/cancel")
 async def cancel_execution(
@@ -2289,14 +2490,15 @@ async def cancel_execution(
             detail=f"Cannot cancel execution with status: {execution.status}"
         )
 
-    # Attempt cancellation via orchestrator
-    # Note: We don't have direct access to the orchestrator instance here
-    # The cancellation flag is set in the WorkflowExecution status
-    # The orchestrator checks this status before each node
-
-    execution.status = 'cancelled'
-    execution.completed_at = datetime.now(timezone.utc)
-    execution.error = "Execution cancelled by user"
+    if engine_runs.is_engine_execution(execution):
+        # Engine run: a real abort of the run's conversation (plan 003 U15, KTD9). An abort the engine
+        # could not take yet is retried by the reconciler; the row is cancelled either way.
+        await engine_runs.cancel_workflow_run(db, execution, "Execution cancelled by user")
+    else:
+        # Legacy run: the orchestrator checks this status before each node.
+        execution.status = 'cancelled'
+        execution.completed_at = datetime.now(timezone.utc)
+        execution.error = "Execution cancelled by user"
     await db.commit()
 
     logger.info(f"Execution {execution_id} cancelled by user {user_id}")

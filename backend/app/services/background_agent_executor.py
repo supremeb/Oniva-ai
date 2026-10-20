@@ -31,9 +31,19 @@ from app.services.run_event_service import emit_run_event
 
 logger = logging.getLogger(__name__)
 
-# Budget defaults when resource_constraints is not configured
-DEFAULT_MAX_TOOL_CALLS = 50
-DEFAULT_MAX_DURATION_SEC = 1800  # 30 minutes
+# Pure prompt/tool/connector logic lives in fleet_engine_agent (phase 6 U6); re-exported so the
+# legacy executor and its tests are unchanged.
+from app.services.fleet_engine_agent import (  # noqa: E402,F401
+    _BATCH_SUPERSEDES,
+    _SESSION_DEPENDENT_SKILLS,
+    DEFAULT_MAX_DURATION_SEC,
+    DEFAULT_MAX_TOOL_CALLS,
+    _build_system_prompt,
+    _load_tools,
+    _preload_connector_summary,
+)
+
+# Budget defaults live in fleet_engine_agent (re-exported above)
 DEFAULT_MAX_ITERATIONS = 100  # safety cap on LLM loop iterations
 
 
@@ -382,71 +392,6 @@ async def run_background_agent(
 # ─── Helper functions ────────────────────────────────────────────────────────
 
 
-def _build_system_prompt(
-    system_prompt: str,
-    skill_names: List[str],
-    connector_summary: Optional[str] = None,
-) -> str:
-    """Build a system prompt with tool usage instructions."""
-    base = system_prompt or "You are a helpful AI assistant."
-    tools_note = ""
-    if skill_names:
-        tools_note = (
-            "\n\nYou have access to tools that will be provided in the conversation. "
-            "Use them when appropriate to accomplish the task. "
-            "Process ALL items before responding — do NOT give intermediate summaries "
-            "after partial batches. When the task is fully complete, respond with a "
-            "single clear summary of everything that was done. "
-            "IMPORTANT: When a batch version of a tool exists (e.g. batch_sanctions_check, "
-            "batch_kyc_verification), ALWAYS use it instead of calling the single-entity "
-            "version repeatedly. Pass all entities in one call."
-        )
-    if connector_summary:
-        tools_note += (
-            f"\n\nAvailable connectors (no need to call list_available_connectors):\n"
-            f"{connector_summary}"
-        )
-    return base + tools_note
-
-
-# Skills that require a chat session context and don't work in background execution
-_SESSION_DEPENDENT_SKILLS = {"create_task", "update_task", "list_tasks"}
-
-# When a batch version exists, suppress the individual version in background runs
-# to force the LLM to use the more efficient batch call.
-_BATCH_SUPERSEDES = {
-    "sanctions_check": "batch_sanctions_check",
-    "kyc_verification": "batch_kyc_verification",
-}
-
-
-def _load_tools(skill_names: List[str]) -> Dict[str, Any]:
-    """Load tool handlers from the skill registry.
-
-    Filters out session-dependent skills (e.g. create_task) that require
-    an active chat session and would fail in background execution.
-    Also suppresses individual tools when a batch version is available.
-    """
-    from app.agents.skills.registry import SkillRegistry
-
-    # Determine which individual tools to suppress
-    suppress = set()
-    for individual, batch in _BATCH_SUPERSEDES.items():
-        if individual in skill_names and batch in skill_names:
-            suppress.add(individual)
-
-    tools = {}
-    for skill_name in skill_names:
-        if skill_name in _SESSION_DEPENDENT_SKILLS:
-            continue
-        if skill_name in suppress:
-            continue
-        skill = SkillRegistry.get_skill(skill_name)
-        if skill and skill.handler:
-            tools[skill_name] = skill
-    return tools
-
-
 def _build_openai_tools(tools: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Build OpenAI-format tool definitions for the LLM request."""
     openai_tools = []
@@ -528,42 +473,6 @@ async def _execute_tool(
     except Exception as e:
         logger.error(f"Tool {tool_name} failed: {e}")
         return {"success": False, "error": str(e)}
-
-
-async def _preload_connector_summary(user_id: str, tenant_id: str) -> Optional[str]:
-    """Pre-resolve connector list so the agent can skip the discovery tool call."""
-    try:
-        from app.agents.skills.context import SkillContext
-        from app.connectors.registry import ConnectorRegistry
-
-        ctx = SkillContext(user_id=user_id, tenant_id=tenant_id)
-
-        # Reuse the same connector loading logic as the skill
-        from app.agents.skills.connectors import _get_connectors
-        connectors = _get_connectors(ctx)
-        if not connectors:
-            return None
-
-        lines = []
-        for conn_id, conn_info in connectors.items():
-            provider = conn_info.get("provider", "")
-            connector_instance = ConnectorRegistry.get_connector(provider)
-            tool_names = []
-            if connector_instance:
-                try:
-                    raw_tools = connector_instance.get_tools()
-                    tool_names = [t.get("name", "") for t in raw_tools]
-                except Exception:
-                    pass
-            tools_str = ", ".join(tool_names) if tool_names else "none"
-            lines.append(
-                f"- connector_id=\"{conn_id}\" name=\"{conn_info.get('name', '')}\" "
-                f"tools: [{tools_str}]"
-            )
-        return "\n".join(lines)
-    except Exception as e:
-        logger.debug(f"Failed to preload connectors (non-critical): {e}")
-        return None
 
 
 async def _safe_check_interventions(job_id: str) -> list:

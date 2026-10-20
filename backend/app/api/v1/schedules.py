@@ -169,6 +169,7 @@ class ScheduleExecutionResponse(BaseModel):
     id: uuid.UUID
     schedule_id: uuid.UUID
     workflow_execution_id: Optional[uuid.UUID]
+    engine_conversation_id: Optional[uuid.UUID] = None  # set when the run started on the engine (plan 003 U19)
     scheduled_for: datetime
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
@@ -234,10 +235,12 @@ def _schedule_to_response(schedule: ScheduledWorkflow) -> ScheduleResponse:
 
 def _execution_to_response(execution: ScheduledWorkflowExecution) -> ScheduleExecutionResponse:
     """Convert ScheduledWorkflowExecution model to response"""
+    summary = execution.result_summary or {}
     return ScheduleExecutionResponse(
         id=execution.id,
         schedule_id=execution.schedule_id,
         workflow_execution_id=execution.workflow_execution_id,
+        engine_conversation_id=summary.get("engine_conversation_id"),
         scheduled_for=execution.scheduled_for,
         started_at=execution.started_at,
         completed_at=execution.completed_at,
