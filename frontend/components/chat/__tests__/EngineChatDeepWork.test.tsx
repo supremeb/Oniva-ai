@@ -50,6 +50,7 @@ const mount = () =>
             <EngineChat projectId="p1" client={client as unknown as EngineConversationClient} />
         </TooltipProvider>
     );
+const CHAT_ID = '3bb99183-c2a7-4473-bcd7-dce4e827f4f6';
 const box = () => screen.getByRole('textbox', { name: 'Message' });
 
 beforeAll(() => {
@@ -83,6 +84,7 @@ it('flag on: toggle + send runs the engine intake with the chat project, then th
     mockClarifyEngine.mockResolvedValue({ action: 'proceed', questions: null, enriched_query: null, session_id: 'dw_1', conversation_id: 'conv_1' });
     mockPlanEngine.mockResolvedValue({ title: 'Battery market', steps: ['a'], raw_plan: { title: 'Battery market' }, session_id: 'dw_1', conversation_id: 'conv_1' });
     mockStartEngineRun.mockResolvedValue({ session_id: 'dw_1', conversation_id: 'conv_1', status: 'started' });
+    client.create.mockResolvedValue({ conversationId: CHAT_ID, projectId: 'p1' });
     mount();
 
     fireEvent.click(screen.getByText('Deep Work'));
@@ -92,7 +94,12 @@ it('flag on: toggle + send runs the engine intake with the chat project, then th
     });
 
     await waitFor(() => expect(mockClarifyEngine).toHaveBeenCalledWith(expect.objectContaining({ query: 'battery market', projectId: 'p1' })));
-    expect(client.create).not.toHaveBeenCalled(); // not a chat turn
+    // A new chat gets a real conversation first (listed in the sidebar, `?c=` rejoins it) and the run binds to it;
+    // the text is not sent as a chat turn.
+    expect(client.create).toHaveBeenCalledTimes(1);
+    expect(client.submit).not.toHaveBeenCalled();
+    expect(mockClarifyEngine).toHaveBeenCalledWith(expect.objectContaining({ chatId: CHAT_ID }));
+    expect(new URL(window.location.href).searchParams.get('c')).toBe(CHAT_ID);
     expect(screen.getByTestId('deep-work-query').textContent).toBe('battery market');
 
     // plan approval card is the existing PlanCard
