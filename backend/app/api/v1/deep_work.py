@@ -97,6 +97,11 @@ class DeepWorkFullStateResponse(BaseModel):
     runtime: str = "legacy"
     engine_report: str | None = None
     engine_phase: str | None = None
+    # Engine intake context: lets a page that left and came back restore a plan or questions still waiting on the user.
+    query: str | None = None
+    enriched_query: str | None = None
+    project_id: str | None = None
+    awaiting_input: dict | None = None
     artifacts: list[dict] | None = None
     error: str | None = None
     workers: list[dict] | None = None
