@@ -32,6 +32,25 @@ describe('DeepWorkCard on the engine intake', () => {
     expect(generatePlan).toHaveBeenCalledWith('battery market');
   });
 
+  it('Retry after a failed engine intake opens a new session for the same chat (the failed one is ended)', () => {
+    const generatePlan = jest.fn();
+    useDeepWorkStore.setState({
+      status: 'error',
+      engineMode: true,
+      error: 'The model run failed',
+      enginePendingQuery: 'battery market',
+      conversationId: 'chat_1',
+      engineIntake: { projectId: 'p1', sessionId: 'dw_failed', conversationId: 'conv_failed', kbIds: [], connectorIds: [], enrichedQuery: null },
+      generatePlan,
+    });
+    render(<DeepWorkCard />);
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    expect(generatePlan).toHaveBeenCalledWith('battery market');
+    const s = useDeepWorkStore.getState();
+    expect(s.engineIntake).toMatchObject({ projectId: 'p1', sessionId: null, conversationId: null });
+    expect(s.conversationId).toBe('chat_1');
+  });
+
   it('mounts the engine card once the start publishes a session, and the intake card gives way', () => {
     useDeepWorkStore.setState({ status: 'error', engineMode: true, error: 'x' });
     render(<DeepWorkCard />);

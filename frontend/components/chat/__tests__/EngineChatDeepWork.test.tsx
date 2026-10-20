@@ -8,7 +8,9 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 const mockClarifyEngine = jest.fn();
 const mockPlanEngine = jest.fn();
 const mockStartEngineRun = jest.fn();
+const mockFullState = jest.fn();
 jest.mock('@/lib/engine/deepWorkApi', () => ({
+    getEngineFullState: (...a: unknown[]) => mockFullState(...a),
     clarifyEngine: (...a: unknown[]) => mockClarifyEngine(...a),
     planEngine: (...a: unknown[]) => mockPlanEngine(...a),
     startEngineRun: (...a: unknown[]) => mockStartEngineRun(...a),
@@ -109,4 +111,28 @@ it('flag on: toggle + send runs the engine intake with the chat project, then th
     });
     await waitFor(() => expect(mockStartEngineRun).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'dw_1' })));
     expect((await screen.findByTestId('engine-card')).textContent).toBe('dw_1');
+});
+
+it('coming back to a chat whose plan waits for approval shows the question and the plan, and Proceed starts it', async () => {
+    setFlag(true);
+    client.watch.mockReturnValue(new Promise(() => {}));
+    mockFullState.mockResolvedValue({
+        session_id: 'dw_1', conversation_id: 'conv_1', status: 'running', is_engine: true, runtime: 'engine',
+        engine_phase: 'plan', query: 'battery market', enriched_query: null, project_id: 'p1', awaiting_input: null,
+        plan: { title: 'Battery market', sub_queries: [{ sub_query: 'pricing' }] },
+        todos: [], steps: [], workspace_files: [], summary: null, key_findings: [], sources: [], connectors: [], error: null, workers: null,
+    });
+    mockStartEngineRun.mockResolvedValue({ session_id: 'dw_1', conversation_id: 'conv_1', status: 'started' });
+    render(
+        <TooltipProvider>
+            <EngineChat projectId="p1" initialConversationId={CHAT_ID} client={client as unknown as EngineConversationClient} />
+        </TooltipProvider>
+    );
+    await waitFor(() => expect(mockFullState).toHaveBeenCalledWith(CHAT_ID));
+    expect((await screen.findByTestId('deep-work-query')).textContent).toBe('battery market');
+    const approve = await screen.findByRole('button', { name: /proceed/i });
+    await act(async () => {
+        fireEvent.click(approve);
+    });
+    await waitFor(() => expect(mockStartEngineRun).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'dw_1', chatId: CHAT_ID })));
 });

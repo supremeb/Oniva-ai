@@ -148,6 +148,9 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         void getEngineFullState(initialConversationId)
             .then((fs) => {
                 if (cancelled || !isEngineRuntimeSession(fs) || useEngineSessionStore.getState().session) return;
+                if (fs.query) setDeepWorkQuery(fs.query);
+                // Still in the intake (questions or a plan waiting on the user): restore that card, not the run card.
+                if (useDeepWorkStore.getState().restoreEngineIntake(fs, initialConversationId, projectId)) return;
                 useEngineSessionStore.getState().setSession({
                     sessionId: fs.session_id,
                     conversationId: fs.conversation_id,
@@ -161,7 +164,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         return () => {
             cancelled = true;
         };
-    }, [deepWorkRuntime, initialConversationId]);
+    }, [deepWorkRuntime, initialConversationId, projectId]);
     // Leaving the chat drops the card so it never shows up in another conversation.
     useEffect(
         () => () => {
@@ -242,14 +245,15 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         [submit, markAccepted]
     );
 
-    // First send creates the conversation; submit once its watcher exists.
+    // First send creates the conversation; submit once its watcher exists. The sidebar lists the new chat once the
+    // first message (which titles it) is accepted.
     useEffect(() => {
         if (conversationId && firstText.current !== null) {
             const text = firstText.current;
             firstText.current = null;
-            void doSubmit(text);
+            void doSubmit(text).finally(() => void queryClient?.invalidateQueries({ queryKey: ['chat-sessions'] }));
         }
-    }, [conversationId, doSubmit]);
+    }, [conversationId, doSubmit, queryClient]);
 
     // Create the conversation; the first-send effect above submits `text` once the watcher exists.
     const startConversation = useCallback(

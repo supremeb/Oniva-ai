@@ -135,9 +135,14 @@ const DeepWorkLegacyCard = memo(function DeepWorkLegacyCard() {
   }, [engineReport, plan?.title]);
 
   const handleRetry = useCallback(() => {
-    if (enginePendingQuery) {
-      generatePlan(enginePendingQuery);
+    if (!enginePendingQuery) return;
+    // A failed engine intake ended its session (asking it again would replay the stored failure): the retry
+    // opens a new session, still bound to the same chat.
+    const { engineIntake } = useDeepWorkStore.getState();
+    if (engineIntake) {
+      useDeepWorkStore.setState({ engineIntake: { ...engineIntake, sessionId: null, conversationId: null } });
     }
+    generatePlan(enginePendingQuery);
   }, [enginePendingQuery, generatePlan]);
 
   const formatElapsed = useCallback((seconds: number) => {
