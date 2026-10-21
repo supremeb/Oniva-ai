@@ -130,7 +130,9 @@ async def get_cache_metrics(
 
     total_input = int(row.total_input)
     total_cache_read = int(row.total_cache_read)
-    hit_rate = total_cache_read / total_input if total_input > 0 else 0.0
+    # Providers disagree on whether input_tokens includes cached tokens (Anthropic excludes them),
+    # so the raw ratio can exceed 1 and fail the response model (500). Clamp to [0, 1].
+    hit_rate = min(1.0, total_cache_read / total_input) if total_input > 0 else 0.0
 
     return CacheMetricsResponse(
         start_date=start_date,

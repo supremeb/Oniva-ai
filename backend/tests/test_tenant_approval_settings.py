@@ -8,7 +8,7 @@ from starlette.testclient import TestClient
 from app.api.v1 import tenant_settings as ts
 from app.auth.dependencies import get_current_user
 from app.auth.providers.base import AuthUser
-from app.core.database import get_db
+from app.core.database import get_db, get_system_db
 from app.models.tenant import Tenant
 from tests.test_approval_service import FakeAudit
 
@@ -34,6 +34,7 @@ async def env(test_db, monkeypatch):
     e.role = "admin"
     monkeypatch.setattr(ts, "get_audit_chain", lambda db: e.audit)
     app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_system_db] = _db
     app.dependency_overrides[get_current_user] = lambda: AuthUser(
         id=str(uuid.uuid4()), email="a@x.io", name="Ada", tenant_id=str(TENANT), tenant_slug="t",
         role=e.role, auth_provider="local")

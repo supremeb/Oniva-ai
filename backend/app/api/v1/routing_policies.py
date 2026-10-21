@@ -39,12 +39,12 @@ _DEFAULT_POLICIES = [
 )
 async def list_routing_policies(
     db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """List all routing policies for the current tenant."""
     result = await db.execute(
         select(RoutingPolicy)
-        .where(RoutingPolicy.tenant_id == uuid.UUID(tenant_id))
+        .where(RoutingPolicy.tenant_id == tenant_id)
         .order_by(RoutingPolicy.task_type, RoutingPolicy.priority.desc())
     )
     return result.scalars().all()
@@ -59,11 +59,11 @@ async def list_routing_policies(
 async def create_routing_policy(
     body: RoutingPolicyCreate,
     db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Create a new routing policy (admin only)."""
     policy = RoutingPolicy(
-        tenant_id=uuid.UUID(tenant_id),
+        tenant_id=tenant_id,
         **body.model_dump(),
     )
     db.add(policy)
@@ -81,13 +81,13 @@ async def update_routing_policy(
     policy_id: uuid.UUID,
     body: RoutingPolicyUpdate,
     db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Update a routing policy (admin only)."""
     result = await db.execute(
         select(RoutingPolicy).where(
             RoutingPolicy.id == policy_id,
-            RoutingPolicy.tenant_id == uuid.UUID(tenant_id),
+            RoutingPolicy.tenant_id == tenant_id,
         )
     )
     policy = result.scalar_one_or_none()
@@ -111,13 +111,13 @@ async def update_routing_policy(
 async def delete_routing_policy(
     policy_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Delete a routing policy (admin only)."""
     result = await db.execute(
         select(RoutingPolicy).where(
             RoutingPolicy.id == policy_id,
-            RoutingPolicy.tenant_id == uuid.UUID(tenant_id),
+            RoutingPolicy.tenant_id == tenant_id,
         )
     )
     policy = result.scalar_one_or_none()
@@ -135,10 +135,10 @@ async def delete_routing_policy(
 )
 async def reset_defaults(
     db: AsyncSession = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant_id),
+    tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Delete all policies and recreate factory defaults (admin only)."""
-    tid = uuid.UUID(tenant_id)
+    tid = tenant_id
     await db.execute(
         delete(RoutingPolicy).where(RoutingPolicy.tenant_id == tid)
     )

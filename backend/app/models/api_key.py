@@ -8,6 +8,12 @@ import uuid
 from app.models import Base
 
 
+def normalize_scopes(scopes):
+    """Strip stray quotes/whitespace from stored scopes (old rows hold ``'*:*'`` with quotes)."""
+    cleaned = (str(x).strip().strip("'\"") for x in (scopes or []))
+    return [s for s in cleaned if s]
+
+
 class APIKey(Base):
     """
     Stores encrypted API keys for various LLM providers.
@@ -40,7 +46,9 @@ class APIKey(Base):
     key_metadata = Column(JSONB, default=dict)  # Additional config (base_url, etc.)
 
     # Enterprise: API key scoping and security
-    scopes = Column(ARRAY(String), nullable=False, server_default="{'*:*'}")
+    # No single quotes in the array literal (they were stored literally, giving ["'*:*'"]).
+    # The Python-side default covers ORM inserts; normalize_scopes covers existing rows.
+    scopes = Column(ARRAY(String), nullable=False, default=lambda: ["*:*"], server_default='{"*:*"}')
     allowed_ip_addresses = Column(ARRAY(INET), nullable=True)  # NULL = all IPs allowed
     expires_at = Column(DateTime(timezone=True), nullable=True)  # NULL = never expires
     rate_limit_per_hour = Column(Integer, nullable=False, server_default='1000')
@@ -87,15 +95,16 @@ class APIKey(Base):
         Returns:
             True if key has the required scope
         """
-        if not self.scopes:
+        scopes = normalize_scopes(self.scopes)
+        if not scopes:
             return False
 
         # Wildcard grants all scopes
-        if '*:*' in self.scopes or 'admin:all' in self.scopes:
+        if '*:*' in scopes or 'admin:all' in scopes:
             return True
 
         # Exact match
-        return required_scope in self.scopes
+        return required_scope in scopes
 
     def __repr__(self):
         return f"<APIKey(provider='{self.provider}', name='{self.name}', scopes={len(self.scopes or [])})>"

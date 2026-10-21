@@ -221,6 +221,60 @@ async def create_provider(
     return response
 
 
+# NOTE: declared before /llm-providers/{provider_id} so the literal path is not captured by it.
+@router.get("/llm-providers/browse-models")
+async def browse_available_models(
+    provider_type: str = "openrouter",
+    user: AuthUser = Depends(get_current_user),
+):
+    """
+    Fetch available models from a provider's catalog.
+
+    Currently supports OpenRouter (public API).
+    Returns model IDs, names, context lengths, and pricing.
+    """
+    if provider_type != "openrouter":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Browse not supported for provider '{provider_type}'. Only 'openrouter' is supported.",
+        )
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get("https://openrouter.ai/api/v1/models")
+            resp.raise_for_status()
+            data = resp.json()
+
+        models = []
+        for m in data.get("data", []):
+            model_id = m.get("id", "")
+            name = m.get("name", model_id)
+            ctx = m.get("context_length")
+            pricing = m.get("pricing", {})
+            prompt_price = pricing.get("prompt")
+            completion_price = pricing.get("completion")
+
+            models.append(BrowseModelsResponse(
+                id=model_id,
+                name=name,
+                context_length=ctx,
+                pricing_prompt=prompt_price,
+                pricing_completion=completion_price,
+            ))
+
+        # Sort by name
+        models.sort(key=lambda x: x.name.lower())
+        return {"models": [m.model_dump() for m in models], "total": len(models)}
+
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to fetch models from OpenRouter: {str(e)}",
+        )
+
+
 @router.get("/llm-providers/{provider_id}", response_model=ProviderResponse)
 async def get_provider(
     provider_id: UUID,
@@ -374,59 +428,6 @@ class BrowseModelsResponse(BaseModel):
     context_length: Optional[int] = None
     pricing_prompt: Optional[str] = None
     pricing_completion: Optional[str] = None
-
-
-@router.get("/llm-providers/browse-models")
-async def browse_available_models(
-    provider_type: str = "openrouter",
-    user: AuthUser = Depends(get_current_user),
-):
-    """
-    Fetch available models from a provider's catalog.
-
-    Currently supports OpenRouter (public API).
-    Returns model IDs, names, context lengths, and pricing.
-    """
-    if provider_type != "openrouter":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Browse not supported for provider '{provider_type}'. Only 'openrouter' is supported.",
-        )
-
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get("https://openrouter.ai/api/v1/models")
-            resp.raise_for_status()
-            data = resp.json()
-
-        models = []
-        for m in data.get("data", []):
-            model_id = m.get("id", "")
-            name = m.get("name", model_id)
-            ctx = m.get("context_length")
-            pricing = m.get("pricing", {})
-            prompt_price = pricing.get("prompt")
-            completion_price = pricing.get("completion")
-
-            models.append(BrowseModelsResponse(
-                id=model_id,
-                name=name,
-                context_length=ctx,
-                pricing_prompt=prompt_price,
-                pricing_completion=completion_price,
-            ))
-
-        # Sort by name
-        models.sort(key=lambda x: x.name.lower())
-        return {"models": [m.model_dump() for m in models], "total": len(models)}
-
-    except httpx.HTTPError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to fetch models from OpenRouter: {str(e)}",
-        )
 
 
 @router.post("/llm-providers/reorder", status_code=status.HTTP_200_OK)

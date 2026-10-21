@@ -4,7 +4,8 @@ from typing import AsyncGenerator
 from uuid import UUID
 
 from fastapi import Request
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from app.config import get_settings
@@ -116,6 +117,30 @@ async def set_tenant_context(session: AsyncSession, tenant_id: str) -> None:
         text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
         {"tenant_id": str(tenant_id)},
     )
+    # The GUC is transaction-local. Remember the tenant on the session so every LATER
+    # transaction (e.g. a refresh after commit()) re-applies it - see _reapply_tenant_context.
+    info = getattr(session, "info", None)
+    if info is not None:
+        info[_TENANT_INFO_KEY] = str(tenant_id)
+
+
+_TENANT_INFO_KEY = "oniva_tenant_id"
+
+
+@event.listens_for(Session, "after_begin")
+def _reapply_tenant_context(session, transaction, connection) -> None:
+    """Re-apply the tenant GUC at the start of each transaction on a tenant-scoped session.
+
+    ``set_config(..., true)`` is SET LOCAL: it vanishes at commit, so a statement issued after
+    ``await db.commit()`` (typically ``db.refresh(obj)``) would run with no tenant and RLS would
+    hide the just-written row. System sessions never set the key, so they are untouched.
+    """
+    tenant_id = session.info.get(_TENANT_INFO_KEY)
+    if tenant_id:
+        connection.execute(
+            text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
+            {"tenant_id": tenant_id},
+        )
 
 
 async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:

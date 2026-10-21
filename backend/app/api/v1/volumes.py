@@ -18,10 +18,12 @@ Endpoints:
 from datetime import datetime
 from typing import Optional
 from pathlib import Path
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.auth.dependencies import get_current_tenant_id
 from app.services.volumes import (
     VolumeManager,
     VolumeInfo,
@@ -134,13 +136,14 @@ class FileListResponse(BaseModel):
 @router.get("", response_model=VolumeListResponse)
 async def list_volumes(
     volume_mgr: VolumeManager = Depends(get_volume_manager),
+    tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> VolumeListResponse:
     """
     List all available volumes.
 
     Returns volume metadata including name, size, and file count.
     """
-    volumes = await volume_mgr.list_volumes()
+    volumes = await volume_mgr.list_volumes(str(tenant_id))
     return VolumeListResponse(
         volumes=[VolumeResponse.from_volume_info(v) for v in volumes],
         count=len(volumes),
@@ -151,6 +154,7 @@ async def list_volumes(
 async def create_volume(
     request: VolumeCreateRequest,
     volume_mgr: VolumeManager = Depends(get_volume_manager),
+    tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> VolumeResponse:
     """
     Create a new volume from S3 or local filesystem.
@@ -163,7 +167,7 @@ async def create_volume(
     to multiple sessions as read-only data.
     """
     try:
-        info = await volume_mgr.create_volume(
+        info = await volume_mgr.create_volume(str(tenant_id), 
             volume_name=request.name,
             source=request.source,
             overwrite=request.overwrite,
@@ -184,12 +188,13 @@ async def create_volume(
 async def get_volume(
     volume_name: str,
     volume_mgr: VolumeManager = Depends(get_volume_manager),
+    tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> VolumeResponse:
     """
     Get detailed information about a specific volume.
     """
     try:
-        info = await volume_mgr.get_volume(volume_name)
+        info = await volume_mgr.get_volume(str(tenant_id), volume_name)
         return VolumeResponse.from_volume_info(info)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -203,6 +208,7 @@ async def delete_volume(
         description="Delete even if mounted to sessions",
     ),
     volume_mgr: VolumeManager = Depends(get_volume_manager),
+    tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> None:
     """
     Delete a volume.
@@ -211,7 +217,7 @@ async def delete_volume(
     Use force=true to delete anyway.
     """
     try:
-        deleted = await volume_mgr.delete_volume(volume_name, force=force)
+        deleted = await volume_mgr.delete_volume(str(tenant_id), volume_name, force=force)
         if not deleted:
             raise HTTPException(
                 status_code=404,
@@ -230,6 +236,7 @@ async def mount_volume_to_session(
     volume_name: str,
     session_id: str,
     volume_mgr: VolumeManager = Depends(get_volume_manager),
+    tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> MountResponse:
     """
     Mount a volume to a session.
@@ -239,8 +246,8 @@ async def mount_volume_to_session(
     /sessions/{session_id}/volumes/{volume_name}/
     """
     try:
-        mount_path = await volume_mgr.mount_volume(volume_name, session_id)
-        mounts = await volume_mgr.list_session_mounts(session_id)
+        mount_path = await volume_mgr.mount_volume(str(tenant_id), volume_name, session_id)
+        mounts = await volume_mgr.list_session_mounts(str(tenant_id), session_id)
         # Find the mount we just created
         mount = next((m for m in mounts if m.volume_name == volume_name), None)
         if mount:
@@ -266,13 +273,14 @@ async def unmount_volume_from_session(
     volume_name: str,
     session_id: str,
     volume_mgr: VolumeManager = Depends(get_volume_manager),
+    tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> None:
     """
     Unmount a volume from a session.
 
     Removes the symlink. Does not affect the volume data.
     """
-    unmounted = await volume_mgr.unmount_volume(volume_name, session_id)
+    unmounted = await volume_mgr.unmount_volume(str(tenant_id), volume_name, session_id)
     if not unmounted:
         raise HTTPException(
             status_code=404,
@@ -286,6 +294,7 @@ async def list_volume_files(
     path: str = Query(default="", description="Relative path within volume"),
     recursive: bool = Query(default=False, description="List files recursively"),
     volume_mgr: VolumeManager = Depends(get_volume_manager),
+    tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> FileListResponse:
     """
     List files in a volume directory.
@@ -295,7 +304,7 @@ async def list_volume_files(
     Use recursive=true to list all files recursively.
     """
     try:
-        files = await volume_mgr.list_files(volume_name, path, recursive)
+        files = await volume_mgr.list_files(str(tenant_id), volume_name, path, recursive)
         return FileListResponse(
             files=[FileInfo(**f) for f in files],
             count=len(files),
@@ -311,6 +320,7 @@ async def read_volume_file(
     volume_name: str,
     file_path: str,
     volume_mgr: VolumeManager = Depends(get_volume_manager),
+    tenant_id: UUID = Depends(get_current_tenant_id),
 ):
     """
     Read a file from a volume.
@@ -322,7 +332,7 @@ async def read_volume_file(
     import mimetypes
 
     try:
-        content = await volume_mgr.read_file(volume_name, file_path)
+        content = await volume_mgr.read_file(str(tenant_id), volume_name, file_path)
 
         # Guess content type
         mime_type, _ = mimetypes.guess_type(file_path)
@@ -344,11 +354,12 @@ async def read_volume_file(
 async def list_session_mounts(
     session_id: str,
     volume_mgr: VolumeManager = Depends(get_volume_manager),
+    tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> list[MountResponse]:
     """
     List all volumes mounted to a session.
     """
-    mounts = await volume_mgr.list_session_mounts(session_id)
+    mounts = await volume_mgr.list_session_mounts(str(tenant_id), session_id)
     return [
         MountResponse(
             session_id=m.session_id,

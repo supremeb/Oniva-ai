@@ -15,11 +15,37 @@ from app.auth.providers.base import AuthUser
 
 router = APIRouter()
 
+from uuid import uuid5, NAMESPACE_DNS
+
+# Deterministic namespace for registry (system) skills: id = uuid5(namespace, skill name)
+SYSTEM_SKILL_NAMESPACE = uuid5(NAMESPACE_DNS, "system.skills.oniva")
+
+
+def _manifest_to_read(name: str, manifest) -> SkillRead:
+    return SkillRead(
+        id=uuid5(SYSTEM_SKILL_NAMESPACE, name),
+        name=manifest.name,
+        description=manifest.description,
+        category=manifest.category,
+        is_custom=False,
+        is_system=True,
+        enabled=True,
+        skill_dependencies=manifest.requires,
+        mcp_dependencies=manifest.mcp_dependencies,
+        mock=manifest.mock,
+        author=manifest.author,
+        version=manifest.version,
+        code=None,
+        configuration={},
+        created_at=None,
+        updated_at=None,
+    )
+
 @router.get("", response_model=List[SkillRead])
 async def list_skills(
     category: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
@@ -40,45 +66,16 @@ async def list_skills(
     db_skills = result.scalars().all()
     
     # 2. Get system skills from Registry (Manifests)
-    from uuid import uuid5, NAMESPACE_DNS
-    registry_skills = SkillRegistry.get_all_skills() # Dict[name, SkillManifest]
-    
-    system_skills_list = []
-    # Create a deterministic namespace for system skills
-    SYSTEM_SKILL_NAMESPACE = uuid5(NAMESPACE_DNS, "system.skills.oniva")
+    registry_skills = SkillRegistry.get_all_skills()  # Dict[name, SkillManifest]
 
+    system_skills_list = []
     for name, manifest in registry_skills.items():
         if category and manifest.category != category:
             continue
-            
-        # Generate deterministic ID
-        skill_id = uuid5(SYSTEM_SKILL_NAMESPACE, name)
-        
-        # Check if already in DB skills (override system with custom if name collision? 
-        # Or usually system skills are distinct. DB skills have `is_custom=True` typically).
-        # We'll assume names are unique enough or DB takes precedence if we want.
-        # But for now, let's just append system skills that aren't in DB (by name).
+        # DB skills take precedence over a registry skill with the same name.
         if any(s.name == name for s in db_skills):
             continue
-
-        system_skills_list.append(SkillRead(
-            id=skill_id,
-            name=manifest.name,
-            description=manifest.description,
-            category=manifest.category,
-            is_custom=False,
-            is_system=True,
-            enabled=True,
-            skill_dependencies=manifest.requires,
-            mcp_dependencies=manifest.mcp_dependencies,
-            mock=manifest.mock,
-            author=manifest.author,
-            version=manifest.version,
-            code=None,
-            configuration={},
-            created_at=None,
-            updated_at=None
-        ))
+        system_skills_list.append(_manifest_to_read(name, manifest))
 
     return db_skills + system_skills_list
 
@@ -235,6 +232,10 @@ async def get_skill(
     """
     skill = await db.get(Skill, skill_id)
     if not skill:
+        # Registry skills are listed with a deterministic uuid5 id and are not DB rows.
+        for name, manifest in SkillRegistry.get_all_skills().items():
+            if uuid5(SYSTEM_SKILL_NAMESPACE, name) == skill_id:
+                return _manifest_to_read(name, manifest)
         raise HTTPException(status_code=404, detail="Skill not found")
     return skill
 

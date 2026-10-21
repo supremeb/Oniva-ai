@@ -1,6 +1,6 @@
 """Pydantic schemas for BackgroundJob API."""
 from typing import Optional, List, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 from uuid import UUID
 from enum import Enum
@@ -49,6 +49,13 @@ class BackgroundJobCreate(BackgroundJobBase):
     """Schema for creating a new background job."""
     workflow_id: Optional[UUID] = Field(None, description="Associated workflow ID")
     agent_id: Optional[UUID] = Field(None, description="Associated agent ID")
+
+    @model_validator(mode="after")
+    def _agent_job_needs_agent(self):
+        # Reject before any row is written: a background_agent job without an agent can never run.
+        if self.job_type == JobType.BACKGROUND_AGENT and self.agent_id is None:
+            raise ValueError("agent_id is required for background_agent jobs")
+        return self
 
 
 class BackgroundJobUpdate(BaseModel):

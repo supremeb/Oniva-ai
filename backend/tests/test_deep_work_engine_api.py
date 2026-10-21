@@ -508,7 +508,7 @@ async def test_start_twice_is_one_run_and_409_only_while_active(w):
     assert r.status_code == 409
     w.engine.end(cid)  # finished (not active)
     r = await w.http.post("/api/v1/deep-work/engine", json={"query": "compare vendor pricing", "session_id": sid, "plan": PLAN})
-    assert r.status_code == 200 and r.json()["status"] == "failed"  # ended before dw_finalize: reconciled, not rerun
+    assert r.status_code == 409 and "ended" in r.json()["detail"]  # ended before dw_finalize: reconciled, not rerun
     executes = [e for e in w.engine.of(cid).entries if e["kind"] == "user" and e["payload"]["requestId"] == f"deep_work:{sid}"]
     assert len(executes) == 1
     async with w.factory() as db:
@@ -611,6 +611,42 @@ async def test_steer_needs_a_running_started_session(w):
     await w.http.post("/api/v1/deep-work/engine", json={"query": "compare vendor pricing", "session_id": sid, "plan": PLAN})
     await w.http.post(f"/api/v1/deep-work/engine/{sid}/cancel")
     assert (await w.http.post(f"/api/v1/deep-work/{sid}/steer", json={"text": "x"})).status_code == 409
+
+
+async def test_steer_before_start_says_the_run_has_not_started(w):
+    sid, _ = await new_session(w)
+    r = await w.http.post(f"/api/v1/deep-work/{sid}/steer", json={"text": "x"})
+    assert r.status_code == 409 and "not started" in r.json()["detail"]
+
+
+async def test_start_on_a_cancelled_session_is_409(w):
+    sid, _ = await started(w)
+    await w.http.post(f"/api/v1/deep-work/engine/{sid}/cancel")
+    r = await w.http.post("/api/v1/deep-work/engine", json={"query": "compare vendor pricing", "session_id": sid, "plan": PLAN})
+    assert r.status_code == 409 and "ended" in r.json()["detail"]
+
+
+async def test_workspace_and_delete_error_codes(w):
+    for bad in ("a%20b", "%2e%2e", "..%2e"):
+        assert (await w.http.get(f"/api/v1/deep-work/{bad}/workspace")).status_code in (404, 422), bad
+        assert (await w.http.get(f"/api/v1/deep-work/{bad}/workspace/x.md")).status_code in (404, 422), bad
+    unknown = str(uuid.uuid4())
+    assert (await w.http.get(f"/api/v1/deep-work/{unknown}/workspace")).status_code == 404
+    assert (await w.http.get(f"/api/v1/deep-work/legacy-unknown/workspace")).status_code == 404
+    assert (await w.http.delete(f"/api/v1/deep-work/{unknown}")).status_code == 404
+    assert (await w.http.delete("/api/v1/deep-work/legacy-unknown")).status_code == 404
+
+
+async def test_legacy_workspace_is_owner_only(w):
+    sid = "v1-owned"
+    async with w.factory() as db:
+        db.add(BackgroundJob(id=uuid.uuid4(), tenant_id=w.ta, user_id=w.ua, job_type="deep_work", status="completed",
+                             trigger="manual", session_id=sid, conversation_id=uuid.uuid4()))
+    await w.storage.write(str(w.ta), sid, "workspace/report.md", "# R")
+    assert (await w.http.get(f"/api/v1/deep-work/{sid}/workspace")).status_code == 200
+    as_user(w, w.ta, w.ua2)
+    assert (await w.http.get(f"/api/v1/deep-work/{sid}/workspace")).status_code == 403
+    assert (await w.http.get(f"/api/v1/deep-work/{sid}/workspace/report.md")).status_code == 403
 
 
 # --- reconcile on read (KTD11) --------------------------------------------------------------------------------------------
