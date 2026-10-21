@@ -31,6 +31,7 @@ CONNECTOR_TOOLS = ("list_available_connectors", "get_connector_schema", "invoke_
 KNOWLEDGE_TOOL = "search_knowledge"
 FILE_TOOLS = ("read_file", "write_file")
 CODE_TOOLS = ("execute_python",)
+MEMORY_TOOLS = ("memory_view", "memory_create", "memory_str_replace", "memory_insert", "memory_delete")
 _SKILL_NS = uuid.uuid5(uuid.NAMESPACE_DNS, "system.skills.oniva")
 
 KNOWLEDGE_INSTRUCTION = (
@@ -51,6 +52,7 @@ CAPABILITY_FAMILIES = (
     ("connectors", CONNECTOR_TOOLS),
     ("file operations", FILE_TOOLS),
     ("code execution", CODE_TOOLS),
+    ("project memory", MEMORY_TOOLS),
 )
 
 # Tiered context (U16). With tiers on, chat also gets read_file (to page saved tool outputs) and, top level only,
@@ -221,6 +223,9 @@ class ChatInputs:
     # Subsets of the requested ids the user may use (RBAC / existence), as strings.
     accessible_knowledge_base_ids: Set[str] = field(default_factory=set)
     valid_connector_ids: Set[str] = field(default_factory=set)
+    # U28: the frozen "## Project memory" block. None = memory is off for this conversation (flag or project
+    # setting), which leaves the config exactly as before; a string (even the empty-state block) turns it on.
+    memory_block: Optional[str] = None
 
 
 @dataclass
@@ -288,6 +293,11 @@ def compose_agent_config(
     dropped["skill_ids"] = [n for n in wanted if n not in manifest]
     # The toggles below are authoritative for their tool families.
     tools -= set(WEB_TOOLS) | set(CONNECTOR_TOOLS) | {KNOWLEDGE_TOOL}
+    # Memory tools come only from the memory grant below (flags on, top-level chat), never from skill picks.
+    tools -= set(MEMORY_TOOLS)
+    memory_on = inputs.memory_block is not None and agent_role is None
+    if memory_on:
+        tools |= {t for t in MEMORY_TOOLS if t in manifest}
     if selections.web_search:
         tools |= {t for t in WEB_TOOLS if t in manifest}
     if connector_ids:
@@ -324,6 +334,8 @@ def compose_agent_config(
             "<earlier_conversation_summary>\n"
             f"{continuation_summary.strip()}\n"
             "</earlier_conversation_summary>")
+    if memory_on:
+        parts.append(inputs.memory_block)  # last: the static prefix stays first (KTD17)
 
     stored = {
         "agent_id": inputs.agent_id,
@@ -361,6 +373,27 @@ def _uuids(values: Iterable[str]) -> Dict[str, uuid.UUID]:
         except ValueError:
             continue
     return out
+
+
+async def _load_memory_block(db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID, project: Any) -> Optional[str]:
+    """The memory block when the tenant/global flag AND the project's ``settings.memory.enabled`` are on, else None.
+
+    The project setting is checked first (no query), then the tenant/global flag. A failure never blocks a chat.
+    """
+    from app.models.tenant import Tenant
+    from app.services import project_memory
+
+    try:
+        memory = (project.settings or {}).get("memory") if isinstance(project.settings, dict) else None
+        if not (isinstance(memory, dict) and memory.get("enabled") is True):
+            return None  # project setting off: no further queries
+        tenant = await db.get(Tenant, tenant_id)
+        if not project_memory.project_memory_enabled(tenant, project.settings):
+            return None
+        return await project_memory.build_injection(db, project, None)
+    except Exception:
+        logger.warning("project memory injection failed; building the config without it", exc_info=True)
+        return None
 
 
 async def load_chat_inputs(
@@ -414,6 +447,7 @@ async def load_chat_inputs(
                     KnowledgeDocument.tenant_id == tenant_id,
                     KnowledgeDocument.status == "ready").order_by(KnowledgeDocument.filename)))
             inputs.project_files = [n for (n,) in names.all()]
+        inputs.memory_block = await _load_memory_block(db, tenant_id, user_id, proj)
 
     wanted_kbs = _uuids(_dedupe(
         inputs.agent_knowledge_base_ids
