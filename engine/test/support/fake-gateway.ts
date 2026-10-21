@@ -141,6 +141,27 @@
  * the call is blocked with reason `policy_unavailable`, never run
  * (engine client: authorize-fail-closed).
  *
+ * Tier 0 offload (the backend's `/internal/workspace/offload`; the real
+ * contract lives in `backend/app/internal_api/workspace.py`). Fenced like the
+ * tool routes: it carries `X-Engine-Fence` and `X-Engine-Session`, a stale
+ * token is answered `409 { error: "fence_rejected", highWater }`.
+ * [clause:offload-fenced] `POST /internal/workspace/offload` with body
+ * `{ tenantId, projectId, conversationId, engineConversationId, runId,
+ * toolCallId, toolName, text }` and header `Idempotency-Key: runId:toolCallId`
+ * stores `text` once under a path the server generates from the validated ids
+ * (`tool_results/<toolCallId>.txt`; never caller-supplied) and answers
+ * `200 { path, bytes }`, `bytes` being the UTF-8 length of the stored text.
+ * [clause:offload-shape] `conversationId` is the top-level conversation (the
+ * storage key), `engineConversationId` the one that made the call
+ * (informational). A second put under the same key is a no-op that answers the
+ * same `{ path, bytes }`, even when `text` differs. [clause:offload-idempotent]
+ * A body missing a field, an invalid `toolCallId`, or a key that is not
+ * `runId:toolCallId` is `400 { error: "invalid_request" }`.
+ * [clause:offload-invalid-400] A `text` over the server's cap is `413 {
+ * error: "too_large" }`, a definitive answer the engine does not retry.
+ * [clause:offload-too-large-413] `429`, `503` and any `5xx` are outages the
+ * engine retries (the route is idempotent). [clause:offload-retry-transient]
+ *
  * Test controls: per-tool effect counters ({@link FakeGateway.effects}),
  * scripted failures and delays, stored outcomes by key, the per-session fence
  * high-water mark, and a log of every request with its headers.
@@ -205,6 +226,8 @@ export interface FakeGatewayOptions {
   serviceToken?: string;
   /** Reject invokes that carry no `X-Engine-Fence` header (400). Default false. */
   requireFence?: boolean;
+  /** Largest offload `text` accepted, in bytes. Default 1 MiB. */
+  offloadMaxBytes?: number;
 }
 
 const MANIFEST = "/internal/tools/manifest";
@@ -212,6 +235,7 @@ const INVOKE = /^\/internal\/tools\/([^/]+)\/invoke$/;
 const POLICY = "/internal/models/policy";
 const USAGE = "/internal/models/usage";
 const AUTHORIZE = "/internal/tools/authorize";
+const OFFLOAD = "/internal/workspace/offload";
 const INVOCATION = /^\/internal\/tools\/invocations\/([^/]+)$/;
 
 /** What the fake answers a model policy request with. */
@@ -257,6 +281,11 @@ export class FakeGateway {
   readonly #highWater = new Map<string, number>();
   readonly #requireFence: boolean;
   #manifestFailures: number[] = [];
+  readonly #offloadMaxBytes: number;
+  #offloadScripts: FakeScript[] = [];
+  /** Objects stored by the offload route, by `tenantId/conversationId/path`. */
+  readonly offloaded = new Map<string, { path: string; text: string; bytes: number }>();
+  readonly #offloadByKey = new Map<string, { path: string; bytes: number }>();
   readonly #policyScripts: FakePolicy[] = [];
   #usageFailures: number[] = [];
   readonly #authorizeScripts: FakeAuthorize[] = [];
@@ -274,6 +303,7 @@ export class FakeGateway {
     this.tools = tools;
     this.serviceToken = options.serviceToken ?? "service-token";
     this.#requireFence = options.requireFence ?? false;
+    this.#offloadMaxBytes = options.offloadMaxBytes ?? 1024 * 1024;
     this.#server = createServer((req, res) => {
       void this.#handle(req, res).catch((err) => {
         if (!res.headersSent) send(res, 500, { error: String(err) });
@@ -313,6 +343,17 @@ export class FakeGateway {
   script(name: string, ...scripts: FakeScript[]): this {
     this.#scripts.set(name, [...(this.#scripts.get(name) ?? []), ...scripts]);
     return this;
+  }
+
+  /** Queue reactions for the next offload puts (status answers only; consumed in order). */
+  scriptOffload(...scripts: FakeScript[]): this {
+    this.#offloadScripts.push(...scripts);
+    return this;
+  }
+
+  /** Offload requests received (including repeats and failures), in order. */
+  offloadRequests(): FakeRequest[] {
+    return this.requests.filter((r) => r.method === "POST" && r.path === OFFLOAD);
   }
 
   /** Fail the next manifest loads with these statuses. */
@@ -408,6 +449,7 @@ export class FakeGateway {
     if (req.method === "POST" && path === POLICY) return this.#policy(res, body);
     if (req.method === "POST" && path === USAGE) return this.#recordUsage(res, body);
     if (req.method === "POST" && path === AUTHORIZE) return this.#authorize(res, body);
+    if (req.method === "POST" && path === OFFLOAD) return this.#offload(req, res, body);
     const invoke = INVOKE.exec(path);
     if (!(req.method === "POST" && invoke)) {
       const session = header(req, "x-engine-session");
@@ -523,6 +565,50 @@ export class FakeGateway {
     }
     this.#authorizeDecided.set(key, out);
     send(res, 200, out, headers);
+  }
+
+  #offload(req: IncomingMessage, res: ServerResponse, body: JsonValue | null): void {
+    const session = header(req, "x-engine-session");
+    if (session !== undefined && !this.#admitFence(req, session, res)) return;
+    const script = this.#offloadScripts.shift();
+    if (script && "status" in script) {
+      send(res, script.status, script.body ?? { error: "scripted" }, script.headers);
+      return;
+    }
+    if (script && "hang" in script) return;
+    const b = body && typeof body === "object" && !Array.isArray(body) ? body : null;
+    const text = (v: JsonValue | undefined): v is string => typeof v === "string" && v !== "";
+    const key = header(req, "idempotency-key");
+    if (
+      !b ||
+      !text(b.tenantId) ||
+      !text(b.projectId) ||
+      !text(b.conversationId) ||
+      !text(b.runId) ||
+      !text(b.toolCallId) ||
+      !text(b.toolName) ||
+      typeof b.text !== "string" ||
+      !/^[A-Za-z0-9_.:-]{1,128}$/.test(b.toolCallId) ||
+      key !== `${b.runId}:${b.toolCallId}`
+    ) {
+      send(res, 400, { error: "invalid_request" });
+      return;
+    }
+    const bytes = Buffer.byteLength(b.text, "utf8");
+    const stored = this.#offloadByKey.get(`${b.tenantId}/${key}`);
+    if (stored) {
+      send(res, 200, stored);
+      return;
+    }
+    if (bytes > this.#offloadMaxBytes) {
+      send(res, 413, { error: "too_large" });
+      return;
+    }
+    const path = `tool_results/${b.toolCallId}.txt`;
+    this.offloaded.set(`${b.tenantId}/${b.conversationId}/${path}`, { path, text: b.text, bytes });
+    const answer = { path, bytes };
+    this.#offloadByKey.set(`${b.tenantId}/${key}`, answer);
+    send(res, 200, answer);
   }
 
   #recordUsage(res: ServerResponse, body: JsonValue | null): void {
