@@ -74,7 +74,7 @@ async def submit_feedback(
 async def list_feedback(
     request: Request,
     agent_id: Optional[str] = Query(None, description="Filter by agent UUID"),
-    rating: Optional[str] = Query(None, regex="^(positive|negative)$"),
+    rating: Optional[str] = Query(None, pattern="^(positive|negative)$"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),

@@ -1,5 +1,5 @@
 """
-Direct provider layer — native SDK calls without LiteLLM.
+Direct provider layer — native provider SDK calls (OpenAI, Anthropic, Azure, OpenRouter).
 
 `openai`, `openrouter`, `azure` and `custom` providers go through `AsyncOpenAI`
 with an optional `base_url`; `anthropic` goes through `AsyncAnthropic`. The

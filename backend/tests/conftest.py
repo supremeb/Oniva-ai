@@ -4,9 +4,6 @@ import os
 
 # Before any app import: Settings must not read a developer's backend/.env during tests.
 os.environ["ONIVA_ENV_FILE"] = ""
-# litellm (still imported by app code until phase 6 U28) calls load_dotenv() in its default DEV mode,
-# which copies backend/.env into os.environ and defeats the line above; PRODUCTION mode skips that.
-os.environ["LITELLM_MODE"] = "PRODUCTION"
 
 import pytest
 import asyncio

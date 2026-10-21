@@ -131,9 +131,9 @@ def utc_now() -> datetime:
 @router.get("/{workflow_id}/logs", response_model=WorkflowLogListResponse)
 async def get_workflow_logs(
     workflow_id: uuid.UUID,
-    status: Optional[str] = Query(None, regex="^(running|success|failed)$"),
-    trigger: Optional[str] = Query(None, regex="^(manual|api|scheduled)$"),
-    time_range: str = Query("7d", regex="^(1h|24h|7d|30d)$"),
+    status: Optional[str] = Query(None, pattern="^(running|success|failed)$"),
+    trigger: Optional[str] = Query(None, pattern="^(manual|api|scheduled)$"),
+    time_range: str = Query("7d", pattern="^(1h|24h|7d|30d)$"),
     search: Optional[str] = Query(None, max_length=200),
     version: Optional[int] = Query(None, ge=1, le=10000, description="Filter by workflow version number"),
     cursor: Optional[str] = Query(None, description="Cursor for pagination (created_at:id)"),
@@ -546,7 +546,7 @@ async def get_workflow_log_detail(
 
 @router.get("/monitoring/metrics", response_model=MonitoringMetrics)
 async def get_monitoring_metrics(
-    time_range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
+    time_range: str = Query("24h", pattern="^(1h|24h|7d|30d)$"),
     workflow_id: Optional[uuid.UUID] = Query(None),
     db: AsyncSession = Depends(get_db),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
@@ -603,7 +603,7 @@ async def get_monitoring_metrics(
 
 @router.get("/monitoring/top-workflows", response_model=TopWorkflowsResponse)
 async def get_top_workflows(
-    time_range: str = Query("24h", regex="^(1h|24h|7d|30d)$"),
+    time_range: str = Query("24h", pattern="^(1h|24h|7d|30d)$"),
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),

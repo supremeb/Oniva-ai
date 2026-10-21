@@ -121,7 +121,7 @@ async def generate_workflow_ai_stream(
             # Build effective model: workflow_builder_model > default_model > fallback
             workflow_model = selected_provider.workflow_builder_model or selected_provider.default_model or "openai/gpt-4o"
 
-            # Prefix with provider routing for LiteLLM
+            # Prefix with the provider so create_model picks the right SDK
             # e.g. "openai/gpt-4o" with an openrouter provider -> "openrouter/openai/gpt-4o"
             provider_type = selected_provider.provider_type
             if provider_type == "openrouter" and not workflow_model.startswith("openrouter/"):

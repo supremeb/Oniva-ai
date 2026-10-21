@@ -81,7 +81,7 @@ class ToolCallResponse(BaseModel):
     @field_validator("arguments", mode="before")
     @classmethod
     def parse_arguments(cls, v: Any) -> dict[str, Any]:
-        """LiteLLM returns arguments as JSON string, not dict."""
+        """Providers return tool arguments as a JSON string; accept either."""
         if isinstance(v, str):
             try:
                 return json.loads(v)
@@ -246,7 +246,7 @@ async def _get_cached_tenant_providers(
 
 
 class EffectiveProvider(NamedTuple):
-    """Resolved provider config for direct API calls (not LiteLLM)."""
+    """Resolved provider config for direct API calls."""
     api_key: str
     model: str
     provider_type: str
@@ -262,7 +262,7 @@ async def resolve_effective_provider(
     Resolve the tenant's LLM provider config for direct API calls.
 
     Returns the first enabled provider's key, model, type, and base URL.
-    Does NOT apply LiteLLM routing prefixes — returns raw model strings
+    Does NOT apply provider routing prefixes — returns raw model strings
     suitable for AsyncOpenAI/AsyncAnthropic direct calls.
 
     Args:
@@ -512,13 +512,13 @@ def create_model(
     enable_thinking: bool = False,
 ):
     """
-    Create a pydantic-ai native model for a ``provider/model`` id (no LiteLLM).
+    Create a pydantic-ai native model for a ``provider/model`` id.
 
     The provider prefix picks the pydantic-ai provider (Anthropic, OpenRouter, Google, or an
     OpenAI-compatible endpoint).
 
     Args:
-        model_id: Model in LiteLLM format (e.g., "openai/gpt-4o", "anthropic/claude-3-5-sonnet")
+        model_id: Canonical provider/model id (e.g., "openai/gpt-4o", "anthropic/claude-3-5-sonnet")
         api_key: Decrypted API key for the provider
         api_base: Optional custom API base URL
         enable_thinking: Enable extended thinking for Anthropic models
@@ -580,7 +580,7 @@ def create_model(
 
 def normalize_model_id(model_id: str) -> str:
     """
-    Normalize a model ID to LiteLLM canonical format: provider/model-name.
+    Normalize a model ID to the canonical provider/model-name form.
 
     Handles various input formats:
     - "gpt-4o" -> "openai/gpt-4o"
@@ -1201,7 +1201,7 @@ async def resolve_model_for_policy(
 
 
 # ============================================================================
-# Engine model policy helpers (internal API; no LiteLLM loop is touched)
+# Engine model policy helpers (internal API)
 # ============================================================================
 
 async def get_tenant_own_key_providers(

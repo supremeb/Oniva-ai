@@ -3,9 +3,9 @@ Deep Work API — Autonomous agent execution with plan-first UX.
 
 Endpoints for starting, controlling, and observing Deep Work sessions.
 
-Execution: Orchestrator-Worker pipeline (POST /deep-work/engine), on the legacy
-v2 path or on @oniva/engine behind the per-tenant flag. The v1 single-agent
-executor is gone; its sessions stay readable (status, full-state, workspace).
+Execution: the orchestrator-worker pipeline on @oniva/engine (POST /deep-work/engine and the
+engine intake routes). The legacy v1 and v2 executors are gone; their sessions stay readable
+(status, full-state, workspace).
 """
 
 import asyncio
@@ -734,7 +734,7 @@ async def start_deep_work_engine(
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
-    """Start a deep work engine session (v2 orchestrator-worker pipeline)."""
+    """Start a Deep Work run on the engine (orchestrator-worker pipeline)."""
     _check_feature_enabled()
     if await engine_dw.tenant_uses_engine_deep_work(db, tenant_id, request):
         return await engine_dw.start(body, db, user_id, tenant_id)

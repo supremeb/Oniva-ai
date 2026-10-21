@@ -25,7 +25,6 @@ dependencies = [
     # LLM providers
     "openai>=2.30.0",
     "anthropic>=0.89.0",
-    "litellm>=1.83.2",
     # MCP
     "mcp>=1.27.0",
     # Auth & security

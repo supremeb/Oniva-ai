@@ -16,7 +16,7 @@ class LLMUsageRecord(Base):
 
     Each record represents a single LLM completion call with:
     - Token counts (input/output)
-    - Cost in USD (calculated via LiteLLM)
+    - Cost in USD (from app.config.llm_pricing)
     - Latency metrics
     - Context (workflow, node, user)
 

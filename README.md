@@ -162,10 +162,10 @@ npm install && npm run dev
 | Layer       | Technologies                                                                |
 |-------------|-----------------------------------------------------------------------------|
 | Frontend    | Next.js 15, React, TypeScript, @xyflow/react 12, TanStack Query, Tailwind CSS, Radix UI |
-| Backend     | FastAPI 0.115, Pydantic AI, SQLAlchemy 2.0 async, LiteLLM                  |
+| Backend     | FastAPI 0.115, Pydantic AI, SQLAlchemy 2.0 async                           |
 | Sandbox     | E2B (per-tenant code-execution sandboxes)                                   |
 | Database    | PostgreSQL 16 + pgvector, Redis 7                                           |
-| LLM         | OpenAI, Anthropic, OpenRouter (via LiteLLM)                                 |
+| LLM         | OpenAI, Anthropic, OpenRouter (native SDKs; `@oniva/engine` runtime)       |
 | Container   | Docker, Docker Compose, Kubernetes                                          |
 
 ### Data flow
