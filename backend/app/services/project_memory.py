@@ -31,7 +31,7 @@ MAX_PATH_CHARS = 128
 MAX_FILE_BYTES = 32 * 1024
 MAX_CORE_BYTES = 8 * 1024
 MAX_FILES_PER_PROJECT = 64
-MAX_BULLETS_PER_PROJECT = 400  # enforced by the playbook service (U27)
+MAX_BULLETS_PER_PROJECT = 400  # enforced via check_bullet_capacity (U27)
 CORE_PATH = "core.md"
 PLAYBOOK_PATH = "playbook.md"
 # The injected part of core.md is cut at ~2k tokens (about 4 bytes per token).
@@ -135,22 +135,25 @@ def _apply(row: MemoryFile, content: str) -> None:
 
 
 async def _render_playbook(db: AsyncSession, tenant_id, project_id) -> str | None:
-    bullets = (
+    from app.services.memory_playbook import render_playbook  # lazy: memory_playbook imports this module
+
+    return await render_playbook(db, tenant_id=tenant_id, project_id=project_id)
+
+
+async def check_bullet_capacity(db: AsyncSession, *, tenant_id, project_id, adding: int = 1) -> None:
+    """Raise ``too_many_bullets`` if adding ``adding`` bullets (any status) would exceed the project cap."""
+    count = (
         await db.execute(
-            select(MemoryBullet).where(
-                MemoryBullet.tenant_id == tenant_id,
-                MemoryBullet.project_id == project_id,
-                MemoryBullet.status == "active",
+            select(func.count()).select_from(MemoryBullet).where(
+                MemoryBullet.tenant_id == tenant_id, MemoryBullet.project_id == project_id
             )
         )
-    ).scalars().all()
-    if not bullets:
-        return None
-    bullets.sort(key=lambda b: (-(b.helpful - 2 * b.harmful), b.bullet_key))
-    sections: dict[str, list[str]] = {}
-    for b in bullets:
-        sections.setdefault(b.section, []).append(f"- [{b.bullet_key}] {b.text} (+{b.helpful}/-{b.harmful})")
-    return "\n\n".join(f"## {name}\n" + "\n".join(lines) for name, lines in sections.items())
+    ).scalar_one()
+    if count + adding > MAX_BULLETS_PER_PROJECT:
+        raise MemoryStoreError(
+            "too_many_bullets",
+            f"A project holds at most {MAX_BULLETS_PER_PROJECT} playbook bullets. Retire some first.",
+        )
 
 
 def _entry(row: MemoryFile) -> dict[str, Any]:
