@@ -389,7 +389,7 @@ async def apply_steps(
     request_body: ApplyStepsRequest,
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Apply proposed steps to a workflow.
@@ -520,7 +520,7 @@ async def oauth_callback(
 async def get_connected_connectors(
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> List[ConnectorRequirement]:
     """
     Get list of OAuth connectors the user has connected.

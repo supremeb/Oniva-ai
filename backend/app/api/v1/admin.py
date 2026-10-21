@@ -41,7 +41,7 @@ def _get_tenant_id(request: Request) -> UUID:
 @router.get("/overview", response_model=OrgOverviewResponse)
 async def get_org_overview(
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Get high-level org dashboard metrics."""
     tenant_id = _get_tenant_id(request)
@@ -61,7 +61,7 @@ async def get_agent_fleet(
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Get paginated agent fleet with feedback stats."""
     tenant_id = _get_tenant_id(request)
@@ -80,7 +80,7 @@ async def get_agent_fleet(
 async def get_agent_detail(
     agent_id: UUID,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Get detailed metrics for a single agent."""
     tenant_id = _get_tenant_id(request)
@@ -99,7 +99,7 @@ async def get_agent_detail(
 async def get_agent_permissions(
     agent_id: UUID,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Get all permissions for an agent."""
     tenant_id = _get_tenant_id(request)
@@ -112,7 +112,7 @@ async def get_agent_permissions(
 async def grant_permission(
     data: PermissionGrantRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Grant a team permission on an agent."""
     tenant_id = _get_tenant_id(request)
@@ -133,7 +133,7 @@ async def grant_permission(
 async def revoke_permission(
     permission_id: UUID,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Revoke a specific permission."""
     tenant_id = _get_tenant_id(request)

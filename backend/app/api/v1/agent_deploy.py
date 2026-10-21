@@ -172,7 +172,7 @@ async def get_deploy_gate_status(
     agent_id: UUID,
     version_id: UUID,
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Check if a version can be deployed.
@@ -195,7 +195,7 @@ async def deploy_version(
     request: DeployRequest,
     agent_info: AgentInfo = Depends(verify_agent_access),
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
     """
@@ -338,7 +338,7 @@ async def rollback_version(
     version_id: UUID,
     request: RollbackRequest,
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
     """
@@ -423,7 +423,7 @@ async def get_deploy_history(
     agent_id: UUID,
     limit: int = Query(20, ge=1, le=100),
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Get deployment history for an agent.

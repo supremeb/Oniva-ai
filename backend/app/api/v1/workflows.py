@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from sqlalchemy import select, func, or_, and_, text
 from sqlalchemy.orm import defer
 
-from app.core.database import get_db
+from app.core.database import get_db, get_db_streaming
 from app.models.workflow_permission import WorkflowPermission, GranteeType, PermissionLevel
 from app.services.workflow_validator import WorkflowValidator
 from app.services.workflow_orchestrator import WorkflowOrchestrator
@@ -372,7 +372,7 @@ async def _engine_run_response(
 async def execute_workflow(
     request: ExecuteWorkflowRequest,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
@@ -524,7 +524,8 @@ async def execute_workflow(
 @router.post("/execute-stream")
 async def execute_workflow_stream(
     request: ExecuteWorkflowRequest,
-    db: AsyncSession = Depends(get_db),
+    # Streaming route: the legacy orchestrator keeps using this session while streaming.
+    db: AsyncSession = Depends(get_db_streaming),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
@@ -584,6 +585,7 @@ async def execute_workflow_stream(
                 save_logs=True
             ):
                 yield f"data: {json.dumps(update)}\n\n"
+            await db.commit()  # explicit: the dependency teardown runs after the stream
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
@@ -667,7 +669,7 @@ async def list_workflows(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     include_shared: bool = Query(default=True, description="Include workflows shared with you"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -843,7 +845,7 @@ async def list_workflows(
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(
     workflow_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -912,7 +914,7 @@ async def get_workflow(
 @router.post("", response_model=WorkflowResponse)
 async def create_workflow(
     workflow_in: WorkflowCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -951,7 +953,7 @@ async def create_workflow(
 async def update_workflow(
     workflow_id: uuid.UUID,
     workflow_in: WorkflowUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -1017,7 +1019,7 @@ async def update_workflow(
 @router.delete("/{workflow_id}", response_model=Dict[str, str])
 async def delete_workflow(
     workflow_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -1096,7 +1098,7 @@ async def run_saved_workflow(
     workflow_id: uuid.UUID,
     request: RunWorkflowRequest,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
@@ -1339,7 +1341,7 @@ class DurableWorkflowResult(WorkflowResult):
 @router.post("/execute-durable", response_model=DurableWorkflowResult)
 async def execute_durable_workflow(
     request: ExecuteWorkflowRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
@@ -1403,7 +1405,7 @@ async def execute_durable_workflow(
 @router.get("/{workflow_uuid}/checkpoints", response_model=CheckpointListResponse)
 async def get_workflow_checkpoints(
     workflow_uuid: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -1451,7 +1453,7 @@ async def get_workflow_checkpoints(
 async def recover_workflow(
     workflow_uuid: uuid.UUID,
     request: RecoverWorkflowRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -1505,7 +1507,7 @@ async def recover_workflow(
 @router.get("/{workflow_uuid}/replay", response_model=ReplayResponse)
 async def replay_workflow(
     workflow_uuid: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -1645,7 +1647,7 @@ async def get_workflow_logs(
     time_range: Optional[str] = Query("24h", description="Time range: 1h, 24h, 7d, 30d"),
     cursor: Optional[str] = Query(None, description="Cursor for pagination"),
     limit: int = Query(20, ge=1, le=100, description="Number of results"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -1714,7 +1716,8 @@ async def get_workflow_logs(
 @router.get("/{workflow_id}/logs/stream")
 async def stream_workflow_logs(
     workflow_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    # Streaming route: the polling generator keeps using this session.
+    db: AsyncSession = Depends(get_db_streaming),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
@@ -1823,7 +1826,7 @@ async def stream_workflow_logs(
 async def get_workflow_log_detail(
     workflow_id: uuid.UUID,
     run_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -1852,7 +1855,7 @@ async def get_workflow_log_detail(
 async def get_monitoring_metrics(
     time_range: str = Query("24h", description="Time range: 1h, 24h, 7d, 30d"),
     workflow_id: Optional[uuid.UUID] = Query(None, description="Filter by specific workflow"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -1926,7 +1929,7 @@ async def get_monitoring_metrics(
 async def get_top_workflows(
     time_range: str = Query("24h", description="Time range: 1h, 24h, 7d, 30d"),
     limit: int = Query(10, ge=1, le=50, description="Number of results"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -1985,7 +1988,7 @@ async def get_top_workflows(
 @router.get("/monitoring/recent-failures", response_model=RecentFailuresResponse)
 async def get_recent_failures(
     limit: int = Query(10, ge=1, le=50, description="Number of results"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -2084,7 +2087,7 @@ class BatchItemResponse(BaseModel):
 @router.post("/execute-batch", response_model=BatchExecuteResponse)
 async def execute_batch(
     request: BatchExecuteRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -2204,7 +2207,7 @@ async def execute_batch(
 @router.get("/batches/{batch_id}", response_model=BatchStatusResponse)
 async def get_batch_status(
     batch_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
     """
@@ -2247,7 +2250,7 @@ async def list_batch_items(
     status: Optional[str] = Query(None, description="Filter by status"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
     """
@@ -2306,7 +2309,7 @@ async def list_batch_items(
 @router.post("/batches/{batch_id}/cancel")
 async def cancel_batch(
     batch_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -2363,7 +2366,7 @@ async def cancel_batch(
 @router.get("/executions/{execution_id}", response_model=WorkflowLogDetail)
 async def get_execution(
     execution_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
@@ -2384,7 +2387,7 @@ async def get_execution(
 @router.get("/executions/{execution_id}/waiting-nodes")
 async def list_waiting_nodes(
     execution_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ) -> Dict[str, Any]:
@@ -2429,7 +2432,7 @@ async def list_waiting_nodes(
 @router.post("/{execution_id}/cancel")
 async def cancel_execution(
     execution_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ) -> Dict[str, str]:

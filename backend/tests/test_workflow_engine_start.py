@@ -14,7 +14,7 @@ from app.api.v1 import compliance as compliance_api
 from app.api.v1 import workflows as wf_api
 from app.auth.dependencies import get_current_tenant_id, get_current_user, get_current_user_id
 from app.auth.providers.base import AuthUser
-from app.core.database import get_db
+from app.core.database import get_db, get_db_streaming
 from app.models.engine import EngineConversation
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -157,6 +157,7 @@ def make_app(w, *, user=None, quota_error=None):
             yield session
 
     app.dependency_overrides[get_db] = db
+    app.dependency_overrides[get_db_streaming] = db
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=str(acting), role="member", email="u@x.io", tenant_id=str(w.tenant))
     app.dependency_overrides[get_current_user_id] = lambda: acting
     app.dependency_overrides[get_current_tenant_id] = lambda: w.tenant

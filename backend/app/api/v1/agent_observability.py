@@ -144,7 +144,7 @@ async def trip_circuit_breaker(
     description="Check for accuracy drift compared to deployed baseline."
 )
 async def check_drift(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     agent_info: AgentInfo = Depends(verify_agent_access),
     version_id: Optional[UUID] = Query(None, description="Version to check (defaults to latest)"),
     max_drift: float = Query(0.05, ge=0, le=1, description="Maximum allowed drift"),
@@ -235,7 +235,7 @@ async def check_drift(
 async def schedule_evaluation(
     request: ScheduledEvaluationRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     agent_info: AgentInfo = Depends(verify_agent_access),
 ) -> ScheduledEvaluationResponse:
     """Schedule an evaluation job for an agent."""
@@ -267,7 +267,7 @@ async def schedule_evaluation(
     description="Returns comprehensive health status including circuit state, accuracy, and drift."
 )
 async def get_agent_health(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     agent_info: AgentInfo = Depends(verify_agent_access),
 ) -> Dict[str, Any]:
     """Get comprehensive health summary for an agent."""

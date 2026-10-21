@@ -62,7 +62,7 @@ def job_to_response(job: BackgroundJob) -> BackgroundJobResponse:
 @router.post("/", response_model=BackgroundJobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
     job_data: BackgroundJobCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -145,7 +145,7 @@ async def create_job(
 
 @router.get("/", response_model=BackgroundJobListResponse)
 async def list_jobs(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     status_filter: Optional[JobStatus] = Query(None, alias="status"),
     job_type: Optional[JobType] = None,
@@ -201,7 +201,7 @@ async def list_jobs(
 
 @router.get("/active", response_model=BackgroundJobListResponse)
 async def list_active_jobs(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
 ):
     """
@@ -235,7 +235,7 @@ async def list_active_jobs(
 @router.get("/{job_id}", response_model=BackgroundJobDetailResponse)
 async def get_job(
     job_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """
@@ -285,7 +285,7 @@ async def get_job(
 async def cancel_job(
     job_id: UUID,
     request: CancelJobRequest = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """
@@ -336,7 +336,7 @@ async def cancel_job(
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_job(
     job_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """
@@ -520,7 +520,7 @@ async def _poll_events(job_id: UUID, tenant_id: UUID, last_progress: int, last_t
 @router.get("/{job_id}/stream")
 async def stream_job_progress(
     job_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -578,7 +578,7 @@ async def stream_job_progress(
 @router.get("/workflow/{workflow_id}/history", response_model=BackgroundJobListResponse)
 async def get_workflow_job_history(
     workflow_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     limit: int = Query(10, ge=1, le=50),
 ):
@@ -636,7 +636,7 @@ async def get_workflow_job_history(
 @router.get("/agent/{agent_id}/history", response_model=BackgroundJobListResponse)
 async def get_agent_job_history(
     agent_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     limit: int = Query(10, ge=1, le=50),
 ):

@@ -121,7 +121,7 @@ async def token(
     client_id: str = Form(...),
     client_secret: str = Form(...),
     scope: Optional[str] = Form(None),
-    db: AsyncSession = Depends(get_db_no_tenant)  # No tenant context for M2M auth
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function")  # No tenant context for M2M auth
 ):
     """
     OAuth 2.0 Token Endpoint - Client Credentials Grant.
@@ -257,7 +257,7 @@ def create_client_access_token(
 @router.post("", response_model=OAuthClientCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_client(
     request: OAuthClientCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -314,7 +314,7 @@ async def create_client(
 
 @router.get("", response_model=List[OAuthClientResponse])
 async def list_clients(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -346,7 +346,7 @@ async def list_clients(
 @router.get("/{client_id}", response_model=OAuthClientResponse)
 async def get_client(
     client_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
     """
@@ -381,7 +381,7 @@ async def get_client(
 async def update_client(
     client_id: uuid.UUID,
     request: OAuthClientUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -441,7 +441,7 @@ async def update_client(
 @router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_client(
     client_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -480,7 +480,7 @@ async def delete_client(
 @router.post("/{client_id}/regenerate-secret", response_model=OAuthClientCreateResponse)
 async def regenerate_secret(
     client_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):

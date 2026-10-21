@@ -52,7 +52,7 @@ def _doc_to_response(doc: KnowledgeDocument) -> KnowledgeDocumentResponse:
 async def create_knowledge_base(
     data: KnowledgeBaseCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Create a new knowledge base."""
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -79,7 +79,7 @@ async def create_knowledge_base(
 async def list_knowledge_bases(
     request: Request,
     team_id: Optional[str] = Query(None, description="Filter by team"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """List all knowledge bases for the tenant."""
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -101,7 +101,7 @@ async def list_knowledge_bases(
 async def get_knowledge_base(
     kb_id: UUID,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Get a knowledge base by ID."""
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -120,7 +120,7 @@ async def update_knowledge_base(
     kb_id: UUID,
     data: KnowledgeBaseUpdate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Update a knowledge base."""
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -144,7 +144,7 @@ async def update_knowledge_base(
 async def delete_knowledge_base(
     kb_id: UUID,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Delete a knowledge base and all its documents/chunks."""
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -166,7 +166,7 @@ async def upload_document(
     kb_id: UUID,
     request: Request,
     file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Upload a document to a knowledge base.
 
@@ -270,7 +270,7 @@ async def upload_document(
 async def list_documents(
     kb_id: UUID,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """List all documents in a knowledge base."""
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -295,7 +295,7 @@ async def get_document(
     kb_id: UUID,
     doc_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Get a single document's details."""
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -320,7 +320,7 @@ async def delete_document(
     kb_id: UUID,
     doc_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Delete a document and its chunks."""
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -351,7 +351,7 @@ async def list_document_versions(
     kb_id: UUID,
     doc_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """List all versions of a document (by filename match)."""
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -394,7 +394,7 @@ async def search_knowledge_base(
     kb_id: UUID,
     data: KnowledgeSearchRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Search a knowledge base with a query.
 

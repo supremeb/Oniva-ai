@@ -138,7 +138,7 @@ async def get_workflow_logs(
     version: Optional[int] = Query(None, ge=1, le=10000, description="Filter by workflow version number"),
     cursor: Optional[str] = Query(None, description="Cursor for pagination (created_at:id)"),
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
@@ -265,7 +265,7 @@ async def get_workflow_logs(
 @router.get("/{workflow_id}/latest-execution", response_model=WorkflowLogDetailResponse)
 async def get_latest_execution(
     workflow_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
@@ -338,7 +338,7 @@ async def get_latest_execution(
 @router.get("/{workflow_id}/logs/stream")
 async def stream_workflow_logs(
     workflow_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
@@ -472,7 +472,7 @@ async def stream_workflow_logs(
 async def get_workflow_log_detail(
     workflow_id: uuid.UUID,
     run_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
@@ -548,7 +548,7 @@ async def get_workflow_log_detail(
 async def get_monitoring_metrics(
     time_range: str = Query("24h", pattern="^(1h|24h|7d|30d)$"),
     workflow_id: Optional[uuid.UUID] = Query(None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """
@@ -605,7 +605,7 @@ async def get_monitoring_metrics(
 async def get_top_workflows(
     time_range: str = Query("24h", pattern="^(1h|24h|7d|30d)$"),
     limit: int = Query(10, ge=1, le=50),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """
@@ -657,7 +657,7 @@ async def get_top_workflows(
 @router.get("/monitoring/recent-failures", response_model=RecentFailuresResponse)
 async def get_recent_failures(
     limit: int = Query(10, ge=1, le=50),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """
@@ -724,7 +724,7 @@ class MonitoringTimeSeries(PydanticBaseModel):
 async def get_monitoring_time_series(
     workflow_id: uuid.UUID,
     time_range: str = Query("24h", pattern="^(1h|24h|7d|30d)$"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),

@@ -199,7 +199,7 @@ async def enrich_permission_response(
 @router.get("/{workflow_id}/permissions", response_model=List[WorkflowPermissionResponse])
 async def list_workflow_permissions(
     workflow_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -238,7 +238,7 @@ async def list_workflow_permissions(
 async def create_workflow_permission(
     workflow_id: uuid.UUID,
     request: WorkflowPermissionCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -323,7 +323,7 @@ async def create_workflow_permission(
 async def bulk_create_permissions(
     workflow_id: uuid.UUID,
     request: WorkflowPermissionBulkCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -384,7 +384,7 @@ async def update_workflow_permission(
     workflow_id: uuid.UUID,
     permission_id: uuid.UUID,
     request: WorkflowPermissionUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -432,7 +432,7 @@ async def update_workflow_permission(
 async def delete_workflow_permission(
     workflow_id: uuid.UUID,
     permission_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -471,7 +471,7 @@ async def delete_workflow_permission(
 async def bulk_delete_permissions(
     workflow_id: uuid.UUID,
     request: WorkflowPermissionBulkDelete,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -505,7 +505,7 @@ async def bulk_delete_permissions(
 @router.get("/{workflow_id}/share-summary", response_model=WorkflowShareSummary)
 async def get_workflow_share_summary(
     workflow_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -575,7 +575,7 @@ async def get_workflow_share_summary(
 async def check_permission(
     workflow_id: uuid.UUID,
     request: CheckPermissionRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -660,7 +660,7 @@ async def check_permission(
 async def list_shared_workflows(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):

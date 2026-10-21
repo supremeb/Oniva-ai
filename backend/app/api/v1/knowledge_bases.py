@@ -54,7 +54,7 @@ class KnowledgeBaseListResponse(BaseModel):
 @router.get("", response_model=KnowledgeBaseListResponse)
 async def list_knowledge_bases(
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> KnowledgeBaseListResponse:
     """
     List all distinct knowledge bases from document metadata.

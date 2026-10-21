@@ -81,7 +81,7 @@ class TenantSummary(BaseModel):
 )
 async def get_my_tenant_features(
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Returns the resolved feature map for the authenticated user's tenant.
     No source information is exposed — just flag name → boolean.
@@ -101,7 +101,7 @@ async def toggle_my_tenant_feature(
     flag_name: str,
     body: FeatureToggleRequest,
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_system_db),
+    db: AsyncSession = Depends(get_system_db, scope="function"),
 ):
     """Tenant admin/owner can toggle non-operator-only flags for their own tenant.
 
@@ -169,7 +169,7 @@ def get_audit_chain(db: AsyncSession) -> AuditChain:
 @router.get("/tenant/approvals", response_model=ApprovalSettings, summary="Approval policy for the current tenant")
 async def get_approval_settings(
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     tenant = await _get_tenant(db, UUID(user.tenant_id))
     if not tenant:
@@ -181,8 +181,8 @@ async def get_approval_settings(
 async def update_approval_settings(
     body: ApprovalSettingsUpdate,
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-    system_db: AsyncSession = Depends(get_system_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
+    system_db: AsyncSession = Depends(get_system_db, scope="function"),
 ):
     """Admins change TTL and separate-approver; only an owner changes the Rule of Two (audited)."""
     if user.role not in ("owner", "admin"):
@@ -238,7 +238,7 @@ async def update_approval_settings(
 )
 async def list_tenants(
     operator: AuthUser = Depends(require_platform_operator()),
-    db: AsyncSession = Depends(get_db_no_tenant),
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function"),
 ):
     """List all tenants with feature override counts."""
     result = await db.execute(select(Tenant).order_by(Tenant.created_at.desc()))
@@ -263,7 +263,7 @@ async def list_tenants(
 async def get_tenant_features_admin(
     tenant_id: UUID,
     operator: AuthUser = Depends(require_platform_operator()),
-    db: AsyncSession = Depends(get_db_no_tenant),
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function"),
 ):
     """Returns resolved features + explicit overrides + flag metadata."""
     tenant = await _get_tenant(db, tenant_id)
@@ -287,7 +287,7 @@ async def toggle_tenant_feature_admin(
     flag_name: str,
     body: FeatureToggleRequest,
     operator: AuthUser = Depends(require_platform_operator()),
-    db: AsyncSession = Depends(get_db_no_tenant),
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function"),
 ):
     """Platform operator can toggle any flag (including operator-only) for any tenant."""
     if not is_known_flag(flag_name):
