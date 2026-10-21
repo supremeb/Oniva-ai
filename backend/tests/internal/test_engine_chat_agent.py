@@ -484,8 +484,9 @@ def test_patch_selections_keeps_the_continuation_summary(renv):
 def test_agent_config_carries_compaction_settings():
     cfg = compose(Selections()).agent["compaction"]
     window = eca.DEFAULT_CONTEXT_WINDOW
-    assert set(cfg) == {"enabled", "contextWindow", "reserveTokens", "backgroundMargin", "keepRecentTokens"}
-    assert cfg["enabled"] is True and cfg["contextWindow"] == window
+    # No hardcoded window: the model policy returns the chosen model's contextWindow.
+    assert set(cfg) == {"enabled", "reserveTokens", "backgroundMargin", "keepRecentTokens"}
+    assert cfg["enabled"] is True
     # Engine thresholds: background at window - reserve - margin (70 percent), blocking at window - reserve.
     assert window - cfg["reserveTokens"] - cfg["backgroundMargin"] == int(window * 0.70)
     assert cfg["reserveTokens"] > 0 and cfg["keepRecentTokens"] > 0

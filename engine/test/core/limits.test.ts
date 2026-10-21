@@ -11,6 +11,7 @@ describe("limits", () => {
         "maxRequestBodyBytes",
         "maxSubagentDepth",
         "maxToolCallsPerRound",
+        "maxToolResultTokens",
       ].sort(),
     );
     for (const v of Object.values(DEFAULT_LIMITS)) {

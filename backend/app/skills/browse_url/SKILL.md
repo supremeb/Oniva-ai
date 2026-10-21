@@ -1,6 +1,6 @@
 ---
 name: browse_url
-description: Fetch and read content from a webpage URL. Extracts text or returns raw HTML.
+description: Fetch and read content from a webpage URL. Returns readable text (never raw HTML), paged with offset.
 
 type: tool
 category: web
@@ -32,7 +32,8 @@ result = await browse_url(url="https://example.com", extract_text=True)
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `url` | string | Yes | - | URL to fetch |
-| `extract_text` | bool | No | True | Extract text content; if False, return raw HTML |
+| `extract_text` | bool | No | True | Kept for compatibility; raw HTML is never returned |
+| `offset` | int | No | 0 | Character offset into the text, to read past a truncated page (`next_offset` in the response) |
 
 ## Response
 
@@ -42,7 +43,10 @@ result = await browse_url(url="https://example.com", extract_text=True)
   "status": 200,
   "title": "Example Domain",
   "content": "This domain is for use in illustrative examples...",
-  "content_type": "text"
+  "content_type": "text",
+  "total_chars": 1256,
+  "offset": 0,
+  "truncated": false
 }
 ```
 
@@ -54,8 +58,7 @@ result = await browse_url(url="https://news.ycombinator.com")
 print(result["content"])
 ```
 
-### Get raw HTML
+### Read the next part of a long page
 ```python
-result = await browse_url(url="https://example.com", extract_text=False)
-print(result["content"])  # Raw HTML
+result = await browse_url(url="https://example.com/long", offset=20000)
 ```

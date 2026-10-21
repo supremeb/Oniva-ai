@@ -72,6 +72,8 @@ export function usesThinkingBudget(model: string): boolean {
 }
 
 const EPHEMERAL = { type: "ephemeral" } as const;
+// A longer-TTL breakpoint must precede shorter ones; the system prompt comes first.
+const EPHEMERAL_1H = { type: "ephemeral", ttl: "1h" } as const;
 
 export class AnthropicProvider implements ModelProvider {
   readonly name: string;
@@ -307,7 +309,9 @@ export class AnthropicProvider implements ModelProvider {
 
     if (cache) {
       const lastSystem = system.at(-1);
-      if (lastSystem) lastSystem.cache_control = EPHEMERAL;
+      if (lastSystem) {
+        lastSystem.cache_control = request.cacheTtl === "1h" ? EPHEMERAL_1H : EPHEMERAL;
+      }
       markLastStable(out);
     }
     return { system, messages: out };

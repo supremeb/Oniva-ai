@@ -70,6 +70,12 @@ const agentConfigSchema = z.object({
    * by subagent children.
    */
   deadlineMs: z.number().int().min(0).nullable().default(null),
+  /**
+   * Prompt-cache lifetime for the system breakpoint: "1h" for conversations
+   * whose rounds wait longer than 5 minutes (Deep Work orchestrators). Null:
+   * the provider default (5 minutes).
+   */
+  cacheTtl: z.enum(["5m", "1h"]).nullable().default(null),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
@@ -107,6 +113,7 @@ export const agentConfigDoc = defineDoc<AgentConfig>({
     compaction: null,
     maxRounds: null,
     deadlineMs: null,
+    cacheTtl: null,
   },
   schema: agentConfigSchema,
 });

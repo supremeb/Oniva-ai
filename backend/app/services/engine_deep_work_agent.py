@@ -21,6 +21,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tup
 from pydantic import ValidationError
 
 from app.services.deep_work.models import DeepWorkPlan
+from app.services.engine_chat_agent import compaction_settings
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +319,9 @@ def has_output_agent(inputs: ExecuteInputs) -> bool:
     return bool(inputs.plan.deliverable) and inputs.sandbox_enabled
 
 
+ORCHESTRATOR_CACHE_TTL = "1h"
+
+
 def compose_execute_config(
     inputs: ExecuteInputs, now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
@@ -373,6 +377,10 @@ def compose_execute_config(
         "tools": sorted(_dedupe(parent_tools)),
         "model": models.high,
         "metadata": metadata,
+        # Window comes from the model policy; thresholds scale with the default basis.
+        "compaction": compaction_settings(),
+        # Rounds wait on workers for more than the default 5 minute cache lifetime.
+        "cacheTtl": ORCHESTRATOR_CACHE_TTL,
     }
     if inputs.max_rounds is not None:
         agent["maxRounds"] = inputs.max_rounds

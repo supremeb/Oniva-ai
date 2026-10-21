@@ -96,6 +96,19 @@ async def test_tenant_anthropic_provider_returns_bare_model_and_its_key(client, 
     assert r.headers["cache-control"] == "no-store"
 
 
+async def test_policy_returns_context_window_of_the_chosen_model(client, test_db):
+    t = await make_tenant(test_db)
+    await add_provider(test_db, t, default_model="anthropic/claude-sonnet-4-5")
+    j = (await post(client, body(t))).json()
+    assert j["ok"] is True and j["contextWindow"] == 200_000
+
+
+def test_unknown_model_context_window_is_the_conservative_default():
+    from app.config.llm_pricing import DEFAULT_CONTEXT_WINDOW, context_window_for
+
+    assert context_window_for("totally-unknown-model") == DEFAULT_CONTEXT_WINDOW == 128_000
+
+
 async def test_only_unsupported_provider_is_no_supported_provider(client, test_db):
     t = await make_tenant(test_db)
     await add_provider(test_db, t, ptype="openai", key=OPENAI_KEY)

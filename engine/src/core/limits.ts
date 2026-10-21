@@ -15,6 +15,11 @@ export interface EngineLimits {
   maxEntryBytes: number;
   /** Maximum serialized size of one document snapshot in a commit, in bytes. */
   maxDocumentBytes: number;
+  /**
+   * Largest tool result, in estimated tokens (characters / 4), the model sees;
+   * longer results are cut with a note on how to fetch the rest.
+   */
+  maxToolResultTokens: number;
 }
 
 export type LimitName = keyof EngineLimits;
@@ -25,6 +30,7 @@ export const DEFAULT_LIMITS: Readonly<EngineLimits> = Object.freeze({
   maxRequestBodyBytes: 1024 * 1024,
   maxEntryBytes: 256 * 1024,
   maxDocumentBytes: 1024 * 1024,
+  maxToolResultTokens: 25_000,
 });
 
 export function resolveLimits(overrides: Partial<EngineLimits> = {}): Readonly<EngineLimits> {
