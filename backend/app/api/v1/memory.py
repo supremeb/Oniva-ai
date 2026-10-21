@@ -65,7 +65,7 @@ def _check_feature_enabled():
 @router.post("/episodic", response_model=StoreDecisionResponse, status_code=status.HTTP_201_CREATED)
 async def store_decision(
     request: StoreDecisionRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -120,7 +120,7 @@ async def store_decision(
 @router.post("/episodic/search", response_model=SearchDecisionsResponse)
 async def search_decisions(
     request: SearchDecisionsRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -176,7 +176,7 @@ async def recall_memories(
         description="Search algorithm: hybrid (semantic+BM25), semantic (vector only), keyword (BM25 only)"
     ),
     include_archived: bool = Query(default=False, description="Include archived memories"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -256,7 +256,7 @@ async def recall_memories(
 async def update_importance(
     memory_id: UUID,
     request: ImportanceUpdateRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -297,7 +297,7 @@ async def update_importance(
 @router.post("/episodic/archive", response_model=ArchiveResponse)
 async def archive_old_memories(
     request: ArchiveRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -334,7 +334,7 @@ async def archive_old_memories(
 
 @router.get("/health", response_model=MemoryHealthResponse)
 async def get_memory_health(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -361,7 +361,7 @@ async def get_memory_health(
 
 @router.post("/consolidate", response_model=ConsolidationResponse)
 async def consolidate_memories(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -400,7 +400,7 @@ async def consolidate_memories(
 async def provide_feedback(
     memory_id: UUID,
     request: "MemoryFeedbackRequest",
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -472,7 +472,7 @@ def _extract_section(combined_text: str, section: str) -> str:
 async def update_memory(
     memory_id: UUID,
     request: "MemoryUpdateRequest",
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -648,7 +648,7 @@ async def list_memories(
     memory_type: Optional[str] = Query(default=None, description="Filter by memory type"),
     agent_name: Optional[str] = Query(default=None, description="Filter by agent name"),
     visibility: Optional[str] = Query(default=None, description="Filter by visibility (private, shared)"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -702,7 +702,7 @@ async def list_memories(
 
 @router.get("/episodic/stats", response_model=MemoryStatsResponse)
 async def get_memory_stats(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -782,7 +782,7 @@ async def get_memory_stats(
 @router.get("/episodic/{memory_id}", response_model=EpisodicMemoryResponse)
 async def get_memory(
     memory_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -813,7 +813,7 @@ async def get_memory(
 @router.delete("/episodic/{memory_id}", response_model=MemoryDeleteResponse)
 async def delete_memory(
     memory_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -856,7 +856,7 @@ async def delete_memory(
 
 @router.get("/org-profile", response_model=OrgProfileResponse)
 async def get_org_profile(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -911,7 +911,7 @@ async def get_org_profile(
 @router.patch("/org-profile", response_model=OrgProfileResponse)
 async def update_org_profile(
     request: OrgProfileUpdateRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):

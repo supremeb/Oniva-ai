@@ -86,7 +86,7 @@ def parse_agent_id(agent_id_str: str) -> tuple[Optional[UUID], str]:
 
 async def verify_agent_access(
     agent_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ) -> AgentInfo:
     """
@@ -103,7 +103,7 @@ async def verify_agent_access(
         async def endpoint(
             agent_id: str,
             agent: AgentInfo = Depends(verify_agent_access),
-            db: AsyncSession = Depends(get_db)
+            db: AsyncSession = Depends(get_db, scope="function")
         ):
             if agent.is_builtin:
                 # Handle built-in agent

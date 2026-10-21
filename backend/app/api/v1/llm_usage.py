@@ -77,7 +77,7 @@ class UsageResponse(BaseModel):
 @router.get("/llm-usage/summary", response_model=UsageResponse, dependencies=[Depends(require_role("owner", "admin"))])
 async def get_usage_summary(
     days: int = Query(30, ge=1, le=90, description="Number of days to include"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -218,7 +218,7 @@ async def get_usage_summary(
 @router.get("/llm-usage/workflow/{workflow_id}", response_model=UsageSummary)
 async def get_workflow_usage(
     workflow_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):

@@ -143,25 +143,9 @@ def _reapply_tenant_context(session, transaction, connection) -> None:
         )
 
 
-async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
-    """
-    Get database session with tenant context and audit context set for RLS.
-
-    This dependency:
-    1. Creates a new database session
-    2. Sets tenant context from request.state.tenant_id
-    3. Sets audit context from request.state.audit_context
-    4. Yields session for query execution
-    5. Commits on success, rollback on error
-    6. Closes session
-
-    Usage:
-        @router.get("/items")
-        async def list_items(db: AsyncSession = Depends(get_db)):
-            # All queries automatically filtered by tenant via RLS
-            result = await db.execute(select(Item))
-            return result.scalars().all()
-    """
+@asynccontextmanager
+async def _open_request_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """Tenant + audit scoped session for one request; commit on success, rollback on error."""
     async with AsyncSessionLocal() as session:
         try:
             # Set tenant context if available
@@ -211,7 +195,44 @@ async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def get_db_no_tenant() -> AsyncGenerator[AsyncSession, None]:
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """
+    Get database session with tenant context and audit context set for RLS.
+
+    Creates a session, sets the tenant and audit context, yields it, then commits on success /
+    rolls back on error and closes it.
+
+    COMMIT TIMING (read before using): FastAPI >= 0.118 runs a ``yield`` dependency's teardown
+    AFTER the response has been sent. Declared plainly (``Depends(get_db)``) the commit would land
+    after the client already saw a 2xx: a commit failure is lost and an immediate follow-up read
+    can miss the write. ALWAYS declare it function-scoped::
+
+        db: AsyncSession = Depends(get_db, scope="function")
+
+    so teardown (and the commit) runs when the endpoint returns, before the response is sent, and
+    a commit failure becomes a 5xx. ``tests/test_commit_before_response.py`` fails for any plain
+    ``Depends(get_db)``, ``Depends(get_db_no_tenant)`` or ``Depends(get_system_db)``. The only
+    exception is a route whose response body keeps using the session while streaming: those use
+    :func:`get_db_streaming` and must commit explicitly.
+    """
+    async with _open_request_session(request) as session:
+        yield session
+
+
+async def get_db_streaming(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """Request-scoped variant of :func:`get_db` for STREAMING routes only.
+
+    The session stays open until the response stream has finished, so a generator returned by the
+    endpoint can keep using it. The teardown commit therefore happens AFTER the response: any write
+    the endpoint or its generator makes that must be durable has to be committed explicitly
+    (``await db.commit()``). Declare it as ``Depends(get_db_streaming)`` and list the route in
+    ``STREAMING_ROUTES`` in ``tests/test_commit_before_response.py``.
+    """
+    async with _open_request_session(request) as session:
+        yield session
+
+
+async def get_db_no_tenant() ->AsyncGenerator[AsyncSession, None]:
     """Session WITHOUT tenant context. Alias of :func:`get_system_db`.
 
     Without a tenant GUC the request role (oniva_app) sees zero rows, so every caller of

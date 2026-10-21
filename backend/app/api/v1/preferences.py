@@ -38,7 +38,7 @@ def _check_feature_enabled():
 
 @router.get("", response_model=PreferencesListResponse)
 async def get_preferences(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -92,7 +92,7 @@ async def get_preferences(
 @router.put("", response_model=UserPreferencesResponse)
 async def set_preferences(
     preferences: UserPreferencesSchema,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -127,7 +127,7 @@ async def set_preferences(
 @router.patch("", response_model=UserPreferencesResponse)
 async def update_preferences(
     updates: UserPreferencesUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -178,7 +178,7 @@ async def update_preferences(
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_preferences(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):

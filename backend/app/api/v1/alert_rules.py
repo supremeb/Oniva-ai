@@ -99,7 +99,7 @@ class AlertRuleResponse(BaseModel):
 @router.post("/notification-channels", response_model=NotificationChannelResponse, status_code=status.HTTP_201_CREATED)
 async def create_notification_channel(
     request: NotificationChannelCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -127,7 +127,7 @@ async def create_notification_channel(
 
 @router.get("/notification-channels", response_model=List[NotificationChannelResponse])
 async def list_notification_channels(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
     """List all notification channels for tenant."""
@@ -143,7 +143,7 @@ async def list_notification_channels(
 async def update_notification_channel(
     channel_id: uuid.UUID,
     request: NotificationChannelUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -177,7 +177,7 @@ async def update_notification_channel(
 @router.delete("/notification-channels/{channel_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_notification_channel(
     channel_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -204,7 +204,7 @@ async def delete_notification_channel(
 @router.post("/alert-rules", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED)
 async def create_alert_rule(
     request: AlertRuleCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -239,7 +239,7 @@ async def create_alert_rule(
 @router.get("/alert-rules", response_model=List[AlertRuleResponse])
 async def list_alert_rules(
     workflow_id: Optional[uuid.UUID] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
     """List all alert rules for tenant."""
@@ -260,7 +260,7 @@ async def list_alert_rules(
 async def update_alert_rule(
     rule_id: uuid.UUID,
     request: AlertRuleUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -300,7 +300,7 @@ async def update_alert_rule(
 @router.delete("/alert-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_alert_rule(
     rule_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -325,7 +325,7 @@ async def delete_alert_rule(
 @router.get("/alert-history", response_model=List[dict])
 async def list_alert_history(
     limit: int = 50,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
     """List recent alert deliveries."""

@@ -101,7 +101,7 @@ def _run_item(job: BackgroundJob, agent_info: dict) -> FleetRunItem:
 async def list_fleet_runs(
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     status: Optional[Literal["pending", "running", "completed", "failed", "cancelled"]] = Query(None, description="Filter by status"),
     agent_id: Optional[UUID] = Query(None, description="Filter by agent"),
     page: int = Query(1, ge=1),
@@ -165,7 +165,7 @@ async def get_fleet_run(
     job_id: UUID,
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """One run, same shape as a list item (``conversation_id`` is set for engine runs)."""
     job = (await db.execute(
@@ -210,7 +210,7 @@ async def intervene_in_agent(
     body: InterventionRequest,
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Send an intervention message to a running background agent.
 

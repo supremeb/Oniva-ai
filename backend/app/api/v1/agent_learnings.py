@@ -44,7 +44,7 @@ async def list_learnings(
     pattern_type: Optional[str] = Query(None, description="Filter by pattern type"),
     limit: int = Query(50, ge=1, le=250, description="Max results"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -74,7 +74,7 @@ async def list_learnings(
 async def update_learning(
     learning_id: UUID,
     update: AgentLearningUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -111,7 +111,7 @@ async def update_learning(
 @router.delete("/{learning_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_learning(
     learning_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):

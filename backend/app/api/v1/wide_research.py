@@ -35,7 +35,7 @@ _active_orchestrators: Dict[str, WideResearchOrchestrator] = {}
 @router.post("/execute", response_model=WideResearchResponse)
 async def execute_wide_research(
     request: WideResearchExecuteRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id),
     user_id: UUID = Depends(get_current_user_id),
 ):
@@ -124,7 +124,7 @@ async def execute_wide_research(
 @router.get("/{execution_id}", response_model=WideResearchResponse)
 async def get_wide_research(
     execution_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Get wide research status and results.

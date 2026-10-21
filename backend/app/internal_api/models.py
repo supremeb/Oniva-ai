@@ -214,7 +214,7 @@ async def decide(db: AsyncSession, req: PolicyRequest) -> Dict[str, Any]:
 
 
 @router.post("/policy")
-async def model_policy(req: PolicyRequest, db: AsyncSession = Depends(get_system_db)) -> JSONResponse:
+async def model_policy(req: PolicyRequest, db: AsyncSession = Depends(get_system_db, scope="function")) -> JSONResponse:
     cache_key = (str(req.tenant_id), req.request_id)
     body = _decisions.get(cache_key)
     if body is None:
@@ -336,6 +336,6 @@ async def record_usage(db: AsyncSession, req: UsageRequest) -> bool:
 
 
 @router.post("/usage")
-async def model_usage(req: UsageRequest, db: AsyncSession = Depends(get_system_db)) -> JSONResponse:
+async def model_usage(req: UsageRequest, db: AsyncSession = Depends(get_system_db, scope="function")) -> JSONResponse:
     recorded = await record_usage(db, req)
     return JSONResponse({"recorded": recorded}, headers={"Cache-Control": "no-store"})

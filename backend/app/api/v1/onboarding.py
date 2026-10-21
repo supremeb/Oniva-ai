@@ -37,7 +37,7 @@ router = APIRouter()
 @router.post("/check-email", response_model=EmailCheckResponse)
 async def check_email(
     request: EmailCheckRequest,
-    db: AsyncSession = Depends(get_db_no_tenant),
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function"),
 ):
     """
     Check if email is available for registration.
@@ -62,7 +62,7 @@ async def check_email(
 )
 async def register(
     request: RegisterRequest,
-    db: AsyncSession = Depends(get_db_no_tenant),
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function"),
 ):
     """
     Register a new user.
@@ -100,7 +100,7 @@ async def register(
 async def create_org(
     request: CreateOrgRequest,
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_no_tenant)  # tenant insert: pre-tenant, system role,
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function")  # tenant insert: pre-tenant, system role,
 ):
     """
     Create a new organization for existing user.
@@ -127,7 +127,7 @@ async def create_org(
 @router.get("/check-slug/{slug}", response_model=SlugCheckResponse)
 async def check_slug(
     slug: str,
-    db: AsyncSession = Depends(get_db_no_tenant),
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function"),
 ):
     """
     Check if organization slug is available.

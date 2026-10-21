@@ -230,7 +230,7 @@ async def list_versions(
     include_drafts: bool = Query(True, description="Include draft versions"),
     limit: int = Query(50, le=100),
     offset: int = Query(0),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """List all versions for a workflow"""
@@ -273,7 +273,7 @@ async def list_versions(
 @router.get("/workflows/{workflow_id}/versions/draft", response_model=DraftResponse)
 async def get_draft_status(
     workflow_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Get current draft status and suggested next versions"""
@@ -320,7 +320,7 @@ async def get_draft_status(
 @router.get("/workflows/{workflow_id}/versions/active", response_model=VersionFullResponse)
 async def get_active_version(
     workflow_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Get the currently active (deployed) version"""
@@ -344,7 +344,7 @@ async def get_active_version(
 async def get_version_by_number(
     workflow_id: uuid.UUID,
     version_number: int,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Get a specific version by version number"""
@@ -368,7 +368,7 @@ async def get_version_by_number(
 async def get_version(
     workflow_id: uuid.UUID,
     version_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Get a specific version with full spec"""
@@ -392,7 +392,7 @@ async def get_version(
 async def create_version(
     workflow_id: uuid.UUID,
     request: VersionCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
@@ -492,7 +492,7 @@ async def update_version(
     workflow_id: uuid.UUID,
     version_id: uuid.UUID,
     request: VersionUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Update version metadata (description, tag)"""
@@ -524,7 +524,7 @@ async def update_version(
 async def publish_workflow(
     workflow_id: uuid.UUID,
     request: PublishRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
@@ -651,7 +651,7 @@ async def publish_workflow(
 async def activate_version(
     workflow_id: uuid.UUID,
     version_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Activate (deploy) a specific version"""
@@ -699,7 +699,7 @@ async def activate_version(
 async def rollback_to_version(
     workflow_id: uuid.UUID,
     version_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Rollback workflow to a specific version (updates current spec)"""
@@ -752,7 +752,7 @@ async def compare_versions(
     workflow_id: uuid.UUID,
     version_a: int = Query(..., description="First version number"),
     version_b: int = Query(..., description="Second version number"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Compare two versions and return diff"""
@@ -798,7 +798,7 @@ async def compare_versions(
 async def delete_version(
     workflow_id: uuid.UUID,
     version_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Delete a version (only drafts or inactive versions can be deleted)"""
@@ -836,7 +836,7 @@ async def compare_versions(
     workflow_id: uuid.UUID,
     base_version: int = Query(..., description="Base version number"),
     compare_version: int = Query(..., description="Compare version number"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):

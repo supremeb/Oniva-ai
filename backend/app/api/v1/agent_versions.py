@@ -109,7 +109,7 @@ async def _get_production_alias(db: AsyncSession, agent_id: UUID) -> AgentAlias 
 @router.post("/", response_model=AgentVersionResponse, status_code=status.HTTP_201_CREATED)
 async def create_version(
     version_data: AgentVersionCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -162,7 +162,7 @@ async def create_version(
 @router.get("/agent/{agent_id}", response_model=AgentVersionListResponse)
 async def list_agent_versions(
     agent_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -217,7 +217,7 @@ async def list_agent_versions(
 @router.get("/agent/{agent_id}/draft-status", response_model=DraftStatusResponse)
 async def get_draft_status(
     agent_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -274,7 +274,7 @@ async def get_draft_status(
 @router.get("/{version_id}", response_model=AgentVersionDetailResponse)
 async def get_version(
     version_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -322,7 +322,7 @@ async def get_version(
 async def update_version(
     version_id: UUID,
     version_data: AgentVersionUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -352,7 +352,7 @@ async def update_version(
 @router.delete("/{version_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_version(
     version_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -392,7 +392,7 @@ async def delete_version(
 @router.post("/deploy", response_model=DeployVersionResponse)
 async def deploy_version(
     request: DeployVersionRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -453,7 +453,7 @@ async def deploy_version(
 @router.post("/compare", response_model=CompareVersionsResponse)
 async def compare_versions(
     request: CompareVersionsRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -499,7 +499,7 @@ async def compare_versions(
 @router.post("/rollback", response_model=RollbackResponse)
 async def rollback_to_version(
     request: RollbackRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):

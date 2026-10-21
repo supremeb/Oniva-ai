@@ -40,7 +40,7 @@ _DEFAULT_POLICIES = [
 @router.get("/", include_in_schema=False, response_model=List[RoutingPolicyResponse],
             dependencies=[Depends(get_current_user)])
 async def list_routing_policies(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """List all routing policies for the current tenant."""
@@ -62,7 +62,7 @@ async def list_routing_policies(
              status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_role("admin"))])
 async def create_routing_policy(
     body: RoutingPolicyCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Create a new routing policy (admin only)."""
@@ -84,7 +84,7 @@ async def create_routing_policy(
 async def update_routing_policy(
     policy_id: uuid.UUID,
     body: RoutingPolicyUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Update a routing policy (admin only)."""
@@ -114,7 +114,7 @@ async def update_routing_policy(
 )
 async def delete_routing_policy(
     policy_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Delete a routing policy (admin only)."""
@@ -138,7 +138,7 @@ async def delete_routing_policy(
     dependencies=[Depends(require_role("admin"))],
 )
 async def reset_defaults(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """Delete all policies and recreate factory defaults (admin only)."""

@@ -77,7 +77,7 @@ async def require_engine_deep_work_for(db: AsyncSession, tenant_id: UUID, reques
 
 async def require_engine_deep_work(
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> None:
     """FastAPI dependency form of the gate, for engine-only routes (e.g. steer)."""
