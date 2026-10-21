@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID, JSONB
 from sqlalchemy.orm import relationship
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class Project(Base):
@@ -49,14 +50,14 @@ class Project(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
-        default=datetime.utcnow,
+        default=utc_now,
     )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utc_now,
+        onupdate=utc_now,
     )
 
     # Relationships

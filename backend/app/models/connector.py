@@ -6,6 +6,7 @@ from datetime import datetime
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class Connector(Base):
@@ -56,8 +57,8 @@ class Connector(Base):
     openapi_spec_hash = Column(String(64), nullable=True)  # SHA256 hash for change detection
     openapi_operations = Column(JSONB, default=list)  # Cached tool definitions from spec
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now, onupdate=utc_now)
 
     # Relationships
     user = relationship("User", back_populates="connectors")

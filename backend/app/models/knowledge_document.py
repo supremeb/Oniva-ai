@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import relationship
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class KnowledgeDocument(Base):
@@ -92,7 +93,7 @@ class KnowledgeDocument(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
-        default=datetime.utcnow
+        default=utc_now
     )
 
     # Relationships

@@ -82,7 +82,7 @@ async def list_users(
     limit: int = 50,
     offset: int = 0,
     user: AuthUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """List users with optional filtering."""
     service = UserManagementService(db)
@@ -126,7 +126,7 @@ async def get_user(
     request: Request,
     user_id: UUID,
     user: AuthUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """Get user details by ID."""
     service = UserManagementService(db)
@@ -167,7 +167,7 @@ async def update_user(
     user_id: UUID,
     body: UpdateUserRequest,
     user: AuthUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """Update user profile information."""
     service = UserManagementService(db)
@@ -213,7 +213,7 @@ async def change_user_role(
     user_id: UUID,
     body: ChangeRoleRequest,
     user: AuthUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """
     Change a user's role.
@@ -276,7 +276,7 @@ async def deactivate_user(
     request: Request,
     user_id: UUID,
     user: AuthUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """Deactivate a user (soft disable)."""
     service = UserManagementService(db)
@@ -322,7 +322,7 @@ async def reactivate_user(
     request: Request,
     user_id: UUID,
     user: AuthUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """Reactivate a deactivated user."""
     service = UserManagementService(db)
@@ -373,7 +373,7 @@ async def admin_reset_password(
     user_id: UUID,
     body: ResetPasswordRequest,
     user: AuthUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """Admin resets a user's password."""
     service = UserManagementService(db)

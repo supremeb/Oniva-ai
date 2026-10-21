@@ -7,6 +7,7 @@ import uuid
 import enum
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class TeamRole(str, enum.Enum):
@@ -40,8 +41,8 @@ class Team(Base):
     slug = Column(String(100), nullable=False, index=True)  # URL-friendly identifier
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now, onupdate=utc_now)
 
     # Relationships
     tenant = relationship("Tenant")
@@ -94,8 +95,8 @@ class TeamMembership(Base):
     )
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now, onupdate=utc_now)
 
     # Relationships
     team = relationship("Team", back_populates="memberships")

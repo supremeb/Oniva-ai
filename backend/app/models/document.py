@@ -7,6 +7,7 @@ import uuid
 from pgvector.sqlalchemy import Vector
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class Document(Base):
@@ -40,8 +41,8 @@ class Document(Base):
     chunk_index = Column(Integer, nullable=True)  # For chunked documents
     parent_document_id = Column(UUID(as_uuid=True), nullable=True)  # Link to original doc
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now, onupdate=utc_now)
 
     # Relationships
     user = relationship("User", back_populates="documents")

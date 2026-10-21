@@ -76,9 +76,29 @@ async def get_optional_user(request: Request) -> Optional[AuthUser]:
     return getattr(request.state, 'user', None)
 
 
+def role_satisfies(user_role: str, allowed_roles: tuple) -> bool:
+    """True when ``user_role`` is one of ``allowed_roles`` or ranks above the lowest of them.
+
+    Roles form a hierarchy (owner > admin > member > viewer): whatever an admin may do, an owner
+    may do, and whatever a member may do, an admin may do. Roles outside the hierarchy only match
+    by name.
+    """
+    if user_role in allowed_roles:
+        return True
+    from app.auth.permissions import ROLE_HIERARCHY
+
+    ranks = [ROLE_HIERARCHY[r] for r in allowed_roles if r in ROLE_HIERARCHY]
+    user_rank = ROLE_HIERARCHY.get(user_role)
+    return bool(ranks) and user_rank is not None and user_rank >= min(ranks)
+
+
 def require_role(*allowed_roles: str):
     """
     Dependency factory for role-based access control.
+
+    The listed roles are a minimum: higher roles pass too (owner > admin > member > viewer),
+    so ``require_role("admin")`` admits owners and ``require_role("owner", "admin")`` is the
+    same check.
 
     Usage:
         @router.delete("/", dependencies=[Depends(require_role("admin"))])
@@ -86,7 +106,7 @@ def require_role(*allowed_roles: str):
             ...
     """
     async def role_checker(user: AuthUser = Depends(get_current_user)):
-        if user.role not in allowed_roles:
+        if not role_satisfies(user.role, allowed_roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Requires one of roles: {', '.join(allowed_roles)}"

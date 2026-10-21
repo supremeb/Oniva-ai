@@ -6,6 +6,7 @@ from datetime import datetime
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class Skill(Base):
@@ -42,8 +43,8 @@ class Skill(Base):
     is_system = Column(Boolean, default=True)   # True if built-in
     enabled = Column(Boolean, default=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now, onupdate=utc_now)
 
     # Relationships
     author = relationship("User", backref="created_skills")
@@ -95,7 +96,7 @@ class SkillExecution(Base):
     audit_metadata = Column(JSON, nullable=True)  # Additional context (IP, user agent, etc.)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now, index=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships

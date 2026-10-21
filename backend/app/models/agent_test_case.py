@@ -6,6 +6,7 @@ from datetime import datetime
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class AgentTestCase(Base):
@@ -70,8 +71,8 @@ class AgentTestCase(Base):
     is_baseline = Column(Boolean, default=False)  # Include in baseline evaluation
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now, onupdate=utc_now)
     last_evaluated_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships

@@ -6,6 +6,7 @@ from datetime import datetime
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class AgentAlias(Base):
@@ -53,8 +54,8 @@ class AgentAlias(Base):
         ForeignKey('users.id', ondelete='SET NULL'),
         nullable=True
     )
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now, onupdate=utc_now)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
 
     # Relationships
     tenant = relationship("Tenant")
