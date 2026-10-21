@@ -17,6 +17,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.services.agent_resolver import (
     build_project_context,
     build_web_search_instruction,
@@ -52,6 +53,14 @@ CAPABILITY_FAMILIES = (
     ("code execution", CODE_TOOLS),
 )
 
+# Tiered context (U16). With tiers on, chat also gets read_file (to page saved tool outputs) and, top level only,
+# update_todo (a rewritten todo is what survives a summary). The note lists where saved outputs live.
+TODO_TOOL = "update_todo"
+OFFLOAD_NOTE = (
+    "Large tool outputs may be saved to files under tool_results/ instead of appearing in full; "
+    "read them with read_file using offset and limit."
+)
+
 
 # Compaction (U11, R9). The agent config names no model (the policy endpoint picks it per
 # request and returns the chosen model's ``contextWindow``, which the engine uses for the
@@ -65,18 +74,34 @@ RESERVE_FRACTION = 0.10
 KEEP_RECENT_FRACTION = 0.10
 
 
+# Tools whose results are never cleared from the view (U16): their content is the state the model works from.
+CLEAR_EXCLUDE_TOOLS = (
+    "dw_get_learnings", "dw_get_report", "ask_user", "update_todo", "present_plan", "complete_task")
+
+
+def tier_rank(tiers: str) -> int:
+    from app.services.feature_flags import CONTEXT_TIER_VALUES
+
+    return CONTEXT_TIER_VALUES.index(tiers) if tiers in CONTEXT_TIER_VALUES else 0
+
+
 def compaction_settings(
     context_window: Optional[int] = None, compact_fraction: float = COMPACT_FRACTION,
+    *, tiers: str = "off", context_windows: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     """Engine ``CompactionOverrides`` for a conversation (camelCase, engine schema).
 
     ``context_window`` None (the default) leaves the window to the model policy, which returns the
-    chosen model's; pass a number to pin it.
+    chosen model's; pass a number to pin it. ``tiers`` (``off`` | ``offload`` | ``offload+clear`` | ``full``)
+    adds the context-reduction knobs: nothing at ``off`` (the block is then exactly the pre-U16 one);
+    ``offloadTokens`` from ``offload``; clearing from ``offload+clear``; ``structuredSummary`` and
+    ``archiveSummarized`` at ``full``. ``context_windows`` (model id -> tokens) is emitted when given and,
+    with clearing on, the smallest known window sizes the clear trigger.
     """
     basis = context_window or DEFAULT_CONTEXT_WINDOW
     reserve = int(basis * RESERVE_FRACTION)
     background_start = int(basis * compact_fraction)
-    return {
+    out: Dict[str, Any] = {
         "enabled": True,
         **({"contextWindow": context_window} if context_window else {}),
         "reserveTokens": reserve,
@@ -84,6 +109,81 @@ def compaction_settings(
         "backgroundMargin": max(0, basis - reserve - background_start),
         "keepRecentTokens": int(basis * KEEP_RECENT_FRACTION),
     }
+    rank = tier_rank(tiers)
+    if rank == 0:
+        return out
+    cfg = get_settings()
+    windows = {k: int(v) for k, v in (context_windows or {}).items() if v}
+    if windows:
+        out["contextWindows"] = windows
+    out["offloadTokens"] = cfg.ENGINE_CONTEXT_OFFLOAD_TOKENS
+    if rank >= 2:
+        clear_basis = context_window or (min(windows.values()) if windows else DEFAULT_CONTEXT_WINDOW)
+        out["clearTriggerTokens"] = int(clear_basis * cfg.ENGINE_CONTEXT_CLEAR_FRACTION)
+        out["keepToolResults"] = cfg.ENGINE_CONTEXT_KEEP_TOOL_RESULTS
+        out["clearAtLeastTokens"] = cfg.ENGINE_CONTEXT_CLEAR_AT_LEAST_TOKENS
+        out["excludeTools"] = list(CLEAR_EXCLUDE_TOOLS)
+    if rank >= 3:
+        out["structuredSummary"] = True
+        out["archiveSummarized"] = True
+    return out
+
+
+async def resolve_context_tiers(db: Any, tenant_id: Any) -> str:
+    """The tenant's context tier (flag over global); ``off`` without a database or when the lookup fails."""
+    from app.models.tenant import Tenant
+    from app.services.feature_flags import context_tiers_for
+
+    tenant = None
+    if db is not None:
+        try:
+            tenant = await db.get(Tenant, uuid.UUID(str(tenant_id)))
+        except Exception:
+            logger.warning("tenant lookup for context tiers failed; using the global setting", exc_info=True)
+    return context_tiers_for(tenant)
+
+
+def model_id_variants(model: str) -> List[str]:
+    """A model id as the policy may report it: as resolved, provider prefix stripped, OpenRouter form."""
+    from app.services.llm_gateway import strip_provider_prefix, to_openrouter_model_id
+
+    variants = [model]
+    for fn in (strip_provider_prefix, to_openrouter_model_id):
+        try:
+            variants.append(fn(model))
+        except Exception:  # an odd id never blocks a config build
+            pass
+    return list(dict.fromkeys(v for v in variants if v))
+
+
+def windows_for_models(models: Iterable[str]) -> Dict[str, int]:
+    """Context window per model id, for the ``contextWindows`` setting."""
+    from app.config.llm_pricing import context_window_for
+
+    out: Dict[str, int] = {}
+    for model in models:
+        if not model:
+            continue
+        window = context_window_for(model)
+        for key in model_id_variants(model):
+            out[key] = window
+    return out
+
+
+async def resolve_context_windows(db: Any, tenant_id: Any) -> Dict[str, int]:
+    """Windows of the models the tenant's high, mid and low tiers resolve to (empty on any failure).
+
+    Chat names no model (the policy picks one per request), so the windows of every model it can pick are
+    given and the engine looks the chosen one up. A follow-up may return the window from the policy instead.
+    """
+    from app.services import llm_gateway as gw
+
+    try:
+        models = [await gw.resolve_model_for_tier(db, tenant_id, t, None) for t in ("high", "mid", "low")]
+        return windows_for_models(models)
+    except Exception:
+        logger.warning("context window lookup failed; the model policy supplies windows", exc_info=True)
+        return {}
 
 
 CONTINUATION_HEADING = "Earlier conversation summary"
@@ -141,7 +241,7 @@ def skill_names(refs: Iterable[str], known: Iterable[str]) -> List[str]:
     return _dedupe(by_uuid.get(r, r) for r in refs)
 
 
-def build_capabilities_block(tools: Iterable[str]) -> str:
+def build_capabilities_block(tools: Iterable[str], tiers: str = "off") -> str:
     """The capability block naming the tool families actually granted (U4 / R4, KTD4)."""
     granted = set(tools)
     lines = [
@@ -154,6 +254,8 @@ def build_capabilities_block(tools: Iterable[str]) -> str:
     if other:
         lines.append(f"- other tools: {', '.join(other)}")
     body = "\n".join(lines) if lines else "You have no tools beyond your own knowledge."
+    if tier_rank(tiers) and "read_file" in granted:
+        body += f"\n\n{OFFLOAD_NOTE}"
     return f"## {CAPABILITY_HEADING}\n\n{body}\n\n{CAPABILITY_FOOTER}"
 
 
@@ -164,6 +266,8 @@ def compose_agent_config(
     now: Optional[datetime] = None,
     continuation_summary: Optional[str] = None,
     agent_role: Optional[str] = None,
+    tiers: str = "off",
+    context_windows: Optional[Dict[str, int]] = None,
 ) -> BuiltAgent:
     now = now or datetime.now(timezone.utc)
     manifest = set(manifest_names)
@@ -201,7 +305,12 @@ def compose_agent_config(
         parts.append(KNOWLEDGE_INSTRUCTION)
     if selections.web_search:
         parts.append(build_web_search_instruction(now, selections.specific_sites or None))
-    parts.append(build_capabilities_block(tools))
+    if tier_rank(tiers):
+        # Offloaded results are read back with read_file; a rewritten todo survives a summary (top level only).
+        tools |= {t for t in ("read_file",) if t in manifest}
+        if agent_role is None and TODO_TOOL in manifest:
+            tools.add(TODO_TOOL)
+    parts.append(build_capabilities_block(tools, tiers))
     # ask_user is native to the engine and only reaches a human in a top-level chat (U11): workers
     # (any ``agent_role``) have nobody to ask.
     if agent_role is None:
@@ -235,7 +344,7 @@ def compose_agent_config(
     agent = {
         "systemPrompt": "\n\n".join(parts),
         "tools": sorted(tools),
-        "compaction": compaction_settings(),
+        "compaction": compaction_settings(tiers=tiers, context_windows=context_windows),
         "metadata": metadata,
     }
     return BuiltAgent(agent=agent, selections=stored, dropped=dropped)
@@ -348,11 +457,19 @@ async def build_engine_chat_agent(
     now: Optional[datetime] = None,
     continuation_summary: Optional[str] = None,
     agent_role: Optional[str] = None,
+    tiers: Optional[str] = None,
 ) -> BuiltAgent:
-    """Agent config for a chat conversation: raises ``AgentUnavailable`` for an unusable agent."""
+    """Agent config for a chat conversation: raises ``AgentUnavailable`` for an unusable agent.
+
+    ``tiers`` None resolves the context tier from the tenant flag and ``ENGINE_CONTEXT_TIERS`` (U16).
+    """
     inputs = await loader(
         db, tenant_id=uuid.UUID(str(tenant_id)), user_id=uuid.UUID(str(user.id)),
         is_admin=getattr(user, "role", None) == "admin",
         project_id=uuid.UUID(str(project_id)), selections=selections)
     names = set(manifest) if manifest is not None else await manifest_tool_names()
-    return compose_agent_config(inputs, selections, names, now, continuation_summary, agent_role)
+    if tiers is None:
+        tiers = await resolve_context_tiers(db, tenant_id)
+    windows = await resolve_context_windows(db, tenant_id) if tier_rank(tiers) and db is not None else None
+    return compose_agent_config(
+        inputs, selections, names, now, continuation_summary, agent_role, tiers=tiers, context_windows=windows)

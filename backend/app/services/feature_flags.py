@@ -124,6 +124,13 @@ FLAG_METADATA: dict[str, FlagMeta] = {
         operator_only=True,
     ),
 
+    "ENABLE_ENGINE_CONTEXT_TIERS": FlagMeta(
+        group="Core",
+        description="Tiered context reduction on the engine (offload, clearing, structured summaries); "
+                    "true turns on every tier for the tenant, false forces it off over ENGINE_CONTEXT_TIERS",
+        operator_only=True,
+    ),
+
     # Infrastructure (operator-only — cost/security implications)
     "ENABLE_SANDBOX": FlagMeta(
         group="Infrastructure",
@@ -193,6 +200,29 @@ ENGINE_CHAT_FLAG = "ENABLE_ENGINE_CHAT"
 ENGINE_DEEP_WORK_FLAG = "ENABLE_ENGINE_DEEP_WORK"
 ENGINE_FLEET_FLAG = "ENABLE_ENGINE_FLEET"
 ENGINE_WORKFLOWS_FLAG = "ENABLE_ENGINE_WORKFLOWS"
+ENGINE_CONTEXT_TIERS_FLAG = "ENABLE_ENGINE_CONTEXT_TIERS"
+
+# Values of the global ENGINE_CONTEXT_TIERS setting, weakest to strongest; anything else means "off".
+CONTEXT_TIER_VALUES = ("off", "offload", "offload+clear", "full")
+
+
+def context_tiers_for(tenant: Optional[Tenant], settings=None) -> str:
+    """The context tier a tenant's agent configs are built with (U16, KTD7).
+
+    A tenant value wins whenever the key exists (``True`` = ``full``, ``False`` = ``off``, resolved with
+    ``get_feature``); otherwise the global ``ENGINE_CONTEXT_TIERS`` string applies. A missing tenant (``None``)
+    or an unknown global value means ``off``.
+    """
+    if tenant is not None:
+        raw = ((tenant.settings or {}).get("features") or {}).get(ENGINE_CONTEXT_TIERS_FLAG)
+        if raw is not None:
+            return "full" if get_feature(tenant, ENGINE_CONTEXT_TIERS_FLAG) else "off"
+    s = settings if settings is not None else get_settings()
+    value = str(getattr(s, "ENGINE_CONTEXT_TIERS", "off") or "off")
+    if value not in CONTEXT_TIER_VALUES:
+        logger.warning("ENGINE_CONTEXT_TIERS=%r is not one of %s; using off", value, CONTEXT_TIER_VALUES)
+        return "off"
+    return value
 
 
 def _engine_tenant_flag(tenant: Tenant, flag: str, global_on: bool, settings) -> bool:

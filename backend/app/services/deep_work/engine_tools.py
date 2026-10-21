@@ -12,6 +12,7 @@ conversation (worker, reflector) made the call.
 import json
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,6 +25,7 @@ from app.core.database import get_db_for_tenant
 from app.internal_api.execution import ToolOutcome
 from app.services import deep_work_state as dws
 from app.services import session_storage as _session_storage
+from app.services.feature_flags import context_tiers_for
 from app.services.deep_work.models import Learning
 from app.services.deep_work.synthesis import build_sources_section, select_learnings
 
@@ -178,6 +180,22 @@ def _render_todo(run: dws.RunSnapshot) -> str:
     if len(lines) == 2:
         lines.append("- [ ] Register the first research round")
     return "\n".join(lines) + "\n"
+
+
+async def _recitation_on(factory: dws.SessionFactory, tenant_id: Any) -> bool:
+    """Whether results repeat the todo (recitation, U16): only when the tenant's context tiers are on.
+
+    Any failure means off, so the result stays exactly what it was before U16.
+    """
+    try:
+        from app.models.tenant import Tenant
+
+        async with factory() as db:
+            tenant = await db.get(Tenant, tenant_id if hasattr(tenant_id, "hex") else uuid.UUID(str(tenant_id)))
+        return context_tiers_for(tenant) != "off"
+    except Exception:
+        logger.warning("context tier lookup failed; not repeating the todo", exc_info=True)
+        return False
 
 
 def _status_line(run: dws.RunSnapshot) -> str:
@@ -421,6 +439,8 @@ async def dw_save_learnings(ctx: SkillContext, worker_id: str, learnings: List[D
         notes.append(f"{repaired} learning(s) were saved after shortening overlong text or defaulting a missing confidence.")
     if notes:
         payload["note"] = " ".join(notes)
+    if await _recitation_on(factory, tenant_id):
+        payload["todo"] = _render_todo(run)  # recitation: keeps the plan in recent context
     return _ok(payload, files, **details)
 
 
@@ -521,10 +541,11 @@ async def dw_record_reflection(
     if (refusal := _refusal(run)) is not None:
         return refusal
     can_continue = bool(should_continue) and round < cap + 1
-    return _ok(
-        {"round": round, "recorded": True, "next": "dw_start_round" if can_continue else "synthesis",
-         "workers_still_open": _open_workers(_round_entry(run, round) or {}), "status": _status_line(run)},
-    )
+    payload = {"round": round, "recorded": True, "next": "dw_start_round" if can_continue else "synthesis",
+               "workers_still_open": _open_workers(_round_entry(run, round) or {}), "status": _status_line(run)}
+    if await _recitation_on(factory, tenant_id):
+        payload["todo"] = _render_todo(run)  # recitation: keeps the plan in recent context
+    return _ok(payload)
 
 
 @skill(

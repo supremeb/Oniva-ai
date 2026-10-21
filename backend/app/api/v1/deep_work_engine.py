@@ -43,7 +43,13 @@ from app.services import engine_deep_work_agent as edw
 from app.services.deep_work import engine_view as ev
 from app.services.deep_work.engine_sandbox import reap_if_terminal, sandbox_available, teardown_all
 from app.services.deep_work.models import DeepWorkPlan, IntakeResult
-from app.services.engine_chat_agent import Selections, load_chat_inputs
+from app.services.engine_chat_agent import (
+    Selections,
+    load_chat_inputs,
+    resolve_context_tiers,
+    tier_rank,
+    windows_for_models,
+)
 from app.services.engine_client import EngineClient, EngineError, get_engine_client
 from app.services.feature_flags import engine_deep_work_enabled
 from app.services.project_service import ProjectService
@@ -474,7 +480,10 @@ async def start(body, db: AsyncSession, user_id, tenant_id) -> dict:
 
     agent_config = await _agent_config_for(db, tenant_id)
     models = await edw.resolve_deep_work_models(db, _uuid(tenant_id), approved, agent_config)
+    tiers = await resolve_context_tiers(db, tenant_id)
+    windows = windows_for_models([models.high, models.mid, models.low, models.worker]) if tier_rank(tiers) else None
     execute = edw.compose_execute_config(edw.ExecuteInputs(
+        tiers=tiers, context_windows=windows,
         plan=approved, models=models, has_search=await _has_search(db, tenant_id),
         knowledge_base_ids=kb_ids, searchable_kb_ids=await _kbs_with_documents(db, kb_ids),
         has_files=bool(chat.project_files), connector_ids=connector_ids, sandbox_enabled=sandbox_available(),

@@ -21,7 +21,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tup
 from pydantic import ValidationError
 
 from app.services.deep_work.models import DeepWorkPlan
-from app.services.engine_chat_agent import compaction_settings
+from app.services.engine_chat_agent import tier_rank, compaction_settings
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,9 @@ class ExecuteInputs:
     run_id: Optional[str] = None
     max_rounds: Optional[int] = None
     deadline_ms: Optional[int] = None
+    # Context tier (U16): off | offload | offload+clear | full. Off leaves every output as it was before U16.
+    tiers: str = "off"
+    context_windows: Optional[Dict[str, int]] = None  # model id -> window, for the models the run can use
 
 
 # --- intake and plan -------------------------------------------------------------------------
@@ -252,7 +255,8 @@ def worker_tools(inputs: ExecuteInputs) -> List[str]:
     # read_file is offered only when the run has files to read: workers are not pointed at any other file
     # and guess names ("findings.json") when it is there with nothing behind it.
     tools: List[str] = [WORKER_SAVE_TOOL]
-    if inputs.has_files:
+    # With tiers on a worker also gets read_file: an offloaded tool result is a pointer it must be able to follow.
+    if inputs.has_files or tier_rank(inputs.tiers):
         tools.append(FILE_TOOL)
     if inputs.has_search:
         tools += list(WEB_TOOLS)
@@ -265,6 +269,12 @@ def worker_tools(inputs: ExecuteInputs) -> List[str]:
     return sorted(_dedupe(tools))
 
 
+def _gathering_tools(inputs: ExecuteInputs, tools: set) -> set:
+    """The worker's tools that fetch information; read_file counts only when there are project files to read."""
+    names = {"web_search", KNOWLEDGE_TOOL, "invoke_connector_tool"} | ({FILE_TOOL} if inputs.has_files else set())
+    return tools & names
+
+
 def worker_tools_section(inputs: ExecuteInputs) -> str:
     """The "Your tools" block of the worker prompt, derived from the worker's real tool set."""
     tools = set(worker_tools(inputs))
@@ -273,7 +283,13 @@ def worker_tools_section(inputs: ExecuteInputs) -> str:
         lines.append("- `web_search` and `browse_url`: find pages, then read the two or three most promising.")
     if KNOWLEDGE_TOOL in tools:
         lines.append("- `search_knowledge`: search the attached knowledge bases when the sub-query may be covered there.")
-    if FILE_TOOL in tools:
+    if FILE_TOOL in tools and not inputs.has_files:
+        lines.append("- `read_file`: read tool outputs that were saved to files under `tool_results/` "
+                     "(use `offset` and `limit`). There are no project files to read.")
+    elif FILE_TOOL in tools and tier_rank(inputs.tiers):
+        lines.append("- `read_file`: read the project files you were pointed to, and tool outputs saved under "
+                     "`tool_results/` (use `offset` and `limit`). Do not guess file names.")
+    elif FILE_TOOL in tools:
         lines.append("- `read_file`: read the project files you were pointed to. Do not guess file names.")
     if "invoke_connector_tool" in tools:
         lines.append("- `list_available_connectors`, `get_connector_schema`, `invoke_connector_tool`: query connected data sources.")
@@ -281,7 +297,7 @@ def worker_tools_section(inputs: ExecuteInputs) -> str:
         lines.append("- `shell_exec` (sandbox): computation and analysis; see Code execution below.")
     lines.append("- `dw_save_learnings`: save your findings, once.")
     out = ["## Your tools", "", "These are the only tools you have. Do not call anything else.", ""] + lines
-    gathering = tools & {"web_search", KNOWLEDGE_TOOL, FILE_TOOL, "invoke_connector_tool"}
+    gathering = _gathering_tools(inputs, tools)
     if not gathering:
         out += [
             "", "You have NO web search, knowledge base or file access on this run. Do not look for them. "
@@ -305,7 +321,7 @@ def worker_prompt(inputs: ExecuteInputs, now: datetime) -> str:
         return _with_date(text, now)
     step1 = ("Start with `web_search` to find pages; read the two or three most promising with `browse_url`. "
              if "web_search" in tools else "")
-    if not tools & {"web_search", KNOWLEDGE_TOOL, FILE_TOOL, "invoke_connector_tool"}:
+    if not _gathering_tools(inputs, tools):
         method = ("Work from your own knowledge: list the specific, relevant points you can state with reasonable "
                   "confidence, and mark what you are unsure of.")
     else:
@@ -320,6 +336,7 @@ def has_output_agent(inputs: ExecuteInputs) -> bool:
 
 
 ORCHESTRATOR_CACHE_TTL = "1h"
+CONTEXT_NOTE_FILE = "orchestrator_context_note.md"  # appended to the orchestrator prompt only with tiers on
 
 
 def compose_execute_config(
@@ -353,6 +370,9 @@ def compose_execute_config(
         parent_tools.append(OUTPUT_AGENT)
 
     prompt_parts = [_with_date(load_prompt("orchestrator_loop.md"), now)]
+    tiered = bool(tier_rank(inputs.tiers))
+    if tiered:
+        prompt_parts.append(load_prompt(CONTEXT_NOTE_FILE).strip())
     if not inputs.has_search:
         prompt_parts.append(
             "## Tool availability\n\nWeb search is NOT available on this run. Workers answer from their own "
@@ -361,6 +381,12 @@ def compose_execute_config(
     prompt_parts.append("## Approved plan\n\n```json\n" + inputs.plan.model_dump_json(indent=2) + "\n```")
     if not with_output:
         prompt_parts.append("This plan has no deliverable file: skip step 7 and do not look for `output_agent`.")
+
+    compaction = compaction_settings(tiers=inputs.tiers, context_windows=inputs.context_windows)
+    if tiered:
+        # Same block for the children (they inherit the parent's today; named here so a child override works).
+        for sub in subagents.values():
+            sub["compaction"] = dict(compaction)
 
     metadata: Dict[str, Any] = {
         "purpose": PURPOSE_ORCHESTRATOR,
@@ -378,7 +404,7 @@ def compose_execute_config(
         "model": models.high,
         "metadata": metadata,
         # Window comes from the model policy; thresholds scale with the default basis.
-        "compaction": compaction_settings(),
+        "compaction": compaction,
         # Rounds wait on workers for more than the default 5 minute cache lifetime.
         "cacheTtl": ORCHESTRATOR_CACHE_TTL,
     }
