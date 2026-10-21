@@ -314,3 +314,27 @@ def test_openrouter_ids_are_priced():
     ]:
         assert find_model_pricing(slug) is find_model_pricing(base) and find_model_pricing(slug) is not None
     assert find_model_pricing("openai/gpt-4o-mini") is not None
+
+
+async def test_a_deep_work_run_gets_the_larger_output_budget(client, test_db):
+    """Without an estimate a request gets the chat default; a Deep Work run (orchestrator, and its workers, which
+    report the run's root conversation) gets DEEP_WORK_MAX_OUTPUT_TOKENS, since reasoning eats into the budget."""
+    from app.config import get_settings
+    from app.models.engine import EngineConversation
+
+    t = await make_tenant(test_db)
+    await add_provider(test_db, t)
+    dw, chat = uuid.uuid4(), uuid.uuid4()
+    for cid, sel in ((dw, {"deep_work": True}), (chat, {})):
+        test_db.add(EngineConversation(conversation_id=cid, tenant_id=t, project_id=uuid.uuid4(), user_id=uuid.uuid4(),
+                                       session_id="s", selections=sel))
+    await test_db.commit()
+    no_estimate = {"estimate": {}}
+    deep = (await post(client, body(t, conversationId=str(dw), **no_estimate))).json()
+    plain = (await post(client, body(t, conversationId=str(chat), **no_estimate))).json()
+    unknown = (await post(client, body(t, conversationId="not-a-uuid", **no_estimate))).json()
+    assert deep["maxTokens"] == get_settings().DEEP_WORK_MAX_OUTPUT_TOKENS > plain["maxTokens"]
+    assert plain["maxTokens"] == unknown["maxTokens"] == 8192
+    # an explicit estimate still wins
+    assert (await post(client, body(t, conversationId=str(dw)))).json()["maxTokens"] == 1000
+

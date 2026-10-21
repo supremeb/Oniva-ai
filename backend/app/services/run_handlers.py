@@ -33,6 +33,7 @@ BOOTSTRAP_MODULES: tuple[str, ...] = (
     "app.services.workflow_engine_runs",  # U15: start_missing, find_stuck, fail
     "app.services.workflow_run_sync",  # U16: on_finished
     "app.services.scheduled_run_hooks",  # U19: scheduled start_missing, find_stuck, fail
+    "app.services.deep_work_run_sync",  # Deep Work runs that ended while nobody was reading them
 )
 
 

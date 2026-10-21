@@ -168,6 +168,20 @@ async def test_save_learnings_rejects_unknown_workers_and_invalid_learnings(dw):
     assert (await dw.state()).rounds[0]["workers"] == {}  # nothing partially saved
 
 
+async def test_save_learnings_repairs_overlong_text_and_a_missing_confidence(dw):
+    # One overlong fact or a missing confidence used to fail the whole save, and weaker models then saved nothing.
+    await dw.research("w1", save=False)
+    long_fact = {**learning(1), "fact": "x" * 1200}
+    no_conf = {k: v for k, v in learning(2).items() if k != "confidence"}
+    worded = {**learning(3), "confidence": "High"}
+    r = await dw.call("dw_save_learnings", {"worker_id": "w1", "learnings": [long_fact, no_conf, worded, learning(4)]})
+    assert not r["isError"] and r["data"]["learning_count"] == 4 and r["data"]["repaired"] == 3
+    assert "shortening" in r["data"]["note"]
+    saved = json.loads(await dw.read("learnings/w1.json"))["learnings"]
+    assert len(saved[0]["fact"]) == 800 and saved[0]["fact"].endswith("\u2026")
+    assert saved[1]["confidence"] == 0.5 and saved[2]["confidence"] == 0.9
+
+
 async def test_learnings_over_the_cap_are_truncated_visibly(dw):
     dw.caps.DEEP_WORK_MAX_LEARNINGS_PER_WORKER = 3
     await dw.research("w1", save=False)

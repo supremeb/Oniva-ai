@@ -190,3 +190,42 @@ function waitFor(fn: () => void, timeout = 1000): Promise<void> {
     tick();
   });
 }
+
+describe('restoreEngineIntake (a page that left and came back)', () => {
+  const base = {
+    session_id: 'dw_1', conversation_id: 'conv_1', status: 'running', todos: [], steps: [], workspace_files: [],
+    summary: null, key_findings: [], sources: [], connectors: [], is_engine: true, runtime: 'engine' as const,
+    error: null, workers: null, query: 'battery market', enriched_query: 'battery market in EU', project_id: 'proj-1',
+  };
+
+  it('a plan waiting for approval comes back as the approval card, and approving starts that session', async () => {
+    const raw = { title: 'Battery market', sub_queries: [{ sub_query: 'a' }, { sub_query: 'b' }] };
+    const fs = { ...base, engine_phase: 'plan', plan: raw as never, awaiting_input: null };
+    expect(useDeepWorkStore.getState().restoreEngineIntake(fs, 'chat_1')).toBe(true);
+    const s = useDeepWorkStore.getState();
+    expect(s.status).toBe('awaiting_approval');
+    expect(s.plan).toEqual({ title: 'Battery market', steps: ['a', 'b'] });
+    expect(s.enginePendingQuery).toBe('battery market');
+    expect(s.conversationId).toBe('chat_1');
+    expect(s.engineIntake).toMatchObject({ projectId: 'proj-1', sessionId: 'dw_1', conversationId: 'conv_1', enrichedQuery: 'battery market in EU' });
+
+    mockStartEngineRun.mockResolvedValue({ session_id: 'dw_1', conversation_id: 'conv_1', status: 'started' });
+    await useDeepWorkStore.getState().approveEnginePlan();
+    expect(mockStartEngineRun).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'dw_1', query: 'battery market', chatId: 'chat_1' }));
+  });
+
+  it('questions waiting for answers come back as the clarification card', () => {
+    const fs = { ...base, engine_phase: 'clarify', plan: null, awaiting_input: { action: 'ask', questions: [{ text: 'Region?' }] } };
+    expect(useDeepWorkStore.getState().restoreEngineIntake(fs as never, 'chat_1')).toBe(true);
+    const s = useDeepWorkStore.getState();
+    expect(s.status).toBe('clarifying');
+    expect(s.intakeResult?.questions?.[0].text).toBe('Region?');
+  });
+
+  it('a run past the intake, or one that ended, is left to the run card', () => {
+    const plan = { title: 't', sub_queries: [{ sub_query: 'a' }] } as never;
+    expect(useDeepWorkStore.getState().restoreEngineIntake({ ...base, engine_phase: 'research', plan }, 'chat_1')).toBe(false);
+    expect(useDeepWorkStore.getState().restoreEngineIntake({ ...base, engine_phase: 'plan', plan, status: 'failed' }, 'chat_1')).toBe(false);
+    expect(useDeepWorkStore.getState().status).toBe('idle');
+  });
+});

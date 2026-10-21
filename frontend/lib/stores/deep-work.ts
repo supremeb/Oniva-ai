@@ -61,6 +61,11 @@ export interface DeepWorkFullState {
   runtime?: 'engine' | 'legacy';
   engine_report?: string | null;
   engine_phase: string | null;
+  /** Engine intake context (engine runs only): restores a plan or questions still waiting on the user. */
+  query?: string | null;
+  enriched_query?: string | null;
+  project_id?: string | null;
+  awaiting_input?: { action?: string; questions?: IntakeResult['questions'] } | null;
   error: string | null;
   workers: Array<{
     worker_id: string;
@@ -157,6 +162,11 @@ interface DeepWorkActions {
   disconnectEvents: () => void;
   /** Hydrate store from backend full-state response */
   hydrateFromBackend: (fullState: DeepWorkFullState) => void;
+  /**
+   * Restore an engine intake that is still waiting on the user (questions asked, or a plan to approve) after the
+   * page was left. True when it restored one; false when the run is past the intake (the run card shows it).
+   */
+  restoreEngineIntake: (fullState: DeepWorkFullState, chatId: string, projectId?: string | null) => boolean;
   reset: () => void;
   // ── Intake actions ─────────────────────────────────────────
   clarify: (query: string, conversationId?: string, availableKbs?: string[], availableConnectors?: string[], opts?: EngineIntakeOptions) => Promise<void>;
@@ -324,6 +334,38 @@ export const useDeepWorkStore = create<DeepWorkStore>()(
       currentActivity: null,
       engineReflection: null,
     });
+  },
+
+  restoreEngineIntake: (fullState, chatId, projectId) => {
+    const query = fullState.query;
+    const phase = fullState.engine_phase;
+    if (fullState.status !== 'running' || !query || (phase !== 'clarify' && phase !== 'plan')) return false;
+    const intake: EngineIntakeContext = {
+      projectId: fullState.project_id ?? projectId ?? '',
+      sessionId: fullState.session_id,
+      conversationId: fullState.conversation_id,
+      kbIds: [],
+      connectorIds: [],
+      enrichedQuery: fullState.enriched_query ?? null,
+    };
+    const base = { ...initialState, engineMode: true, conversationId: chatId, enginePendingQuery: query, engineIntake: intake };
+    const asked = fullState.awaiting_input;
+    if (asked?.action === 'ask' && asked.questions?.length) {
+      set({ ...base, status: 'clarifying', intakeResult: { action: 'ask', questions: asked.questions, enriched_query: null } });
+      return true;
+    }
+    const raw = fullState.plan as unknown as { title?: string; sub_queries?: Array<string | { sub_query?: string }> } | null;
+    if (phase === 'plan' && raw && Array.isArray(raw.sub_queries) && raw.sub_queries.length > 0) {
+      const steps = raw.sub_queries.map((q) => (typeof q === 'string' ? q : q.sub_query ?? '')).filter(Boolean);
+      set({
+        ...base,
+        status: 'awaiting_approval',
+        plan: { title: raw.title ?? 'Research plan', steps },
+        engineRawPlan: raw as Record<string, unknown>,
+      });
+      return true;
+    }
+    return false;
   },
 
   // ── Intake actions ─────────────────────────────────────────
