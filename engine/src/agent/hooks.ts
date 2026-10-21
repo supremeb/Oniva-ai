@@ -43,6 +43,18 @@ export interface AfterCompactionEvent {
   taskId: string;
   message: AssistantMessage;
   usage: Usage;
+  /** Structured summaries only: how the summary compares with what it replaced. */
+  quality?: CompactionQuality;
+}
+
+/** Size and shape of a structured summary (`structuredSummary`). */
+export interface CompactionQuality {
+  summaryChars: number;
+  summarizedChars: number;
+  /** `summaryChars / summarizedChars`; null when nothing text-bearing was summarized. */
+  ratio: number | null;
+  /** Headings the model left out (restored from the previous summary or marked empty). */
+  missingHeadings: string[];
 }
 
 export interface BeforeToolEvent {
@@ -80,6 +92,7 @@ export interface AgentErrorInfo {
     | "progress"
     | "reconcile"
     | "offload"
+    | "compaction_quality"
     | "settle"
     | "handler"
     | "abort"

@@ -294,6 +294,8 @@ class GatewayHttp {
       toolCallId: request.toolCallId,
       toolName: request.toolName,
       text: request.text,
+      // Only sent for an archive, so a tool-result put is byte-identical to before.
+      ...(request.kind === "history" ? { kind: "history" } : {}),
     });
     const idempotencyKey = `${request.runId}:${request.toolCallId}`;
     const deadline = this.#clock.monotonic() + timeoutMs;

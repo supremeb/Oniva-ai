@@ -65,6 +65,16 @@ describe("offload gateway client", () => {
     });
   });
 
+  it("sends kind history for an archive and leaves a tool-result put without a kind", async () => {
+    const g = await start();
+    await store(g).put(request({ kind: "history", toolName: "compaction", toolCallId: "task-9" }));
+    await store(g).put(request({ kind: "tool_result" }));
+    const [archive, plain] = g.offloadRequests();
+    expect(archive?.body).toMatchObject({ kind: "history" });
+    expect(archive?.headers["idempotency-key"]).toBe("run-1:task-9");
+    expect(plain?.body).not.toHaveProperty("kind");
+  });
+
   it("sends the root conversation id for a subagent's child conversation", async () => {
     const g = await start();
     await store(g).put(

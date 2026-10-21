@@ -142,7 +142,7 @@ The native `ask_user` tool (`askUserTool`, flagged `internal` and `humanInput`) 
 | `structuredSummary` | `false` | use the sectioned summary prompt |
 | `archiveSummarized` | `false` | save summarized history to the offload store |
 
-`offloadTokens`, `structuredSummary` and `archiveSummarized` are validated and stored only; they take effect as the offload and summary units land. The clearing fields are live (below).
+`structuredSummary` and `archiveSummarized` are live (Tier 2, below); the clearing fields are live too (Tier 1).
 
 ### Tier 1: view-time clearing
 
@@ -152,6 +152,17 @@ With `clearTriggerTokens > 0`, stale tool results are replaced by a fixed stub i
 - **Advance.** The generation `request` phase advances the watermark when the context estimate is at or above `clearTriggerTokens` and the results that would newly be cleared (in context, older than the newest `keepToolResults`, not excluded) total at least `clearAtLeastTokens`. It writes the advance before building the context, only moves it forward, and a rerun after a crash plans nothing twice. Between advances the cleared prefix is byte-stable, which keeps the provider's prefix cache.
 - **Stub.** `[cleared: <tool> result, ~<n> tokens. Re-run the tool.]`; when the result carries `details.offloaded.path` the stub ends `Re-run the tool, or read <path> if it was saved.]`.
 - **Off.** With `clearTriggerTokens` 0 the watermark is ignored and results are verbatim (a one-time cache miss when switching); the stored watermark is kept, and turning clearing back on resumes from it.
+
+### Tier 2: structured delta compaction
+
+With `structuredSummary: true` the compaction task uses a sectioned prompt instead of the plain one (which stays the default and is unchanged). The summary has six sections, in this order: `## Goal and constraints`, `## Decisions`, `## Facts and IDs`, `## Files and artifacts`, `## Open tasks`, `## Errors and dead ends`.
+
+- **Delta.** The request gives the previous summary's sections apart from the new transcript and tells the model to edit the sections in place. The goal section is carried forward byte for byte; if the model rewrites it, the previous text is kept and only the lines it did not have are appended.
+- **Repair.** A heading the model leaves out is restored verbatim from the previous summary (or reads `(nothing recorded)` on the first compaction), so a bad summary can only lose detail from the new material. No second model call.
+- **Archive.** With `archiveSummarized` and an offload store, the whole summarized range is written (unclipped) through `OffloadStore.put` with `kind: "history"` and the compaction task id as `toolCallId`; the summary gains `Full earlier transcript: <path>` (paths accumulate across compactions in structured mode). A store failure is reported (`offload`) and skipped.
+- **Todo.** With `structuredSummary`, the open items of the todo are appended as `Open todo (as of the summary):`, folded from the previous summary's block and every `update_todo` call in the summarized range.
+- **Quality.** `afterCompaction` events carry `quality { summaryChars, summarizedChars, ratio, missingHeadings }`; a ratio under 0.01 or a missing heading is also reported through `onError` as `compaction_quality`.
+- The `compaction` entry payload is unchanged; the archive path and todo live inside the summary text.
 
 ## Running a worker
 
