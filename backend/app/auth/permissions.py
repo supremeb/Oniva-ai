@@ -50,6 +50,8 @@ ROLE_PERMISSIONS: dict[str, Set[str]] = {
         "api_keys:manage",
         # Approvals: decide any tool-call approval in the tenant
         "approvals:decide",
+        # Project memory: erase all of a project's memory (hard delete)
+        "project_memory:purge",
     },
     "member": {
         # Workflow permissions
@@ -73,6 +75,8 @@ ROLE_PERMISSIONS: dict[str, Set[str]] = {
         "api_keys:manage_own",
         # Approvals: decide only approvals the member requested, on member-level tools
         "approvals:decide_own",
+        # Project memory: edit, approve, reject (also needs editor+ on the project)
+        "project_memory:write",
     },
     "viewer": {
         # Read-only access
@@ -80,6 +84,8 @@ ROLE_PERMISSIONS: dict[str, Set[str]] = {
         "agents:read",
         "settings:read",
         "connectors:read",
+        # Project memory: view and export (also needs project access)
+        "project_memory:read",
     },
 }
 

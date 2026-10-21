@@ -373,6 +373,8 @@ class Settings(BaseSettings):
     ENABLE_ENGINE_WORKFLOWS: bool = False  # global gate for engine-backed workflow runs; tenants opt in via settings.features
     # Project memory (U26): global gate for the memory tools; tenants override via settings.features.
     ENABLE_PROJECT_MEMORY: bool = False
+    # Project memory retention (U32): pending rows nobody approved are swept after this many days.
+    MEMORY_RETENTION_DAYS: int = 30
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
     # Run reconciler (plan 003 U5): rows stuck active for this long are checked against the engine.
     RUN_RECONCILE_AFTER_S: int = 120
