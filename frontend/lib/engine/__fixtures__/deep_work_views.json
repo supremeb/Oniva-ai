@@ -6273,5 +6273,1595 @@
         ]
       }
     ]
+  },
+  "success_v2": {
+    "legacy": null,
+    "points": [
+      {
+        "at": "verifying",
+        "view": {
+          "entries": [
+            {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run this approved research plan.\n\n{\"title\":\"Contract run\",\"sub_queries\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "requestId": "dw-1"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-w1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 34,
+                  "outputTokens": 19,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": [
+                    "plan.md",
+                    "todo.md"
+                  ]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-w1",
+                        "label": "w1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 68,
+                  "outputTokens": 11,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-14>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-11>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_4_0",
+                "toolName": "research_worker",
+                "status": "ok",
+                "content": "{\"summary\":\"saved w1\",\"learning_count\":2,\"source_count\":2,\"top_findings\":[\"Finding 1 for w1\"],\"sources\":[{\"title\":\"Source w1\",\"url\":\"https://example.com/w1/1\",\"type\":\"web\"},{\"title\":\"Source w1\",\"url\":\"https://example.com/w1/2\",\"type\":\"web\"}]}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-12>",
+                  "submissionId": "subm_<id-13>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-15>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-16>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 2,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_6_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT round 1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 139,
+                  "outputTokens": 10,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-20>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-17>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_6_0",
+                "toolName": "reflector",
+                "status": "ok",
+                "content": "{\"score\":55,\"gaps\":[\"gap-1: the second angle\"],\"round\":1,\"continuing\":true,\"note\":\"reflected 1\"}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-18>",
+                  "submissionId": "subm_<id-19>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-21>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-22>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 3,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_8_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 2,
+                        "workers": [
+                          {
+                            "worker_id": "gap-1",
+                            "sub_query": "q-gap-1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 172,
+                  "outputTokens": 21,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-23>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-24>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_8_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":2,\"workers\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": [
+                    "plan.md",
+                    "todo.md"
+                  ]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-25>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-26>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 4,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_10_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER gap-1: q-gap-1",
+                        "label": "gap-1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 209,
+                  "outputTokens": 13,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-27>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-28>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_10_0",
+                "toolName": "research_worker",
+                "status": "ok",
+                "content": "{\"summary\":\"saved gap-1\",\"learning_count\":2,\"source_count\":2,\"top_findings\":[\"Finding 1 for gap-1\"],\"sources\":[{\"title\":\"Source gap-1\",\"url\":\"https://example.com/gap-1/1\",\"type\":\"web\"},{\"title\":\"Source gap-1\",\"url\":\"https://example.com/gap-1/2\",\"type\":\"web\"}]}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-29>",
+                  "submissionId": "subm_<id-30>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-31>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-32>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 5,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_12_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT round 2"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 286,
+                  "outputTokens": 10,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-33>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-34>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_12_0",
+                "toolName": "reflector",
+                "status": "ok",
+                "content": "{\"score\":88,\"gaps\":[],\"round\":2,\"continuing\":false,\"note\":\"reflected 2\"}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-35>",
+                  "submissionId": "subm_<id-36>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-37>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-38>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 6,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_14_0",
+                      "name": "dw_write_section",
+                      "arguments": {
+                        "heading": "Findings",
+                        "markdown": "Findings from w1 and gap-1."
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 314,
+                  "outputTokens": 20,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-39>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-40>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_14_0",
+                "toolName": "dw_write_section",
+                "status": "ok",
+                "content": "{\"heading\":\"Findings\",\"replaced\":false,\"sections\":[\"Findings\"]}",
+                "isError": false,
+                "details": {
+                  "workspace": [
+                    "report.md"
+                  ]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-41>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-42>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 7,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_16_0",
+                      "name": "dw_write_section",
+                      "arguments": {
+                        "heading": "Gaps closed",
+                        "markdown": "gap-1 closed."
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 349,
+                  "outputTokens": 17,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-43>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-44>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_16_0",
+                "toolName": "dw_write_section",
+                "status": "ok",
+                "content": "{\"heading\":\"Gaps closed\",\"replaced\":false,\"sections\":[\"Findings\",\"Gaps closed\"]}",
+                "isError": false,
+                "details": {
+                  "workspace": [
+                    "report.md"
+                  ]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-v1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-v2>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 8,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_v_0",
+                      "name": "verifier",
+                      "arguments": {
+                        "prompt": "VERIFY the draft report"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 380,
+                  "outputTokens": 9,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          ],
+          "live": {
+            "runId": "task_<id-5>",
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "questions": {
+            "items": []
+          },
+          "usage": {
+            "requests": 10,
+            "total": {
+              "requests": 10,
+              "inputTokens": 2355,
+              "outputTokens": 130,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {
+              "fake/fake-1": {
+                "requests": 10,
+                "inputTokens": 2355,
+                "outputTokens": 130,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "byPurpose": {
+              "generation": {
+                "requests": 10,
+                "inputTokens": 2355,
+                "outputTokens": 130,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": [
+                    "browse_url",
+                    "dw_save_learnings",
+                    "web_search"
+                  ],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": [
+                    "dw_get_learnings",
+                    "dw_record_reflection"
+                  ],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": true,
+            "runId": "task_<id-5>",
+            "startedAt": "1970-01-01T00:16:40.000Z"
+          },
+          "subagents": {
+            "task_<id-11>": {
+              "conversationId": "conv_<id-12>",
+              "submissionId": "subm_<id-13>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "web_search({\"query\":\"q-w1\"})",
+                "dw_save_learnings({\"worker_id\":\"w1\",\"learnings\":[{\"fact\":\"Finding 1 for w1\",\"source_url\":\"https://example.com/w1/1\",\"confidence\":0.8,\"source_title\":\"Source w1\"…"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 163,
+                "outputTokens": 159,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-17>": {
+              "conversationId": "conv_<id-18>",
+              "submissionId": "subm_<id-19>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "dw_get_learnings()",
+                "dw_record_reflection({\"round\":1,\"score\":55,\"gaps\":[\"gap-1: the second angle\"],\"should_continue\":true,\"gap_tasks\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]})"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 287,
+                "outputTokens": 69,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-28>": {
+              "conversationId": "conv_<id-29>",
+              "submissionId": "subm_<id-30>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "web_search({\"query\":\"q-gap-1\"})",
+                "dw_save_learnings({\"worker_id\":\"gap-1\",\"learnings\":[{\"fact\":\"Finding 1 for gap-1\",\"source_url\":\"https://example.com/gap-1/1\",\"confidence\":0.8,\"source_title\":\"S…"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 178,
+                "outputTokens": 171,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-34>": {
+              "conversationId": "conv_<id-35>",
+              "submissionId": "subm_<id-36>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "dw_get_learnings()",
+                "dw_record_reflection({\"round\":2,\"score\":88,\"gaps\":[],\"should_continue\":false})"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 454,
+                "outputTokens": 42,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-v4>": {
+              "conversationId": "conv_<id-v5>",
+              "submissionId": "subm_<id-v6>",
+              "status": "running",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 1,
+              "recent": [
+                "dw_get_report({})"
+              ],
+              "usage": {
+                "requests": 2,
+                "inputTokens": 120,
+                "outputTokens": 40,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "tasks": {}
+        }
+      },
+      {
+        "at": "done",
+        "view": {
+          "entries": [
+            {
+              "id": "ent_<id-1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": null,
+              "kind": "user",
+              "payload": {
+                "submissionId": "subm_<id-3>",
+                "content": "Run this approved research plan.\n\n{\"title\":\"Contract run\",\"sub_queries\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "requestId": "dw-1"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-4>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "system",
+              "payload": {
+                "text": "<prompt:orchestrator>",
+                "tools": [
+                  "dw_finalize",
+                  "dw_get_learnings",
+                  "dw_get_report",
+                  "dw_start_round",
+                  "dw_write_section",
+                  "reflector",
+                  "research_worker"
+                ],
+                "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-6>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-5>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 0,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_2_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 1,
+                        "workers": [
+                          {
+                            "worker_id": "w1",
+                            "sub_query": "q-w1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 34,
+                  "outputTokens": 19,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-7>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-8>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_2_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": [
+                    "plan.md",
+                    "todo.md"
+                  ]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-9>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-10>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 1,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_4_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER w1: q-w1",
+                        "label": "w1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 68,
+                  "outputTokens": 11,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-14>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-11>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_4_0",
+                "toolName": "research_worker",
+                "status": "ok",
+                "content": "{\"summary\":\"saved w1\",\"learning_count\":2,\"source_count\":2,\"top_findings\":[\"Finding 1 for w1\"],\"sources\":[{\"title\":\"Source w1\",\"url\":\"https://example.com/w1/1\",\"type\":\"web\"},{\"title\":\"Source w1\",\"url\":\"https://example.com/w1/2\",\"type\":\"web\"}]}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-12>",
+                  "submissionId": "subm_<id-13>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-15>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-16>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 2,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_6_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT round 1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 139,
+                  "outputTokens": 10,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-20>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-17>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_6_0",
+                "toolName": "reflector",
+                "status": "ok",
+                "content": "{\"score\":55,\"gaps\":[\"gap-1: the second angle\"],\"round\":1,\"continuing\":true,\"note\":\"reflected 1\"}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-18>",
+                  "submissionId": "subm_<id-19>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-21>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-22>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 3,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_8_0",
+                      "name": "dw_start_round",
+                      "arguments": {
+                        "round": 2,
+                        "workers": [
+                          {
+                            "worker_id": "gap-1",
+                            "sub_query": "q-gap-1"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 172,
+                  "outputTokens": 21,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-23>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-24>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_8_0",
+                "toolName": "dw_start_round",
+                "status": "ok",
+                "content": "{\"round\":2,\"workers\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]}",
+                "isError": false,
+                "details": {
+                  "workspace": [
+                    "plan.md",
+                    "todo.md"
+                  ]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-25>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-26>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 4,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_10_0",
+                      "name": "research_worker",
+                      "arguments": {
+                        "prompt": "WORKER gap-1: q-gap-1",
+                        "label": "gap-1"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 209,
+                  "outputTokens": 13,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-27>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-28>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_10_0",
+                "toolName": "research_worker",
+                "status": "ok",
+                "content": "{\"summary\":\"saved gap-1\",\"learning_count\":2,\"source_count\":2,\"top_findings\":[\"Finding 1 for gap-1\"],\"sources\":[{\"title\":\"Source gap-1\",\"url\":\"https://example.com/gap-1/1\",\"type\":\"web\"},{\"title\":\"Source gap-1\",\"url\":\"https://example.com/gap-1/2\",\"type\":\"web\"}]}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-29>",
+                  "submissionId": "subm_<id-30>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-31>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-32>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 5,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_12_0",
+                      "name": "reflector",
+                      "arguments": {
+                        "prompt": "REFLECT round 2"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 286,
+                  "outputTokens": 10,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-33>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-34>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_12_0",
+                "toolName": "reflector",
+                "status": "ok",
+                "content": "{\"score\":88,\"gaps\":[],\"round\":2,\"continuing\":false,\"note\":\"reflected 2\"}",
+                "isError": false,
+                "details": {
+                  "conversationId": "conv_<id-35>",
+                  "submissionId": "subm_<id-36>",
+                  "depth": 1,
+                  "status": "done"
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-37>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-38>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 6,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_14_0",
+                      "name": "dw_write_section",
+                      "arguments": {
+                        "heading": "Findings",
+                        "markdown": "Findings from w1 and gap-1."
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 314,
+                  "outputTokens": 20,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-39>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-40>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_14_0",
+                "toolName": "dw_write_section",
+                "status": "ok",
+                "content": "{\"heading\":\"Findings\",\"replaced\":false,\"sections\":[\"Findings\"]}",
+                "isError": false,
+                "details": {
+                  "workspace": [
+                    "report.md"
+                  ]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-41>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-42>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 7,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_16_0",
+                      "name": "dw_write_section",
+                      "arguments": {
+                        "heading": "Gaps closed",
+                        "markdown": "gap-1 closed."
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 349,
+                  "outputTokens": 17,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-43>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-44>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_16_0",
+                "toolName": "dw_write_section",
+                "status": "ok",
+                "content": "{\"heading\":\"Gaps closed\",\"replaced\":false,\"sections\":[\"Findings\",\"Gaps closed\"]}",
+                "isError": false,
+                "details": {
+                  "workspace": [
+                    "report.md"
+                  ]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-v1>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-v2>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 8,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_v_0",
+                      "name": "verifier",
+                      "arguments": {
+                        "prompt": "VERIFY the draft report"
+                      }
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 380,
+                  "outputTokens": 9,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-v3>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-v4>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_v_0",
+                "toolName": "verifier",
+                "status": "ok",
+                "content": "{\"unsupported_claims\":[{\"section\":\"Findings\",\"claim\":\"Market grew 40% in 2025\",\"reason\":\"No learning supports the figure\"}],\"missing_citations\":[{\"section\":\"Gaps closed\",\"claim\":\"gap-1 closed.\"}],\"broken_citations\":[]}",
+                "isError": false,
+                "details": {
+                  "result": {
+                    "unsupported_claims": [
+                      {
+                        "section": "Findings",
+                        "claim": "Market grew 40% in 2025",
+                        "reason": "No learning supports the figure"
+                      }
+                    ],
+                    "missing_citations": [
+                      {
+                        "section": "Gaps closed",
+                        "claim": "gap-1 closed."
+                      }
+                    ],
+                    "broken_citations": []
+                  }
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-45>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-46>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 8,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "tool_call",
+                      "id": "call_18_0",
+                      "name": "dw_finalize",
+                      "arguments": {}
+                    }
+                  ],
+                  "stopReason": "tool_use"
+                },
+                "usage": {
+                  "inputTokens": 386,
+                  "outputTokens": 4,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-47>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-48>",
+              "kind": "tool_result",
+              "payload": {
+                "runId": "task_<id-5>",
+                "toolCallId": "call_18_0",
+                "toolName": "dw_finalize",
+                "status": "ok",
+                "content": "{\"report_length\":71,\"artifacts\":[]}",
+                "isError": false,
+                "details": {
+                  "workspace": [
+                    "report.md"
+                  ]
+                },
+                "terminate": false,
+                "attempts": 1
+              },
+              "createdAt": 1000000
+            },
+            {
+              "id": "ent_<id-49>",
+              "conversationId": "conv_<id-2>",
+              "taskId": "task_<id-50>",
+              "kind": "assistant",
+              "payload": {
+                "runId": "task_<id-5>",
+                "round": 9,
+                "message": {
+                  "role": "assistant",
+                  "provider": "fake",
+                  "model": "fake-1",
+                  "blocks": [
+                    {
+                      "type": "text",
+                      "text": "Deep Work complete."
+                    }
+                  ],
+                  "stopReason": "end_turn"
+                },
+                "usage": {
+                  "inputTokens": 398,
+                  "outputTokens": 5,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              },
+              "createdAt": 1000000
+            }
+          ],
+          "live": {
+            "runId": null,
+            "taskId": null,
+            "message": null
+          },
+          "inbox": {
+            "queue": [],
+            "placed": []
+          },
+          "approvals": {
+            "items": []
+          },
+          "questions": {
+            "items": []
+          },
+          "usage": {
+            "requests": 10,
+            "total": {
+              "requests": 10,
+              "inputTokens": 2355,
+              "outputTokens": 130,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "costUsd": null
+            },
+            "byModel": {
+              "fake/fake-1": {
+                "requests": 10,
+                "inputTokens": 2355,
+                "outputTokens": 130,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "byPurpose": {
+              "generation": {
+                "requests": 10,
+                "inputTokens": 2355,
+                "outputTokens": 130,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "agent": {
+            "systemPrompt": "<prompt:orchestrator>",
+            "tools": [
+              "dw_finalize",
+              "dw_get_learnings",
+              "dw_get_report",
+              "dw_start_round",
+              "dw_write_section",
+              "reflector",
+              "research_worker"
+            ],
+            "model": "m/high",
+            "thinking": null,
+            "depth": 0,
+            "metadata": {
+              "purpose": "deep_work.orchestrator",
+              "phase": "execute",
+              "allowedConnectorIds": [],
+              "knowledgeBaseIds": [],
+              "subagents": {
+                "research_worker": {
+                  "model": "m/worker",
+                  "tools": [
+                    "browse_url",
+                    "dw_save_learnings",
+                    "web_search"
+                  ],
+                  "systemPrompt": "<prompt:research_worker>"
+                },
+                "reflector": {
+                  "model": "m/mid",
+                  "tools": [
+                    "dw_get_learnings",
+                    "dw_record_reflection"
+                  ],
+                  "systemPrompt": "<prompt:reflector>"
+                }
+              },
+              "deepWorkRunId": "run-1"
+            },
+            "compaction": null,
+            "maxRounds": 40,
+            "deadlineMs": 1000600000
+          },
+          "toolOutput": {},
+          "compaction": {
+            "running": false
+          },
+          "run": {
+            "active": false
+          },
+          "subagents": {
+            "task_<id-11>": {
+              "conversationId": "conv_<id-12>",
+              "submissionId": "subm_<id-13>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "web_search({\"query\":\"q-w1\"})",
+                "dw_save_learnings({\"worker_id\":\"w1\",\"learnings\":[{\"fact\":\"Finding 1 for w1\",\"source_url\":\"https://example.com/w1/1\",\"confidence\":0.8,\"source_title\":\"Source w1\"…"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 163,
+                "outputTokens": 159,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-17>": {
+              "conversationId": "conv_<id-18>",
+              "submissionId": "subm_<id-19>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "dw_get_learnings()",
+                "dw_record_reflection({\"round\":1,\"score\":55,\"gaps\":[\"gap-1: the second angle\"],\"should_continue\":true,\"gap_tasks\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]})"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 287,
+                "outputTokens": 69,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-28>": {
+              "conversationId": "conv_<id-29>",
+              "submissionId": "subm_<id-30>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "web_search({\"query\":\"q-gap-1\"})",
+                "dw_save_learnings({\"worker_id\":\"gap-1\",\"learnings\":[{\"fact\":\"Finding 1 for gap-1\",\"source_url\":\"https://example.com/gap-1/1\",\"confidence\":0.8,\"source_title\":\"S…"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 178,
+                "outputTokens": 171,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-34>": {
+              "conversationId": "conv_<id-35>",
+              "submissionId": "subm_<id-36>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "dw_get_learnings()",
+                "dw_record_reflection({\"round\":2,\"score\":88,\"gaps\":[],\"should_continue\":false})"
+              ],
+              "usage": {
+                "requests": 3,
+                "inputTokens": 454,
+                "outputTokens": 42,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            },
+            "task_<id-v4>": {
+              "conversationId": "conv_<id-v5>",
+              "submissionId": "subm_<id-v6>",
+              "status": "done",
+              "startedAt": "1970-01-01T00:16:40.000Z",
+              "endedAt": "1970-01-01T00:16:40.000Z",
+              "toolCalls": 2,
+              "recent": [
+                "dw_get_report({})"
+              ],
+              "usage": {
+                "requests": 2,
+                "inputTokens": 120,
+                "outputTokens": 40,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "costUsd": null
+              }
+            }
+          },
+          "tasks": {}
+        }
+      }
+    ],
+    "frames": []
   }
 }
