@@ -93,6 +93,26 @@ async def read_report(ctx: DriverContext, session_id: str) -> str | None:
     return r.text if r.status_code == 200 else None
 
 
+SETTLE_S = 30.0
+OPEN_SUBMISSION = ("pending", "active")
+
+
+async def fetch_settled_trace(ctx: DriverContext, conversation_id: str, *, wait: bool = True) -> dict[str, Any]:
+    """The trace once the orchestrator's input is settled.
+
+    The Deep Work row turns terminal when `dw_finalize` has run; the orchestrator's closing assistant message is
+    written a moment later. Reading the trace in between left that last entry out about one run in four, which made
+    repeated runs differ in shape. So wait (bounded) until no submission is pending or active.
+    """
+    deadline = time.monotonic() + (SETTLE_S if wait else 0.0)
+    while True:
+        raw = await fetch_trace(ctx.api, conversation_id, raw=True)
+        open_ = [x for x in raw.get("submissions") or [] if x.get("status") in OPEN_SUBMISSION]
+        if not open_ or time.monotonic() >= deadline or ctx.remaining() <= 0:
+            return raw
+        await asyncio.sleep(POLL_S)
+
+
 async def run(ctx: DriverContext) -> DriverOutput:
     query = ctx.task.input.get("query")
     if not isinstance(query, str) or len(query) < 5:
@@ -113,7 +133,7 @@ async def run(ctx: DriverContext) -> DriverOutput:
     ctx.lap("run", started)
 
     started = time.monotonic()
-    raw = await fetch_trace(ctx.api, conversation_id, raw=True)
+    raw = await fetch_settled_trace(ctx, conversation_id, wait=not timed_out)
     files: dict[str, Any] = {"fixture_urls": fixture_urls(ctx.ew.replay_dir), "learnings": saved_learnings(ctx, session_id)}
     if (report := await read_report(ctx, session_id)) is not None:
         files["report.md"] = report

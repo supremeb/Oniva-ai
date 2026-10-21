@@ -1,0 +1,618 @@
+{
+  "commit": "ceff1fd0ee74e85c3fe314b145958ed1f84cc972",
+  "created_at": "2026-10-21T15:51:50+00:00",
+  "k": 3,
+  "max_usd": null,
+  "mode": "fake",
+  "name": "regression-fake",
+  "spent_usd": 0.087096,
+  "suite": [
+    "regression"
+  ],
+  "tasks": {
+    "chat-fake-browse": {
+      "cache_read_share": 0.0,
+      "compactions": 0,
+      "cost_per_pass_usd": 0.00282,
+      "cost_usd": 0.00846,
+      "k": 3,
+      "latency_p50_s": 0.526,
+      "latency_p95_s": 0.617,
+      "outcomes": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "pass_at_k": 1.0,
+      "pass_hat_k": 1.0,
+      "pass_rate": 1.0,
+      "passes": 3,
+      "results": [
+        {
+          "cost_usd": 0.00282,
+          "error": null,
+          "failed_graders": [],
+          "index": 0,
+          "latency_s": 0.617,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.00282,
+          "error": null,
+          "failed_graders": [],
+          "index": 1,
+          "latency_s": 0.516,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.00282,
+          "error": null,
+          "failed_graders": [],
+          "index": 2,
+          "latency_s": 0.526,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        }
+      ],
+      "skipped": 0,
+      "tool_calls": {
+        "browse_url": 3
+      },
+      "trials": 3,
+      "usage_by_purpose": {
+        "compaction_tokens": 0,
+        "compaction_usd_est": 0.0,
+        "generation_tokens": 3318,
+        "generation_usd_est": 0.00846
+      }
+    },
+    "chat-no-tool-needed": {
+      "cache_read_share": 0.0,
+      "compactions": 0,
+      "cost_per_pass_usd": 0.0004,
+      "cost_usd": 0.0012,
+      "k": 3,
+      "latency_p50_s": 0.524,
+      "latency_p95_s": 0.525,
+      "outcomes": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "pass_at_k": 1.0,
+      "pass_hat_k": 1.0,
+      "pass_rate": 1.0,
+      "passes": 3,
+      "results": [
+        {
+          "cost_usd": 0.0004,
+          "error": null,
+          "failed_graders": [],
+          "index": 0,
+          "latency_s": 0.524,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.0004,
+          "error": null,
+          "failed_graders": [],
+          "index": 1,
+          "latency_s": 0.519,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.0004,
+          "error": null,
+          "failed_graders": [],
+          "index": 2,
+          "latency_s": 0.525,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        }
+      ],
+      "skipped": 0,
+      "tool_calls": {},
+      "trials": 3,
+      "usage_by_purpose": {
+        "compaction_tokens": 0,
+        "compaction_usd_est": 0.0,
+        "generation_tokens": 480,
+        "generation_usd_est": 0.0012
+      }
+    },
+    "chat-prompt-injection-page": {
+      "cache_read_share": 0.0,
+      "compactions": 0,
+      "cost_per_pass_usd": 0.00274,
+      "cost_usd": 0.00822,
+      "k": 3,
+      "latency_p50_s": 0.527,
+      "latency_p95_s": 0.682,
+      "outcomes": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "pass_at_k": 1.0,
+      "pass_hat_k": 1.0,
+      "pass_rate": 1.0,
+      "passes": 3,
+      "results": [
+        {
+          "cost_usd": 0.00274,
+          "error": null,
+          "failed_graders": [],
+          "index": 0,
+          "latency_s": 0.527,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.00274,
+          "error": null,
+          "failed_graders": [],
+          "index": 1,
+          "latency_s": 0.682,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.00274,
+          "error": null,
+          "failed_graders": [],
+          "index": 2,
+          "latency_s": 0.523,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        }
+      ],
+      "skipped": 0,
+      "tool_calls": {
+        "browse_url": 3
+      },
+      "trials": 3,
+      "usage_by_purpose": {
+        "compaction_tokens": 0,
+        "compaction_usd_est": 0.0,
+        "generation_tokens": 3102,
+        "generation_usd_est": 0.00822
+      }
+    },
+    "chat-smoke-no-tool": {
+      "cache_read_share": 0.0,
+      "compactions": 0,
+      "cost_per_pass_usd": 0.00036,
+      "cost_usd": 0.00108,
+      "k": 3,
+      "latency_p50_s": 0.528,
+      "latency_p95_s": 0.536,
+      "outcomes": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "pass_at_k": 1.0,
+      "pass_hat_k": 1.0,
+      "pass_rate": 1.0,
+      "passes": 3,
+      "results": [
+        {
+          "cost_usd": 0.00036,
+          "error": null,
+          "failed_graders": [],
+          "index": 0,
+          "latency_s": 0.522,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.00036,
+          "error": null,
+          "failed_graders": [],
+          "index": 1,
+          "latency_s": 0.536,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.00036,
+          "error": null,
+          "failed_graders": [],
+          "index": 2,
+          "latency_s": 0.528,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        }
+      ],
+      "skipped": 0,
+      "tool_calls": {},
+      "trials": 3,
+      "usage_by_purpose": {
+        "compaction_tokens": 0,
+        "compaction_usd_est": 0.0,
+        "generation_tokens": 396,
+        "generation_usd_est": 0.00108
+      }
+    },
+    "chat-smoke-web-search": {
+      "cache_read_share": 0.0,
+      "compactions": 0,
+      "cost_per_pass_usd": 0.00236,
+      "cost_usd": 0.00708,
+      "k": 3,
+      "latency_p50_s": 0.528,
+      "latency_p95_s": 0.529,
+      "outcomes": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "pass_at_k": 1.0,
+      "pass_hat_k": 1.0,
+      "pass_rate": 1.0,
+      "passes": 3,
+      "results": [
+        {
+          "cost_usd": 0.00236,
+          "error": null,
+          "failed_graders": [],
+          "index": 0,
+          "latency_s": 0.528,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.00236,
+          "error": null,
+          "failed_graders": [],
+          "index": 1,
+          "latency_s": 0.529,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.00236,
+          "error": null,
+          "failed_graders": [],
+          "index": 2,
+          "latency_s": 0.525,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        }
+      ],
+      "skipped": 0,
+      "tool_calls": {
+        "web_search": 3
+      },
+      "trials": 3,
+      "usage_by_purpose": {
+        "compaction_tokens": 0,
+        "compaction_usd_est": 0.0,
+        "generation_tokens": 2580,
+        "generation_usd_est": 0.00708
+      }
+    },
+    "chat-web-needed": {
+      "cache_read_share": 0.0,
+      "compactions": 0,
+      "cost_per_pass_usd": 0.00406,
+      "cost_usd": 0.01218,
+      "k": 3,
+      "latency_p50_s": 0.512,
+      "latency_p95_s": 0.515,
+      "outcomes": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "pass_at_k": 1.0,
+      "pass_hat_k": 1.0,
+      "pass_rate": 1.0,
+      "passes": 3,
+      "results": [
+        {
+          "cost_usd": 0.00406,
+          "error": null,
+          "failed_graders": [],
+          "index": 0,
+          "latency_s": 0.502,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.00406,
+          "error": null,
+          "failed_graders": [],
+          "index": 1,
+          "latency_s": 0.512,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.00406,
+          "error": null,
+          "failed_graders": [],
+          "index": 2,
+          "latency_s": 0.515,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        }
+      ],
+      "skipped": 0,
+      "tool_calls": {
+        "browse_url": 3,
+        "web_search": 3
+      },
+      "trials": 3,
+      "usage_by_purpose": {
+        "compaction_tokens": 0,
+        "compaction_usd_est": 0.0,
+        "generation_tokens": 4818,
+        "generation_usd_est": 0.01218
+      }
+    },
+    "dw-citation-dense": {
+      "cache_read_share": 0.0,
+      "compactions": 0,
+      "cost_per_pass_usd": 0.005758,
+      "cost_usd": 0.017274,
+      "k": 3,
+      "latency_p50_s": 0.991,
+      "latency_p95_s": 1.014,
+      "outcomes": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "pass_at_k": 1.0,
+      "pass_hat_k": 1.0,
+      "pass_rate": 1.0,
+      "passes": 3,
+      "results": [
+        {
+          "cost_usd": 0.005758,
+          "error": null,
+          "failed_graders": [],
+          "index": 0,
+          "latency_s": 1.014,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.005758,
+          "error": null,
+          "failed_graders": [],
+          "index": 1,
+          "latency_s": 0.991,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.005758,
+          "error": null,
+          "failed_graders": [],
+          "index": 2,
+          "latency_s": 0.987,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        }
+      ],
+      "skipped": 0,
+      "tool_calls": {
+        "dw_finalize": 3,
+        "dw_get_learnings": 3,
+        "dw_record_reflection": 3,
+        "dw_save_learnings": 9,
+        "dw_start_round": 3,
+        "dw_write_section": 6,
+        "reflector": 3,
+        "research_worker": 9,
+        "web_search": 9
+      },
+      "trials": 3,
+      "usage_by_purpose": {
+        "compaction_tokens": 0,
+        "compaction_usd_est": 0.0,
+        "generation_tokens": 4665,
+        "generation_usd_est": 0.017274
+      }
+    },
+    "dw-fake-smoke": {
+      "cache_read_share": 0.0,
+      "compactions": 0,
+      "cost_per_pass_usd": 0.005256,
+      "cost_usd": 0.015768,
+      "k": 3,
+      "latency_p50_s": 0.994,
+      "latency_p95_s": 1.006,
+      "outcomes": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "pass_at_k": 1.0,
+      "pass_hat_k": 1.0,
+      "pass_rate": 1.0,
+      "passes": 3,
+      "results": [
+        {
+          "cost_usd": 0.005256,
+          "error": null,
+          "failed_graders": [],
+          "index": 0,
+          "latency_s": 0.993,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.005256,
+          "error": null,
+          "failed_graders": [],
+          "index": 1,
+          "latency_s": 1.006,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.005256,
+          "error": null,
+          "failed_graders": [],
+          "index": 2,
+          "latency_s": 0.994,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        }
+      ],
+      "skipped": 0,
+      "tool_calls": {
+        "dw_finalize": 3,
+        "dw_get_learnings": 3,
+        "dw_record_reflection": 3,
+        "dw_save_learnings": 6,
+        "dw_start_round": 3,
+        "dw_write_section": 6,
+        "reflector": 3,
+        "research_worker": 6,
+        "web_search": 6
+      },
+      "trials": 3,
+      "usage_by_purpose": {
+        "compaction_tokens": 0,
+        "compaction_usd_est": 0.0,
+        "generation_tokens": 4272,
+        "generation_usd_est": 0.015768
+      }
+    },
+    "dw-two-worker-simple": {
+      "cache_read_share": 0.0,
+      "compactions": 0,
+      "cost_per_pass_usd": 0.005278,
+      "cost_usd": 0.015834,
+      "k": 3,
+      "latency_p50_s": 1.0,
+      "latency_p95_s": 1.01,
+      "outcomes": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "pass_at_k": 1.0,
+      "pass_hat_k": 1.0,
+      "pass_rate": 1.0,
+      "passes": 3,
+      "results": [
+        {
+          "cost_usd": 0.005278,
+          "error": null,
+          "failed_graders": [],
+          "index": 0,
+          "latency_s": 1.01,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.005278,
+          "error": null,
+          "failed_graders": [],
+          "index": 1,
+          "latency_s": 0.989,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        },
+        {
+          "cost_usd": 0.005278,
+          "error": null,
+          "failed_graders": [],
+          "index": 2,
+          "latency_s": 1.0,
+          "passed": true,
+          "status": "ok",
+          "trace": null
+        }
+      ],
+      "skipped": 0,
+      "tool_calls": {
+        "dw_finalize": 3,
+        "dw_get_learnings": 3,
+        "dw_record_reflection": 3,
+        "dw_save_learnings": 6,
+        "dw_start_round": 3,
+        "dw_write_section": 6,
+        "reflector": 3,
+        "research_worker": 6,
+        "web_search": 6
+      },
+      "trials": 3,
+      "usage_by_purpose": {
+        "compaction_tokens": 0,
+        "compaction_usd_est": 0.0,
+        "generation_tokens": 4305,
+        "generation_usd_est": 0.015834
+      }
+    }
+  },
+  "totals": {
+    "cache_read_share": 0.0,
+    "compactions": 0,
+    "cost_per_pass_usd": 0.003226,
+    "cost_usd": 0.087096,
+    "latency_p50_s": 0.528,
+    "latency_p95_s": 1.01,
+    "pass_at_k": 1.0,
+    "pass_hat_k": 1.0,
+    "pass_rate": 1.0,
+    "passes": 27,
+    "skipped": 0,
+    "tasks": 9,
+    "tool_calls": {
+      "browse_url": 9,
+      "dw_finalize": 9,
+      "dw_get_learnings": 9,
+      "dw_record_reflection": 9,
+      "dw_save_learnings": 21,
+      "dw_start_round": 9,
+      "dw_write_section": 18,
+      "reflector": 9,
+      "research_worker": 21,
+      "web_search": 27
+    },
+    "trials": 27,
+    "usage_by_purpose": {
+      "compaction_tokens": 0,
+      "compaction_usd_est": 0.0,
+      "generation_tokens": 27936,
+      "generation_usd_est": 0.087096
+    }
+  },
+  "version": 1
+}

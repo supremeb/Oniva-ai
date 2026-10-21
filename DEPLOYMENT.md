@@ -581,6 +581,13 @@ the worker answers; start a Deep Work run to confirm the subagent tools. If a re
 - Engine routes return 502: the worker is not up, or `ENGINE_URL` / the tokens do not match.
 - `relation ... does not exist` from the backend: step 3 migrations were not run as the owner.
 
+## Evals
+
+The eval harness (`backend/evals/`, see `TESTING.md`) is tooling only. `EVAL_OPENROUTER_API_KEY`, `EVAL_MAX_USD` and
+the other `EVAL_*` variables are never set in a deployed environment (not in `docker-compose.prod.yml`, `k8s/`,
+`terraform/` or the secrets of the running services): the eval key is a separate, credit-limited OpenRouter key kept
+in a developer's local `.env`. The CI eval job runs in fake mode and has no key.
+
 ## Security Checklist
 
 - [ ] Change all default passwords
