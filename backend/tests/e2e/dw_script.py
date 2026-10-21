@@ -82,11 +82,22 @@ def _learning(worker: str, n: int) -> Dict[str, Any]:
 
 
 def _scenario_rules(name: str) -> List[Dict[str, Any]]:
-    cfg = SCENARIOS[name]
-    ids, queries = worker_ids(name), sub_queries(name)
+    return scenario_rules(title(name), worker_ids(name), sub_queries(name), SCENARIOS[name]["prefix"],
+                          sandbox=SCENARIOS[name]["sandbox"], hold=SCENARIOS[name]["hold"])
+
+
+def scenario_rules(plan_title: str, ids: List[str], queries: List[str], prefix: str, *, sandbox: bool = False,
+                   hold: Any = None, findings_md: Any = None) -> List[Dict[str, Any]]:
+    """The rules of one research scenario, from explicit parts (the eval harness builds its own scenarios).
+
+    ``plan_title`` is the plan's title (it is in the orchestrator's first message), ``ids`` the worker ids (each must
+    start with ``prefix``), ``queries`` one search per worker. ``hold`` is ``"search"``/``"write"`` (the recovery
+    scenarios) or ``None`` for a plain run. ``findings_md`` replaces the text of the "Findings" section.
+    """
+    cfg = {"prefix": prefix, "sandbox": sandbox, "hold": hold}
     rules: List[Dict[str, Any]] = [
         # --- orchestrator: start the round with both workers in one message ---
-        _rule({"role": "user", "includes": title(name)}, [_call("dw_start_round", {
+        _rule({"role": "user", "includes": plan_title}, [_call("dw_start_round", {
             "round": 1, "workers": [{"worker_id": w, "sub_query": q} for w, q in zip(ids, queries)]})]),
         _rule({"role": "tool_result", "tool": "dw_start_round", "includes": ids[0]}, [
             _call("research_worker", {"prompt": f"WORKER {w}: {q}"}) for w, q in zip(ids, queries)]),
@@ -95,7 +106,8 @@ def _scenario_rules(name: str) -> List[Dict[str, Any]]:
               [_call("e2e_hold", {"note": f"{cfg['prefix']}-root"})] if cfg["hold"] == "write" else
               [_call("reflector", {"prompt": f"REFLECT {cfg['prefix']} round 1"})]),
         _rule({"role": "tool_result", "tool": "reflector", "includes": f"reflected {cfg['prefix']}"}, [
-            _call("dw_write_section", {"heading": "Findings", "markdown": f"Researched {queries[0]} and {queries[1]}."})]),
+            _call("dw_write_section", {"heading": "Findings", "markdown": findings_md
+                                       or f"Researched {queries[0]} and {queries[1]}."})]),
         # --- reflector ---
         _rule({"role": "user", "includes": f"REFLECT {cfg['prefix']}"}, [_call("dw_get_learnings", {})]),
         _rule({"role": "tool_result", "tool": "dw_get_learnings", "includes": f"{cfg['prefix']}-w1"}, [
@@ -135,10 +147,15 @@ def build() -> Dict[str, Any]:
     ]
     for n in SCENARIOS:
         rules += _scenario_rules(n)
-    rules += [
+    rules += finish_rules()
+    return {"rules": rules}
+
+
+def finish_rules() -> List[Dict[str, Any]]:
+    """After the Findings section: a Method section, ``dw_finalize`` and the closing text (scenario-independent)."""
+    return [
         _rule({"role": "tool_result", "tool": "dw_write_section", "includes": "Method"}, [_call("dw_finalize", {})]),
         _rule({"role": "tool_result", "tool": "dw_write_section"}, [
             _call("dw_write_section", {"heading": "Method", "markdown": "Two parallel workers and one reflection round."})]),
         _rule({"role": "tool_result", "tool": "dw_finalize"}, [_text(FINAL_TEXT)]),
     ]
-    return {"rules": rules}

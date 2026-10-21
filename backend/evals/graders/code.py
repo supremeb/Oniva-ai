@@ -57,29 +57,28 @@ def cache_hit_ratio(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
 
 
 # --- raw-trace checks -------------------------------------------------------
+#
+# How these look in a real trace (recorded from fake-mode runs; tests/evals/fixtures/trace_fake_*.json):
+# - a tool call the engine refused for exceeding the per-round cap is a `tool_result` entry whose payload
+#   `status` is "limit_exceeded" (`isError` true, `details` null); there is no `reason`/`error`/`code` key;
+# - a run that fails before answering leaves a `run_error` entry whose `error` is the provider's ModelError;
+#   `compaction_failed` is in no entry. It is the reason the run's submission ended `unanswered`, which the
+#   trace route reports under `submissions` (`{status: "unanswered", unanswered: {reason, message}}`).
 
-_MARKER_KEYS = {"reason", "error", "code", "errorCode"}
-
-
-def markers(value: Any) -> Iterator[str]:
-    """String values under reason/error/code keys, at any depth of a payload."""
-    if isinstance(value, dict):
-        for k, v in value.items():
-            if k in _MARKER_KEYS and isinstance(v, str):
-                yield v
-            else:
-                yield from markers(v)
-    elif isinstance(value, list):
-        for v in value:
-            yield from markers(v)
+LIMIT_EXCEEDED = "limit_exceeded"
+COMPACTION_FAILED = "compaction_failed"
 
 
-def _find_marker(ctx: GradeContext, wanted: str) -> list[str]:
-    return [
-        str(e.get("id") or e.get("kind"))
-        for e in ctx.entries()
-        if wanted in set(markers(e.get("payload") or {}))
-    ]
+def unanswered_submissions(ctx: GradeContext, reason: str | None = None) -> Iterator[dict[str, Any]]:
+    """Submissions of the root and each child that ended unanswered (optionally with one `reason`)."""
+    raw = ctx.raw or {}
+    groups = [raw.get("submissions") or []]
+    groups += [c.get("submissions") or [] for c in (raw.get("children") or {}).values()]
+    for group in groups:
+        for sub in group:
+            why = sub.get("unanswered") or {}
+            if sub.get("status") == "unanswered" and (reason is None or why.get("reason") == reason):
+                yield sub
 
 
 def no_run_error(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
@@ -96,20 +95,31 @@ def no_run_error(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
 
 
 def no_compaction_failure(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
-    """Fail on an input settled `unanswered(compaction_failed)` unless `allow` (expected-failure tasks)."""
+    """Fail when an input ended `unanswered(compaction_failed)`, unless `allow` (expected-failure tasks).
+
+    Reads the trace's `submissions`, not the entries (see the note above). A raw trace without `submissions`
+    (recorded before the route reported them) cannot answer the question, so the check fails closed.
+    """
     if ctx.raw is None:
         return needs_raw("no_compaction_failure")
-    hits = _find_marker(ctx, "compaction_failed")
+    if ctx.raw.get("submissions") is None:
+        return outcome(False, "no_compaction_failure needs the trace's 'submissions'; this raw trace has none")
+    hits = [s.get("requestId") or s.get("id") for s in unanswered_submissions(ctx, COMPACTION_FAILED)]
     if hits and params.get("allow"):
         return outcome(True, f"{len(hits)} compaction_failed (allowed)")
-    return outcome(not hits, f"compaction_failed in entries {hits}" if hits else "no compaction failures")
+    return outcome(not hits, f"compaction_failed ended submissions {hits}" if hits else "no compaction failures")
 
 
 def no_limit_exceeded(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
+    """Fail when a tool call got a `limit_exceeded` result (too many calls in a round, subagent depth)."""
     if ctx.raw is None:
         return needs_raw("no_limit_exceeded")
-    hits = _find_marker(ctx, "limit_exceeded")
-    return outcome(not hits, f"limit_exceeded in entries {hits}" if hits else "no limit_exceeded results")
+    hits = [
+        f"{(e.get('payload') or {}).get('toolName')}:{e.get('id')}"
+        for e in ctx.entries()
+        if e.get("kind") == "tool_result" and (e.get("payload") or {}).get("status") == LIMIT_EXCEEDED
+    ]
+    return outcome(not hits, f"limit_exceeded results: {', '.join(hits)}" if hits else "no limit_exceeded results")
 
 
 def _is_call(s: Span) -> bool:

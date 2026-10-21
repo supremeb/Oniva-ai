@@ -1,0 +1,24 @@
+# Test input, not corpus: two long replies, then a reply that reports a near-full context, so turn three must compact
+# first; the summary request errors, and the run ends unanswered(compaction_failed). Used to record how a compaction
+# failure really appears in a trace.
+id: fail-compaction
+kind: chat
+tags: []
+input:
+  turns: ["Turn one: tell me a lot", "Turn two: and some more", "Turn three: now answer briefly"]
+fake:
+  rules:
+    - when: { role: user, includes: "Summarize the conversation above." }
+      respond:
+        steps: [{ type: error, kind: invalid_request, message: "the summary model refused the request" }]
+    - when: { role: user, includes: "Turn one" }
+      respond:
+        steps: [{ type: text, text: "Lorem ipsum dolor sit amet. ", repeat: 4000 }]
+        usage: { inputTokens: 500, outputTokens: 28000 }
+    - when: { role: user, includes: "Turn two" }
+      respond:
+        steps: [{ type: text, text: "Consectetur adipiscing elit. ", repeat: 4000 }]
+        usage: { inputTokens: 29000, outputTokens: 190000 }
+graders:
+  - { id: no-compaction-failure, type: no_compaction_failure }
+  - { id: no-run-error, type: no_run_error }

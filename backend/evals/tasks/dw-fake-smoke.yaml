@@ -1,0 +1,32 @@
+# A two-worker Deep Work run. Fake mode: the orchestrator, workers and reflector follow the e2e Deep Work script
+# (start round, search, save learnings, reflect, two sections, finalize). Searches are served from
+# evals/fixtures/web; the learnings' source URLs are the ones those fixtures list.
+id: dw-fake-smoke
+kind: deep_work
+tags: [smoke, regression]
+input:
+  query: "Compare the pricing of the two smoke-test vendors"
+  plan:
+    title: DWPLAN_EVAL_SMOKE
+    sub_queries:
+      - { worker_id: es-w1, sub_query: "eval smoke es-w1 vendor pricing", tools: [web_search] }
+      - { worker_id: es-w2, sub_query: "eval smoke es-w2 vendor pricing", tools: [web_search] }
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: "Vendor one lists two price points [1][2]. Vendor two lists two more [3][4]."
+graders:
+  - { id: no-run-error, type: no_run_error }
+  - { id: no-limit-exceeded, type: no_limit_exceeded }
+  - { id: no-compaction-failure, type: no_compaction_failure }
+  - { id: tool-order, type: tool_order }
+  - { id: workers-ok, type: no_failed_workers }
+  - { id: citations-map, type: citation_map }
+  - { id: learnings-sourced, type: learning_sources }
+  - { id: urls-resolve, type: url_resolves }
+  - { id: tools-ok, type: tool_error_rate, params: { max_rate: 0.0 } }
+  - { id: budget, type: budget, params: { max_usd: 1.0, max_rounds: 8 } }
+budget:
+  max_usd: 1.0
+  max_rounds: 8

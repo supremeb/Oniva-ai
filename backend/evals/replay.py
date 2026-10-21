@@ -181,3 +181,24 @@ def install_from_env(env: Mapping[str, str] | None = None) -> bool:
         return False
     install(mode, directory, miss_log=env.get("EVAL_REPLAY_MISS_LOG") or None)
     return True
+
+
+def fixture_urls(root: Path | str) -> list[str]:
+    """Every URL a fixture in ``root`` carries (search result URLs and fetched page URLs), sorted and unique.
+
+    What the `url_resolves` grader checks learnings' source URLs against.
+    """
+    root = Path(root)
+    urls: set[str] = set()
+    for path in sorted(root.glob("*.json")):
+        if path.name == "index.json":
+            continue
+        result = json.loads(path.read_text()).get("result")
+        if not isinstance(result, dict):
+            continue
+        if isinstance(result.get("url"), str):
+            urls.add(result["url"])
+        for item in result.get("results") or []:
+            if isinstance(item, dict) and isinstance(item.get("url"), str):
+                urls.add(item["url"])
+    return sorted(urls)

@@ -202,7 +202,7 @@ def _merge_page(into: dict[str, Any], page: dict[str, Any]) -> None:
             kids[cid]["entries"] = [*kids[cid]["entries"], *child.get("entries", [])]
         else:
             kids[cid] = child
-    for key in ("usage", "taint", "compactions", "agent"):
+    for key in ("usage", "taint", "compactions", "agent", "submissions"):
         into[key] = page.get(key, into.get(key))
     into["truncated"] = bool(page.get("truncated"))
     into["nextCursor"] = page.get("nextCursor")

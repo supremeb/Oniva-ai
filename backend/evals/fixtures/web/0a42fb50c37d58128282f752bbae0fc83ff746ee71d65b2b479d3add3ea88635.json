@@ -1,0 +1,13 @@
+{
+  "key": "0a42fb50c37d58128282f752bbae0fc83ff746ee71d65b2b479d3add3ea88635",
+  "tool": "browse_url",
+  "args": {
+    "url": "https://example.com/pricing",
+    "extract_text": true
+  },
+  "result": {
+    "url": "https://example.com/pricing",
+    "status": "ok",
+    "content": "Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales."
+  }
+}

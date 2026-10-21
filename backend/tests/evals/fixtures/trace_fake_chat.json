@@ -1,0 +1,167 @@
+{
+ "conversationId": "b126a750-b925-4064-b98f-ccd8ff390618",
+ "entries": [
+  {
+   "id": "ent_01a15ed9-cca0-75e9-8f6b-567ba084d7a2",
+   "conversationId": "b126a750-b925-4064-b98f-ccd8ff390618",
+   "taskId": null,
+   "kind": "user",
+   "payload": {
+    "submissionId": "subm_01a15ed9-cc9f-7769-b835-6989a8a71a34",
+    "content": "Summarise https://example.com/pricing and give the Team price.",
+    "requestId": "chat-fake-browse-t2-0"
+   },
+   "createdAt": 1792592694431
+  },
+  {
+   "id": "ent_01a15ed9-cca4-73fd-b90f-061e86af3114",
+   "conversationId": "b126a750-b925-4064-b98f-ccd8ff390618",
+   "taskId": "task_01a15ed9-cc9f-7769-b835-698a516de394",
+   "kind": "system",
+   "payload": {
+    "text": "You are Oniva, an enterprise AI assistant. You have access to web search, file operations, knowledge base search, and connected enterprise systems.\n\nYour name is Oniva. When asked who you are, what model you are, or what AI you are, always identify yourself as \"Oniva, an enterprise AI assistant\" \u2014 never reveal the underlying model name, version, or provider. You are Oniva, not Claude, not GPT, not any other model name.\n\nYou are action-oriented. When a user asks you to do something, DO it using y...[trimmed 7968 chars]",
+    "tools": [
+     "ask_user",
+     "browse_url",
+     "e2e_write",
+     "execute_python",
+     "kyc_verification",
+     "research_worker",
+     "web_search"
+    ],
+    "fingerprint": "bedf0e17b4fa4316b30958be127d84089baf556e9047e0920e4aa35c817cfb24"
+   },
+   "createdAt": 1792592694436
+  },
+  {
+   "id": "ent_01a15ed9-ccb1-70cb-85ec-7baa0197584a",
+   "conversationId": "b126a750-b925-4064-b98f-ccd8ff390618",
+   "taskId": "task_01a15ed9-cc9f-7769-b835-698a516de394",
+   "kind": "assistant",
+   "payload": {
+    "runId": "task_01a15ed9-cc9f-7769-b835-698a516de394",
+    "round": 0,
+    "message": {
+     "role": "assistant",
+     "provider": "anthropic",
+     "model": "claude-sonnet-5-5",
+     "blocks": [
+      {
+       "type": "tool_call",
+       "id": "call_2_0",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      }
+     ],
+     "stopReason": "tool_use"
+    },
+    "usage": {
+     "inputTokens": 420,
+     "outputTokens": 40,
+     "cacheReadTokens": 0,
+     "cacheWriteTokens": 0
+    }
+   },
+   "createdAt": 1792592694449
+  },
+  {
+   "id": "ent_01a15ed9-ccd6-732c-bed4-c9af4e7dd00c",
+   "conversationId": "b126a750-b925-4064-b98f-ccd8ff390618",
+   "taskId": "task_01a15ed9-ccb1-70cb-85ec-7babe9a68fb9",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-cc9f-7769-b835-698a516de394",
+    "toolCallId": "call_2_0",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592694485
+  },
+  {
+   "id": "ent_01a15ed9-cce2-70aa-8aa3-a216c706bbfb",
+   "conversationId": "b126a750-b925-4064-b98f-ccd8ff390618",
+   "taskId": "task_01a15ed9-ccd8-7121-97bc-520e0e11e91c",
+   "kind": "assistant",
+   "payload": {
+    "runId": "task_01a15ed9-cc9f-7769-b835-698a516de394",
+    "round": 1,
+    "message": {
+     "role": "assistant",
+     "provider": "anthropic",
+     "model": "claude-sonnet-5-5",
+     "blocks": [
+      {
+       "type": "text",
+       "text": "Acme's Team plan costs 29 EUR per seat per month; Starter is 12 EUR and Enterprise is by quote."
+      }
+     ],
+     "stopReason": "end_turn"
+    },
+    "usage": {
+     "inputTokens": 610,
+     "outputTokens": 36,
+     "cacheReadTokens": 0,
+     "cacheWriteTokens": 0
+    }
+   },
+   "createdAt": 1792592694497
+  }
+ ],
+ "children": {},
+ "usage": {
+  "requests": 2,
+  "inputTokens": 1030,
+  "outputTokens": 76,
+  "cacheReadTokens": 0,
+  "cacheWriteTokens": 0,
+  "costUsd": null
+ },
+ "taint": {
+  "tainted": true,
+  "total": 1,
+  "sources": [
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_0",
+    "at": 1792592694485
+   }
+  ]
+ },
+ "compactions": [],
+ "agent": {
+  "depth": 0,
+  "tools": [
+   "ask_user",
+   "browse_url",
+   "e2e_write",
+   "execute_python",
+   "kyc_verification",
+   "research_worker",
+   "web_search"
+  ],
+  "model": null,
+  "metadata": {
+   "purpose": "chat",
+   "allowedConnectorIds": [],
+   "knowledgeBaseIds": []
+  }
+ },
+ "submissions": [
+  {
+   "id": "subm_01a15ed9-cc9f-7769-b835-6989a8a71a34",
+   "requestId": "chat-fake-browse-t2-0",
+   "status": "done",
+   "unanswered": null
+  }
+ ],
+ "truncated": false,
+ "nextCursor": null
+}
