@@ -168,6 +168,8 @@ export type ToolTaskCheckpoint = {
   subagent?: SubagentLink;
   /** A subagent call's optional label (U18), for steering by name. */
   label?: string;
+  /** A typed-result subagent's one follow-up submission to its child (U19). */
+  nudge?: { submissionId: string };
 } | null;
 
 /** A tool task's `done` value. */
