@@ -90,10 +90,7 @@
                 "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -202,19 +199,12 @@
               "subagents": {
                 "research_worker": {
                   "model": "m/worker",
-                  "tools": [
-                    "browse_url",
-                    "dw_save_learnings",
-                    "web_search"
-                  ],
+                  "tools": ["browse_url", "dw_save_learnings", "web_search"],
                   "systemPrompt": "<prompt:research_worker>"
                 },
                 "reflector": {
                   "model": "m/mid",
-                  "tools": [
-                    "dw_get_learnings",
-                    "dw_record_reflection"
-                  ],
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
                   "systemPrompt": "<prompt:reflector>"
                 }
               },
@@ -246,9 +236,7 @@
               "status": "running",
               "startedAt": "1970-01-01T00:16:40.000Z",
               "toolCalls": 1,
-              "recent": [
-                "web_search({\"query\":\"q-w1\"})"
-              ],
+              "recent": ["web_search({\"query\":\"q-w1\"})"],
               "usage": {
                 "requests": 1,
                 "inputTokens": 10,
@@ -350,10 +338,7 @@
                 "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -518,19 +503,12 @@
               "subagents": {
                 "research_worker": {
                   "model": "m/worker",
-                  "tools": [
-                    "browse_url",
-                    "dw_save_learnings",
-                    "web_search"
-                  ],
+                  "tools": ["browse_url", "dw_save_learnings", "web_search"],
                   "systemPrompt": "<prompt:research_worker>"
                 },
                 "reflector": {
                   "model": "m/mid",
-                  "tools": [
-                    "dw_get_learnings",
-                    "dw_record_reflection"
-                  ],
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
                   "systemPrompt": "<prompt:reflector>"
                 }
               },
@@ -687,10 +665,7 @@
                 "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -861,10 +836,7 @@
                 "content": "{\"round\":2,\"workers\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -1030,9 +1002,7 @@
                 "content": "{\"heading\":\"Findings\",\"replaced\":false,\"sections\":[\"Findings\"]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "report.md"
-                  ]
+                  "workspace": ["report.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -1086,9 +1056,7 @@
                 "content": "{\"heading\":\"Gaps closed\",\"replaced\":false,\"sections\":[\"Findings\",\"Gaps closed\"]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "report.md"
-                  ]
+                  "workspace": ["report.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -1139,9 +1107,7 @@
                 "content": "{\"report_length\":71,\"artifacts\":[]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "report.md"
-                  ]
+                  "workspace": ["report.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -1246,19 +1212,12 @@
               "subagents": {
                 "research_worker": {
                   "model": "m/worker",
-                  "tools": [
-                    "browse_url",
-                    "dw_save_learnings",
-                    "web_search"
-                  ],
+                  "tools": ["browse_url", "dw_save_learnings", "web_search"],
                   "systemPrompt": "<prompt:research_worker>"
                 },
                 "reflector": {
                   "model": "m/mid",
-                  "tools": [
-                    "dw_get_learnings",
-                    "dw_record_reflection"
-                  ],
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
                   "systemPrompt": "<prompt:reflector>"
                 }
               },
@@ -1422,19 +1381,12 @@
               "subagents": {
                 "research_worker": {
                   "model": "m/worker",
-                  "tools": [
-                    "browse_url",
-                    "dw_save_learnings",
-                    "web_search"
-                  ],
+                  "tools": ["browse_url", "dw_save_learnings", "web_search"],
                   "systemPrompt": "<prompt:research_worker>"
                 },
                 "reflector": {
                   "model": "m/mid",
-                  "tools": [
-                    "dw_get_learnings",
-                    "dw_record_reflection"
-                  ],
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
                   "systemPrompt": "<prompt:reflector>"
                 }
               },
@@ -1677,10 +1629,7 @@
                 "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -2435,10 +2384,7 @@
                 "content": "{\"round\":2,\"workers\":[{\"worker_id\":\"gap-1\",\"sub_query\":\"q-gap-1\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -3188,9 +3134,7 @@
                 "content": "{\"heading\":\"Findings\",\"replaced\":false,\"sections\":[\"Findings\"]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "report.md"
-                  ]
+                  "workspace": ["report.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -3362,9 +3306,7 @@
                 "content": "{\"heading\":\"Gaps closed\",\"replaced\":false,\"sections\":[\"Findings\",\"Gaps closed\"]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "report.md"
-                  ]
+                  "workspace": ["report.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -3533,9 +3475,7 @@
                 "content": "{\"report_length\":71,\"artifacts\":[]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "report.md"
-                  ]
+                  "workspace": ["report.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -3789,10 +3729,7 @@
                 "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-FAULT\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -3958,19 +3895,12 @@
               "subagents": {
                 "research_worker": {
                   "model": "m/worker",
-                  "tools": [
-                    "browse_url",
-                    "dw_save_learnings",
-                    "web_search"
-                  ],
+                  "tools": ["browse_url", "dw_save_learnings", "web_search"],
                   "systemPrompt": "<prompt:research_worker>"
                 },
                 "reflector": {
                   "model": "m/mid",
-                  "tools": [
-                    "dw_get_learnings",
-                    "dw_record_reflection"
-                  ],
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
                   "systemPrompt": "<prompt:reflector>"
                 }
               },
@@ -4003,9 +3933,7 @@
               "startedAt": "1970-01-01T00:16:40.000Z",
               "endedAt": "1970-01-01T00:16:40.000Z",
               "toolCalls": 1,
-              "recent": [
-                "web_search({\"query\":\"q-FAULT\"})"
-              ],
+              "recent": ["web_search({\"query\":\"q-FAULT\"})"],
               "usage": {
                 "requests": 2,
                 "inputTokens": 11,
@@ -4126,10 +4054,7 @@
                 "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-FAULT\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -4333,19 +4258,12 @@
               "subagents": {
                 "research_worker": {
                   "model": "m/worker",
-                  "tools": [
-                    "browse_url",
-                    "dw_save_learnings",
-                    "web_search"
-                  ],
+                  "tools": ["browse_url", "dw_save_learnings", "web_search"],
                   "systemPrompt": "<prompt:research_worker>"
                 },
                 "reflector": {
                   "model": "m/mid",
-                  "tools": [
-                    "dw_get_learnings",
-                    "dw_record_reflection"
-                  ],
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
                   "systemPrompt": "<prompt:reflector>"
                 }
               },
@@ -4376,9 +4294,7 @@
               "startedAt": "1970-01-01T00:16:40.000Z",
               "endedAt": "1970-01-01T00:16:40.000Z",
               "toolCalls": 1,
-              "recent": [
-                "web_search({\"query\":\"q-FAULT\"})"
-              ],
+              "recent": ["web_search({\"query\":\"q-FAULT\"})"],
               "usage": {
                 "requests": 2,
                 "inputTokens": 11,
@@ -4468,19 +4384,12 @@
               "subagents": {
                 "research_worker": {
                   "model": "m/worker",
-                  "tools": [
-                    "browse_url",
-                    "dw_save_learnings",
-                    "web_search"
-                  ],
+                  "tools": ["browse_url", "dw_save_learnings", "web_search"],
                   "systemPrompt": "<prompt:research_worker>"
                 },
                 "reflector": {
                   "model": "m/mid",
-                  "tools": [
-                    "dw_get_learnings",
-                    "dw_record_reflection"
-                  ],
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
                   "systemPrompt": "<prompt:reflector>"
                 }
               },
@@ -4723,10 +4632,7 @@
                 "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-FAULT\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -5475,10 +5381,7 @@
                 "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -5587,19 +5490,12 @@
               "subagents": {
                 "research_worker": {
                   "model": "m/worker",
-                  "tools": [
-                    "browse_url",
-                    "dw_save_learnings",
-                    "web_search"
-                  ],
+                  "tools": ["browse_url", "dw_save_learnings", "web_search"],
                   "systemPrompt": "<prompt:research_worker>"
                 },
                 "reflector": {
                   "model": "m/mid",
-                  "tools": [
-                    "dw_get_learnings",
-                    "dw_record_reflection"
-                  ],
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
                   "systemPrompt": "<prompt:reflector>"
                 }
               },
@@ -5631,9 +5527,7 @@
               "status": "running",
               "startedAt": "1970-01-01T00:16:40.000Z",
               "toolCalls": 1,
-              "recent": [
-                "web_search({\"query\":\"q-w1\"})"
-              ],
+              "recent": ["web_search({\"query\":\"q-w1\"})"],
               "usage": {
                 "requests": 1,
                 "inputTokens": 10,
@@ -5735,10 +5629,7 @@
                 "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
@@ -5847,19 +5738,12 @@
               "subagents": {
                 "research_worker": {
                   "model": "m/worker",
-                  "tools": [
-                    "browse_url",
-                    "dw_save_learnings",
-                    "web_search"
-                  ],
+                  "tools": ["browse_url", "dw_save_learnings", "web_search"],
                   "systemPrompt": "<prompt:research_worker>"
                 },
                 "reflector": {
                   "model": "m/mid",
-                  "tools": [
-                    "dw_get_learnings",
-                    "dw_record_reflection"
-                  ],
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
                   "systemPrompt": "<prompt:reflector>"
                 }
               },
@@ -5890,9 +5774,7 @@
               "startedAt": "1970-01-01T00:16:40.000Z",
               "endedAt": "1970-01-01T00:16:40.000Z",
               "toolCalls": 1,
-              "recent": [
-                "web_search({\"query\":\"q-w1\"})"
-              ],
+              "recent": ["web_search({\"query\":\"q-w1\"})"],
               "usage": {
                 "requests": 1,
                 "inputTokens": 10,
@@ -5962,19 +5844,12 @@
               "subagents": {
                 "research_worker": {
                   "model": "m/worker",
-                  "tools": [
-                    "browse_url",
-                    "dw_save_learnings",
-                    "web_search"
-                  ],
+                  "tools": ["browse_url", "dw_save_learnings", "web_search"],
                   "systemPrompt": "<prompt:research_worker>"
                 },
                 "reflector": {
                   "model": "m/mid",
-                  "tools": [
-                    "dw_get_learnings",
-                    "dw_record_reflection"
-                  ],
+                  "tools": ["dw_get_learnings", "dw_record_reflection"],
                   "systemPrompt": "<prompt:reflector>"
                 }
               },
@@ -6217,10 +6092,7 @@
                 "content": "{\"round\":1,\"workers\":[{\"worker_id\":\"w1\",\"sub_query\":\"q-w1\"}]}",
                 "isError": false,
                 "details": {
-                  "workspace": [
-                    "plan.md",
-                    "todo.md"
-                  ]
+                  "workspace": ["plan.md", "todo.md"]
                 },
                 "terminate": false,
                 "attempts": 1
