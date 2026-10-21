@@ -12,6 +12,7 @@ from app.internal_api.models import router as models_router
 from app.internal_api.runs import router as runs_router
 from app.internal_api.tools import router as tools_router
 from app.internal_api.workflow_nodes import router as workflows_router
+from app.internal_api.workspace import router as workspace_router
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ def build_internal_router(settings: Settings) -> APIRouter:
     router.include_router(models_router)
     router.include_router(workflows_router)
     router.include_router(runs_router)
+    router.include_router(workspace_router)
     return router
 
 
