@@ -19,7 +19,7 @@ from app.auth.dependencies import (
     require_platform_operator,
 )
 from app.auth.providers.base import AuthUser
-from app.core.database import get_db, get_db_no_tenant
+from app.core.database import get_db, get_db_no_tenant, get_system_db
 from app.models.compliance_audit_log import AuditAction
 from app.models.tenant import Tenant
 from app.services.audit_chain import AuditChain
@@ -101,9 +101,13 @@ async def toggle_my_tenant_feature(
     flag_name: str,
     body: FeatureToggleRequest,
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_system_db),
 ):
-    """Tenant admin/owner can toggle non-operator-only flags for their own tenant."""
+    """Tenant admin/owner can toggle non-operator-only flags for their own tenant.
+
+    ``db`` is the system session: the tenants table has no RLS UPDATE policy for the app role.
+    The role check above gates the write and it only ever touches the caller's own tenant row.
+    """
     if user.role not in ("owner", "admin"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Requires owner or admin role")
 
@@ -178,6 +182,7 @@ async def update_approval_settings(
     body: ApprovalSettingsUpdate,
     user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    system_db: AsyncSession = Depends(get_system_db),
 ):
     """Admins change TTL and separate-approver; only an owner changes the Rule of Two (audited)."""
     if user.role not in ("owner", "admin"):
@@ -185,7 +190,9 @@ async def update_approval_settings(
     if body.rule_of_two is not None and user.role != "owner":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Changing the Rule of Two requires the owner role")
 
-    tenant = await _get_tenant(db, UUID(user.tenant_id))
+    # Write through the system session (no RLS UPDATE policy on tenants for the app role);
+    # only the caller's own tenant row is loaded and changed, after the role checks above.
+    tenant = await _get_tenant(system_db, UUID(user.tenant_id))
     if not tenant:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
 
@@ -196,7 +203,7 @@ async def update_approval_settings(
         approvals[key] = value
     settings["approvals"] = approvals
     tenant.settings = settings
-    await db.flush()
+    await system_db.flush()
 
     after = _approval_settings(tenant)
     if after.rule_of_two != before.rule_of_two:

@@ -23,7 +23,7 @@ from app.schemas.project import (
     ProjectMemberResponse,
     ProjectTransferOwnership,
 )
-from app.exceptions import OptimisticLockError, EntityNotFoundError, PermissionDeniedError
+from app.exceptions import OptimisticLockError, EntityNotFoundError, EntityConflictError, PermissionDeniedError
 
 logger = logging.getLogger(__name__)
 
@@ -222,8 +222,11 @@ async def add_member(
             invited_by=UUID(user.id),
             tenant_id=tenant_id,
         )
-    except EntityNotFoundError:
-        raise HTTPException(status_code=404, detail="Project not found")
+    except EntityNotFoundError as e:
+        what = "User" if getattr(e, "entity_type", "") == "User" else "Project"
+        raise HTTPException(status_code=404, detail=f"{what} not found")
+    except EntityConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except PermissionDeniedError as e:
         raise HTTPException(status_code=403, detail=str(e))
     return member.to_dict()
@@ -363,14 +366,30 @@ async def upload_project_file(
     # Delegate to document processor
     from app.services.document_processor import DocumentProcessorService
     doc_service = DocumentProcessorService(db)
-    document = await doc_service.upload_document(
-        kb_id=project.knowledge_base_id,
-        tenant_id=tenant_id,
-        filename=file.filename or "untitled",
-        file_content=contents,
-        file_size=len(contents),
-        user_id=UUID(user.id),
-    )
+    from app.services.document_processor import ALLOWED_FILE_TYPES, _sanitize_filename
+    safe_name = _sanitize_filename(file.filename or "untitled")
+    ext = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
+    if ext not in ALLOWED_FILE_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type '.{ext}'. Allowed: {', '.join(sorted(ALLOWED_FILE_TYPES))}",
+        )
+    try:
+        document = await doc_service.upload_document(
+            kb_id=project.knowledge_base_id,
+            tenant_id=tenant_id,
+            filename=file.filename or "untitled",
+            file_content=contents,
+            file_size=len(contents),
+            user_id=UUID(user.id),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # Build the response BEFORE committing: the tenant GUC is transaction-local (SET LOCAL), so a
+    # refresh after the commit runs without tenant context and RLS hides the new row (500).
+    # Embedding/processing failures happen in the background and surface as status="error".
+    await db.refresh(document)
+    response = document.to_dict()
     # Commit so the background task (new DB session) can see the document
     await db.commit()
 
@@ -380,8 +399,7 @@ async def upload_project_file(
     uid = UUID(user.id)
     asyncio.create_task(_process_project_doc_in_background(doc_id, tid, uid))
 
-    await db.refresh(document)
-    return document.to_dict()
+    return response
 
 
 @router.get("/{project_id}/files")

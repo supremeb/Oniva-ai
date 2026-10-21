@@ -32,6 +32,14 @@ class APIKeyBase(BaseModel):
         description="Max requests per hour for this key"
     )
 
+    @field_validator('scopes', mode='before')
+    @classmethod
+    def normalize_scope_list(cls, v):
+        """Existing rows store the default as ``'*:*'`` with literal quotes; normalise on read."""
+        if isinstance(v, (list, tuple)):
+            return [s for s in (str(x).strip().strip("'\"") for x in v) if s]
+        return v
+
     @field_validator('allowed_ip_addresses')
     @classmethod
     def validate_ip_addresses(cls, v: Optional[List[str]]) -> Optional[List[str]]:

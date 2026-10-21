@@ -17,7 +17,7 @@ from app.models.knowledge_base import KnowledgeBase
 from app.models.chat_session import ChatSession
 from app.models.engine import EngineConversation
 from app.models.user import User
-from app.exceptions import OptimisticLockError, EntityNotFoundError, PermissionDeniedError
+from app.exceptions import OptimisticLockError, EntityNotFoundError, EntityConflictError, PermissionDeniedError
 
 
 ProjectRole = Literal["owner", "editor", "viewer"]
@@ -333,6 +333,20 @@ class ProjectService:
         project = await self._get_project_raw(project_id, tenant_id)
         if project.owner_id == user_id:
             raise PermissionDeniedError("add owner as member", "owner")
+
+        target = await self.db.execute(
+            select(User.id).where(User.id == user_id, User.tenant_id == tenant_id)
+        )
+        if target.scalar_one_or_none() is None:
+            raise EntityNotFoundError("User", user_id)
+
+        existing = await self.db.execute(
+            select(ProjectMember.id).where(
+                ProjectMember.project_id == project_id, ProjectMember.user_id == user_id
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise EntityConflictError("User is already a member of this project")
 
         member = ProjectMember(
             project_id=project_id,

@@ -99,7 +99,7 @@ async def list_knowledge_bases(
 
 @router.get("/{kb_id}", response_model=KnowledgeBaseResponse)
 async def get_knowledge_base(
-    kb_id: str,
+    kb_id: UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
@@ -109,7 +109,7 @@ async def get_knowledge_base(
         raise HTTPException(status_code=401, detail="Tenant context required")
 
     service = KnowledgeBaseService(db)
-    kb = await service.get_kb(UUID(kb_id), UUID(str(tenant_id)))
+    kb = await service.get_kb(kb_id, UUID(str(tenant_id)))
     if not kb:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
     return _kb_to_response(kb)
@@ -117,7 +117,7 @@ async def get_knowledge_base(
 
 @router.patch("/{kb_id}", response_model=KnowledgeBaseResponse)
 async def update_knowledge_base(
-    kb_id: str,
+    kb_id: UUID,
     data: KnowledgeBaseUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -129,7 +129,7 @@ async def update_knowledge_base(
 
     service = KnowledgeBaseService(db)
     kb = await service.update_kb(
-        kb_id=UUID(kb_id),
+        kb_id=kb_id,
         tenant_id=UUID(str(tenant_id)),
         name=data.name,
         description=data.description,
@@ -142,7 +142,7 @@ async def update_knowledge_base(
 
 @router.delete("/{kb_id}", status_code=204)
 async def delete_knowledge_base(
-    kb_id: str,
+    kb_id: UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
@@ -152,7 +152,7 @@ async def delete_knowledge_base(
         raise HTTPException(status_code=401, detail="Tenant context required")
 
     service = KnowledgeBaseService(db)
-    deleted = await service.delete_kb(UUID(kb_id), UUID(str(tenant_id)))
+    deleted = await service.delete_kb(kb_id, UUID(str(tenant_id)))
     if not deleted:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
 
@@ -163,7 +163,7 @@ async def delete_knowledge_base(
 
 @router.post("/{kb_id}/documents", response_model=KnowledgeDocumentResponse, status_code=201)
 async def upload_document(
-    kb_id: str,
+    kb_id: UUID,
     request: Request,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
@@ -181,7 +181,7 @@ async def upload_document(
 
     # Verify KB exists
     kb_service = KnowledgeBaseService(db)
-    kb = await kb_service.get_kb(UUID(kb_id), UUID(str(tenant_id)))
+    kb = await kb_service.get_kb(kb_id, UUID(str(tenant_id)))
     if not kb:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
 
@@ -191,13 +191,17 @@ async def upload_document(
     processor = DocumentProcessorService(db)
     try:
         doc = await processor.upload_document(
-            kb_id=UUID(kb_id),
+            kb_id=kb_id,
             tenant_id=UUID(str(tenant_id)),
             filename=file.filename or "unknown",
             file_content=content,
             file_size=len(content),
             user_id=UUID(str(user_id)) if user_id else None,
         )
+        # Build the response BEFORE committing: the tenant GUC is transaction-local (SET LOCAL),
+        # so a refresh after commit runs without tenant context and RLS hides the new row.
+        await db.refresh(doc)
+        response = _doc_to_response(doc)
         await db.commit()
 
         # Dispatch processing as a background task with its own DB session
@@ -214,7 +218,7 @@ async def upload_document(
                         user_id=uid or tid,
                         job_type=JobType.DOCUMENT_PROCESSING.value,
                         status=JobStatus.RUNNING.value,
-                        input_data={"document_id": str(doc_id), "kb_id": kb_id},
+                        input_data={"document_id": str(doc_id), "kb_id": str(kb_id)},
                     )
                     job.start()
                     bg_db.add(job)
@@ -247,8 +251,7 @@ async def upload_document(
         asyncio.create_task(_process_in_background())
 
         # Return doc immediately with status="uploading" — client polls for "ready"
-        await db.refresh(doc)
-        return _doc_to_response(doc)
+        return response
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -256,7 +259,7 @@ async def upload_document(
 
 @router.get("/{kb_id}/documents", response_model=KnowledgeDocumentListResponse)
 async def list_documents(
-    kb_id: str,
+    kb_id: UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
@@ -267,7 +270,7 @@ async def list_documents(
 
     result = await db.execute(
         select(KnowledgeDocument).where(
-            KnowledgeDocument.knowledge_base_id == UUID(kb_id),
+            KnowledgeDocument.knowledge_base_id == kb_id,
             KnowledgeDocument.tenant_id == UUID(str(tenant_id)),
         ).order_by(KnowledgeDocument.created_at.desc())
     )
@@ -280,7 +283,7 @@ async def list_documents(
 
 @router.get("/{kb_id}/documents/{doc_id}", response_model=KnowledgeDocumentResponse)
 async def get_document(
-    kb_id: str,
+    kb_id: UUID,
     doc_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -293,7 +296,7 @@ async def get_document(
     result = await db.execute(
         select(KnowledgeDocument).where(
             KnowledgeDocument.id == UUID(doc_id),
-            KnowledgeDocument.knowledge_base_id == UUID(kb_id),
+            KnowledgeDocument.knowledge_base_id == kb_id,
             KnowledgeDocument.tenant_id == UUID(str(tenant_id)),
         )
     )
@@ -305,7 +308,7 @@ async def get_document(
 
 @router.delete("/{kb_id}/documents/{doc_id}", status_code=204)
 async def delete_document(
-    kb_id: str,
+    kb_id: UUID,
     doc_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -318,7 +321,7 @@ async def delete_document(
     result = await db.execute(
         select(KnowledgeDocument).where(
             KnowledgeDocument.id == UUID(doc_id),
-            KnowledgeDocument.knowledge_base_id == UUID(kb_id),
+            KnowledgeDocument.knowledge_base_id == kb_id,
             KnowledgeDocument.tenant_id == UUID(str(tenant_id)),
         )
     )
@@ -331,12 +334,12 @@ async def delete_document(
 
     # Update KB counts
     kb_service = KnowledgeBaseService(db)
-    await kb_service.update_kb_counts(UUID(kb_id), UUID(str(tenant_id)))
+    await kb_service.update_kb_counts(kb_id, UUID(str(tenant_id)))
 
 
 @router.get("/{kb_id}/documents/{doc_id}/versions", response_model=KnowledgeDocumentListResponse)
 async def list_document_versions(
-    kb_id: str,
+    kb_id: UUID,
     doc_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -350,7 +353,7 @@ async def list_document_versions(
     result = await db.execute(
         select(KnowledgeDocument).where(
             KnowledgeDocument.id == UUID(doc_id),
-            KnowledgeDocument.knowledge_base_id == UUID(kb_id),
+            KnowledgeDocument.knowledge_base_id == kb_id,
             KnowledgeDocument.tenant_id == UUID(str(tenant_id)),
         )
     )
@@ -361,7 +364,7 @@ async def list_document_versions(
     # Find all versions with same filename
     versions_result = await db.execute(
         select(KnowledgeDocument).where(
-            KnowledgeDocument.knowledge_base_id == UUID(kb_id),
+            KnowledgeDocument.knowledge_base_id == kb_id,
             KnowledgeDocument.tenant_id == UUID(str(tenant_id)),
             KnowledgeDocument.filename == doc.filename,
         ).order_by(KnowledgeDocument.version.desc())
@@ -379,7 +382,7 @@ async def list_document_versions(
 
 @router.post("/{kb_id}/search", response_model=KnowledgeSearchResponse)
 async def search_knowledge_base(
-    kb_id: str,
+    kb_id: UUID,
     data: KnowledgeSearchRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -394,7 +397,7 @@ async def search_knowledge_base(
 
     # Verify KB exists
     kb_service = KnowledgeBaseService(db)
-    kb = await kb_service.get_kb(UUID(kb_id), UUID(str(tenant_id)))
+    kb = await kb_service.get_kb(kb_id, UUID(str(tenant_id)))
     if not kb:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
 
@@ -412,7 +415,7 @@ async def search_knowledge_base(
 
     # Search
     results = await kb_service.search_kb(
-        kb_id=UUID(kb_id),
+        kb_id=kb_id,
         tenant_id=UUID(str(tenant_id)),
         query_embedding=query_embedding,
         limit=data.limit,
