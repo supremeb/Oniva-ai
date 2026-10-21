@@ -55,8 +55,8 @@ async def get_org_overview(
 @router.get("/agents", response_model=AgentFleetResponse)
 async def get_agent_fleet(
     request: Request,
-    sort_by: str = Query("created_at", regex="^(name|created_at|updated_at)$"),
-    sort_order: str = Query("desc", regex="^(asc|desc)$"),
+    sort_by: str = Query("created_at", pattern="^(name|created_at|updated_at)$"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),

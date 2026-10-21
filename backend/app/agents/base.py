@@ -70,7 +70,7 @@ class BaseAgent:
 
         settings = get_settings()
 
-        # Normalize model to LiteLLM format (provider/model-name)
+        # Normalize model to the canonical provider/model-name form
         from app.services.llm_gateway import normalize_model_id
         self.model = normalize_model_id(model or settings.DEFAULT_LLM_MODEL)
 
@@ -1090,8 +1090,8 @@ class BaseAgent:
         """
         Run with extended thinking, then pydantic-ai for structured output.
 
-        OpenRouter: calls the API directly with the `reasoning` parameter
-        (LiteLLM strips reasoning from responses, so we bypass it).
+        OpenRouter: calls the API directly with the `reasoning` parameter, which the
+        pydantic-ai model does not surface.
         Other providers: the `thinking` parameter is dropped (debug log).
         """
         from app.services.llm_gateway import create_model
@@ -1128,8 +1128,8 @@ class BaseAgent:
                 if choices:
                     reasoning_text = choices[0].get("message", {}).get("reasoning", "") or ""
             else:
-                # `thinking` was a LiteLLM extension; native providers other than
-                # Anthropic (handled elsewhere) and OpenRouter run without it.
+                # Native providers other than Anthropic (handled elsewhere) and
+                # OpenRouter take no `thinking` parameter: run without it.
                 logger.debug("thinking parameter dropped for non-OpenRouter model %s", model_id)
 
             # Run through pydantic-ai for structured output (with tools, etc.)

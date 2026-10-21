@@ -1,22 +1,28 @@
-"""Guard: litellm is being removed from backend/app (plan 003 U28).
+"""Guard: litellm is gone from the backend (plan 003 U28) and must not come back.
 
-The allowlist holds the legacy v2 Deep Work engine, which is deleted by a separate PR.
-Shrink ALLOWED to empty when that lands, then drop the dependency.
+LiteLLM was replaced by native provider SDKs (``app/services/llm_direct.py``) and the engine. Besides the
+dependency, it used to call ``load_dotenv()`` on import, leaking ``backend/.env`` into tests.
 """
 
+import importlib.util
+import re
+import tomllib
 from pathlib import Path
 
-APP = Path(__file__).resolve().parents[1] / "app"
-ALLOWED = {"services/deep_work/engine.py"}
+BACKEND = Path(__file__).resolve().parents[1]
+APP = BACKEND / "app"
+IMPORT = re.compile(r"^\s*(import|from)\s+litellm\b", re.MULTILINE)
 
 
-def test_litellm_only_appears_in_allowlisted_files():
-    hits = {
-        p.relative_to(APP).as_posix()
-        for p in APP.rglob("*.py")
-        if "litellm" in p.read_text(encoding="utf-8", errors="ignore")
-    }
-    assert hits <= ALLOWED, f"unexpected litellm references: {sorted(hits - ALLOWED)}"
+def test_no_module_imports_litellm():
+    hits = sorted(p.relative_to(APP).as_posix() for p in APP.rglob("*.py") if IMPORT.search(p.read_text(errors="ignore")))
+    assert hits == [], f"litellm imported in: {hits}"
+
+
+def test_litellm_is_not_a_dependency_nor_installed():
+    deps = tomllib.loads((BACKEND / "pyproject.toml").read_text())["project"]["dependencies"]
+    assert not [d for d in deps if d.lower().startswith("litellm")]
+    assert importlib.util.find_spec("litellm") is None
 
 
 def test_create_litellm_model_alias_is_gone():

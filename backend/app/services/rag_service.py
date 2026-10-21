@@ -76,9 +76,8 @@ class RAGService:
     async def get_embedding(self, text_input: str, model: str | None = None) -> Optional[List[float]]:
         """Generate embedding for query text with Redis caching.
 
-        Uses OpenRouter's embeddings API directly for openrouter providers
-        (LiteLLM doesn't support OpenRouter embeddings), otherwise falls back
-        to LiteLLM for OpenAI / other providers.
+        Uses OpenRouter's embeddings API directly for openrouter providers and the
+        native provider SDK (``llm_direct.embed``) for OpenAI and the others.
 
         Returns None on failure (callers must handle gracefully).
         """

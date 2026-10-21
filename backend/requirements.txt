@@ -10,7 +10,6 @@ aiohappyeyeballs==2.7.1
     # via aiohttp
 aiohttp==3.14.5
     # via
-    #   litellm
     #   oniva-backend
     #   xai-sdk
 aiosignal==1.4.0
@@ -68,9 +67,7 @@ beartype==0.23.1
 beautifulsoup4==4.12.3
     # via oniva-backend
 boto3==1.43.113
-    # via
-    #   litellm
-    #   pydantic-ai-slim
+    # via pydantic-ai-slim
 botocore==1.43.113
     # via
     #   boto3
@@ -103,7 +100,6 @@ chonkie-core==0.10.2
 click==8.5.0
     # via
     #   huggingface-hub
-    #   litellm
     #   uvicorn
 cloudpickle==3.1.2
     # via joblib
@@ -174,12 +170,8 @@ fastmcp==3.4.8
     # via pydantic-ai-slim
 fastmcp-slim==3.4.8
     # via fastmcp
-fastuuid==0.14.0
-    # via litellm
 filelock==3.32.7
-    # via
-    #   huggingface-hub
-    #   litellm
+    # via huggingface-hub
 flatbuffers==25.12.19
     # via onnxruntime
 fonttools==4.67.0
@@ -229,9 +221,7 @@ h11==0.16.0
     #   httpcore2
     #   uvicorn
 h2==4.4.1
-    # via
-    #   e2b
-    #   httpx
+    # via e2b
 hf-xet==1.7.0 ; platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
     # via huggingface-hub
 hiredis==3.4.2
@@ -253,7 +243,6 @@ httpx==0.28.1
     #   google-genai
     #   groq
     #   huggingface-hub
-    #   litellm
     #   mcp
     #   oniva-backend
     #   openai
@@ -271,7 +260,6 @@ httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
     # via httpx2
 huggingface-hub==1.33.0
     # via
-    #   litellm
     #   model2vec
     #   pydantic-ai-slim
     #   tokenizers
@@ -285,8 +273,6 @@ idna==3.20
     #   httpx2
     #   requests
     #   yarl
-importlib-metadata==8.9.0
-    # via litellm
 isodate==0.7.2
     # via python3-saml
 jaraco-classes==3.4.0
@@ -300,9 +286,7 @@ jeepney==0.9.0 ; sys_platform == 'linux'
     #   keyring
     #   secretstorage
 jinja2==3.1.6
-    # via
-    #   litellm
-    #   model2vec
+    # via model2vec
 jiter==0.17.0
     # via
     #   anthropic
@@ -324,7 +308,6 @@ jsonref==1.1.0
 jsonschema==4.26.0
     # via
     #   braintrust
-    #   litellm
     #   mcp
 jsonschema-path==0.5.0
     # via fastmcp-slim
@@ -335,8 +318,6 @@ keyring==25.7.0
 kiwisolver==1.5.1
     # via matplotlib
 langsmith==0.14.8
-    # via oniva-backend
-litellm==1.105.1
     # via oniva-backend
 logfire==5.2.0
     # via pydantic-ai-slim
@@ -396,7 +377,6 @@ onnxruntime==1.31.0
     # via pymupdf-layout
 openai==2.54.0
     # via
-    #   litellm
     #   oniva-backend
     #   pydantic-ai-slim
 openapi-pydantic==0.6.0
@@ -490,7 +470,6 @@ packaging==25.0
     #   fastmcp-slim
     #   huggingface-hub
     #   langsmith
-    #   litellm
     #   matplotlib
     #   onnxruntime
     #   opentelemetry-instrumentation
@@ -553,7 +532,6 @@ pydantic==2.14.1
     #   google-genai
     #   groq
     #   langsmith
-    #   litellm
     #   mcp
     #   mistralai
     #   oniva-backend
@@ -584,7 +562,6 @@ pydantic-handlebars==0.2.1
 pydantic-settings==2.16.0
     # via
     #   fastmcp-slim
-    #   litellm
     #   mcp
     #   oniva-backend
 pygments==2.21.0
@@ -626,7 +603,6 @@ python-docx==1.2.0
 python-dotenv==1.2.4
     # via
     #   fastmcp-slim
-    #   litellm
     #   oniva-backend
     #   pydantic-settings
     #   uvicorn
@@ -656,7 +632,6 @@ pyyaml==6.0.3
     #   fastmcp-slim
     #   huggingface-hub
     #   jsonschema-path
-    #   litellm
     #   pydantic-ai-slim
     #   pydantic-evals
     #   pymupdf-layout
@@ -755,14 +730,11 @@ tenacity==9.1.4
 text-unidecode==1.3
     # via python-slugify
 tiktoken==0.14.0
-    # via
-    #   litellm
-    #   pydantic-ai-slim
+    # via pydantic-ai-slim
 tokenizers==0.23.3
     # via
     #   chonkie
     #   cohere
-    #   litellm
     #   model2vec
 tqdm==4.70.1
     # via
@@ -877,7 +849,5 @@ xxhash==4.0.1
     # via langsmith
 yarl==1.25.1
     # via aiohttp
-zipp==4.1.1
-    # via importlib-metadata
 zstandard==0.25.0
     # via langsmith
