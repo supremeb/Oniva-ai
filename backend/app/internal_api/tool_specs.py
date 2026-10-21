@@ -131,6 +131,14 @@ TOOL_SPECS: Dict[str, ToolSpec] = {
     "dw_browser_screenshot": _write(timeout_ms=BROWSER_MS, untrusted_output=True, scope="sandbox"),
     "inspect_artifact": _read(SANDBOX_MS, untrusted_output=True),
     "publish_artifact": _write(timeout_ms=SANDBOX_MS, scope="workspace"),
+    # Project memory (U26, KTD17). Reads are curated or user-approved content, so they do not taint. Writes
+    # are external, so the Rule of Two applies (a tainted run needs approval, or is blocked unattended); none
+    # requires approval by itself. create replaces by path (idempotent); the others are not safe to re-run.
+    "memory_view": _read(untrusted_output=False),
+    "memory_create": _write(idempotent=True, scope="external"),
+    "memory_str_replace": _write(idempotent=False, scope="external"),
+    "memory_insert": _write(idempotent=False, scope="external"),
+    "memory_delete": _write(idempotent=False, scope="external"),
     # Interactive or loop-internal: declared, but not served to the engine.
     "ask_user": _INTERACTIVE,
     "present_plan": _INTERACTIVE,

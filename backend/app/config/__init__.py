@@ -371,6 +371,8 @@ class Settings(BaseSettings):
     ENABLE_ENGINE_DEEP_WORK: bool = False  # global gate for engine-backed Deep Work; tenants opt in via settings.features
     ENABLE_ENGINE_FLEET: bool = False  # global gate for engine-backed Fleet runs; tenants opt in via settings.features
     ENABLE_ENGINE_WORKFLOWS: bool = False  # global gate for engine-backed workflow runs; tenants opt in via settings.features
+    # Project memory (U26): global gate for the memory tools; tenants override via settings.features.
+    ENABLE_PROJECT_MEMORY: bool = False
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
     # Run reconciler (plan 003 U5): rows stuck active for this long are checked against the engine.
     RUN_RECONCILE_AFTER_S: int = 120

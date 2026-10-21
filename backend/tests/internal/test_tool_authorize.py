@@ -172,3 +172,33 @@ def test_manifest_flags_untrusted_output(manifest_json):  # noqa: F811
     tools = by_name(manifest_json)
     assert tools["browse_url"]["untrustedOutput"] is True
     assert tools["write_file"]["untrustedOutput"] is False
+
+
+# ---- U26: memory tools under the Rule of Two (KTD17) ------------------------------------------
+
+_TAINT = {"tainted": True, "sources": [{"kind": "tool_result", "name": "browse_url", "ref": "x", "at": 1}]}
+_MEMORY_WRITES = ("memory_create", "memory_str_replace", "memory_insert", "memory_delete")
+
+
+async def test_tainted_memory_write_requires_rule_of_two_approval(env):
+    for n, tool in enumerate(_MEMORY_WRITES, start=1):
+        r = (await post(env, body(env, n=n, tool=tool, taint=_TAINT, arguments={"path": "core.md"}))).json()
+        assert (r["decision"], r["requiredRole"]) == ("requireApproval", "member"), tool
+    approvals = await rows(env)
+    assert {a.rule for a in approvals} == {"rule_of_two"} and len(approvals) == len(_MEMORY_WRITES)
+
+
+async def test_untainted_memory_writes_and_tainted_memory_view_are_allowed(env):
+    for n, tool in enumerate(_MEMORY_WRITES, start=1):
+        assert (await post(env, body(env, n=n, tool=tool, arguments={"path": "core.md"}))).json() == {"decision": "allow"}
+    r = await post(env, body(env, n=9, tool="memory_view", taint=_TAINT, arguments={}))
+    assert r.json() == {"decision": "allow"}
+    assert await rows(env) == []
+
+
+def test_unattended_tainted_memory_write_is_blocked():
+    from app.internal_api.tool_specs import spec_for
+    from app.services.tool_policy import TenantPolicy, ToolCallInfo, decide_tool_call
+    info = ToolCallInfo(tool_name="memory_create", tool_source="gateway", tainted=True, agent_role=None)
+    d = decide_tool_call(spec_for("memory_create"), info, TenantPolicy(), attended=False)
+    assert (d.decision, d.code) == ("block", "untrusted_input_no_approver")
