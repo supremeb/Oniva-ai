@@ -1,0 +1,23 @@
+{
+  "key": "01b73251d25d43b93fc01c47119d49bcee6f529a6b5ff665161682a3936155cc",
+  "tool": "web_search",
+  "args": {
+    "query": "tern express transit ridership and fares",
+    "num_results": 5
+  },
+  "result": {
+    "query": "tern express transit ridership and fares",
+    "results": [
+      {
+        "title": "Synthetic source cd-w2 1",
+        "url": "https://example.com/cd-w2/1",
+        "snippet": "Tern Express carries about 120 thousand riders per weekday."
+      },
+      {
+        "title": "Synthetic source cd-w2 2",
+        "url": "https://example.com/cd-w2/2",
+        "snippet": "A single Tern Express fare costs 3.10 euros."
+      }
+    ]
+  }
+}

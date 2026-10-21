@@ -1,0 +1,49 @@
+# [easy] Guards over-eager tool use: a greeting must be answered directly with zero tool calls.
+id: chat-smoke-no-tool
+kind: chat
+tags:
+- smoke
+- regression
+input:
+  turns:
+  - Say hello in one short sentence.
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake:
+  rules:
+  - when:
+      role: user
+      includes: Say hello in one short sentence
+    respond:
+      steps:
+      - type: text
+        text: Hello! How can I help you today?
+      usage:
+        inputTokens: 120
+        outputTokens: 12
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: expected-tools
+  type: trajectory_match
+  params:
+    mode: exact
+    expected: []
+- id: budget
+  type: budget
+  params:
+    max_usd: 0.1
+    max_rounds: 2
+budget:
+  max_usd: 0.1
+  max_rounds: 2

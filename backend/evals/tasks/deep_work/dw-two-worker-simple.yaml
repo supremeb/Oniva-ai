@@ -1,0 +1,62 @@
+# [easy] Guards the baseline two-worker run: both workers search, save sourced learnings, the reflector stops and
+# the report cites only sources that exist.
+id: dw-two-worker-simple
+kind: deep_work
+tags:
+- regression
+input:
+  query: Compare the battery life and charging speed of the Veltra Orbit and Norrin Pulse smartwatches
+  plan:
+    title: DWPLAN_TS_DW_TWO_WORKER_SIMPLE
+    sub_queries:
+    - worker_id: ts-w1
+      sub_query: veltra orbit smartwatch battery life and charging speed
+      tools:
+      - web_search
+    - worker_id: ts-w2
+      sub_query: norrin pulse smartwatch battery life and charging speed
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: The Orbit runs about nine days per charge and recharges in roughly seventy minutes [1][2]. The Pulse
+    is rated for five days and recharges in about forty-five minutes [3][4].
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 8
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 8

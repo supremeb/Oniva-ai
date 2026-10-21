@@ -1,0 +1,23 @@
+{
+  "key": "84fdd253ee741b7b68ee0dc667ead314908725f9ce6741bca69e75307428bb84",
+  "tool": "web_search",
+  "args": {
+    "query": "salt coast cloud region reliability uptime",
+    "num_results": 5
+  },
+  "result": {
+    "query": "salt coast cloud region reliability uptime",
+    "results": [
+      {
+        "title": "Synthetic source df-w3 1",
+        "url": "https://example.com/df-w3/1",
+        "snippet": "Salt Coast reported 99.95 percent uptime last year."
+      },
+      {
+        "title": "Synthetic source df-w3 2",
+        "url": "https://example.com/df-w3/2",
+        "snippet": "Salt Coast had two outages longer than an hour."
+      }
+    ]
+  }
+}

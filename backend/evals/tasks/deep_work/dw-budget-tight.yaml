@@ -1,0 +1,61 @@
+# [medium] Guards limits: a tight budget (one round, small spend) on a broad question. The run must stay inside
+# the caps and still produce a cited report instead of looping on gaps.
+id: dw-budget-tight
+kind: deep_work
+tags: []
+input:
+  query: Give a short overview of the main water-saving rules for gardens in the fictional district of Eastmere
+  plan:
+    title: DWPLAN_BT_DW_BUDGET_TIGHT
+    sub_queries:
+    - worker_id: bt-w1
+      sub_query: eastmere district garden watering restrictions
+      tools:
+      - web_search
+    - worker_id: bt-w2
+      sub_query: eastmere district rainwater tank rebate
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Sprinklers are banned from ten to four on summer days while hand watering is always allowed [1][2].
+    A 150 euro rebate applies to rainwater tanks fitted by a licensed installer [3][4].
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 0.5
+    max_rounds: 3
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 0.5
+  max_rounds: 3

@@ -1,0 +1,18 @@
+{
+  "key": "64bdaa43b9d59d13e5f0fcae96dc00c2c6d2f37f9208fbeca4fca4ecbc195f60",
+  "tool": "web_search",
+  "args": {
+    "query": "norrin pulse battery rating",
+    "num_results": 5
+  },
+  "result": {
+    "query": "norrin pulse battery rating",
+    "results": [
+      {
+        "title": "Norrin Pulse specifications",
+        "url": "https://example.com/norrin/pulse",
+        "snippet": "Norrin Pulse battery rated for five days of typical use."
+      }
+    ]
+  }
+}

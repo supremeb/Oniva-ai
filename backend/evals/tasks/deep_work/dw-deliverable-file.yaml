@@ -1,0 +1,67 @@
+# [hard] Guards deliverables: the plan asks for a pdf_report, so the run must publish a file after the report is
+# written. Needs the output sandbox, so it is live-only; the fake flow covers the research part.
+id: dw-deliverable-file
+kind: deep_work
+tags: []
+input:
+  query: 'Produce a one-page PDF brief on the reliability of three fictional cloud regions: North Fjord, Amber Plain
+    and Salt Coast'
+  plan:
+    title: DWPLAN_DF_DW_DELIVERABLE_FILE
+    sub_queries:
+    - worker_id: df-w1
+      sub_query: north fjord cloud region reliability uptime
+      tools:
+      - web_search
+    - worker_id: df-w2
+      sub_query: amber plain cloud region reliability uptime
+      tools:
+      - web_search
+    - worker_id: df-w3
+      sub_query: salt coast cloud region reliability uptime
+      tools:
+      - web_search
+    deliverable: pdf_report
+    deliverable_description: One-page brief comparing region reliability
+environment:
+  web: replay
+fake:
+  findings_md: North Fjord led on uptime at 99.98 percent [1] with one long outage [2]. Salt Coast followed at 99.95
+    percent [5] and Amber Plain at 99.93 percent [3], with three long outages [4].
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 3.0
+    max_rounds: 10
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 3.0
+  max_rounds: 10

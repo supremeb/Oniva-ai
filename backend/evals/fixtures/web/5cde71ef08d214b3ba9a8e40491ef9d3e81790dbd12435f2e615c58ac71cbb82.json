@@ -1,0 +1,23 @@
+{
+  "key": "5cde71ef08d214b3ba9a8e40491ef9d3e81790dbd12435f2e615c58ac71cbb82",
+  "tool": "web_search",
+  "args": {
+    "query": "amber plain cloud region reliability uptime",
+    "num_results": 5
+  },
+  "result": {
+    "query": "amber plain cloud region reliability uptime",
+    "results": [
+      {
+        "title": "Synthetic source df-w2 1",
+        "url": "https://example.com/df-w2/1",
+        "snippet": "Amber Plain reported 99.93 percent uptime last year."
+      },
+      {
+        "title": "Synthetic source df-w2 2",
+        "url": "https://example.com/df-w2/2",
+        "snippet": "Amber Plain had three outages longer than an hour."
+      }
+    ]
+  }
+}

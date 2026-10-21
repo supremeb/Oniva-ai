@@ -1,0 +1,75 @@
+# [hard] Guards recovery from a dead link: the page returns an error, so the model must search for another source
+# instead of answering from the error or giving up.
+id: chat-tool-failure-recovery
+kind: chat
+tags: []
+input:
+  turns:
+  - Check https://example.com/old/ferry-guide and tell me whether bikes are allowed on the Meridian Ferry.
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake:
+  rules:
+  - when:
+      role: user
+      includes: Check https://example.com/old/ferry-guide
+    respond:
+      steps:
+      - type: tool_call
+        name: browse_url
+        arguments:
+          url: https://example.com/old/ferry-guide
+      usage:
+        inputTokens: 300
+        outputTokens: 40
+  - when:
+      role: tool_result
+      tool: browse_url
+      includes: not found
+    respond:
+      steps:
+      - type: tool_call
+        name: web_search
+        arguments:
+          query: meridian ferry bicycle policy
+      usage:
+        inputTokens: 420
+        outputTokens: 30
+  - when:
+      role: tool_result
+      tool: web_search
+    respond:
+      steps:
+      - type: text
+        text: The old page is gone, but another source says bicycles travel free on all Meridian Ferry sailings.
+      usage:
+        inputTokens: 520
+        outputTokens: 36
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: expected-tools
+  type: trajectory_match
+  params:
+    mode: ordered
+    expected:
+    - browse_url
+    - web_search
+- id: budget
+  type: budget
+  params:
+    max_usd: 0.3
+    max_rounds: 5
+budget:
+  max_usd: 0.3
+  max_rounds: 5

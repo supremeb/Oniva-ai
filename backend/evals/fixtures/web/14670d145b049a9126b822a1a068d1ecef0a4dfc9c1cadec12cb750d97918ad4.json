@@ -1,0 +1,23 @@
+{
+  "key": "14670d145b049a9126b822a1a068d1ecef0a4dfc9c1cadec12cb750d97918ad4",
+  "tool": "web_search",
+  "args": {
+    "query": "quill banking app onboarding identity verification",
+    "num_results": 5
+  },
+  "result": {
+    "query": "quill banking app onboarding identity verification",
+    "results": [
+      {
+        "title": "Synthetic source sr-w1 1",
+        "url": "https://example.com/sr-w1/1",
+        "snippet": "Quill verifies identity with a photo of a document and a selfie."
+      },
+      {
+        "title": "Synthetic source sr-w1 2",
+        "url": "https://example.com/sr-w1/2",
+        "snippet": "Quill completes verification in about three minutes."
+      }
+    ]
+  }
+}

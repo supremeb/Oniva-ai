@@ -1,0 +1,23 @@
+{
+  "key": "ee9478f5bb19776a633dbf7a39071b5fa6405c96492897c06afbdfc5073f02e9",
+  "tool": "web_search",
+  "args": {
+    "query": "kestrel e-bike warranty terms",
+    "num_results": 5
+  },
+  "result": {
+    "query": "kestrel e-bike warranty terms",
+    "results": [
+      {
+        "title": "Synthetic source sf-w1 1",
+        "url": "https://example.com/sf-w1/1",
+        "snippet": "Kestrel gives a three-year frame warranty."
+      },
+      {
+        "title": "Synthetic source sf-w1 2",
+        "url": "https://example.com/sf-w1/2",
+        "snippet": "The Kestrel battery warranty covers two years."
+      }
+    ]
+  }
+}

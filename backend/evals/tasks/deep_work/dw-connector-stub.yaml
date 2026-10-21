@@ -1,0 +1,70 @@
+# [medium] Guards connector use inside Deep Work: a worker reads from a stubbed issue-tracker connector and must
+# not call write tools. The connector stub is described in environment.connectors; the fake script exercises the
+# research flow only.
+id: dw-connector-stub
+kind: deep_work
+tags: []
+input:
+  query: Report how many open bugs the Harbor project has and compare with public release notes for Harbor 3
+  plan:
+    title: DWPLAN_CN_DW_CONNECTOR_STUB
+    sub_queries:
+    - worker_id: cn-w1
+      sub_query: harbor project open bug count tracker
+      tools: &id001
+      - invoke_connector_tool
+      - web_search
+    - worker_id: cn-w2
+      sub_query: harbor 3 release notes known issues
+      tools: *id001
+    deliverable: null
+environment:
+  web: replay
+  connectors:
+    tracker:
+      kind: stub
+      tools:
+      - name: search_issues
+        mode: read
+      data:
+        open_bugs: 41
+fake:
+  findings_md: The tracker shows forty-one open bugs, twelve of them critical [1][2]. The Harbor 3 notes list nine
+    known issues [3][4].
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 8
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 8

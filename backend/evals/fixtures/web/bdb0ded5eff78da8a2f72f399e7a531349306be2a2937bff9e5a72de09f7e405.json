@@ -1,0 +1,23 @@
+{
+  "key": "bdb0ded5eff78da8a2f72f399e7a531349306be2a2937bff9e5a72de09f7e405",
+  "tool": "web_search",
+  "args": {
+    "query": "meridian ferry saturday timetable",
+    "num_results": 5
+  },
+  "result": {
+    "query": "meridian ferry saturday timetable",
+    "results": [
+      {
+        "title": "Meridian Ferry timetable",
+        "url": "https://example.com/meridian-ferry/timetable",
+        "snippet": "Saturday sailings leave Pier 4 at 08:15, 11:40 and 16:05."
+      },
+      {
+        "title": "Meridian Ferry notices",
+        "url": "https://example.com/meridian-ferry/notices",
+        "snippet": "Saturday services run all year except on public holidays."
+      }
+    ]
+  }
+}
