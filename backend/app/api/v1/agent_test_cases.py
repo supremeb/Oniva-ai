@@ -107,7 +107,7 @@ async def list_test_cases(
     limit: int = Query(50, ge=1, le=250),
     offset: int = Query(0, ge=0),
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     List test cases for an agent with filters.
@@ -167,7 +167,7 @@ async def create_test_case(
     agent_id: str,
     request: CreateTestCaseRequest,
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
     """
@@ -215,7 +215,7 @@ async def get_test_case(
     agent_id: str,
     test_case_id: UUID,
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Get a specific test case.
@@ -251,7 +251,7 @@ async def update_test_case(
     test_case_id: UUID,
     request: UpdateTestCaseRequest,
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Update a test case.
@@ -297,7 +297,7 @@ async def delete_test_case(
     agent_id: str,
     test_case_id: UUID,
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Delete a test case.
@@ -333,7 +333,7 @@ async def import_test_cases(
     agent_id: str,
     file: UploadFile = File(...),
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
     """
@@ -449,7 +449,7 @@ async def generate_test_cases(
     agent_id: str,
     request: GenerateTestsRequest,
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id),
     user_id: UUID = Depends(get_current_user_id),
 ):
@@ -592,7 +592,7 @@ async def export_test_cases(
     agent_id: str,
     format: str = Query("json", pattern="^(json|csv)$"),
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Export test cases to JSON or CSV file.

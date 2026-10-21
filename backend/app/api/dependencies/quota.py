@@ -40,13 +40,13 @@ def require_quota(
     Note: QuotaExceededError propagates to the global exception handler
     registered in main.py (returns HTTP 429). No try/except needed here.
 
-    Note: Both this dependency and the handler may declare Depends(get_db).
+    Note: Both this dependency and the handler may declare Depends(get_db, scope="function").
     FastAPI caches dependencies per-request by default, so both receive the
     SAME AsyncSession instance — quota checks share the handler's transaction
     and tenant RLS context. Do NOT change get_db to use_cache=False.
     """
     async def _check(
-        db: AsyncSession = Depends(get_db),
+        db: AsyncSession = Depends(get_db, scope="function"),
         current_user: AuthUser = Depends(get_current_user),
     ) -> None:
         quota_svc = QuotaService(db)

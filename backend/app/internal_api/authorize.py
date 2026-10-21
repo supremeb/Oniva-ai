@@ -150,5 +150,5 @@ async def authorize(db: AsyncSession, req: AuthorizeRequest) -> Dict[str, Any]:
 
 
 @router.post("/authorize")
-async def authorize_tool(req: AuthorizeRequest, db: AsyncSession = Depends(get_system_db)) -> JSONResponse:
+async def authorize_tool(req: AuthorizeRequest, db: AsyncSession = Depends(get_system_db, scope="function")) -> JSONResponse:
     return _no_store(await authorize(db, req))

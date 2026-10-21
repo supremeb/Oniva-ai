@@ -6,8 +6,8 @@
  * When no reply was reported since the newest `compaction` entry, the whole
  * built context is estimated by characters.
  *
- * Thresholds, from the window (`contextWindow`, else `contextWindows[model]`,
- * else {@link DEFAULT_CONTEXT_WINDOW}):
+ * Thresholds, from the window (`contextWindow`, else the window the policy
+ * resolved for the model, else `contextWindows[model]`, else {@link DEFAULT_CONTEXT_WINDOW}):
  * - above `window − reserve − backgroundMargin`, a generation starts a
  *   background compaction task and carries on; the conversation keeps
  *   answering, and the finished summary is placed at the next turn boundary
@@ -127,9 +127,11 @@ export interface CompactionThresholds {
 export function compactionThresholds(
   settings: CompactionSettings,
   model: string | null,
+  resolvedWindow?: number,
 ): CompactionThresholds {
   const window =
     settings.contextWindow ??
+    resolvedWindow ??
     (model !== null && Object.hasOwn(settings.contextWindows, model)
       ? (settings.contextWindows[model] as number)
       : DEFAULT_CONTEXT_WINDOW);

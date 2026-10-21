@@ -261,7 +261,7 @@ def _execution_to_response(execution: ScheduledWorkflowExecution) -> ScheduleExe
              dependencies=[Depends(require_scope("workflows:execute"))])
 async def create_schedule(
     request: ScheduleCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -318,7 +318,7 @@ async def list_schedules(
     is_enabled: Optional[bool] = Query(None, description="Filter by enabled state"),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -379,7 +379,7 @@ async def list_schedules(
             dependencies=[Depends(require_scope("workflows:read"))])
 async def get_schedule(
     schedule_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -408,7 +408,7 @@ async def get_schedule(
 async def update_schedule(
     schedule_id: uuid.UUID,
     request: ScheduleUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -451,7 +451,7 @@ async def update_schedule(
                dependencies=[Depends(require_scope("workflows:write"))])
 async def delete_schedule(
     schedule_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -479,7 +479,7 @@ async def delete_schedule(
              dependencies=[Depends(require_scope("workflows:write"))])
 async def pause_schedule(
     schedule_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -507,7 +507,7 @@ async def pause_schedule(
              dependencies=[Depends(require_scope("workflows:execute"))])
 async def resume_schedule(
     schedule_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -535,7 +535,7 @@ async def resume_schedule(
              dependencies=[Depends(require_scope("workflows:execute"))])
 async def trigger_schedule(
     schedule_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -574,7 +574,7 @@ async def list_schedule_executions(
     status: Optional[str] = Query(None, description="Filter by status: pending, running, completed, failed, skipped"),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -635,7 +635,7 @@ async def list_schedule_executions(
 async def get_schedule_execution(
     schedule_id: uuid.UUID,
     execution_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):

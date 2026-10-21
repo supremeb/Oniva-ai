@@ -71,7 +71,7 @@ def _api_key_to_response(key: APIKey) -> APIKeyResponse:
 @router.post("/api-keys", response_model=APIKeyResponse, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
     api_key_data: APIKeyCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -146,7 +146,7 @@ async def create_api_key(
 
 @router.get("/api-keys", response_model=APIKeyListResponse)
 async def list_api_keys(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -171,7 +171,7 @@ async def list_api_keys(
 @router.get("/api-keys/{api_key_id}", response_model=APIKeyResponse)
 async def get_api_key(
     api_key_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -198,7 +198,7 @@ async def get_api_key(
 async def update_api_key(
     api_key_id: UUID,
     api_key_update: APIKeyUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -253,7 +253,7 @@ async def update_api_key(
 @router.delete("/api-keys/{api_key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_api_key(
     api_key_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -284,7 +284,7 @@ async def delete_api_key(
 @router.post("/connectors", response_model=ConnectorResponse, status_code=status.HTTP_201_CREATED)
 async def create_connector(
     connector_data: ConnectorCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -326,7 +326,7 @@ async def create_connector(
 
 @router.get("/connectors", response_model=ConnectorListResponse)
 async def list_connectors(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -357,7 +357,7 @@ async def list_connectors(
 @router.get("/connectors/{connector_id}", response_model=ConnectorResponse)
 async def get_connector(
     connector_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -387,7 +387,7 @@ async def get_connector(
 async def update_connector(
     connector_id: UUID,
     connector_update: ConnectorUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -440,7 +440,7 @@ async def update_connector(
 @router.delete("/connectors/{connector_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_connector(
     connector_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -468,7 +468,7 @@ async def delete_connector(
 async def test_connector(
     connector_id: UUID,
     test_request: ConnectorTestRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):

@@ -14,7 +14,7 @@ import asyncio
 from app.models.agent_test_case import AgentTestCase
 from app.models.agent_accuracy_history import AgentAccuracyHistory
 from app.models.agent_version import AgentVersion
-from app.core.database import get_db
+from app.core.database import get_db, get_db_streaming
 from app.auth.dependencies import get_current_tenant_id
 from app.api.dependencies import verify_agent_access, AgentInfo, parse_agent_id
 from app.api.dependencies.quota import require_quota
@@ -37,7 +37,8 @@ async def run_evaluation(
     agent_id: str,
     request: EvaluationRequest,
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    # Streaming route: the evaluation generator keeps using this session.
+    db: AsyncSession = Depends(get_db_streaming),
     tenant_id: UUID = Depends(get_current_tenant_id),
     _quota=Depends(require_quota(QuotaType.EXECUTIONS)),
 ):
@@ -194,7 +195,7 @@ async def get_accuracy_summary(
     agent_id: str,
     version_id: Optional[UUID] = None,
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Get current accuracy metrics for an agent.
@@ -269,7 +270,7 @@ async def get_accuracy_history(
     agent_id: str,
     limit: int = Query(30, ge=1, le=100),
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """
     Get accuracy trend over time.
@@ -322,7 +323,7 @@ async def run_single_test(
     agent_id: str,
     test_case_id: UUID,
     agent_info: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id),
     _quota=Depends(require_quota(QuotaType.EXECUTIONS)),
 ):

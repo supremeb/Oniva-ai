@@ -8,7 +8,7 @@ This service handles:
 - Password management (admin reset)
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 from uuid import UUID
 
@@ -303,6 +303,13 @@ class UserManagementService:
     # Signup Flow
     # =========================================
 
+    async def account_exists(self, email: str) -> bool:
+        """True when a user with this email already exists (in any tenant)."""
+        result = await self.db.execute(
+            select(User).where(User.email == email.lower())
+        )
+        return result.scalars().first() is not None
+
     async def check_can_signup(self, email: str) -> Tuple[bool, Optional[PendingUser]]:
         """
         Check if an email can sign up.
@@ -313,10 +320,7 @@ class UserManagementService:
         email = email.lower()
 
         # Check if already a user anywhere
-        result = await self.db.execute(
-            select(User).where(User.email == email)
-        )
-        if result.scalars().first():
+        if await self.account_exists(email):
             return False, None
 
         # Check if in pending users
@@ -374,7 +378,7 @@ class UserManagementService:
             is_active=True,
             added_by=pending_user.added_by,
             added_at=pending_user.created_at,
-            password_changed_at=datetime.utcnow()
+            password_changed_at=datetime.now(timezone.utc)
         )
         self.db.add(user)
 
@@ -569,7 +573,7 @@ class UserManagementService:
             raise ValueError("New password must be different from the current password")
 
         user.hashed_password = self.hash_password(new_password)
-        user.password_changed_at = datetime.utcnow()
+        user.password_changed_at = datetime.now(timezone.utc)
 
         logger.info(f"User {user.email} changed their password")
         return user
@@ -600,7 +604,7 @@ class UserManagementService:
             raise ValueError(error)
 
         target_user.hashed_password = self.hash_password(new_password)
-        target_user.password_changed_at = datetime.utcnow()
+        target_user.password_changed_at = datetime.now(timezone.utc)
 
         logger.info(f"Admin {actor.email} reset password for {target_user.email}")
         return target_user

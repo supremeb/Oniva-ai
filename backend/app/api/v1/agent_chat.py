@@ -16,7 +16,7 @@ import logging
 from app.models.agent_chat_session import AgentChatSession
 from app.models.agent_test_case import AgentTestCase
 from app.models.agent_version import AgentVersion
-from app.core.database import get_db
+from app.core.database import get_db, get_db_streaming
 from app.auth.dependencies import get_current_user, get_current_tenant_id
 from app.auth.providers.base import AuthUser
 from app.api.dependencies import verify_agent_access, AgentInfo
@@ -127,7 +127,7 @@ async def create_chat_session(
     agent_id: str,
     request: CreateChatSessionRequest,
     agent: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -175,7 +175,7 @@ async def list_chat_sessions(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     status_filter: Optional[str] = Query(None, alias="status"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """
@@ -206,7 +206,7 @@ async def list_chat_sessions(
 async def get_chat_session(
     agent_id: str,
     session_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """
@@ -239,7 +239,8 @@ async def send_message(
     session_id: UUID,
     request: SendMessageRequest,
     agent: AgentInfo = Depends(verify_agent_access),
-    db: AsyncSession = Depends(get_db),
+    # Streaming route: the generator keeps using this session (and commits explicitly).
+    db: AsyncSession = Depends(get_db_streaming),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
     _quota=Depends(require_quota(QuotaType.LLM_TOKENS)),
@@ -594,7 +595,7 @@ async def submit_feedback(
     session_id: UUID,
     message_id: UUID,
     request: FeedbackRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -684,7 +685,7 @@ async def submit_feedback(
 async def delete_chat_session(
     agent_id: str,
     session_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """

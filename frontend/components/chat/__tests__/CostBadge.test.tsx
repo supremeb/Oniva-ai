@@ -30,6 +30,14 @@ describe('CostBadge', () => {
     expect(screen.getByTestId('cost-badge-total').textContent).toContain('180 in / 35 out');
   });
 
+  it('appends the cache-hit share when the ledger reports one, and omits it otherwise', () => {
+    const run = { ...COST.runs[0], cacheReadTokens: 400, cacheHitRatio: 0.7273 };
+    render(<CostBadge variant="turn" run={run} />);
+    expect(screen.getByTestId('cost-badge-turn').textContent).toBe('150 in / 30 out · $0.015 · cache 73%');
+    render(<CostBadge variant="total" cost={{ ...COST, cacheHitRatio: null }} />);
+    expect(screen.getByTestId('cost-badge-total').textContent).not.toContain('cache');
+  });
+
   it('shows tokens only, no dollars, while a run is active', () => {
     render(<CostBadge variant="turn" run={COST.runs[0]} active liveTokens={{ input: 1200, output: 300 }} />);
     const t = screen.getByTestId('cost-badge-turn').textContent!;

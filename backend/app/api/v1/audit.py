@@ -71,7 +71,7 @@ async def list_audit_events(
     resource_type: Optional[str] = Query(None, description="Filter by resource type"),
     start_date: Optional[date] = Query(None, description="Filter events on or after this date"),
     end_date: Optional[date] = Query(None, description="Filter events on or before this date"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
 ):
     """
@@ -133,7 +133,7 @@ async def export_audit_events(
     end_date: date = Query(..., description="End date for export"),
     action: Optional[str] = Query(None),
     resource_type: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(require_role("owner", "admin")),
 ):
     """
@@ -191,7 +191,7 @@ class ComplianceAuditLogResponse(BaseModel):
     decision: str
     rationale: str
     data_sources: List[str]
-    workflow_state: str
+    workflow_state: Optional[str] = None
     workflow_id: Optional[str] = None
     session_id: Optional[str] = None
     timestamp: datetime
@@ -279,7 +279,7 @@ async def query_compliance_audit_logs(
     date_to: Optional[datetime] = None,
     limit: int = Query(default=100, le=500),
     offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: str = Depends(get_current_tenant_id),
 ):
     """
@@ -321,7 +321,7 @@ async def query_compliance_audit_logs(
 @router.post("/compliance/logs/export")
 async def export_compliance_audit_logs(
     request: ComplianceAuditExportRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: str = Depends(get_current_tenant_id),
 ):
     """
@@ -356,7 +356,7 @@ async def export_compliance_audit_logs(
 @router.post("/compliance/logs/verify", response_model=VerifyEntryResponse)
 async def verify_compliance_audit_entry(
     entry_id: str = Query(..., description="ID of the audit entry to verify"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: str = Depends(get_current_tenant_id),
 ):
     """
@@ -378,7 +378,7 @@ async def verify_compliance_audit_entry(
 
 @router.get("/chain/verify", response_model=AuditChainVerifyResponse)
 async def verify_audit_chain(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: str = Depends(get_current_tenant_id),
 ):
     """
@@ -419,7 +419,7 @@ async def get_workflow_replay(
     workflow_id: str,
     session_id: Optional[str] = None,
     verify_signatures: bool = True,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: str = Depends(get_current_tenant_id),
 ):
     """
@@ -463,7 +463,7 @@ async def get_workflow_replay(
 async def export_workflow_replay(
     workflow_id: str,
     format: str = Query(default="json", pattern="^(json|csv)$"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: str = Depends(get_current_tenant_id),
 ):
     """
@@ -494,7 +494,7 @@ async def export_workflow_replay(
 @router.get("/replay/{workflow_id}/integrity", response_model=WorkflowIntegrityResponse)
 async def verify_workflow_integrity(
     workflow_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: str = Depends(get_current_tenant_id),
 ):
     """
@@ -523,7 +523,7 @@ class ComplianceStatsResponse(BaseModel):
 
 @router.get("/compliance/stats", response_model=ComplianceStatsResponse)
 async def get_compliance_stats(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: str = Depends(get_current_tenant_id),
 ):
     """
@@ -601,7 +601,7 @@ async def get_compliance_stats(
 @router.get("/{event_id}", response_model=AuditEventResponse)
 async def get_audit_event(
     event_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
 ):
     """

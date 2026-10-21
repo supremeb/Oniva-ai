@@ -46,6 +46,14 @@ def test_intake_and_plan_have_no_tools_and_legacy_prompts():
     assert "api_key" not in json.dumps(intake).lower()
 
 
+def test_execute_config_uses_one_hour_cache_and_policy_driven_compaction():
+    cfg = compose_execute_config(inputs(), NOW)
+    assert cfg["cacheTtl"] == "1h"
+    comp = cfg["compaction"]
+    assert comp["enabled"] is True and "contextWindow" not in comp  # the model policy supplies it
+    assert comp["reserveTokens"] > 0 and comp["keepRecentTokens"] > 0
+
+
 def test_execute_config_shape_full_tenant():
     cfg = compose_execute_config(inputs(
         plan=plan(deliverable="pdf_report"), has_search=True, knowledge_base_ids=["kb1"],

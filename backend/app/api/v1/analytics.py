@@ -102,7 +102,7 @@ class CostSummaryResponse(BaseModel):
 async def get_cache_metrics(
     start_date: datetime = Query(..., description="Start date (ISO format)"),
     end_date: datetime = Query(..., description="End date (ISO format)"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ) -> CacheMetricsResponse:
@@ -150,7 +150,7 @@ async def get_cost_summary(
     start_date: datetime = Query(..., description="Start date (ISO format)"),
     end_date: datetime = Query(..., description="End date (ISO format)"),
     group_by: str = Query("day", description="Aggregation period: hour, day, week, month"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ) -> CostSummaryResponse:
@@ -217,7 +217,7 @@ async def get_cost_by_workflow(
     start_date: datetime = Query(...),
     end_date: datetime = Query(...),
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ) -> List[WorkflowCostBreakdown]:
@@ -266,7 +266,7 @@ async def get_cost_by_user(
     start_date: datetime = Query(...),
     end_date: datetime = Query(...),
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ) -> List[UserCostBreakdown]:
@@ -314,7 +314,7 @@ async def get_cost_by_model(
     start_date: datetime = Query(...),
     end_date: datetime = Query(...),
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ) -> List[ModelCostBreakdown]:
     """Get cost breakdown by provider and model."""
@@ -358,7 +358,7 @@ async def get_cost_by_model(
 async def export_cost_data(
     start_date: datetime = Query(...),
     end_date: datetime = Query(...),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):

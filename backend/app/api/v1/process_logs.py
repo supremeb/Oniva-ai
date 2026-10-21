@@ -31,7 +31,7 @@ async def export_process_logs(
     workflow_id: uuid.UUID | None = Query(None, description="Filter by workflow"),
     agent_id: str | None = Query(None, description="Filter by agent"),
     limit: int = Query(100_000, le=500_000, description="Max rows"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(require_role("owner", "admin")),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ) -> StreamingResponse:

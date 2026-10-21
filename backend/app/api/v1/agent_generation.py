@@ -14,7 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.auth.dependencies import get_current_user_id, get_current_tenant_id
 from app.config import get_settings
-from app.core.database import get_db
+from app.core.database import get_db, get_db_streaming
 from app.schemas.agent_generation import (
     GenerateAgentRequest,
     ClarifyRequest,
@@ -44,7 +44,7 @@ def _resolve_provider_or_fallback(provider):
 @router.post("/clarify", response_model=ClarifyResponse)
 async def clarify_agent(
     body: ClarifyRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -74,7 +74,8 @@ async def clarify_agent(
 async def generate_agent(
     request: Request,
     body: GenerateAgentRequest,
-    db: AsyncSession = Depends(get_db),
+    # Streaming route: the SSE generator keeps using this session.
+    db: AsyncSession = Depends(get_db_streaming),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):

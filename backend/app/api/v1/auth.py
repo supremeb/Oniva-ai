@@ -226,7 +226,7 @@ async def list_providers():
 async def login(
     request: LoginRequest,
     http_request: Request,
-    db: AsyncSession = Depends(get_db_no_tenant)
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function")
 ):
     """
     Authenticate user and return JWT tokens (access + refresh).
@@ -440,7 +440,7 @@ async def oauth_callback(
 async def refresh_token(
     request: Optional[RefreshRequest] = None,
     http_request: Request = None,
-    db: AsyncSession = Depends(get_db_no_tenant)
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function")
 ):
     """
     Refresh access token using refresh token.
@@ -538,7 +538,7 @@ async def list_stub_users():
 @router.get("/me")
 async def get_current_user_info(
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_no_tenant),
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function"),
 ):
     """
     Get current authenticated user information including resolved feature flags.
@@ -585,7 +585,7 @@ async def logout(
     request_body: Optional[LogoutRequest] = None,
     http_request: Request = None,
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_no_tenant)
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function")
 ):
     """
     Logout current user, blacklist access token, and optionally revoke refresh tokens.
@@ -659,7 +659,7 @@ async def logout(
 @router.get("/check-email/{email}", response_model=CheckEmailResponse)
 async def check_email(
     email: str,
-    db: AsyncSession = Depends(get_db_no_tenant)
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function")
 ):
     """
     Check if an email can sign up.
@@ -675,7 +675,7 @@ async def check_email(
             can_signup=True,
             message="Email found. You can sign up."
         )
-    elif pending_user is None:
+    elif not await service.account_exists(email):
         return CheckEmailResponse(
             can_signup=False,
             message="Email not found. Contact your admin to be added to the organization."
@@ -690,7 +690,7 @@ async def check_email(
 @router.post("/signup", response_model=SignupResponse)
 async def signup(
     request: SignupRequest,
-    db: AsyncSession = Depends(get_db_no_tenant)
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function")
 ):
     """
     Complete user signup.
@@ -729,7 +729,7 @@ async def change_password(
     request_body: ChangePasswordRequest,
     http_request: Request = None,
     user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_no_tenant)
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function")
 ):
     """
     Change current user's password.

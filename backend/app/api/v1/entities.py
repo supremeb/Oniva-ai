@@ -39,7 +39,7 @@ async def get_workflow_entities(
     execution_id: Optional[UUID] = Query(None, description="Filter by specific execution"),
     entity_type: Optional[str] = Query(None, description="Filter by entity type"),
     limit: int = Query(default=100, ge=1, le=500, description="Maximum results"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -69,7 +69,7 @@ async def get_workflow_entities(
 @router.post("/search", response_model=EntitySearchResponse)
 async def search_entities(
     request: EntitySearchRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -101,7 +101,7 @@ async def search_entities_get(
     entity_name: str = Query(..., min_length=1, max_length=255, description="Entity name to search"),
     entity_type: Optional[str] = Query(None, description="Filter by entity type"),
     limit: int = Query(default=50, ge=1, le=200, description="Maximum results"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -130,7 +130,7 @@ async def search_entities_get(
 @router.post("/extract", response_model=ExtractEntityResponse, status_code=status.HTTP_201_CREATED)
 async def extract_entities(
     request: ExtractEntityRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -167,7 +167,7 @@ async def extract_entities(
 @router.get("/summary", response_model=EntitySummaryResponse)
 async def get_entity_summary(
     workflow_id: Optional[UUID] = Query(None, description="Filter by workflow"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -192,7 +192,7 @@ async def get_entity_summary(
 async def delete_workflow_entities(
     workflow_id: UUID,
     execution_id: Optional[UUID] = Query(None, description="Delete only from specific execution"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):

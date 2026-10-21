@@ -6,7 +6,7 @@ import httpx
 from fastapi import FastAPI, Request
 
 from app.auth.providers.base import AuthUser
-from app.core.database import get_db
+from app.core.database import get_db, get_db_streaming
 
 TENANT = uuid.uuid4()
 
@@ -30,6 +30,7 @@ def make_app(db, user: AuthUser, *routers, prefix="/api/v1") -> FastAPI:
         yield db
 
     app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_db_streaming] = _db
     return app
 
 

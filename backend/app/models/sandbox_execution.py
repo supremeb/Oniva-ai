@@ -6,6 +6,7 @@ from enum import Enum
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class SandboxExecutionStatus(str, Enum):
@@ -37,7 +38,7 @@ class SandboxExecution(Base):
     stdout = Column(Text, nullable=True)
     stderr = Column(Text, nullable=True)
     duration_seconds = Column(Float, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (

@@ -16,6 +16,7 @@ from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 
 from app.models import Base
+from app.models._clock import utc_now
 
 if TYPE_CHECKING:
     pass
@@ -115,7 +116,7 @@ class EpisodicMemory(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
-        default=datetime.utcnow
+        default=utc_now
     )
 
     # Retention (default 2 years, max 7 years)

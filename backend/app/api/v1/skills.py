@@ -46,7 +46,7 @@ async def list_skills(
     category: Optional[str] = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -82,7 +82,7 @@ async def list_skills(
 @router.post("", response_model=SkillRead)
 async def create_skill(
     skill_in: SkillCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     # user: User = Depends(get_current_user) # Assuming auth
 ):
     """
@@ -114,7 +114,7 @@ async def create_skill(
     return skill
 
 @router.get("/categories", response_model=List[str])
-async def list_categories(db: AsyncSession = Depends(get_db)):
+async def list_categories(db: AsyncSession = Depends(get_db, scope="function")):
     """
     List all skill categories
     """
@@ -139,7 +139,7 @@ async def export_skill_executions(
     skill_name: Optional[str] = Query(None, description="Filter by skill name"),
     status: Optional[str] = Query(None, description="Filter by status"),
     format: str = Query("json", description="Export format: json or csv"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -225,7 +225,7 @@ async def export_skill_executions(
 @router.get("/{skill_id}", response_model=SkillRead)
 async def get_skill(
     skill_id: UUID,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """
     Get skill details
@@ -244,7 +244,7 @@ async def get_skill(
 async def update_skill(
     skill_id: UUID,
     skill_in: SkillUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -301,7 +301,7 @@ async def update_skill(
 @router.delete("/{skill_id}")
 async def delete_skill(
     skill_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -342,7 +342,7 @@ async def list_skill_executions(
     until: Optional[datetime] = Query(None, description="Filter by created_at <= until"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=250),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):

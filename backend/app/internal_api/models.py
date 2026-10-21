@@ -14,7 +14,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.config.llm_pricing import calculate_cost_with_cache, find_model_pricing
+from app.config.llm_pricing import calculate_cost_with_cache, context_window_for, find_model_pricing
 from app.core.database import get_system_db
 from app.models.engine import EngineConversation
 from app.models.llm_provider import LLMProvider
@@ -82,6 +82,7 @@ class PolicyAllow(BaseModel):
     model: str
     api_key: SecretStr
     max_tokens: int
+    context_window: Optional[int] = None
     expires_at: int
     request_id: str
 
@@ -105,6 +106,7 @@ def _serialize_allow(a: PolicyAllow) -> Dict[str, Any]:
         "model": a.model,
         "apiKey": a.api_key.get_secret_value(),
         "maxTokens": a.max_tokens,
+        **({"contextWindow": a.context_window} if a.context_window else {}),
         "expiresAt": a.expires_at,
         "requestId": a.request_id,
     }
@@ -203,6 +205,7 @@ async def decide(db: AsyncSession, req: PolicyRequest) -> Dict[str, Any]:
         model=model,
         api_key=SecretStr(provider.api_key),
         max_tokens=max_tokens,
+        context_window=context_window_for(model),
         expires_at=int(time.time() * 1000) + KEY_TTL_MS,
         request_id=req.request_id,
     )
@@ -214,7 +217,7 @@ async def decide(db: AsyncSession, req: PolicyRequest) -> Dict[str, Any]:
 
 
 @router.post("/policy")
-async def model_policy(req: PolicyRequest, db: AsyncSession = Depends(get_system_db)) -> JSONResponse:
+async def model_policy(req: PolicyRequest, db: AsyncSession = Depends(get_system_db, scope="function")) -> JSONResponse:
     cache_key = (str(req.tenant_id), req.request_id)
     body = _decisions.get(cache_key)
     if body is None:
@@ -336,6 +339,6 @@ async def record_usage(db: AsyncSession, req: UsageRequest) -> bool:
 
 
 @router.post("/usage")
-async def model_usage(req: UsageRequest, db: AsyncSession = Depends(get_system_db)) -> JSONResponse:
+async def model_usage(req: UsageRequest, db: AsyncSession = Depends(get_system_db, scope="function")) -> JSONResponse:
     recorded = await record_usage(db, req)
     return JSONResponse({"recorded": recorded}, headers={"Cache-Control": "no-store"})

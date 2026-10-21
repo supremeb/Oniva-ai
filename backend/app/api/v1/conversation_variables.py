@@ -93,7 +93,7 @@ class VariableHistoryResponse(BaseModel):
 async def initialize_conversation(
     workflow_id: uuid.UUID,
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """

@@ -863,7 +863,7 @@ async def get_auth_service(db: AsyncSession) -> AuthService:
         @router.post("/login")
         async def login(
             request: LoginRequest,
-            db: AsyncSession = Depends(get_db_no_tenant)
+            db: AsyncSession = Depends(get_db_no_tenant, scope="function")
         ):
             auth_service = await get_auth_service(db)
             user, tokens = await auth_service.authenticate("local", {...})

@@ -47,7 +47,7 @@ async def list_inbox(
     kinds: Optional[str] = Query(None, description="Comma list: approval,review,question,compliance,fleet,deep_work"),
     limit: int = Query(50, ge=1, le=200),
     cursor: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     engine: EngineClient = Depends(get_engine_client),
 ):
@@ -61,7 +61,7 @@ async def list_inbox(
 
 @router.get("/inbox/count", response_model=InboxCountResponse)
 async def inbox_count(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
 ):
     return await InboxService(db).count_for_user(user)

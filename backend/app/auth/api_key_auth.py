@@ -86,7 +86,7 @@ async def validate_api_key(
 async def get_current_user_from_api_key(
     request: Request,
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
-    db: AsyncSession = Depends(get_db_no_tenant)
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function")
 ) -> AuthUser:
     """Validate API key and return AuthUser.
 
@@ -167,7 +167,7 @@ async def get_current_user_from_api_key(
 async def get_current_user_flexible(
     request: Request,
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
-    db: AsyncSession = Depends(get_db_no_tenant)
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function")
 ) -> AuthUser:
     """Get current user from either JWT token or API key.
 

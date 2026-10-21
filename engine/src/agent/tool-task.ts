@@ -315,6 +315,30 @@ const ENTRY_ENVELOPE_BYTES = 2048;
 
 export const TRUNCATED_RESULT_MARKER = "[Tool result truncated to fit the entry size limit";
 
+/** Characters per token in the engine's token estimate (see `compaction.ts`). */
+const CHARS_PER_TOKEN = 4;
+
+export const TOKEN_TRUNCATED_RESULT_MARKER = "[Tool result truncated to about";
+
+/**
+ * Cut a result to `maxTokens` (estimated as characters / 4), head kept, with a
+ * note telling the model how to get the rest. A result within the cap is
+ * returned unchanged.
+ */
+export function capToolResultTokens(result: ToolResult, maxTokens: number): ToolResult {
+  const text =
+    typeof result.content === "string"
+      ? result.content
+      : result.content.map((c) => c.text).join("\n");
+  const maxChars = maxTokens * CHARS_PER_TOKEN;
+  if (text.length <= maxChars) return result;
+  const note =
+    `\n\n${TOKEN_TRUNCATED_RESULT_MARKER} ${maxTokens} tokens: kept ${maxChars} of ${text.length} characters. ` +
+    "To see more, call the tool again for a narrower slice: use its offset, limit or page " +
+    "arguments if it has them, or ask for a more specific part of the data.]";
+  return { ...result, content: text.slice(0, maxChars) + note };
+}
+
 /**
  * Fit a tool result into one `tool_result` entry of at most `maxEntryBytes`:
  * oversized `details` are replaced by a note and oversized content is cut
@@ -326,7 +350,9 @@ export function capToolResult(
   call: Pick<ToolCallInput, "id" | "name">,
   result: ToolResult,
   maxEntryBytes: number,
+  maxTokens?: number,
 ): ToolResult {
+  if (maxTokens !== undefined) result = capToolResultTokens(result, maxTokens);
   const measure = (r: ToolResult) => jsonByteLength(resultPayload("", call, "ok", r, 0));
   const budget = Math.max(0, maxEntryBytes - ENTRY_ENVELOPE_BYTES);
   if (measure(result) <= budget) return result;
@@ -390,7 +416,12 @@ export function toolTaskDefinition(
         });
       }
       if (options.output) (await tx.doc(toolOutputDoc, task.id)).set(options.output);
-      const capped = capToolResult(task.input.call, result, deps.limits.maxEntryBytes);
+      const capped = capToolResult(
+        task.input.call,
+        result,
+        deps.limits.maxEntryBytes,
+        deps.limits.maxToolResultTokens,
+      );
       return writeToolResult(tx, task, status, capped, attempts);
     });
 

@@ -19,12 +19,12 @@ from app.utils.safe_update import safe_update
 router = APIRouter()
 
 
-async def get_rbac_service(db: AsyncSession = Depends(get_db)) -> AgentRBACService:
+async def get_rbac_service(db: AsyncSession = Depends(get_db, scope="function")) -> AgentRBACService:
     """Dependency to get RBAC service instance."""
     return AgentRBACService(db)
 
 
-async def get_registry_service(db: AsyncSession = Depends(get_db)) -> AgentRegistryService:
+async def get_registry_service(db: AsyncSession = Depends(get_db, scope="function")) -> AgentRegistryService:
     """Dependency to get Registry service instance."""
     return AgentRegistryService(db)
 
@@ -180,7 +180,7 @@ async def get_organization_categories(
 async def publish_agent(
     agent_id: UUID,
     request: PublishAgentRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
     rbac: AgentRBACService = Depends(get_rbac_service),
@@ -208,7 +208,7 @@ async def publish_agent(
 @router.delete("/{agent_id}/publish", response_model=CustomAgentResponse)
 async def unpublish_agent(
     agent_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
     rbac: AgentRBACService = Depends(get_rbac_service),
@@ -231,7 +231,7 @@ async def unpublish_agent(
 @router.post("/", response_model=CustomAgentResponse, status_code=status.HTTP_201_CREATED)
 async def create_custom_agent(
     agent_data: CustomAgentCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -319,7 +319,7 @@ async def create_custom_agent(
 
 @router.get("/", response_model=List[CustomAgentResponse])
 async def list_custom_agents(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
     rbac: AgentRBACService = Depends(get_rbac_service),
@@ -341,7 +341,7 @@ async def list_custom_agents(
 @router.get("/{agent_id}", response_model=CustomAgentResponse)
 async def get_custom_agent(
     agent_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
     rbac: AgentRBACService = Depends(get_rbac_service)
@@ -362,7 +362,7 @@ async def get_custom_agent(
 async def update_custom_agent(
     agent_id: UUID,
     agent_data: CustomAgentUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
     rbac: AgentRBACService = Depends(get_rbac_service)
@@ -460,7 +460,7 @@ async def update_custom_agent(
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_custom_agent(
     agent_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
     rbac: AgentRBACService = Depends(get_rbac_service)
@@ -482,7 +482,7 @@ async def delete_custom_agent(
 async def clone_custom_agent(
     agent_id: UUID,
     clone_request: Optional[CloneAgentRequest] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
     rbac: AgentRBACService = Depends(get_rbac_service),
@@ -525,7 +525,7 @@ async def clone_custom_agent(
 @router.post("/{agent_id}/increment-usage", response_model=CustomAgentResponse)
 async def increment_agent_usage(
     agent_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
     rbac: AgentRBACService = Depends(get_rbac_service)

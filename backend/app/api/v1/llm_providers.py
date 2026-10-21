@@ -123,7 +123,7 @@ async def _reject_unsafe_api_base(api_base: Optional[str]) -> None:
 
 @router.get("/llm-providers", response_model=ProviderListResponse)
 async def list_providers(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -165,7 +165,7 @@ async def list_providers(
 @router.post("/llm-providers", response_model=ProviderResponse, status_code=status.HTTP_201_CREATED, dependencies=[_admin])
 async def create_provider(
     data: ProviderCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -306,7 +306,7 @@ async def browse_available_models(
 @router.get("/llm-providers/{provider_id}", response_model=ProviderResponse)
 async def get_provider(
     provider_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -345,7 +345,7 @@ async def get_provider(
 async def update_provider(
     provider_id: UUID,
     data: ProviderUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -410,7 +410,7 @@ async def update_provider(
 @router.delete("/llm-providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_admin])
 async def delete_provider(
     provider_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -456,7 +456,7 @@ async def test_provider(
 @router.post("/llm-providers/reorder", status_code=status.HTTP_200_OK, dependencies=[_admin])
 async def reorder_providers(
     provider_ids: List[UUID],
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
