@@ -6,10 +6,22 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _restore_event_loop():
-    """The eval CLI/runner call asyncio.run(), which unsets the main-thread loop; pytest-asyncio 0.24 needs one."""
-    yield
+    """The eval CLI/runner call asyncio.run(), which unsets the main-thread loop; pytest-asyncio 0.24 needs one.
+
+    Put back the very loop that was installed before the test instead of a fresh one: a loop nobody owns or
+    closes leaks into later tests (e.g. the Postgres fencing tests) that cache or compare the current loop.
+    """
+    policy = asyncio.get_event_loop_policy()
     try:
-        asyncio.get_event_loop_policy().get_event_loop()
+        before = policy.get_event_loop()
+    except RuntimeError:
+        before = None
+    yield
+    if before is not None and not before.is_closed():
+        asyncio.set_event_loop(before)
+        return
+    try:
+        policy.get_event_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
 
