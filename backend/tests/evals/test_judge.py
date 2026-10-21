@@ -18,7 +18,12 @@ MODEL = "judge/pinned-1"
 
 
 def run(coro):
-    return asyncio.run(coro)
+    # Private loop: asyncio.run() would clear the main thread's loop and break later tests.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 class Fake:

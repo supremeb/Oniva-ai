@@ -1,6 +1,17 @@
+import asyncio
 import os
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_event_loop():
+    """The eval CLI/runner call asyncio.run(), which unsets the main-thread loop; pytest-asyncio 0.24 needs one."""
+    yield
+    try:
+        asyncio.get_event_loop_policy().get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 def pytest_collection_modifyitems(config, items):
