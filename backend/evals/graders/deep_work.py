@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.services.deep_work.engine_tools import _cited_indexes, lint_citations
 from app.services.deep_work.models import Learning
 from app.services.deep_work.synthesis import build_sources_section
 from evals.schema import Span
@@ -23,11 +24,7 @@ ORDER_ERRORS = ("round_order", "round_open", "no_sections")
 SAVE_TOOLS = ("dw_save_learnings", "dw_save_learning")
 WORKER_ROLE = "research_worker"
 MODEL_KNOWLEDGE = "model_knowledge"
-# Same shape as production's citation lint: `[3]`, `[1, 2]`, `[2-4]`, not `[3](url)`.
-_CITATION = re.compile(r"\[(\d{1,4}(?:\s*[,–-]\s*\d{1,4})*)\](?!\()")
-_FENCE = re.compile(r"^\s*(```|~~~)")
-_INLINE_CODE = re.compile(r"`[^`\n]*`")
-_SOURCE_LINE = re.compile(r"^(\d+)\. \[", re.MULTILINE)
+_SOURCE_LINE = re.compile(r"^(\d+)\. \[.*\]\((\S+)\)$", re.MULTILINE)
 
 
 def tool_order(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
@@ -85,35 +82,27 @@ def _learnings(ctx: GradeContext) -> list[dict[str, Any]] | None:
     return v if isinstance(v, list) else None
 
 
-def _strip_code(markdown: str) -> str:
-    out, fenced = [], False
-    for line in markdown.splitlines():
-        if _FENCE.match(line):
-            fenced = not fenced
-        elif not fenced:
-            out.append(_INLINE_CODE.sub("", line))
-    return "\n".join(out)
-
-
 def cited_indexes(markdown: str) -> list[int]:
-    """Citation numbers outside code; `[1, 2]` and `[2-4]` expand."""
-    found: set[int] = set()
-    for group in _CITATION.findall(_strip_code(markdown)):
-        for part in group.split(","):
-            ends = [int(n) for n in re.findall(r"\d+", part)]
-            lo, hi = ends[0], ends[-1]
-            found.update(range(lo, hi + 1) if lo <= hi else ends)
-    return sorted(found)
+    """Distinct citation numbers outside code, from production's own parser (`engine_tools._cited_indexes`)."""
+    return sorted(set(_cited_indexes(markdown)))
+
+
+def _parsed(learnings: list[dict[str, Any]]) -> list[Learning]:
+    return [Learning.model_validate({"fact": "", "confidence": 1.0, **l}) for l in learnings]
+
+
+def numbered_sources(learnings: list[dict[str, Any]]) -> dict[int, str]:
+    """`{N: url}` exactly as production's Sources section numbers them (`build_sources_section`)."""
+    return {int(n): url for n, url in _SOURCE_LINE.findall(build_sources_section(_parsed(learnings)))}
 
 
 def source_count(learnings: list[dict[str, Any]]) -> int:
-    """Entries production's Sources section lists; its helper decides the numbering."""
-    parsed = [Learning.model_validate({"fact": "", "confidence": 1.0, **l}) for l in learnings]
-    return len(_SOURCE_LINE.findall(build_sources_section(parsed)))
+    """Entries production's Sources section lists."""
+    return len(numbered_sources(learnings))
 
 
 def citation_map(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
-    """Every `[N]` in report.md is in 1..K, K = distinct sources.
+    """Every `[N]` in report.md is in 1..K, K = distinct sources (production's `lint_citations`).
 
     K comes from production's `build_sources_section`, so the numbering cannot drift.
     Each listed source is built from at least one learning, so a valid `[N]` has learnings.
@@ -126,8 +115,8 @@ def citation_map(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
     except ValidationError as e:
         return outcome(False, f"a learning is invalid: {e.errors()[0]['msg']}")
     cited = cited_indexes(report)
-    bad = [n for n in cited if n < 1 or n > k]
-    if bad:
+    invalid, _ = lint_citations([("report", report)], k)  # production's lint, over the distinct source URLs
+    if bad := invalid.get("report"):
         return outcome(False, f"citations {bad} do not map to a source ({k} distinct sources, {len(learnings)} learnings)")
     return outcome(True, f"{len(cited)} distinct citations within {k} sources ({len(learnings)} learnings)")
 

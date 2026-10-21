@@ -2,6 +2,8 @@
 
     run      run tasks (fake by default; `--live`/`--mode live` spends money), store JSON + markdown, optional diff
     report   render a stored result as markdown
+    calibrate  run a judge over its labelled set; TPR and TNR must both reach 0.85 (exit 1 if not)
+    record-web record web_search/browse_url fixtures for replay (never overwrites without --force)
     compare  diff a stored result against a baseline (KTD5); exits 1 on a regression; `--promote` saves a baseline
 
 Exit codes: 0 ok, 1 a regression (or, without a baseline, a failed trial), 2 refused or bad usage.
@@ -19,9 +21,12 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from . import calibrate as cal
 from . import report as rpt
+from . import web_record
 from . import runner
 from .budget import ENV_VAR, BudgetConfigError, BudgetMeter
+from .graders.judge import CALIBRATION_DIR, JUDGE_FIELDS, MIN_RATE, MODEL_VAR, JudgeCache, JudgeConfigError
 from .loader import TaskLoadError, load_tasks, select_by_tags
 from .schema import Task
 from .stack import LiveModeError
@@ -116,9 +121,11 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     try:
         meter = BudgetMeter.from_env(run_env, required=mode == "live")
         results = asyncio.run(
-            runner.run_suite(tasks, mode=mode, k=args.k, meter=meter, timeout_s=args.timeout)
+            runner.run_suite(
+                tasks, mode=mode, k=args.k, meter=meter, timeout_s=args.timeout, judges=False if args.no_judges else None
+            )
         )
-    except (LiveModeError, BudgetConfigError) as e:
+    except (LiveModeError, BudgetConfigError, JudgeConfigError) as e:
         print(f"refusing to run: {e}", file=sys.stderr)
         return 2
 
@@ -191,6 +198,47 @@ def cmd_compare(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     return 1 if regressed else 0
 
 
+def cmd_calibrate(args: argparse.Namespace, env: Mapping[str, str]) -> int:
+    """Front end for `evals.calibrate`: same gate, record file and exit codes (0 calibrated, 1 below threshold, 2 cannot run)."""
+    run_env = dict(env)
+    if args.max_usd is not None:
+        run_env[ENV_VAR] = str(args.max_usd)
+    try:
+        meter = BudgetMeter.from_env(run_env, required=True)  # spends money: the cap is mandatory
+    except BudgetConfigError as e:
+        print(f"refusing to run: {e}", file=sys.stderr)
+        return 2
+    argv = [*args.judges, "--threshold", str(args.threshold), "--min-per-class", str(args.min_per_class)]
+    if args.all:
+        argv.append("--all")
+    return cal.main(
+        argv,
+        transport=getattr(args, "judge_transport", None),
+        calibration_dir=Path(args.calibration_dir),
+        meter=meter,
+        model=(run_env.get(MODEL_VAR) or "").strip() or None,
+        cache=JudgeCache(None) if args.no_cache else None,
+    )
+
+
+def cmd_record_web(args: argparse.Namespace, env: Mapping[str, str]) -> int:
+    try:
+        requests = web_record.requests_from_args(args.search, args.url, args.requests)
+        if not requests:
+            print("nothing to record: give --search, --url or --requests", file=sys.stderr)
+            return 2
+        max_calls = int(env["EVAL_RECORD_MAX_CALLS"]) if env.get("EVAL_RECORD_MAX_CALLS") else None
+        call = getattr(args, "web_call", None) or web_record.registry_call()
+        rep_ = asyncio.run(web_record.record(requests, args.dir, call, force=args.force, max_calls=max_calls))
+    except (web_record.RecordError, web_record.ReplayError, ValueError) as e:
+        print(f"refusing to record: {e}", file=sys.stderr)
+        return 2
+    print(f"recorded {len(rep_.recorded)}, overwritten {len(rep_.overwritten)}, failed {len(rep_.failed)} in {args.dir}")
+    for key, err in rep_.failed.items():
+        print(f"  failed {key[:12]}: {err}", file=sys.stderr)
+    return 0 if rep_.ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m evals", description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
@@ -204,6 +252,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--mode", choices=("fake", "live"), default="fake")
     run.add_argument("--live", action="store_true", help="same as --mode live")
     run.add_argument("--max-usd", type=float, default=None, help=f"spend cap for this run (overrides {ENV_VAR})")
+    run.add_argument("--no-judges", action="store_true", help="skip the LLM judge graders (always skipped in fake mode)")
     run.add_argument("--dry-run", action="store_true", help="print the estimated cost and run nothing")
     run.add_argument("--baseline", help="baseline name or path: diff after the run, exit 1 on a regression")
     run.add_argument("--out", help="result file (default: results/<date>-<suite>-<mode>.json)")
@@ -221,14 +270,40 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_.add_argument("--name", help="baseline name when promoting (default: the result's name)")
     cmp_.set_defaults(func=cmd_compare)
 
+    cal_ = sub.add_parser("calibrate", help="calibrate LLM judges against their labelled sets (spends money)")
+    cal_.add_argument("judges", nargs="*", help=f"judge names ({', '.join(JUDGE_FIELDS)})")
+    cal_.add_argument("--all", action="store_true", help="every judge that has a labelled set")
+    cal_.add_argument("--threshold", type=float, default=MIN_RATE)
+    cal_.add_argument("--min-per-class", type=int, default=cal.MIN_PER_CLASS)
+    cal_.add_argument("--max-usd", type=float, default=None, help=f"spend cap (overrides {ENV_VAR}; mandatory)")
+    cal_.add_argument("--calibration-dir", default=str(CALIBRATION_DIR))
+    cal_.add_argument("--no-cache", action="store_true", help="do not read or write the on-disk verdict cache")
+    cal_.set_defaults(func=cmd_calibrate)
+
+    rw = sub.add_parser("record-web", help="record web_search/browse_url fixtures for replay (uses the network)")
+    rw.add_argument("--search", action="append", default=[], metavar="QUERY", help="a web_search query (repeatable)")
+    rw.add_argument("--url", action="append", default=[], help="a browse_url URL (repeatable)")
+    rw.add_argument("--requests", action="append", default=[], metavar="JSONL", help='file of {"tool","args"} lines')
+    rw.add_argument("--dir", default=str(web_record.DEFAULT_DIR), help="fixture directory (default evals/fixtures/web)")
+    rw.add_argument("--force", action="store_true", help="overwrite fixtures that already exist")
+    rw.set_defaults(func=cmd_record_web)
+
     for sp in (run, cmp_):
         sp.add_argument("--baselines-dir", default=str(DEFAULT_BASELINES_DIR))
     run.add_argument("--results-dir", default=str(DEFAULT_RESULTS_DIR))
     return p
 
 
-def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    env: Mapping[str, str] | None = None,
+    *,
+    judge_transport=None,
+    web_call=None,
+) -> int:
+    """`judge_transport` / `web_call` replace the real model and network calls (tests)."""
     args = build_parser().parse_args(argv)
+    args.judge_transport, args.web_call = judge_transport, web_call
     return args.func(args, os.environ if env is None else env)
 
 

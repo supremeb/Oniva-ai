@@ -2,8 +2,11 @@
 
 One stack per (mode, web mode) group of tasks, shared by that group's trials (a fresh conversation and, for Deep Work,
 a fresh run per trial). A trial never raises: a refused route, a run that ended in `run_error`, a timeout, a web
-call with no fixture or an exhausted budget each give a `TrialResult` with a `status`. Judge graders are not run
-here (U7); code graders are, with `GradeContext.raw` and the workspace files the driver collected.
+call with no fixture or an exhausted budget each give a `TrialResult` with a `status`.
+
+Judges: a trial gets LLM judge verdicts only when a `JudgeRunner` is supplied and the trial ended `ok`. Without one
+(fake mode, `--no-judges`) or after a failed trial each judge grader yields a passing, non-gating `skipped:` result,
+so a skipped judge never gates and never fakes a verdict. Judges run after the code graders.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from .budget import ENV_VAR, BudgetConfigError, BudgetMeter
 from .drivers import AUTH, DriverContext, DriverError, DriverOutput, drive
 from .fake_scripts import ScriptError, build_script
 from .graders import GradeContext, grade, to_grader_result
+from .graders.judge import JudgeConfigError, JudgeRunner
 from .ledger import settle_cost, with_ledger_cost
 from .schema import GraderResult, Task, Trial, TrialResult
 from .stack import EvalWorld, LiveModeError, eval_stack, require_live_key
@@ -49,6 +53,26 @@ def grade_trace(task: Task, ctx: GradeContext) -> tuple[GraderResult, ...]:
     return tuple(out)
 
 
+def judge_specs(task: Task) -> list:
+    return [g for g in task.graders if g.type == "judge"]
+
+
+def skipped_judges(task: Task, reason: str) -> tuple[GraderResult, ...]:
+    """One passing, non-gating result per judge grader, saying why it did not run."""
+    return tuple(
+        GraderResult(grader_id=g.id, passed=True, gating=False, detail=f"skipped: {reason}") for g in judge_specs(task)
+    )
+
+
+async def judge_trace(
+    task: Task, ctx: GradeContext, judges: JudgeRunner | None, *, why_not: str = "judges are off"
+) -> tuple[GraderResult, ...]:
+    """The task's judge graders: real verdicts from `judges` (cached, metered), else `skipped` results."""
+    if judges is None:
+        return skipped_judges(task, why_not)
+    return tuple(await judges.grade_all(task.graders, ctx))
+
+
 def _failed(trial: Trial, status: str, code: str, message: str, started: float, phases: dict[str, float]) -> TrialResult:
     return TrialResult(
         trial=trial,
@@ -70,7 +94,10 @@ def skipped(task: Task, index: int, mode: str) -> TrialResult:
 
 
 async def run_trial(
-    ew: EvalWorld, task: Task, index: int, http: httpx.AsyncClient, *, timeout_s: float | None = None
+    ew: EvalWorld, task: Task, index: int, http: httpx.AsyncClient,
+    *,
+    timeout_s: float | None = None,
+    judges: JudgeRunner | None = None,
 ) -> TrialResult:
     """One trial of `task` on a running stack."""
     trial = Trial(task.id, index, ew.mode)  # type: ignore[arg-type]
@@ -107,7 +134,8 @@ async def run_trial(
     # The engine's usage documents have no dollars (the worker has no pricing table); the backend ledger does.
     ledger = await settle_cost(http, ew.world.backend_url, AUTH, out.conversation_id, trace)
     trace = with_ledger_cost(trace, ledger["totalUsd"])
-    graders = grade_trace(task, GradeContext(trace=trace, raw=out.raw, files=out.files))
+    gctx = GradeContext(trace=trace, raw=out.raw, files=out.files)
+    graders = grade_trace(task, gctx)
     status, code, error = "ok", None, None
     if out.timed_out:
         status, code, error = "timeout", "timeout", f"timeout: no result within {ctx.timeout_s:g}s"
@@ -116,6 +144,10 @@ async def run_trial(
         error = f"fixture_miss: {len(misses)} web call(s) had no fixture ({', '.join(m[:12] for m in misses)})"
     elif (kind := run_error_kind(out.raw)) is not None:
         status, code, error = "run_error", kind, f"run_error: the run ended with {kind}"
+    if status == "ok":
+        graders += await judge_trace(task, gctx, judges, why_not="judges are off (fake mode or --no-judges)")
+    else:
+        graders += skipped_judges(task, f"the trial ended {status}")
     return TrialResult(
         trial=trial,
         grader_results=graders,
@@ -131,6 +163,13 @@ async def run_trial(
     )
 
 
+def _live_judges(tasks: Sequence[Task], meter: BudgetMeter) -> JudgeRunner | bool:
+    """A judge runner from the environment if any task declares a judge; raises JudgeConfigError before anything boots."""
+    if not any(judge_specs(t) for t in tasks):
+        return False
+    return JudgeRunner.from_env(meter=meter)
+
+
 async def run_suite(
     tasks: Sequence[Task],
     *,
@@ -139,8 +178,13 @@ async def run_suite(
     meter: BudgetMeter | None = None,
     timeout_s: float | None = None,
     replay_dir: Any = None,
+    judges: JudgeRunner | bool | None = None,
 ) -> list[TrialResult]:
-    """Run every task k times; results are in task order, then trial order."""
+    """Run every task k times; results are in task order, then trial order.
+
+    `judges`: a `JudgeRunner` to use; `None` (default) builds one from the environment in live mode and none in fake
+    mode (fake stays offline and deterministic: judge graders are `skipped`); `False` never judges.
+    """
     if k < 1:
         raise ValueError("k must be at least 1")
     if mode == "live":  # before anything boots: no key or no cap means nothing is spent
@@ -148,6 +192,11 @@ async def run_suite(
         if meter is None or meter.max_usd is None or meter.max_usd <= 0:
             raise BudgetConfigError(f"live mode needs a spend cap: set {ENV_VAR} (USD) before running")
     meter = meter or BudgetMeter(None)
+    if judges is None:
+        judges = _live_judges(tasks, meter) if mode == "live" else False
+    elif isinstance(judges, JudgeRunner) and judges.meter is None:
+        judges.meter = meter
+    judge_runner = judges if isinstance(judges, JudgeRunner) else None
     by_web: dict[str, list[Task]] = {}
     for t in tasks:
         by_web.setdefault(t.environment.web, []).append(t)
@@ -155,7 +204,7 @@ async def run_suite(
     async with httpx.AsyncClient(timeout=60) as http:
         for web, group in by_web.items():
             with eval_stack(mode, web=web, replay_dir=replay_dir) as ew:
-                results.update(await run_on_stack(ew, group, k, meter, http, timeout_s))
+                results.update(await run_on_stack(ew, group, k, meter, http, timeout_s, judges=judge_runner))
     return [results[(t.id, i)] for t in tasks for i in range(k)]
 
 
@@ -166,6 +215,8 @@ async def run_on_stack(
     meter: BudgetMeter,
     http: httpx.AsyncClient,
     timeout_s: float | None = None,
+    *,
+    judges: JudgeRunner | None = None,
 ) -> dict[tuple[str, int], TrialResult]:
     """Run `tasks` k times each on a stack that is already up; trials the budget cannot cover are `skipped_budget`."""
     results: dict[tuple[str, int], TrialResult] = {}
@@ -174,7 +225,7 @@ async def run_on_stack(
             if not meter.can_start(task.budget.max_usd):
                 results[(task.id, i)] = skipped(task, i, ew.mode)
                 continue
-            res = await run_trial(ew, task, i, http, timeout_s=timeout_s)
+            res = await run_trial(ew, task, i, http, timeout_s=timeout_s, judges=judges)
             meter.record(res.cost_usd)
             results[(task.id, i)] = res
     return results
@@ -221,6 +272,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("-k", type=int, default=1, help="trials per task")
     parser.add_argument("--timeout", type=float, default=None, help="seconds per trial")
     parser.add_argument("--live", action="store_true", help="use the production worker and a paid OpenRouter key")
+    parser.add_argument("--no-judges", action="store_true", help="skip the LLM judge graders")
     args = parser.parse_args(argv)
 
     tasks = select_by_tags(load_tasks(args.tasks_dir), args.suite)
@@ -232,8 +284,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode = "live" if args.live else "fake"
     try:
         meter = BudgetMeter.from_env(required=args.live)
-        results = asyncio.run(run_suite(tasks, mode=mode, k=args.k, meter=meter, timeout_s=args.timeout))
-    except (LiveModeError, BudgetConfigError) as e:
+        results = asyncio.run(
+            run_suite(
+                tasks, mode=mode, k=args.k, meter=meter, timeout_s=args.timeout, judges=False if args.no_judges else None
+            )
+        )
+    except (LiveModeError, BudgetConfigError, JudgeConfigError) as e:
         print(f"refusing to run: {e}")
         return 2
     print(summarize(results))

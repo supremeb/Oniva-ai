@@ -31,6 +31,7 @@ from evals.budget import BudgetMeter
 from evals.schema import GraderResult, GraderSpec
 
 from . import GradeContext, Outcome, outcome
+from .deep_work import cited_indexes, numbered_sources
 
 EVALS_DIR = Path(__file__).resolve().parent.parent
 PROMPTS_DIR = EVALS_DIR / "judges"
@@ -355,7 +356,6 @@ class MissingInput(Exception):
 
 Item = dict[str, str]
 Extractor = Callable[[GradeContext, dict[str, Any]], list[Item]]
-_CITATION = re.compile(r"\[(\d{1,4}(?:\s*[,–-]\s*\d{1,4})*)\]")
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
@@ -404,36 +404,28 @@ def first_user_text(ctx: GradeContext) -> str | None:
     return None
 
 
-def _cited_numbers(group: str) -> list[int]:
-    nums = [int(n) for n in re.findall(r"\d+", group)]
-    if "-" in group or "–" in group:
-        return list(range(nums[0], nums[-1] + 1)) if nums[0] <= nums[-1] else nums
-    return nums
-
-
 def extract_claim_supported(ctx: GradeContext, params: dict[str, Any]) -> list[Item]:
     """One item per cited sentence of `report.md`: the claim and the learnings of the sources it cites.
 
-    `[N]` numbers distinct source URLs in first-seen order (as `deep_work.cited_indexes` assumes). A sentence citing a
+    `[N]` is parsed by production's citation parser and numbered by `build_sources_section` (`deep_work.numbered_sources`). A sentence citing a
     source no learning backs gets the evidence "(no learning for this citation)" so the judge answers `no`.
     """
     report = ctx.files.get("report.md")
     if not isinstance(report, str) or not report.strip():
         raise MissingInput("needs the collected file 'report.md'")
     learnings = _learnings(ctx)
-    urls = list(dict.fromkeys(str(l["source_url"]) for l in learnings if l.get("source_url")))
+    urls = numbered_sources(learnings)
     items: list[Item] = []
     for sentence in (s.strip() for s in _SENTENCE.split(report)):
-        groups = _CITATION.findall(sentence)
-        if not groups:
+        cited = cited_indexes(sentence)
+        if not cited:
             continue
-        cited = sorted({n for g in groups for n in _cited_numbers(g)})
         evidence = [
             _learning_text(l)
             for n in cited
-            if 1 <= n <= len(urls)
+            if n in urls
             for l in learnings
-            if str(l.get("source_url")) == urls[n - 1]
+            if str(l.get("source_url")) == urls[n]
         ]
         items.append({"claim": sentence, "evidence": "\n".join(evidence) or "(no learning for this citation)"})
     if not items:
