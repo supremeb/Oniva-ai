@@ -229,6 +229,10 @@
           "deadlineMs": 1000600000,
           "cacheTtl": "1h"
         },
+        "context": {
+          "clearedThroughEntryId": null,
+          "clearedTokens": 0
+        },
         "toolOutput": {},
         "compaction": {
           "running": false
@@ -489,6 +493,10 @@
           "deadlineMs": 1000600000,
           "cacheTtl": "1h"
         },
+        "context": {
+          "clearedThroughEntryId": null,
+          "clearedTokens": 0
+        },
         "toolOutput": {},
         "compaction": {
           "running": false
@@ -603,6 +611,10 @@
           "maxRounds": 40,
           "deadlineMs": 1000600000,
           "cacheTtl": "1h"
+        },
+        "context": {
+          "clearedThroughEntryId": null,
+          "clearedTokens": 0
         },
         "toolOutput": {},
         "compaction": {
