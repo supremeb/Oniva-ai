@@ -249,6 +249,10 @@ export function defineCompleteTaskSuite(backend: AgentBackend): void {
       await waitFor(
         () => toolTask()?.checkpoint?.nudge !== undefined && toolTask().status === "waiting",
       );
+      // Wait until the follow-up round has actually pulled the hanging step:
+      // crashing earlier leaves it queued for the next worker, which would
+      // then hang on it instead of using the complete_task call below.
+      await waitFor(() => fx.provider.requests.length === 3);
       const nudgeId = toolTask().checkpoint.nudge.submissionId as string;
       const childId = toolTask().checkpoint.subagent.conversationId as string;
       await w.crash();
