@@ -131,6 +131,19 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"⚠️ Failed to start run reconciler: {e}")
 
+    # Memory curation sweep (U31): starts the chat curator for idle conversations. Leader-safe (advisory lock);
+    # not started at all while MEMORY_CURATOR_MODE is off (the default), so there is no sweep work.
+    curation_sweep = None
+    if app_settings.ENGINE_URL and app_settings.ENGINE_SERVICE_TOKEN:
+        try:
+            from app.services.memory_curator import CurationSweep, curator_mode
+            if curator_mode(app_settings) != "off":
+                curation_sweep = CurationSweep(SystemSessionLocal, app_settings)
+                curation_sweep.start()
+                print("✅ Memory curation sweep started")
+        except Exception as e:
+            print(f"⚠️ Failed to start memory curation sweep: {e}")
+
     # Start Workflow Scheduler Daemon
     if app_settings.USE_WORKFLOW_SCHEDULER:
         try:
@@ -151,6 +164,11 @@ async def lifespan(app: FastAPI):
             await run_reconciler.stop()
         except Exception as e:
             print(f"⚠️ Failed to stop run reconciler: {e}")
+    if curation_sweep is not None:
+        try:
+            await curation_sweep.stop()
+        except Exception as e:
+            print(f"⚠️ Failed to stop memory curation sweep: {e}")
 
     # Stop Workflow Scheduler Daemon
     if app_settings.USE_WORKFLOW_SCHEDULER:

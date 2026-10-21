@@ -69,7 +69,9 @@ class PolicyRequest(_Camel):
     engine_conversation_id: Optional[str] = Field(None, alias="engineConversationId")  # informational
     run_id: str = Field(alias="runId")
     round: int = 0
-    purpose: Literal["generation", "compaction"] = "generation"
+    # The engine sends generation/compaction; "memory.curate" is accepted for a caller that names the purpose.
+    # The memory curator is otherwise recognised by its conversation binding (``is_curator``).
+    purpose: Literal["generation", "compaction", "memory.curate"] = "generation"
     request_id: str = Field(alias="requestId", min_length=1)
     agent: AgentHint = Field(default_factory=AgentHint)
     supported_providers: List[str] = Field(default_factory=list, alias="supportedProviders")
@@ -112,8 +114,30 @@ def _serialize_allow(a: PolicyAllow) -> Dict[str, Any]:
     }
 
 
-async def _choose_model(db: AsyncSession, req: PolicyRequest) -> str:
-    if req.purpose == "compaction":
+CURATOR_RUN_KIND = "memory_curate"  # engine_conversations.run_kind of a memory curator run (U31)
+CURATOR_ROLE = "memory_curator"
+
+
+async def is_curator(db: AsyncSession, tenant_id: uuid.UUID, conversation_id: Optional[str], purpose: str = "") -> bool:
+    """Is the request the memory curator's? By purpose, or by the root conversation's binding: the conversation
+    of a ``memory_curate`` run (the engine only sends generation/compaction as purpose, KTD18)."""
+    if purpose == "memory.curate":
+        return True
+    try:
+        conv = uuid.UUID(conversation_id) if conversation_id else None
+    except ValueError:
+        return False
+    if conv is None:
+        return False
+    kind = (await db.execute(
+        select(EngineConversation.run_kind).where(
+            EngineConversation.conversation_id == conv, EngineConversation.tenant_id == tenant_id)
+    )).scalar_one_or_none()
+    return kind == CURATOR_RUN_KIND
+
+
+async def _choose_model(db: AsyncSession, req: PolicyRequest, curator: bool = False) -> str:
+    if req.purpose == "compaction" or curator:
         return await resolve_model_for_tier(db, req.tenant_id, "low")
     if req.agent.model:
         return req.agent.model
@@ -123,7 +147,7 @@ async def _choose_model(db: AsyncSession, req: PolicyRequest) -> str:
 
 
 def _pick(
-    providers: List[ProviderConfig], model: str, req: PolicyRequest
+    providers: List[ProviderConfig], model: str, req: PolicyRequest, curator: bool = False
 ) -> tuple[ProviderConfig, str]:
     """Provider for the model's family (by priority), else the best supported provider with its own model."""
     family = get_provider_from_model(model)
@@ -131,7 +155,7 @@ def _pick(
         if p.provider_type == family:
             return p, _bare_model(p, model)
     p = providers[0]
-    tier = "low" if req.purpose == "compaction" else (req.agent.tier or "mid")
+    tier = "low" if (req.purpose == "compaction" or curator) else (req.agent.tier or "mid")
     if p.provider_type == "openrouter" and p.default_model:
         fallback: Optional[str] = p.default_model  # the tenant's own pick beats the Claude tier table
     else:
@@ -197,9 +221,10 @@ async def decide(db: AsyncSession, req: PolicyRequest) -> Dict[str, Any]:
     if not allowed:
         return _deny("quota_exceeded", reason or "Token quota exceeded.")
 
+    curator = await is_curator(db, req.tenant_id, req.conversation_id, req.purpose)
     pinned = _pinned_openrouter_model(supported, req)
-    chosen = f"openrouter/{to_openrouter_model_id(pinned)}" if pinned else await _choose_model(db, req)
-    provider, model = _pick(supported, chosen, req)
+    chosen = f"openrouter/{to_openrouter_model_id(pinned)}" if pinned else await _choose_model(db, req, curator)
+    provider, model = _pick(supported, chosen, req, curator)
     allow = PolicyAllow(
         provider=provider.provider_type,
         model=model,
@@ -251,7 +276,7 @@ class UsageRequest(_Camel):
     usage: UsageTokens = Field(default_factory=UsageTokens)
     latency_ms: Optional[int] = Field(None, alias="latencyMs", ge=0)
     status: Literal["success", "failed", "cached"] = "success"
-    purpose: Literal["generation", "compaction"] = "generation"
+    purpose: Literal["generation", "compaction", "memory.curate"] = "generation"
     # Subagent tool name for child-conversation usage (e.g. research_worker); absent/"root" for the root.
     agent_role: Optional[str] = Field(None, alias="agentRole", min_length=1, max_length=64, pattern=r"^[a-z0-9_]+$")
 
@@ -275,6 +300,14 @@ async def record_usage(db: AsyncSession, req: UsageRequest) -> bool:
         if conv is None:
             raise HTTPException(status_code=404, detail="conversation_not_found")
         user_id = conv.user_id
+
+    # The memory curator's requests are ledgered under the ``memory_curator`` role (the engine sends no role for
+    # them: the child conversation belongs to the ``memory_curate`` task, not to a subagent tool).
+    agent_role, purpose = req.agent_role, req.purpose
+    if purpose == "memory.curate":
+        agent_role, purpose = agent_role or CURATOR_ROLE, "generation"
+    elif req.conversation_id is not None and agent_role is None and conv.run_kind == CURATOR_RUN_KIND:
+        agent_role = CURATOR_ROLE
 
     u = req.usage
     pricing = find_model_pricing(req.model)
@@ -312,8 +345,8 @@ async def record_usage(db: AsyncSession, req: UsageRequest) -> bool:
         request_id=req.request_id,
         run_id=req.run_id,
         conversation_id=req.conversation_id,
-        purpose=req.purpose,
-        agent_role=req.agent_role,
+        purpose=purpose,
+        agent_role=agent_role,
         status=status,
     )
     if db.get_bind().dialect.name == "postgresql":
