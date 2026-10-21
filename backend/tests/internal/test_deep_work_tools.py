@@ -318,6 +318,44 @@ async def test_finalize_builds_sources_from_saved_learnings_regardless_of_sectio
     assert (s.status, s.phase) == ("completed", "done")
 
 
+async def test_finalize_rejects_citations_beyond_the_listed_sources_and_names_the_sections(dw):
+    await dw.research("w1", "w2")  # two sources
+    await dw.call("dw_write_section", {"heading": "Market", "markdown": "Claim [1][2] and a link [x](https://a.example)."})
+    await dw.call("dw_write_section", {"heading": "Pricing", "markdown": "Claim [3] and also [1, 5]; `code[9]` is ignored."})
+    r = await dw.call("dw_finalize")
+    assert r["isError"] and r["details"]["error"] == "invalid_citations"
+    assert "'Pricing': [3], [5]" in r["content"] and "Market" not in r["content"].split("Fix these")[1]
+    assert "[1] to [2]" in r["content"] and r["details"]["source_count"] == 2
+    assert (await dw.state()).status == "running"
+    await dw.call("dw_write_section", {"heading": "Pricing", "markdown": "Claim [2]."})
+    assert not (await dw.call("dw_finalize"))["isError"]
+
+
+async def test_finalize_warns_about_long_uncited_sections_without_blocking(dw):
+    await dw.research("w1")
+    await dw.call("dw_write_section", {"heading": "Intro", "markdown": "Short framing."})
+    await dw.call("dw_write_section", {"heading": "Facts", "markdown": "The market grew considerably over the period. " * 8})
+    await dw.call("dw_write_section", {"heading": "Cited", "markdown": "Supported claim [1]. " * 12})
+    r = await dw.call("dw_finalize")
+    assert not r["isError"] and "Facts" in r["data"]["warnings"][0]
+    assert "Intro" not in r["data"]["warnings"][0] and "Cited" not in r["data"]["warnings"][0]
+
+
+async def test_save_learnings_and_reflection_return_a_short_status_line(dw):
+    await dw.call("dw_start_round", {"round": 1, "workers": workers("w1", "w2")})
+    r = await dw.call("dw_save_learnings", {"worker_id": "w1", "learnings": [learning(1)]})
+    assert r["data"]["status"] == "Round 1: 1/2 workers saved; open: w2. Full list: todo.md."
+    r = await dw.call("dw_record_reflection", {"round": 1, "score": 50, "gaps": [], "should_continue": False})
+    assert r["data"]["status"].startswith("Round 1: 1/2 workers saved")
+
+
+def test_start_round_and_save_learnings_descriptions_carry_a_json_example(gw):
+    manifest = {t.name: t for t in build_manifest()}
+    for name in ("dw_start_round", "dw_save_learnings"):
+        description = manifest[name].description
+        assert "Example: {" in description and len(description) < 600
+
+
 async def test_sources_block_matches_the_pure_builder(dw):
     items = [Learning(**learning(n, title=f"T{n}")) for n in (1, 2)] + [Learning(**learning(3, url="https://example.com/1"))]
     assert build_sources_section(items) == "\n## Sources\n1. [T1](https://example.com/1)\n2. [T2](https://example.com/2)"
