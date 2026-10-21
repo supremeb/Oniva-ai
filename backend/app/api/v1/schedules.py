@@ -5,6 +5,7 @@ Supports cron-based workflow scheduling with timezone support
 Part of Workflow Nodes & Features Expansion
 """
 
+import logging
 import uuid
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -16,11 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.core.database import get_db
+from app.models.workflow import Workflow
 from app.models.scheduled_workflow import ScheduledWorkflow, ScheduledWorkflowExecution, ScheduleStatus
 from app.auth.dependencies import get_current_user, get_current_tenant_id, get_current_user_id, require_scope
 from app.auth.providers.base import AuthUser
 from app.services.workflow_scheduler import WorkflowSchedulerService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -272,6 +275,11 @@ async def create_schedule(
     """
     scheduler = WorkflowSchedulerService(db)
 
+    found = await db.execute(select(Workflow.id).where(
+        Workflow.id == request.workflow_id, Workflow.tenant_id == tenant_id))
+    if found.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
     try:
         schedule = await scheduler.create_schedule(
             workflow_id=request.workflow_id,
@@ -297,8 +305,9 @@ async def create_schedule(
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create schedule: {str(e)}")
+    except Exception:
+        logger.exception("Failed to create schedule")
+        raise HTTPException(status_code=500, detail="Failed to create schedule")
 
 
 @router.get("", response_model=PaginatedScheduleResponse,

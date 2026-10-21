@@ -6,7 +6,7 @@ within a tenant. Feature-gated by ENABLE_FLEET_DASHBOARD.
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 import redis.exceptions
@@ -102,7 +102,7 @@ async def list_fleet_runs(
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
     db: AsyncSession = Depends(get_db),
-    status: Optional[str] = Query(None, description="Filter by status"),
+    status: Optional[Literal["pending", "running", "completed", "failed", "cancelled"]] = Query(None, description="Filter by status"),
     agent_id: Optional[UUID] = Query(None, description="Filter by agent"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),

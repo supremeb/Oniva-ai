@@ -74,6 +74,7 @@ class UpdateConversationBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
     title: Optional[str] = None
     pinned: Optional[bool] = None
+    archived: Optional[bool] = None  # False restores an archived conversation; True archives it
 
     @field_validator("title")
     @classmethod
@@ -121,6 +122,11 @@ async def _binding(db: AsyncSession, conversation_id: UUID, user: AuthUser) -> E
     if str(conv.user_id) != str(user.id) and not _is_admin(user):
         raise HTTPException(status_code=403, detail="Not allowed on this conversation")
     return conv
+
+
+def _require_active(conv: EngineConversation) -> None:
+    if conv.archived_at is not None:
+        raise HTTPException(status_code=409, detail="This conversation is archived. Restore it to continue.")
 
 
 def _engine_http_error(e: EngineError) -> HTTPException:
@@ -174,10 +180,14 @@ async def update_conversation(
     db: AsyncSession = Depends(get_db),
     user: AuthUser = Depends(get_current_user),
 ):
-    """Rename and/or pin. Listing metadata only: it does not touch the engine or ``updated_at``."""
+    """Rename, pin and/or (un)archive. Listing metadata only: it does not touch the engine or ``updated_at``."""
     conv = await _binding(db, conversation_id, user)
     if conv.archived_at is not None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        if body.archived is not False:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        conv.archived_at = None
+    elif body.archived:
+        conv.archived_at = datetime.now(timezone.utc)
     if body.title is not None:
         conv.title = body.title
     if body.pinned is not None:
@@ -213,6 +223,7 @@ async def update_selections(
     accepts it, so a failed update leaves both unchanged.
     """
     conv = await _binding(db, conversation_id, user)
+    _require_active(conv)
     merged = {**(conv.selections or {}), **body.model_dump(include=body.model_fields_set)}
     try:
         built = await build_engine_chat_agent(
@@ -242,6 +253,7 @@ async def submit(
     engine: EngineClient = Depends(get_engine_client),
 ):
     conv = await _binding(db, conversation_id, user)
+    _require_active(conv)
     payload = body.model_dump(exclude_none=True)
     # Any content part that is not text (e.g. an image) is untrusted input: the
     # engine taints the conversation so policy can require approval on what follows.

@@ -544,6 +544,9 @@ async def _prepare_fanout(
                         "__fanout": kind,
                         INPUT_CLASS_KEY: input_class.value,
                         **({"__batch_item_id": batch_item_ids[i]} if kind == "batch" else {"item": _json_safe(item)}),
+                        # Legacy iteration bodies address the loop as {{<iterationNodeId>.item}} / .index.
+                        **({f"{view.node['id']}.item": _json_safe(item), f"{view.node['id']}.index": i}
+                           if kind == "iteration" else {}),
                     },
                     "results": {},
                     "execution_trace": [],

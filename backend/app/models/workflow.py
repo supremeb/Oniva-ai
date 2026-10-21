@@ -2,10 +2,15 @@
 from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer, Boolean, Index, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from app.models import Base
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC: a naive value would be read as server-local time by timestamptz columns."""
+    return datetime.now(timezone.utc)
 
 
 class Workflow(Base):
@@ -95,7 +100,7 @@ class WorkflowExecution(Base):
     execution_trace = Column(JSONB, default=list)  # List of ExecutionTraceStep
 
     # Timestamps
-    started_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, index=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), default=_utcnow, index=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
@@ -186,7 +191,7 @@ class WorkflowVersion(Base):
     edge_count = Column(Integer, default=0)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=_utcnow)
     published_at = Column(DateTime(timezone=True), nullable=True)  # When is_draft became False
 
     # Relationships
