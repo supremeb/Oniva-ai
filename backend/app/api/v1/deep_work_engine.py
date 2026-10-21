@@ -446,6 +446,8 @@ async def start(body, db: AsyncSession, user_id, tenant_id) -> dict:
         if state.active and run.status == "running":
             raise HTTPException(status_code=409, detail="Session already active")
         run = await refresh_run(engine, factory, run)
+        if run.status != "running":
+            raise HTTPException(status_code=409, detail="Session already ended")
         return {"session_id": str(run.id), "conversation_id": str(run.conversation_id), "status": run.status}
     if run.status != "running":
         raise HTTPException(status_code=409, detail="Session already ended")
@@ -710,7 +712,9 @@ async def steer(
     engine = _engine()
     factory = tenant_factory(tenant_id)
     run = await owned_run(factory, tenant_id, user_id, session_id)
-    if run.status != "running" or run.job_id is None:
+    if run.status == "running" and run.job_id is None:
+        raise HTTPException(status_code=409, detail="The run has not started yet; start it before steering")
+    if run.status != "running":
         raise HTTPException(status_code=409, detail="Session is not running")
     engine_session = await _session_id_of(factory, run)
     key = idempotency_key or body.requestId or str(uuid.uuid4())

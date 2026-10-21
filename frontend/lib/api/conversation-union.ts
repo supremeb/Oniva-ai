@@ -32,6 +32,13 @@ export function updateEngineConversation(
     return apiFetch(engineUrl(id), { method: 'PATCH', body: JSON.stringify(patch) });
 }
 
+/** Restore an archived engine conversation (409 on submissions/selections while archived). */
+export function unarchiveEngineConversation(
+    id: string
+): Promise<{ conversationId: string; title: string | null; pinned: boolean }> {
+    return apiFetch(engineUrl(id), { method: 'PATCH', body: JSON.stringify({ archived: false }) });
+}
+
 /** Sidebar "delete": archives the conversation (hidden from the list; engine data is kept). */
 export function archiveEngineConversation(id: string): Promise<void> {
     return apiFetch<void>(engineUrl(id), { method: 'DELETE' });

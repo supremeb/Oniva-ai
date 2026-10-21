@@ -54,6 +54,26 @@ def test_owner_or_admin_only_and_tenant_scoped():
     assert e.http.delete(f"{BASE}/{cid}").status_code == 404
 
 
+def test_patch_unarchives_and_restores_edits():
+    t, e, cid = setup()
+    assert e.http.delete(f"{BASE}/{cid}").status_code == 204
+    r = e.http.patch(f"{BASE}/{cid}", json={"archived": False})
+    assert r.status_code == 200, r.text
+    assert e.db.rows[uuid.UUID(cid)].archived_at is None
+    assert e.http.patch(f"{BASE}/{cid}", json={"title": "back"}).status_code == 200
+
+
+def test_archived_rejects_submissions_and_selections_but_allows_reads():
+    t, e, cid = setup()
+    e.http.delete(f"{BASE}/{cid}")
+    r = e.http.post(f"{BASE}/{cid}/submissions", json={"text": "hi"})
+    assert r.status_code == 409 and "archived" in r.json()["detail"].lower()
+    r = e.http.patch(f"{BASE}/{cid}/selections", json={"web_search": True})
+    assert r.status_code == 409 and "archived" in r.json()["detail"].lower()
+    assert e.calls == []
+    assert e.http.get(f"{BASE}/{cid}/cost").status_code == 200
+
+
 def test_flag_gate_applies():
     t = tenant(False)
     e = Env([t], au(t))

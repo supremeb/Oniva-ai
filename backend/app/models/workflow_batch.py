@@ -8,11 +8,16 @@ Supports parallel execution with configurable concurrency limits.
 from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text, Enum, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import enum
 
 from app.models import Base
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC: a naive value would be read as server-local time by timestamptz columns."""
+    return datetime.now(timezone.utc)
 
 
 class BatchStatus(str, enum.Enum):
@@ -83,8 +88,8 @@ class WorkflowBatch(Base):
 
     # Creator
     created_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     tenant = relationship("Tenant")
@@ -162,8 +167,8 @@ class WorkflowBatchItem(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     execution_time_ms = Column(Integer, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     batch = relationship("WorkflowBatch", back_populates="items")

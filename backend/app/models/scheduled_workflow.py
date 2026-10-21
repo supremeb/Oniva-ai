@@ -14,11 +14,16 @@ Supports:
 from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer, Boolean, Enum, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import enum
 
 from app.models import Base
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC: a naive value would be read as server-local time by timestamptz columns."""
+    return datetime.now(timezone.utc)
 
 
 class ScheduleType(str, enum.Enum):
@@ -108,8 +113,8 @@ class ScheduledWorkflow(Base):
     next_run_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     workflow = relationship("Workflow", backref="schedules")
@@ -196,7 +201,7 @@ class ScheduledWorkflowExecution(Base):
     retry_count = Column(Integer, default=0)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=_utcnow)
 
     # Relationships
     schedule = relationship("ScheduledWorkflow", back_populates="executions")

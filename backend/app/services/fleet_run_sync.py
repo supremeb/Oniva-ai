@@ -73,10 +73,13 @@ def _text(message: dict) -> str:
 
 
 def final_answer(view: Optional[dict], job_id: Any) -> Optional[str]:
+    # The run's final answer: the last one after every placed steer. ``answer_for`` stops at the first
+    # steer, which would hand back the answer the steer superseded.
+    final = _answer_after_steer(view, fe.request_id(job_id))
+    if final is not None:
+        return final
     answer = engine_view.answer_for(view or {}, fe.request_id(job_id))
-    if answer and answer[0] == "done":
-        return answer[1]
-    return _answer_after_steer(view, fe.request_id(job_id))
+    return answer[1] if answer and answer[0] == "done" else None
 
 
 def _answer_after_steer(view: Optional[dict], request_id: str) -> Optional[str]:

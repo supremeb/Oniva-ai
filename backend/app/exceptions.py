@@ -35,6 +35,12 @@ class EntityNotFoundError(FIAgentsException):
         self.entity_id = entity_id
 
 
+class EntityConflictError(FIAgentsException):
+    """Raised when an operation conflicts with existing state (maps to HTTP 409)."""
+    def __init__(self, message: str):
+        super().__init__(message)
+
+
 class PermissionDeniedError(FIAgentsException):
     """Raised when a user lacks permission to perform an operation."""
     def __init__(self, operation: str, required_role: str):

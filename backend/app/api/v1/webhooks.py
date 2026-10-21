@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.database import get_db, get_db_no_tenant
 from app.auth.dependencies import get_current_user, get_current_tenant_id
 from app.auth.providers.base import AuthUser
@@ -30,6 +31,12 @@ from app.services.webhook_trigger_service import TriggerUnowned, WebhookTriggerS
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def webhook_url(http_request: Request, token: str) -> str:
+    """The public delivery URL: PUBLIC_API_URL when configured, else the request's own base URL."""
+    base = (get_settings().PUBLIC_API_URL or str(http_request.base_url)).rstrip("/")
+    return f"{base}/api/v1/webhooks/{token}"
 
 
 # --- Schemas ---
@@ -121,6 +128,7 @@ async def receive_webhook(
 async def create_webhook_trigger(
     workflow_id: uuid.UUID,
     request: WebhookTriggerCreate,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
@@ -165,7 +173,7 @@ async def create_webhook_trigger(
     return WebhookTriggerCreated(
         id=trigger.id,
         workflow_id=trigger.workflow_id,
-        url=f"https://api.oniva.ai/api/v1/webhooks/{trigger.url_token}",
+        url=webhook_url(http_request, trigger.url_token),
         auth_method=trigger.auth_method,
         is_enabled=trigger.is_enabled,
         rate_limit_per_hour=trigger.rate_limit_per_hour,
@@ -178,6 +186,7 @@ async def create_webhook_trigger(
 @router.get("/workflows/{workflow_id}/webhooks", response_model=List[WebhookTriggerResponse])
 async def list_webhook_triggers(
     workflow_id: uuid.UUID,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -194,7 +203,7 @@ async def list_webhook_triggers(
         WebhookTriggerResponse(
             id=t.id,
             workflow_id=t.workflow_id,
-            url=f"https://api.oniva.ai/api/v1/webhooks/{t.url_token}",
+            url=webhook_url(http_request, t.url_token),
             auth_method=t.auth_method,
             is_enabled=t.is_enabled,
             rate_limit_per_hour=t.rate_limit_per_hour,
@@ -239,6 +248,7 @@ async def delete_webhook_trigger(
 @router.get("/webhooks/{webhook_id}", response_model=WebhookTriggerResponse)
 async def get_webhook_trigger(
     webhook_id: uuid.UUID,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -251,7 +261,7 @@ async def get_webhook_trigger(
     return WebhookTriggerResponse(
         id=trigger.id,
         workflow_id=trigger.workflow_id,
-        url=f"https://api.oniva.ai/api/v1/webhooks/{trigger.url_token}",
+        url=webhook_url(http_request, trigger.url_token),
         auth_method=trigger.auth_method,
         is_enabled=trigger.is_enabled,
         rate_limit_per_hour=trigger.rate_limit_per_hour,

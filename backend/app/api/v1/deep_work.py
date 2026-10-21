@@ -169,17 +169,37 @@ def _parse_uuid(value: Optional[str]) -> Optional[uuid.UUID]:
 async def _verify_session_ownership(
     db: AsyncSession, session_id: str, tenant_id: UUID, user_id: UUID,
 ) -> BackgroundJob:
-    """Verify the calling user owns this session. Returns job or raises 403."""
+    """The legacy session's job: 404 when no such session in the tenant, 403 when it is not the caller's."""
     result = await db.execute(
         select(BackgroundJob)
         .where(BackgroundJob.session_id == session_id)
         .where(BackgroundJob.tenant_id == tenant_id)
-        .where(BackgroundJob.user_id == user_id)
     )
-    job = result.scalar_one_or_none()
+    job = result.scalars().first()
     if not job:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if job.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     return job
+
+
+async def _authorize_workspace(db: AsyncSession, tenant_id: UUID, user_id: UUID, session_id: str):
+    """Workspace routes: 404 for unknown / malformed ids, 403 for another user's session.
+
+    Returns the session directory (engine and legacy sessions alike).
+    """
+    from app.services.session_storage import get_session_storage
+    storage = get_session_storage()
+    try:
+        session_path = storage._get_session_path(str(tenant_id), session_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Session not found") from None
+    run = await engine_dw.find_engine_run(engine_dw.reading(db), tenant_id, session_id)
+    if run is not None:
+        await engine_dw.check_workspace_access(engine_dw.reading(db), tenant_id, user_id, session_id)
+    else:
+        await _verify_session_ownership(db, session_id, tenant_id, user_id)
+    return session_path
 
 
 async def _get_general_assistant_config(
@@ -512,12 +532,7 @@ async def list_workspace_files(
 ):
     """List files in the session workspace."""
     _check_feature_enabled()
-    await engine_dw.check_workspace_access(engine_dw.reading(db), tenant_id, user_id, session_id)
-
-    from app.services.session_storage import get_session_storage
-    storage = get_session_storage()
-
-    session_path = storage._get_session_path(str(tenant_id), session_id)
+    session_path = await _authorize_workspace(db, tenant_id, user_id, session_id)
     workspace = session_path / "workspace"
 
     files = []
@@ -550,13 +565,10 @@ async def download_workspace_file(
 ):
     """Download a file from the session workspace."""
     _check_feature_enabled()
-    await engine_dw.check_workspace_access(engine_dw.reading(db), tenant_id, user_id, session_id)
+    session_path = await _authorize_workspace(db, tenant_id, user_id, session_id)
 
     from fastapi.responses import FileResponse
-    from app.services.session_storage import get_session_storage
 
-    storage = get_session_storage()
-    session_path = storage._get_session_path(str(tenant_id), session_id)
     target = session_path / "workspace" / file_path
 
     # Prevent path traversal (Python 3.9+ is_relative_to is safe against partial-match attacks)

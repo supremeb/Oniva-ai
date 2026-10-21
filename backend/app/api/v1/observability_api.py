@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.auth.dependencies import get_current_user, get_current_tenant_id
+from app.auth.dependencies import get_current_user, get_current_tenant_id, require_role
 from app.auth.providers.base import AuthUser
 from app.models.background_job import BackgroundJob
 from app.models.custom_agent import CustomAgent
@@ -316,7 +316,7 @@ def _clean_model_name(model: str) -> str:
     return model
 
 
-@router.get("/traces", response_model=TraceSearchResponse)
+@router.get("/traces", response_model=TraceSearchResponse, dependencies=[Depends(require_role("owner", "admin"))])
 async def search_traces(
     status: str | None = Query(None),
     workflow_id: uuid.UUID | None = Query(None),

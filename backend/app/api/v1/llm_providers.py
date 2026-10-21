@@ -7,6 +7,7 @@ Supports built-in providers (OpenAI, Anthropic, OpenRouter) and
 custom endpoints (vLLM, Ollama, Azure OpenAI).
 """
 
+import asyncio
 from typing import List, Optional
 from uuid import UUID, uuid4
 
@@ -17,12 +18,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.encryption import get_encryption_service
-from app.auth.dependencies import get_current_user, get_current_tenant_id
+from app.auth.dependencies import get_current_user, get_current_tenant_id, require_role
 from app.auth.providers.base import AuthUser
 from app.models.llm_provider import LLMProvider
+from app.config import get_settings
+from app.security.url_validator import is_url_safe
 from app.services.llm_gateway import verify_provider_connection, normalize_model_id
 
 router = APIRouter()
+
+# Provider rows hold the tenant's billing key: every write needs owner/admin.
+_admin = Depends(require_role("owner", "admin"))
 
 
 # ============================================================================
@@ -99,6 +105,18 @@ class ProviderListResponse(BaseModel):
     total: int
 
 
+async def _reject_unsafe_api_base(api_base: Optional[str]) -> None:
+    """400 for loopback/private/link-local/metadata hosts unless explicitly allowed."""
+    if not api_base or get_settings().LLM_PROVIDER_ALLOW_PRIVATE_URLS:
+        return
+    blocked = await asyncio.to_thread(is_url_safe, api_base)
+    if blocked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"api_base is not allowed: {blocked}",
+        )
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
@@ -144,7 +162,7 @@ async def list_providers(
     return ProviderListResponse(providers=responses, total=len(responses))
 
 
-@router.post("/llm-providers", response_model=ProviderResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/llm-providers", response_model=ProviderResponse, status_code=status.HTTP_201_CREATED, dependencies=[_admin])
 async def create_provider(
     data: ProviderCreate,
     db: AsyncSession = Depends(get_db),
@@ -157,6 +175,8 @@ async def create_provider(
     The API key will be encrypted before storage.
     Provider name must be unique within the tenant.
     """
+    await _reject_unsafe_api_base(data.api_base)
+
     # Check for duplicate name
     stmt = select(LLMProvider).where(
         LLMProvider.tenant_id == tenant_id,
@@ -221,152 +241,6 @@ async def create_provider(
     return response
 
 
-@router.get("/llm-providers/{provider_id}", response_model=ProviderResponse)
-async def get_provider(
-    provider_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    user: AuthUser = Depends(get_current_user),
-    tenant_id: UUID = Depends(get_current_tenant_id),
-):
-    """Get a specific LLM provider."""
-    stmt = select(LLMProvider).where(
-        LLMProvider.id == provider_id,
-        LLMProvider.tenant_id == tenant_id,
-    )
-    result = await db.execute(stmt)
-    provider = result.scalar_one_or_none()
-
-    if not provider:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Provider not found",
-        )
-
-    return ProviderResponse(
-        id=provider.id,
-        name=provider.name,
-        display_name=provider.display_name,
-        provider_type=provider.provider_type,
-        api_base=provider.api_base,
-        has_api_key=bool(provider.api_key_encrypted),
-        models=provider.models or [],
-        default_model=provider.default_model,
-        embedding_model=provider.embedding_model,
-        workflow_builder_model=provider.workflow_builder_model,
-        priority=provider.priority,
-        is_enabled=provider.is_enabled,
-        is_default=provider.is_default,
-    )
-
-
-@router.patch("/llm-providers/{provider_id}", response_model=ProviderResponse)
-async def update_provider(
-    provider_id: UUID,
-    data: ProviderUpdate,
-    db: AsyncSession = Depends(get_db),
-    user: AuthUser = Depends(get_current_user),
-    tenant_id: UUID = Depends(get_current_tenant_id),
-):
-    """Update an LLM provider."""
-    stmt = select(LLMProvider).where(
-        LLMProvider.id == provider_id,
-        LLMProvider.tenant_id == tenant_id,
-    )
-    result = await db.execute(stmt)
-    provider = result.scalar_one_or_none()
-
-    if not provider:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Provider not found",
-        )
-
-    # Update fields
-    if data.display_name is not None:
-        provider.display_name = data.display_name
-    if data.api_base is not None:
-        provider.api_base = data.api_base if data.api_base else None
-    if data.api_key is not None:
-        encryption = get_encryption_service()
-        provider.api_key_encrypted = encryption.encrypt(data.api_key)
-    if data.models is not None:
-        provider.models = [normalize_model_id(m) for m in data.models]
-    if data.default_model is not None:
-        provider.default_model = normalize_model_id(data.default_model)
-    if data.embedding_model is not None:
-        provider.embedding_model = normalize_model_id(data.embedding_model) if data.embedding_model else None
-    if data.workflow_builder_model is not None:
-        provider.workflow_builder_model = normalize_model_id(data.workflow_builder_model) if data.workflow_builder_model else None
-    if data.priority is not None:
-        provider.priority = data.priority
-    if data.is_enabled is not None:
-        provider.is_enabled = data.is_enabled
-
-    await db.flush()
-
-    response = ProviderResponse(
-        id=provider.id,
-        name=provider.name,
-        display_name=provider.display_name,
-        provider_type=provider.provider_type,
-        api_base=provider.api_base,
-        has_api_key=bool(provider.api_key_encrypted),
-        models=provider.models or [],
-        default_model=provider.default_model,
-        embedding_model=provider.embedding_model,
-        workflow_builder_model=provider.workflow_builder_model,
-        priority=provider.priority,
-        is_enabled=provider.is_enabled,
-        is_default=provider.is_default,
-    )
-
-    await db.commit()
-    return response
-
-
-@router.delete("/llm-providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_provider(
-    provider_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    user: AuthUser = Depends(get_current_user),
-    tenant_id: UUID = Depends(get_current_tenant_id),
-):
-    """Delete an LLM provider."""
-    stmt = delete(LLMProvider).where(
-        LLMProvider.id == provider_id,
-        LLMProvider.tenant_id == tenant_id,
-    )
-    result = await db.execute(stmt)
-
-    if result.rowcount == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Provider not found",
-        )
-
-    await db.commit()
-
-
-@router.post("/llm-providers/test", response_model=ProviderTestResponse)
-async def test_provider(
-    data: ProviderTestRequest,
-    user: AuthUser = Depends(get_current_user),
-):
-    """
-    Test connection to an LLM provider.
-
-    Makes a minimal API call to verify the configuration works.
-    """
-    result = await verify_provider_connection(
-        provider_type=data.provider_type,
-        api_base=data.api_base,
-        api_key=data.api_key,
-        model=data.model,
-    )
-
-    return ProviderTestResponse(**result)
-
-
 class BrowseModelsResponse(BaseModel):
     """Available model from a provider's catalog."""
     id: str
@@ -376,7 +250,7 @@ class BrowseModelsResponse(BaseModel):
     pricing_completion: Optional[str] = None
 
 
-@router.get("/llm-providers/browse-models")
+@router.get("/llm-providers/browse-models", dependencies=[_admin])
 async def browse_available_models(
     provider_type: str = "openrouter",
     user: AuthUser = Depends(get_current_user),
@@ -429,7 +303,157 @@ async def browse_available_models(
         )
 
 
-@router.post("/llm-providers/reorder", status_code=status.HTTP_200_OK)
+@router.get("/llm-providers/{provider_id}", response_model=ProviderResponse)
+async def get_provider(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    tenant_id: UUID = Depends(get_current_tenant_id),
+):
+    """Get a specific LLM provider."""
+    stmt = select(LLMProvider).where(
+        LLMProvider.id == provider_id,
+        LLMProvider.tenant_id == tenant_id,
+    )
+    result = await db.execute(stmt)
+    provider = result.scalar_one_or_none()
+
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Provider not found",
+        )
+
+    return ProviderResponse(
+        id=provider.id,
+        name=provider.name,
+        display_name=provider.display_name,
+        provider_type=provider.provider_type,
+        api_base=provider.api_base,
+        has_api_key=bool(provider.api_key_encrypted),
+        models=provider.models or [],
+        default_model=provider.default_model,
+        embedding_model=provider.embedding_model,
+        workflow_builder_model=provider.workflow_builder_model,
+        priority=provider.priority,
+        is_enabled=provider.is_enabled,
+        is_default=provider.is_default,
+    )
+
+
+@router.patch("/llm-providers/{provider_id}", response_model=ProviderResponse, dependencies=[_admin])
+async def update_provider(
+    provider_id: UUID,
+    data: ProviderUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    tenant_id: UUID = Depends(get_current_tenant_id),
+):
+    """Update an LLM provider."""
+    stmt = select(LLMProvider).where(
+        LLMProvider.id == provider_id,
+        LLMProvider.tenant_id == tenant_id,
+    )
+    result = await db.execute(stmt)
+    provider = result.scalar_one_or_none()
+
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Provider not found",
+        )
+
+    # Update fields
+    if data.display_name is not None:
+        provider.display_name = data.display_name
+    if data.api_base is not None:
+        await _reject_unsafe_api_base(data.api_base)
+        provider.api_base = data.api_base if data.api_base else None
+    if data.api_key is not None:
+        encryption = get_encryption_service()
+        provider.api_key_encrypted = encryption.encrypt(data.api_key)
+    if data.models is not None:
+        provider.models = [normalize_model_id(m) for m in data.models]
+    if data.default_model is not None:
+        provider.default_model = normalize_model_id(data.default_model)
+    if data.embedding_model is not None:
+        provider.embedding_model = normalize_model_id(data.embedding_model) if data.embedding_model else None
+    if data.workflow_builder_model is not None:
+        provider.workflow_builder_model = normalize_model_id(data.workflow_builder_model) if data.workflow_builder_model else None
+    if data.priority is not None:
+        provider.priority = data.priority
+    if data.is_enabled is not None:
+        provider.is_enabled = data.is_enabled
+
+    await db.flush()
+
+    response = ProviderResponse(
+        id=provider.id,
+        name=provider.name,
+        display_name=provider.display_name,
+        provider_type=provider.provider_type,
+        api_base=provider.api_base,
+        has_api_key=bool(provider.api_key_encrypted),
+        models=provider.models or [],
+        default_model=provider.default_model,
+        embedding_model=provider.embedding_model,
+        workflow_builder_model=provider.workflow_builder_model,
+        priority=provider.priority,
+        is_enabled=provider.is_enabled,
+        is_default=provider.is_default,
+    )
+
+    await db.commit()
+    return response
+
+
+@router.delete("/llm-providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_admin])
+async def delete_provider(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    tenant_id: UUID = Depends(get_current_tenant_id),
+):
+    """Delete an LLM provider."""
+    stmt = delete(LLMProvider).where(
+        LLMProvider.id == provider_id,
+        LLMProvider.tenant_id == tenant_id,
+    )
+    result = await db.execute(stmt)
+
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Provider not found",
+        )
+
+    await db.commit()
+
+
+@router.post("/llm-providers/test", response_model=ProviderTestResponse, dependencies=[_admin])
+async def test_provider(
+    data: ProviderTestRequest,
+    user: AuthUser = Depends(get_current_user),
+):
+    """
+    Test connection to an LLM provider.
+
+    Makes a minimal API call to verify the configuration works.
+    Loopback / private / link-local / metadata hosts are rejected unless
+    LLM_PROVIDER_ALLOW_PRIVATE_URLS is enabled.
+    """
+    await _reject_unsafe_api_base(data.api_base)
+    result = await verify_provider_connection(
+        provider_type=data.provider_type,
+        api_base=data.api_base,
+        api_key=data.api_key,
+        model=data.model,
+    )
+
+    return ProviderTestResponse(**result)
+
+
+@router.post("/llm-providers/reorder", status_code=status.HTTP_200_OK, dependencies=[_admin])
 async def reorder_providers(
     provider_ids: List[UUID],
     db: AsyncSession = Depends(get_db),

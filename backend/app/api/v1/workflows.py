@@ -1624,7 +1624,7 @@ class RecentFailuresResponse(BaseModel):
 def _parse_time_range(time_range: str) -> datetime:
     """Parse time range string to datetime."""
     from datetime import timedelta
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     ranges = {
         '1h': timedelta(hours=1),
@@ -1741,7 +1741,7 @@ async def stream_workflow_logs(
                 select(WorkflowExecution.id)
                 .where(WorkflowExecution.workflow_id == workflow_id)
                 .where(WorkflowExecution.tenant_id == tenant_id)
-                .where(WorkflowExecution.started_at >= datetime.utcnow() - timedelta(hours=1))
+                .where(WorkflowExecution.started_at >= datetime.now(timezone.utc) - timedelta(hours=1))
                 .order_by(desc(WorkflowExecution.started_at))
                 .limit(50)
             )
@@ -1762,7 +1762,7 @@ async def stream_workflow_logs(
                     select(WorkflowExecution)
                     .where(WorkflowExecution.workflow_id == workflow_id)
                     .where(WorkflowExecution.tenant_id == tenant_id)
-                    .where(WorkflowExecution.started_at >= datetime.utcnow() - timedelta(hours=1))
+                    .where(WorkflowExecution.started_at >= datetime.now(timezone.utc) - timedelta(hours=1))
                     .order_by(desc(WorkflowExecution.started_at))
                     .limit(20)
                 )

@@ -22,6 +22,7 @@ from app.auth.providers.stub import get_stub_users
 from app.auth.dependencies import get_current_user
 from app.auth.providers.base import AuthUser
 from app.auth.token_blacklist import token_blacklist
+from app.auth.login_lockout import login_lockout
 from app.config import get_settings
 from app.core.database import get_db, get_db_no_tenant
 from sqlalchemy import select
@@ -255,6 +256,15 @@ async def login(
         else:
             provider = "local"
 
+    # Per-account lockout (keyed on email whether or not it exists: no user enumeration)
+    retry_after = await login_lockout.retry_after(request.email)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed sign-in attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     # Use DB-backed auth service to support local provider
     auth_service = await get_auth_service(db)
 
@@ -267,11 +277,14 @@ async def login(
     )
 
     if not user or not tokens:
+        await login_lockout.record_failure(request.email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    await login_lockout.reset(request.email)
 
     # Create refresh token for all auth providers (including stub)
     # If stub user UUIDs don't exist in users table, FK will fail —
@@ -598,7 +611,14 @@ async def logout(
 
     tokens_revoked = 0
 
-    if request_body:
+    if not (request_body and (request_body.logout_all or request_body.refresh_token)):
+        # No refresh token named (e.g. empty body): revoke them all, so a bare logout
+        # cannot leave a live 7-day refresh token behind.
+        tokens_revoked = await auth_service.revoke_all_user_tokens(
+            user_id=UUID(user.id),
+            reason="logout"
+        )
+    elif request_body:
         if request_body.logout_all:
             # Revoke all tokens for this user
             tokens_revoked = await auth_service.revoke_all_user_tokens(

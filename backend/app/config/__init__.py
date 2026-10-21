@@ -361,6 +361,7 @@ class Settings(BaseSettings):
     # ENGINE_GATEWAY_TOKEN guards /internal (engine -> backend); the router is mounted only when set.
     # ENGINE_SERVICE_TOKEN is what the backend presents to the engine (backend -> engine).
     ENGINE_URL: str = ""
+    PUBLIC_API_URL: str = ""  # public base URL of this API, used in webhook trigger URLs (default: request base URL)
     ENGINE_SESSION_ID: str = ""
     ENGINE_SERVICE_TOKEN: Optional[str] = None
     ENGINE_GATEWAY_TOKEN: Optional[str] = None
@@ -384,6 +385,8 @@ class Settings(BaseSettings):
     # false (CHAT_SERVER_HISTORY=false) to restore the old client-trusted history.
     CHAT_SERVER_HISTORY: bool = True
     INTERNAL_ALLOW_PLAINTEXT: bool = False  # allow a non-https ENGINE_URL in production
+    # Allow loopback/private api_base in the LLM provider connection test (local Ollama/vLLM dev only).
+    LLM_PROVIDER_ALLOW_PRIVATE_URLS: bool = False
 
     # Redis Circuit Breaker Settings
     REDIS_CIRCUIT_BREAKER_ENABLED: bool = True            # Enable circuit breaker
