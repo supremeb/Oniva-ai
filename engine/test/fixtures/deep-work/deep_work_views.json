@@ -210,9 +210,15 @@
               },
               "deepWorkRunId": "run-1"
             },
-            "compaction": null,
+            "compaction": {
+              "enabled": true,
+              "reserveTokens": 20000,
+              "backgroundMargin": 40000,
+              "keepRecentTokens": 20000
+            },
             "maxRounds": 40,
-            "deadlineMs": 1000600000
+            "deadlineMs": 1000600000,
+            "cacheTtl": "1h"
           },
           "toolOutput": {},
           "compaction": {
@@ -508,9 +514,15 @@
               },
               "deepWorkRunId": "run-1"
             },
-            "compaction": null,
+            "compaction": {
+              "enabled": true,
+              "reserveTokens": 20000,
+              "backgroundMargin": 40000,
+              "keepRecentTokens": 20000
+            },
             "maxRounds": 40,
-            "deadlineMs": 1000600000
+            "deadlineMs": 1000600000,
+            "cacheTtl": "1h"
           },
           "toolOutput": {},
           "compaction": {
@@ -1211,9 +1223,15 @@
               },
               "deepWorkRunId": "run-1"
             },
-            "compaction": null,
+            "compaction": {
+              "enabled": true,
+              "reserveTokens": 20000,
+              "backgroundMargin": 40000,
+              "keepRecentTokens": 20000
+            },
             "maxRounds": 40,
-            "deadlineMs": 1000600000
+            "deadlineMs": 1000600000,
+            "cacheTtl": "1h"
           },
           "toolOutput": {},
           "compaction": {
@@ -1374,9 +1392,15 @@
               },
               "deepWorkRunId": "run-1"
             },
-            "compaction": null,
+            "compaction": {
+              "enabled": true,
+              "reserveTokens": 20000,
+              "backgroundMargin": 40000,
+              "keepRecentTokens": 20000
+            },
             "maxRounds": 40,
-            "deadlineMs": 1000600000
+            "deadlineMs": 1000600000,
+            "cacheTtl": "1h"
           },
           "toolOutput": {},
           "compaction": {
@@ -3882,9 +3906,15 @@
               },
               "deepWorkRunId": "run-1"
             },
-            "compaction": null,
+            "compaction": {
+              "enabled": true,
+              "reserveTokens": 20000,
+              "backgroundMargin": 40000,
+              "keepRecentTokens": 20000
+            },
             "maxRounds": 40,
-            "deadlineMs": 1000600000
+            "deadlineMs": 1000600000,
+            "cacheTtl": "1h"
           },
           "toolOutput": {},
           "compaction": {
@@ -4239,9 +4269,15 @@
               },
               "deepWorkRunId": "run-1"
             },
-            "compaction": null,
+            "compaction": {
+              "enabled": true,
+              "reserveTokens": 20000,
+              "backgroundMargin": 40000,
+              "keepRecentTokens": 20000
+            },
             "maxRounds": 40,
-            "deadlineMs": 1000600000
+            "deadlineMs": 1000600000,
+            "cacheTtl": "1h"
           },
           "toolOutput": {},
           "compaction": {
@@ -4359,9 +4395,15 @@
               },
               "deepWorkRunId": "run-1"
             },
-            "compaction": null,
+            "compaction": {
+              "enabled": true,
+              "reserveTokens": 20000,
+              "backgroundMargin": 40000,
+              "keepRecentTokens": 20000
+            },
             "maxRounds": 40,
-            "deadlineMs": 1000600000
+            "deadlineMs": 1000600000,
+            "cacheTtl": "1h"
           },
           "toolOutput": {},
           "compaction": {
@@ -5459,9 +5501,15 @@
               },
               "deepWorkRunId": "run-1"
             },
-            "compaction": null,
+            "compaction": {
+              "enabled": true,
+              "reserveTokens": 20000,
+              "backgroundMargin": 40000,
+              "keepRecentTokens": 20000
+            },
             "maxRounds": 40,
-            "deadlineMs": 1000600000
+            "deadlineMs": 1000600000,
+            "cacheTtl": "1h"
           },
           "toolOutput": {},
           "compaction": {
@@ -5701,9 +5749,15 @@
               },
               "deepWorkRunId": "run-1"
             },
-            "compaction": null,
+            "compaction": {
+              "enabled": true,
+              "reserveTokens": 20000,
+              "backgroundMargin": 40000,
+              "keepRecentTokens": 20000
+            },
             "maxRounds": 40,
-            "deadlineMs": 1000600000
+            "deadlineMs": 1000600000,
+            "cacheTtl": "1h"
           },
           "toolOutput": {},
           "compaction": {
@@ -5801,9 +5855,15 @@
               },
               "deepWorkRunId": "run-1"
             },
-            "compaction": null,
+            "compaction": {
+              "enabled": true,
+              "reserveTokens": 20000,
+              "backgroundMargin": 40000,
+              "keepRecentTokens": 20000
+            },
             "maxRounds": 40,
-            "deadlineMs": 1000600000
+            "deadlineMs": 1000600000,
+            "cacheTtl": "1h"
           },
           "toolOutput": {},
           "compaction": {

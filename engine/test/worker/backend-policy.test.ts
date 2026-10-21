@@ -76,6 +76,32 @@ function virtualTime() {
 }
 
 describe("BackendPolicyClient", () => {
+  it("carries the optional contextWindow and remembers it per model", async () => {
+    const gw = await start();
+    gw.scriptPolicy({
+      ok: true,
+      apiKey: "sk-t",
+      model: "m-1",
+      maxTokens: 7,
+      contextWindow: 123_456,
+    });
+    const c = client(gw);
+    expect(c.contextWindowFor("m-1")).toBeUndefined();
+    const res = await c.resolveModelRequest(info());
+    expect(res).toMatchObject({ ok: true, contextWindow: 123_456 });
+    expect(c.contextWindowFor("m-1")).toBe(123_456);
+  });
+
+  it("ignores a malformed contextWindow", async () => {
+    const gw = await start();
+    gw.scriptPolicy({ ok: true, apiKey: "sk-t", model: "m-2", maxTokens: 7, contextWindow: -5 });
+    const c = client(gw);
+    const res = await c.resolveModelRequest(info());
+    expect(res).toMatchObject({ ok: true });
+    expect(res).not.toHaveProperty("contextWindow");
+    expect(c.contextWindowFor("m-2")).toBeUndefined();
+  });
+
   it("posts the request and returns the key for that request", async () => {
     const gw = await start();
     gw.scriptPolicy({ ok: true, apiKey: "sk-tenant", model: "m-1", maxTokens: 77 });

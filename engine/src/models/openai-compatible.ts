@@ -31,6 +31,7 @@ import {
 } from "./retry.js";
 import { abortMessage, MessageBuilder, modelError } from "./stream.js";
 import type {
+  CacheTtl,
   Message,
   ModelError,
   ModelProvider,
@@ -67,7 +68,7 @@ export interface OpenAICompatibleProviderOptions {
 interface TextPart {
   type: "text";
   text: string;
-  cache_control?: { type: "ephemeral" };
+  cache_control?: { type: "ephemeral"; ttl?: "1h" };
 }
 
 type ChatMessage =
@@ -116,6 +117,7 @@ interface Chunk {
 }
 
 const EPHEMERAL = { type: "ephemeral" } as const;
+const EPHEMERAL_1H = { type: "ephemeral", ttl: "1h" } as const;
 
 export class OpenAICompatibleProvider implements ModelProvider {
   readonly name: string;
@@ -131,7 +133,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     const cache = (request.cache ?? true) && (this.#options.cacheControl?.(request.model) ?? false);
     const params: ChatCompletionsParams = {
       model: request.model,
-      messages: mapMessages(request.messages, cache),
+      messages: mapMessages(request.messages, cache, request.cacheTtl),
       stream: true,
       stream_options: { include_usage: true },
       max_tokens: request.maxTokens,
@@ -335,7 +337,7 @@ function eventData(raw: string): string | undefined {
   return lines.length > 0 ? lines.join("\n") : undefined;
 }
 
-function mapMessages(messages: Message[], cache: boolean): ChatMessage[] {
+function mapMessages(messages: Message[], cache: boolean, ttl?: CacheTtl): ChatMessage[] {
   const out: ChatMessage[] = [];
   for (const m of messages) {
     if (m.role === "system") {
@@ -363,7 +365,7 @@ function mapMessages(messages: Message[], cache: boolean): ChatMessage[] {
       out.push(msg);
     }
   }
-  if (cache) markCacheBreakpoints(out);
+  if (cache) markCacheBreakpoints(out, ttl);
   return out;
 }
 
@@ -378,18 +380,18 @@ function toParts(content: string | TextContent[]): TextPart[] {
 }
 
 /** Turn the last system message and the last stable user/assistant message into part arrays with a breakpoint. */
-function markCacheBreakpoints(messages: ChatMessage[]): void {
-  const mark = (m: ChatMessage): boolean => {
+function markCacheBreakpoints(messages: ChatMessage[], ttl?: CacheTtl): void {
+  const mark = (m: ChatMessage, control: TextPart["cache_control"] = EPHEMERAL): boolean => {
     if (m.role === "tool" || m.content === null) return false;
     const parts = toParts(m.content as string | TextContent[]);
     const last = parts.at(-1);
     if (!last || last.text === "") return false;
-    last.cache_control = EPHEMERAL;
+    last.cache_control = control;
     (m as { content: TextPart[] }).content = parts;
     return true;
   };
   const lastSystem = messages.findLast((m) => m.role === "system");
-  if (lastSystem) mark(lastSystem);
+  if (lastSystem) mark(lastSystem, ttl === "1h" ? EPHEMERAL_1H : EPHEMERAL);
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i] as ChatMessage;
     if ((m.role === "user" || m.role === "assistant") && mark(m)) return;

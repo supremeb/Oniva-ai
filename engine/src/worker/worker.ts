@@ -188,10 +188,16 @@ export function workerHostPolicy(options: {
   approvalTtlMs: number | null;
   clock: Clock;
   /** Resolves model requests instead of `modelDefaults`; no local fallback. */
-  backend?: Pick<BackendPolicyClient, "resolveModelRequest" | "authorizeTool"> | null;
+  backend?:
+    | (Pick<BackendPolicyClient, "resolveModelRequest" | "authorizeTool"> &
+        Partial<Pick<BackendPolicyClient, "contextWindowFor">>)
+    | null;
 }): HostPolicy {
   const { modelDefaults: d, gateway, approvalTtlMs, clock, backend } = options;
   return {
+    contextWindowFor(model) {
+      return backend?.contextWindowFor?.(model);
+    },
     resolveModelRequest(info) {
       if (backend) return backend.resolveModelRequest(info);
       const apiKey = d.apiKey();
