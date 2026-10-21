@@ -384,6 +384,8 @@ class Settings(BaseSettings):
     # false (CHAT_SERVER_HISTORY=false) to restore the old client-trusted history.
     CHAT_SERVER_HISTORY: bool = True
     INTERNAL_ALLOW_PLAINTEXT: bool = False  # allow a non-https ENGINE_URL in production
+    # Allow loopback/private api_base in the LLM provider connection test (local Ollama/vLLM dev only).
+    LLM_PROVIDER_ALLOW_PRIVATE_URLS: bool = False
 
     # Redis Circuit Breaker Settings
     REDIS_CIRCUIT_BREAKER_ENABLED: bool = True            # Enable circuit breaker

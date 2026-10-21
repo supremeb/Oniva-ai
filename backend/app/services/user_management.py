@@ -565,6 +565,9 @@ class UserManagementService:
         if not is_valid:
             raise ValueError(error)
 
+        if self.verify_password(new_password, user.hashed_password):
+            raise ValueError("New password must be different from the current password")
+
         user.hashed_password = self.hash_password(new_password)
         user.password_changed_at = datetime.utcnow()
 

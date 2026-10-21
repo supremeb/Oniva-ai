@@ -7,6 +7,7 @@ Supports built-in providers (OpenAI, Anthropic, OpenRouter) and
 custom endpoints (vLLM, Ollama, Azure OpenAI).
 """
 
+import asyncio
 from typing import List, Optional
 from uuid import UUID, uuid4
 
@@ -17,12 +18,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.encryption import get_encryption_service
-from app.auth.dependencies import get_current_user, get_current_tenant_id
+from app.auth.dependencies import get_current_user, get_current_tenant_id, require_role
 from app.auth.providers.base import AuthUser
 from app.models.llm_provider import LLMProvider
+from app.config import get_settings
+from app.security.url_validator import is_url_safe
 from app.services.llm_gateway import verify_provider_connection, normalize_model_id
 
 router = APIRouter()
+
+# Provider rows hold the tenant's billing key: every write needs owner/admin.
+_admin = Depends(require_role("owner", "admin"))
 
 
 # ============================================================================
@@ -144,7 +150,7 @@ async def list_providers(
     return ProviderListResponse(providers=responses, total=len(responses))
 
 
-@router.post("/llm-providers", response_model=ProviderResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/llm-providers", response_model=ProviderResponse, status_code=status.HTTP_201_CREATED, dependencies=[_admin])
 async def create_provider(
     data: ProviderCreate,
     db: AsyncSession = Depends(get_db),
@@ -221,6 +227,68 @@ async def create_provider(
     return response
 
 
+class BrowseModelsResponse(BaseModel):
+    """Available model from a provider's catalog."""
+    id: str
+    name: str
+    context_length: Optional[int] = None
+    pricing_prompt: Optional[str] = None
+    pricing_completion: Optional[str] = None
+
+
+@router.get("/llm-providers/browse-models", dependencies=[_admin])
+async def browse_available_models(
+    provider_type: str = "openrouter",
+    user: AuthUser = Depends(get_current_user),
+):
+    """
+    Fetch available models from a provider's catalog.
+
+    Currently supports OpenRouter (public API).
+    Returns model IDs, names, context lengths, and pricing.
+    """
+    if provider_type != "openrouter":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Browse not supported for provider '{provider_type}'. Only 'openrouter' is supported.",
+        )
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get("https://openrouter.ai/api/v1/models")
+            resp.raise_for_status()
+            data = resp.json()
+
+        models = []
+        for m in data.get("data", []):
+            model_id = m.get("id", "")
+            name = m.get("name", model_id)
+            ctx = m.get("context_length")
+            pricing = m.get("pricing", {})
+            prompt_price = pricing.get("prompt")
+            completion_price = pricing.get("completion")
+
+            models.append(BrowseModelsResponse(
+                id=model_id,
+                name=name,
+                context_length=ctx,
+                pricing_prompt=prompt_price,
+                pricing_completion=completion_price,
+            ))
+
+        # Sort by name
+        models.sort(key=lambda x: x.name.lower())
+        return {"models": [m.model_dump() for m in models], "total": len(models)}
+
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to fetch models from OpenRouter: {str(e)}",
+        )
+
+
 @router.get("/llm-providers/{provider_id}", response_model=ProviderResponse)
 async def get_provider(
     provider_id: UUID,
@@ -259,7 +327,7 @@ async def get_provider(
     )
 
 
-@router.patch("/llm-providers/{provider_id}", response_model=ProviderResponse)
+@router.patch("/llm-providers/{provider_id}", response_model=ProviderResponse, dependencies=[_admin])
 async def update_provider(
     provider_id: UUID,
     data: ProviderUpdate,
@@ -324,7 +392,7 @@ async def update_provider(
     return response
 
 
-@router.delete("/llm-providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/llm-providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_admin])
 async def delete_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -347,7 +415,7 @@ async def delete_provider(
     await db.commit()
 
 
-@router.post("/llm-providers/test", response_model=ProviderTestResponse)
+@router.post("/llm-providers/test", response_model=ProviderTestResponse, dependencies=[_admin])
 async def test_provider(
     data: ProviderTestRequest,
     user: AuthUser = Depends(get_current_user),
@@ -356,7 +424,16 @@ async def test_provider(
     Test connection to an LLM provider.
 
     Makes a minimal API call to verify the configuration works.
+    Loopback / private / link-local / metadata hosts are rejected unless
+    LLM_PROVIDER_ALLOW_PRIVATE_URLS is enabled.
     """
+    if data.api_base and not get_settings().LLM_PROVIDER_ALLOW_PRIVATE_URLS:
+        blocked = await asyncio.to_thread(is_url_safe, data.api_base)
+        if blocked:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"api_base is not allowed: {blocked}",
+            )
     result = await verify_provider_connection(
         provider_type=data.provider_type,
         api_base=data.api_base,
@@ -367,69 +444,7 @@ async def test_provider(
     return ProviderTestResponse(**result)
 
 
-class BrowseModelsResponse(BaseModel):
-    """Available model from a provider's catalog."""
-    id: str
-    name: str
-    context_length: Optional[int] = None
-    pricing_prompt: Optional[str] = None
-    pricing_completion: Optional[str] = None
-
-
-@router.get("/llm-providers/browse-models")
-async def browse_available_models(
-    provider_type: str = "openrouter",
-    user: AuthUser = Depends(get_current_user),
-):
-    """
-    Fetch available models from a provider's catalog.
-
-    Currently supports OpenRouter (public API).
-    Returns model IDs, names, context lengths, and pricing.
-    """
-    if provider_type != "openrouter":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Browse not supported for provider '{provider_type}'. Only 'openrouter' is supported.",
-        )
-
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get("https://openrouter.ai/api/v1/models")
-            resp.raise_for_status()
-            data = resp.json()
-
-        models = []
-        for m in data.get("data", []):
-            model_id = m.get("id", "")
-            name = m.get("name", model_id)
-            ctx = m.get("context_length")
-            pricing = m.get("pricing", {})
-            prompt_price = pricing.get("prompt")
-            completion_price = pricing.get("completion")
-
-            models.append(BrowseModelsResponse(
-                id=model_id,
-                name=name,
-                context_length=ctx,
-                pricing_prompt=prompt_price,
-                pricing_completion=completion_price,
-            ))
-
-        # Sort by name
-        models.sort(key=lambda x: x.name.lower())
-        return {"models": [m.model_dump() for m in models], "total": len(models)}
-
-    except httpx.HTTPError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to fetch models from OpenRouter: {str(e)}",
-        )
-
-
-@router.post("/llm-providers/reorder", status_code=status.HTTP_200_OK)
+@router.post("/llm-providers/reorder", status_code=status.HTTP_200_OK, dependencies=[_admin])
 async def reorder_providers(
     provider_ids: List[UUID],
     db: AsyncSession = Depends(get_db),

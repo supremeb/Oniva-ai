@@ -16,7 +16,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.auth.dependencies import get_current_user, get_current_tenant_id
+from app.auth.dependencies import get_current_user, get_current_tenant_id, require_role
 from app.auth.providers.base import AuthUser
 from app.models.llm_usage import LLMUsageRecord
 
@@ -74,7 +74,7 @@ class UsageResponse(BaseModel):
 # Endpoints
 # ============================================================================
 
-@router.get("/llm-usage/summary", response_model=UsageResponse)
+@router.get("/llm-usage/summary", response_model=UsageResponse, dependencies=[Depends(require_role("owner", "admin"))])
 async def get_usage_summary(
     days: int = Query(30, ge=1, le=90, description="Number of days to include"),
     db: AsyncSession = Depends(get_db),
