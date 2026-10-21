@@ -22,6 +22,12 @@ GRADER_TYPES = (
     "cache_hit_ratio",
     "trajectory_match",
     "judge",
+    # U6 (additive)
+    "no_run_error",
+    "no_compaction_failure",
+    "no_limit_exceeded",
+    "tool_error_rate",
+    "learning_sources",
 )
 SPAN_KINDS = ("model", "tool", "subagent", "compaction")
 
