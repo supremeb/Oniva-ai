@@ -178,6 +178,26 @@ describe("startWorker", () => {
     expect(body.taskKinds.some((k) => k.startsWith("workflow_"))).toBe(false);
   });
 
+  it("registers memory_curate only with a memory backend (U30)", async () => {
+    const w = await startWorker(
+      options(`sess-${uuidv7()}`, [], {
+        memory: { baseUrl: "http://memory.invalid", serviceToken: "m" },
+      }),
+    );
+    workers.push(w);
+    await w.serving;
+    const body = (await (await fetch(`${w.url}/v1/health`)).json()) as { taskKinds: string[] };
+    expect(body.taskKinds).toContain("memory_curate");
+
+    const plain = await startWorker(options(`sess-${uuidv7()}`, []));
+    workers.push(plain);
+    await plain.serving;
+    const plainBody = (await (await fetch(`${plain.url}/v1/health`)).json()) as {
+      taskKinds: string[];
+    };
+    expect(plainBody.taskKinds).not.toContain("memory_curate");
+  });
+
   describe("ask_user", () => {
     const ASK = { question: "Which colour?", options: [{ id: "blue", label: "Blue" }] };
 

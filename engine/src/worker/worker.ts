@@ -41,6 +41,8 @@ import { createSteerWorkerTool, STEER_WORKER_TOOL } from "../agent/steer-worker-
 import { createSubagentTool } from "../agent/subagents.js";
 import { type Clock, realClock } from "../core/clock.js";
 import { errorText, NotOwner } from "../core/errors.js";
+import { createMemoryGateway } from "../memory/gateway.js";
+import { createMemoryTasks } from "../memory/tasks.js";
 import type { ModelRegistry } from "../models/stream.js";
 import { bearerMatches, headerValue } from "../server/auth.js";
 import { createEngineServer, type EngineServer } from "../server/http.js";
@@ -102,6 +104,15 @@ export interface WorkerWorkflowOptions {
   fetch?: typeof fetch;
 }
 
+/** The backend serving the memory curator gateway (U30). */
+export interface WorkerMemoryOptions {
+  baseUrl: string;
+  serviceToken: string;
+  /** Retry budget for a transient gateway failure (`ENGINE_POLICY_RETRY_MS`). Default 60 s. */
+  retryMs?: number;
+  fetch?: typeof fetch;
+}
+
 export interface WorkerOptions {
   /** Pool on the engine schema; the caller owns (and ends) it. */
   pool: Pool;
@@ -147,6 +158,11 @@ export interface WorkerOptions {
    * a rejected token fences the worker like a rejected tool call does.
    */
   workflow?: WorkerWorkflowOptions | null;
+  /**
+   * Register the `memory_curate` task kind (U30). Off by default: the task kinds
+   * and `/v1/health` `taskKinds` are unchanged without it.
+   */
+  memory?: WorkerMemoryOptions | null;
   /** Engine clock (approval expiry, deadlines, throttling). Leases use the database clock. */
   clock?: Clock;
   settings?: Partial<AgentSettings>;
@@ -511,6 +527,27 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
             onFenceRejected: (rejection) => {
               log("fence_rejected", { tool: "workflow", token: String(rejection.token) });
               k.fenceNow("the workflow node gateway rejected this worker's fence token");
+            },
+          }),
+        ),
+      );
+    }
+    if (options.memory) {
+      tasks.push(
+        ...createMemoryTasks(
+          createMemoryGateway({
+            baseUrl: options.memory.baseUrl,
+            serviceToken: options.memory.serviceToken,
+            fence: k.fence,
+            sessionId,
+            clock,
+            ...(options.memory.retryMs === undefined
+              ? {}
+              : { retry: { budgetMs: options.memory.retryMs } }),
+            ...(options.memory.fetch ? { fetch: options.memory.fetch } : {}),
+            onFenceRejected: (rejection) => {
+              log("fence_rejected", { tool: "memory", token: String(rejection.token) });
+              k.fenceNow("the memory gateway rejected this worker's fence token");
             },
           }),
         ),

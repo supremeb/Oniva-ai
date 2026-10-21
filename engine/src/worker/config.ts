@@ -13,6 +13,8 @@
  * | `ENGINE_LEASE_RETRY_MS` | ttl/3 | how often a standby worker retries the lease |
  * | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
  * | `ENGINE_WORKFLOW_BACKEND_URL` | `ENGINE_GATEWAY_URL` | backend origin of the workflow node gateway (`/internal/workflows/...`); authenticated with the gateway token. The production worker requires one of the two |
+ * | `ENGINE_MEMORY_BACKEND_URL` | none | backend origin of the memory curator gateway (`/internal/memory/curate/...`); setting it registers the `memory_curate` task kind (U30). Authenticated with the gateway token |
+ * | `ENGINE_MEMORY_CURATE` | off | `1` registers `memory_curate` against `ENGINE_GATEWAY_URL` when `ENGINE_MEMORY_BACKEND_URL` is unset. Without either the worker is unchanged |
  * | `ENGINE_POLICY` | `backend` when `ENGINE_POLICY_URL` is set, else `local` | `backend`: model, key and quota come from the backend per request; `local`: `ENGINE_MODEL` and `ANTHROPIC_API_KEY` |
  * | `ENGINE_POLICY_URL` | `ENGINE_GATEWAY_URL` under `ENGINE_POLICY=backend` | backend origin serving `/internal/models/{policy,usage}`; authenticated with the gateway token |
  * | `ENGINE_POLICY_TIMEOUT_MS` | `5000` | timeout of one policy or usage call |
@@ -62,6 +64,10 @@ export interface WorkerConfig {
   gatewayToken: string | null;
   /** Backend origin of the workflow node gateway: `ENGINE_WORKFLOW_BACKEND_URL`, else `gatewayUrl`. */
   workflowBackendUrl: string | null;
+  /** Backend origin of the memory curator gateway (`ENGINE_MEMORY_BACKEND_URL`); null when unset (no fallback). */
+  memoryBackendUrl: string | null;
+  /** Register `memory_curate` against `gatewayUrl` (`ENGINE_MEMORY_CURATE=1`). */
+  memoryCurate: boolean;
   /** `backend`: the backend resolves every model request and records usage. */
   policy: "local" | "backend";
   /** Backend origin for the policy and usage endpoints; set iff `policy` is `backend`. */
@@ -235,6 +241,8 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
     gatewayUrl,
     gatewayToken: text(env, "ENGINE_GATEWAY_TOKEN"),
     workflowBackendUrl: text(env, "ENGINE_WORKFLOW_BACKEND_URL") ?? gatewayUrl,
+    memoryBackendUrl: text(env, "ENGINE_MEMORY_BACKEND_URL"),
+    memoryCurate: flag(env, "ENGINE_MEMORY_CURATE"),
     policy,
     policyUrl,
     policyTimeoutMs: integer(env, "ENGINE_POLICY_TIMEOUT_MS", DEFAULT_POLICY_TIMEOUT_MS, 1),
@@ -282,6 +290,33 @@ export function requireWorkflowBackend(
   }
   return {
     baseUrl: config.workflowBackendUrl,
+    serviceToken: config.gatewayToken ?? config.serviceToken,
+    ...(config.policyRetryMs === undefined ? {} : { retryMs: config.policyRetryMs }),
+  };
+}
+
+/**
+ * The memory curator gateway the worker registers `memory_curate` with (U30),
+ * or null when neither `ENGINE_MEMORY_BACKEND_URL` nor `ENGINE_MEMORY_CURATE=1`
+ * is set (the default: the worker is unchanged). `ENGINE_MEMORY_CURATE=1`
+ * without any backend URL throws {@link WorkerConfigError}.
+ */
+export function memoryBackendOptions(
+  config: Pick<
+    WorkerConfig,
+    "memoryBackendUrl" | "memoryCurate" | "gatewayUrl" | "gatewayToken" | "serviceToken"
+  > &
+    Partial<Pick<WorkerConfig, "policyRetryMs">>,
+): { baseUrl: string; serviceToken: string; retryMs?: number } | null {
+  if (config.memoryBackendUrl === null && !config.memoryCurate) return null;
+  const baseUrl = config.memoryBackendUrl ?? config.gatewayUrl;
+  if (baseUrl === null) {
+    throw new WorkerConfigError(
+      "ENGINE_MEMORY_CURATE=1 needs a backend: set ENGINE_MEMORY_BACKEND_URL or ENGINE_GATEWAY_URL",
+    );
+  }
+  return {
+    baseUrl,
     serviceToken: config.gatewayToken ?? config.serviceToken,
     ...(config.policyRetryMs === undefined ? {} : { retryMs: config.policyRetryMs }),
   };
