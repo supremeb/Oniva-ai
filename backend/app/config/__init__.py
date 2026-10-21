@@ -374,6 +374,14 @@ class Settings(BaseSettings):
     # Project memory (U26): global gate for the memory tools; tenants override via settings.features.
     ENABLE_PROJECT_MEMORY: bool = False
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
+    # Tiered context reduction (evals/context plan, U16). off | offload | offload+clear | full. The per-tenant
+    # flag features.ENABLE_ENGINE_CONTEXT_TIERS (true = full, false = off) overrides this. Read when an agent
+    # config is built, so existing conversations keep their behaviour until reconfigured. Unknown value = off.
+    ENGINE_CONTEXT_TIERS: str = "off"
+    ENGINE_CONTEXT_OFFLOAD_TOKENS: int = 8000        # tool results above this are saved out of context
+    ENGINE_CONTEXT_CLEAR_FRACTION: float = 0.5       # clearing starts at this fraction of the context window
+    ENGINE_CONTEXT_KEEP_TOOL_RESULTS: int = 5        # newest tool results never cleared
+    ENGINE_CONTEXT_CLEAR_AT_LEAST_TOKENS: int = 8000  # a clearing pass must free at least this much
     # Run reconciler (plan 003 U5): rows stuck active for this long are checked against the engine.
     RUN_RECONCILE_AFTER_S: int = 120
     RUN_RECONCILE_INTERVAL_S: float = 60.0
