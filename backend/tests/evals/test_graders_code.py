@@ -285,6 +285,42 @@ def test_dw_citation_ignores_markdown_links_and_needs_report():
     assert deep_work.citation_map(missing, {})["passed"] is False
 
 
+def _with(ctx, **files):
+    return GradeContext(trace=ctx.trace, raw=ctx.raw, files={**ctx.files, **files})
+
+
+def test_dw_citations_number_distinct_sources_not_learnings():
+    ctx = dw_ok()
+    learnings = [
+        {"fact": "a", "source_url": "https://a.example/x"},
+        {"fact": "a2", "source_url": "https://a.example/x"},  # duplicate URL
+        {"fact": "b", "source_url": "https://b.example"},
+        {"fact": "mk", "source_type": "model_knowledge"},  # no source entry
+    ]
+    assert deep_work.source_count(learnings) == 2
+    ok = _with(ctx, learnings=learnings, **{"report.md": "X [1]. Y [2]."})
+    assert deep_work.citation_map(ok, {})["passed"] is True
+    # [3] would be a valid learning index but there are only 2 sources
+    bad = _with(ctx, learnings=learnings, **{"report.md": "X [3]."})
+    out = deep_work.citation_map(bad, {})
+    assert out["passed"] is False and "3" in out["detail"] and "2 distinct" in out["detail"]
+
+
+def test_dw_citation_ranges_lists_and_code():
+    ctx = dw_ok()
+    assert deep_work.cited_indexes("A [1, 2] b [2-3] c `[9]`\n```\n[8]\n```\n[x](u) [4](u)") == [1, 2, 3]
+    assert deep_work.citation_map(_with(ctx, **{"report.md": "A [1-2]."}), {})["passed"] is True
+    assert deep_work.citation_map(_with(ctx, **{"report.md": "A [1-3]."}), {})["passed"] is False
+    assert deep_work.citation_map(_with(ctx, **{"report.md": "`[9]` only"}), {})["passed"] is True
+    assert deep_work.citation_map(_with(ctx, **{"report.md": "A [0]."}), {})["passed"] is False
+
+
+def test_dw_citation_invalid_learning():
+    ctx = dw_ok()
+    out = deep_work.citation_map(_with(ctx, learnings=[{"fact": "x", "source_type": "web"}]), {})
+    assert out["passed"] is False and "invalid" in out["detail"]
+
+
 def test_dw_learning_without_url():
     ctx = dw_ok()
     learnings = [*ctx.files["learnings"], {"fact": "c", "source_type": "web"}]

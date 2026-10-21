@@ -1,8 +1,8 @@
 """Deep Work checks over the trace and the run's workspace artifacts.
 
 Artifacts come from `GradeContext.files`: `report.md` (str), `learnings`
-(list of dicts with `source_url` / `source_type`; `[N]` is a 1-based index into
-it) and `fixture_urls` (URLs present in the replay fixtures).
+(list of dicts with `source_url` / `source_type`; `[N]` is numbered like the
+production Sources section: distinct source URLs in first-seen order) and `fixture_urls` (URLs present in the replay fixtures).
 """
 
 from __future__ import annotations
@@ -11,6 +11,10 @@ import re
 from collections.abc import Iterator
 from typing import Any
 
+from pydantic import ValidationError
+
+from app.services.deep_work.models import Learning
+from app.services.deep_work.synthesis import build_sources_section
 from evals.schema import Span
 
 from . import GradeContext, Outcome, needs_raw, outcome
@@ -19,7 +23,11 @@ ORDER_ERRORS = ("round_order", "round_open", "no_sections")
 SAVE_TOOLS = ("dw_save_learnings", "dw_save_learning")
 WORKER_ROLE = "research_worker"
 MODEL_KNOWLEDGE = "model_knowledge"
-_CITATION = re.compile(r"\[(\d+)\](?!\()")
+# Same shape as production's citation lint: `[3]`, `[1, 2]`, `[2-4]`, not `[3](url)`.
+_CITATION = re.compile(r"\[(\d{1,4}(?:\s*[,–-]\s*\d{1,4})*)\](?!\()")
+_FENCE = re.compile(r"^\s*(```|~~~)")
+_INLINE_CODE = re.compile(r"`[^`\n]*`")
+_SOURCE_LINE = re.compile(r"^(\d+)\. \[", re.MULTILINE)
 
 
 def tool_order(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
@@ -77,16 +85,51 @@ def _learnings(ctx: GradeContext) -> list[dict[str, Any]] | None:
     return v if isinstance(v, list) else None
 
 
+def _strip_code(markdown: str) -> str:
+    out, fenced = [], False
+    for line in markdown.splitlines():
+        if _FENCE.match(line):
+            fenced = not fenced
+        elif not fenced:
+            out.append(_INLINE_CODE.sub("", line))
+    return "\n".join(out)
+
+
+def cited_indexes(markdown: str) -> list[int]:
+    """Citation numbers outside code; `[1, 2]` and `[2-4]` expand."""
+    found: set[int] = set()
+    for group in _CITATION.findall(_strip_code(markdown)):
+        for part in group.split(","):
+            ends = [int(n) for n in re.findall(r"\d+", part)]
+            lo, hi = ends[0], ends[-1]
+            found.update(range(lo, hi + 1) if lo <= hi else ends)
+    return sorted(found)
+
+
+def source_count(learnings: list[dict[str, Any]]) -> int:
+    """Entries production's Sources section lists; its helper decides the numbering."""
+    parsed = [Learning.model_validate({"fact": "", "confidence": 1.0, **l}) for l in learnings]
+    return len(_SOURCE_LINE.findall(build_sources_section(parsed)))
+
+
 def citation_map(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
-    """Every `[N]` in report.md is a valid 1-based learning index."""
+    """Every `[N]` in report.md is in 1..K, K = distinct sources.
+
+    K comes from production's `build_sources_section`, so the numbering cannot drift.
+    Each listed source is built from at least one learning, so a valid `[N]` has learnings.
+    """
     report, learnings = ctx.files.get("report.md"), _learnings(ctx)
     if not isinstance(report, str) or learnings is None:
         return outcome(False, "citation_map needs files 'report.md' and 'learnings'")
-    cited = sorted({int(n) for n in _CITATION.findall(report)})
-    bad = [n for n in cited if n < 1 or n > len(learnings)]
+    try:
+        k = source_count(learnings)
+    except ValidationError as e:
+        return outcome(False, f"a learning is invalid: {e.errors()[0]['msg']}")
+    cited = cited_indexes(report)
+    bad = [n for n in cited if n < 1 or n > k]
     if bad:
-        return outcome(False, f"citations {bad} do not map to a learning (have {len(learnings)})")
-    return outcome(True, f"{len(cited)} distinct citations map to {len(learnings)} learnings")
+        return outcome(False, f"citations {bad} do not map to a source ({k} distinct sources, {len(learnings)} learnings)")
+    return outcome(True, f"{len(cited)} distinct citations within {k} sources ({len(learnings)} learnings)")
 
 
 def learning_sources(ctx: GradeContext, params: dict[str, Any]) -> Outcome:
