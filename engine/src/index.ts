@@ -7,6 +7,7 @@ export * from "./agent/generation.js";
 export * from "./agent/harness.js";
 export * from "./agent/hooks.js";
 export * from "./agent/inbox.js";
+export * from "./agent/offload.js";
 export * from "./agent/policy.js";
 export * from "./agent/progress.js";
 export * from "./agent/prompt.js";

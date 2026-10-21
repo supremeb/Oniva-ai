@@ -49,7 +49,12 @@ import { migrate } from "../storage/postgres/migrate.js";
 import { PostgresStorageProvider } from "../storage/postgres/storage.js";
 import type { StorageProvider } from "../storage/types.js";
 import type { TaskDefinition } from "../tasks/define.js";
-import { createGatewayTools, type GatewayToolset } from "../tools/gateway.js";
+import {
+  createGatewayTools,
+  createOffloadStore,
+  type GatewayClientOptions,
+  type GatewayToolset,
+} from "../tools/gateway.js";
 import type { ToolDefinition } from "../tools/registry.js";
 import { createNodeGateway } from "../workflow/node-gateway.js";
 import { createWorkflowTasks } from "../workflow/tasks.js";
@@ -438,20 +443,28 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
     else onFailed(reason);
   }
 
-  async function loadGateway(k: LeaseKeeper): Promise<GatewayToolset | null> {
-    if (!options.gateway) return null;
-    return createGatewayTools({
-      baseUrl: options.gateway.baseUrl,
-      serviceToken: options.gateway.serviceToken,
+  /** The gateway client options for a lease: the tools and the Tier 0 offload store share them. */
+  function gatewayClientOptions(
+    k: LeaseKeeper,
+    gateway: WorkerGatewayOptions,
+  ): GatewayClientOptions {
+    return {
+      baseUrl: gateway.baseUrl,
+      serviceToken: gateway.serviceToken,
       fence: k.fence,
       sessionId,
       signal: k.signal,
-      ...(options.gateway.fetch ? { fetch: options.gateway.fetch } : {}),
+      ...(gateway.fetch ? { fetch: gateway.fetch } : {}),
       onFenceRejected: (rejection) => {
         log("fence_rejected", { tool: rejection.tool, token: String(rejection.token) });
         k.fenceNow("the tool gateway rejected this worker's fence token");
       },
-    });
+    };
+  }
+
+  async function loadGateway(k: LeaseKeeper): Promise<GatewayToolset | null> {
+    if (!options.gateway) return null;
+    return createGatewayTools(gatewayClientOptions(k, options.gateway));
   }
 
   async function serve(k: LeaseKeeper, gateway: GatewayToolset | null): Promise<void> {
@@ -519,6 +532,10 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
           }
         : {}),
       ...(runNotifier ? { onSettled: runNotifier.listener } : {}),
+      // Tier 0 (R11): with a gateway, a conversation whose settings turn offload on can use it.
+      ...(gateway && options.gateway
+        ? { offload: createOffloadStore(gatewayClientOptions(k, options.gateway)) }
+        : {}),
       onError: (err, info) => log("engine_error", { ...info, error: logErrorText(err) }),
     });
     harness = h;

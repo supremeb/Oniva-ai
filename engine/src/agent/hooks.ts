@@ -79,6 +79,7 @@ export interface AgentErrorInfo {
     | `hook:${HookName}`
     | "progress"
     | "reconcile"
+    | "offload"
     | "settle"
     | "handler"
     | "abort"
