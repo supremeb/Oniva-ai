@@ -196,6 +196,8 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_LEASE_RETRY_MS` | TTL/3 | standby retry interval |
 | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
 | `ENGINE_WORKFLOW_BACKEND_URL` | `ENGINE_GATEWAY_URL` | backend origin of the workflow node gateway (`/internal/workflows/...`), authenticated with the gateway token. The production worker (`npm run worker`) exits 2 at startup when neither is set |
+| `ENGINE_MEMORY_BACKEND_URL` | none | backend origin of the memory curator gateway (`/internal/memory/curate/...`); setting it registers the `memory_curate` task kind (U30), authenticated with the gateway token |
+| `ENGINE_MEMORY_CURATE` | off | `1` registers `memory_curate` against `ENGINE_GATEWAY_URL` when `ENGINE_MEMORY_BACKEND_URL` is unset; exits 2 at startup when neither URL is set. Without either variable the worker is unchanged |
 | `ENGINE_APPROVAL_TTL_MS` | `86400000` | local-mode approval expiry only (`0`: none); under `ENGINE_POLICY=backend` the backend's `approvalTtlMs` decides and this is ignored |
 | `ENGINE_QUESTION_TTL_MS` | `604800000` | how long an `ask_user` question waits for an answer (`0`: none) |
 | `ANTHROPIC_API_KEY` | none | model key (read per request; unused under `ENGINE_POLICY=backend`) |
@@ -369,3 +371,14 @@ Override any of them with `resolveLimits({...})`.
 - Transport error text keeps the real cause: `fetch failed (UND_ERR_SOCKET: other side closed)`, `terminated (ECONNRESET: other side closed)`. Only `code: message` of each error down the `cause` chain is read, never headers, bodies or keys.
 - The Anthropic adapter relies on the SDK's own retries (connection errors, 408/409/429/5xx, before the stream starts) and sets `maxRetries` explicitly (default 3, option `maxRetries`); it does not use `retry.ts`.
 - Errors: 401/402/403 `auth`, 429 `rate_limited`, 408 `network`, 5xx `overloaded`, 400/413 with a context-length message `context_overflow`, other 4xx `invalid_request`, transport failures `network`, cancellation `aborted`. An `error` object inside the stream fails the generation with the text kept as partial.
+
+## Memory curator (`memory_curate`)
+
+`createMemoryCurateTask({ gateway, maxAttempts?, backoffMs?, callTimeoutMs?, onAbort? })` (`src/memory/curate-task.ts`) is the host task kind `memory_curate`, a thin durable driver for the project-memory curator (plan 2026-10-21-001, U30). `createMemoryTasks(gateway)` (`src/memory/tasks.ts`) registers it; `createMemoryGateway(...)` (`src/memory/gateway.ts`) is its HTTP client with the same retry, fence and auth rules as the node gateway. Input: `{ version: 1, conversationId, runId }`, naming the SOURCE run to curate; the backend starts it with `POST /v1/runs` (`kind: "memory_curate"`) under a deterministic id so a repeated trigger is one run (a bad input is a 400 through `validateInput`).
+
+- **Phases.** `prepare` posts to `/internal/memory/curate/prepare` and gets `skip` (the task ends `done`, no child) or `llm` (`system`, `prompt`, `tier`, opaque `ctx`). The engine then creates one tool-less child conversation owned by the task (`metadata.purpose = "memory.curate"`, `metadata.modelTier = tier`) in the commit that leaves `prepare`, and waits on its run (`reflect`). `apply` posts the child's answer text and `ctx` to `/internal/memory/curate/apply`; the backend parses and validates the deltas, the engine never interprets them.
+- **Idempotency.** Keys are `curate:{conversationId}:{runId}:{phase}`; every call is safe to repeat, so a restart after `apply` was sent gets the stored outcome and applies nothing twice.
+- **Failure.** A transient gateway failure is asked again under the same key after `backoffMs * n`, at most `maxAttempts` (3) times per phase; anything else faults the task with `prepare_failed`, `reflect_failed` or `apply_failed`. A curator failure never touches the source run.
+- **Worker.** `startWorker({ memory: { baseUrl, serviceToken } })` registers the kind (so `/v1/health` `taskKinds` lists it) with a gateway client that carries the lease fence. Off by default.
+
+The wire contract the backend reproduces is `src/memory/contract.ts`, specified by `test/support/fake-memory-backend.ts` (`[clause:memory-curate-*]` tags).

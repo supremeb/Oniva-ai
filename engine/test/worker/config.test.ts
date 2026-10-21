@@ -8,6 +8,7 @@ import {
   DEFAULT_LEASE_TTL_MS,
   DEFAULT_SHUTDOWN_TIMEOUT_MS,
   defaultDbTimeouts,
+  memoryBackendOptions,
   requireWorkflowBackend,
   WorkerConfigError,
   workerConfigFromEnv,
@@ -32,6 +33,8 @@ describe("workerConfigFromEnv", () => {
       leaseRetryMs: null,
       gatewayUrl: null,
       workflowBackendUrl: null,
+      memoryBackendUrl: null,
+      memoryCurate: false,
       approvalTtlMs: DEFAULT_APPROVAL_TTL_MS,
       questionTtlMs: DEFAULT_QUESTION_TTL_MS,
       progressIntervalMs: 100,
@@ -68,6 +71,35 @@ describe("workerConfigFromEnv", () => {
       workerConfigFromEnv({ ...BASE, ENGINE_STEER_WORKER: "1", ENGINE_COMPLETE_TASK: "true" }),
     ).toMatchObject({ steerWorker: true, completeTask: true });
     expect(workerConfigFromEnv({ ...BASE, ENGINE_STEER_WORKER: "0" }).steerWorker).toBe(false);
+  });
+
+  it("registers memory_curate only with ENGINE_MEMORY_BACKEND_URL or ENGINE_MEMORY_CURATE (U30)", () => {
+    expect(memoryBackendOptions(workerConfigFromEnv(BASE))).toBeNull();
+    // A gateway URL alone does not register it: the default worker is unchanged.
+    expect(
+      memoryBackendOptions(workerConfigFromEnv({ ...BASE, ENGINE_GATEWAY_URL: "https://g" })),
+    ).toBeNull();
+    expect(
+      memoryBackendOptions(
+        workerConfigFromEnv({
+          ...BASE,
+          ENGINE_MEMORY_BACKEND_URL: "https://m",
+          ENGINE_GATEWAY_TOKEN: "gt",
+        }),
+      ),
+    ).toEqual({ baseUrl: "https://m", serviceToken: "gt", retryMs: 60_000 });
+    expect(
+      memoryBackendOptions(
+        workerConfigFromEnv({
+          ...BASE,
+          ENGINE_MEMORY_CURATE: "1",
+          ENGINE_GATEWAY_URL: "https://g",
+        }),
+      ),
+    ).toMatchObject({ baseUrl: "https://g", serviceToken: "tok" });
+    expect(() =>
+      memoryBackendOptions(workerConfigFromEnv({ ...BASE, ENGINE_MEMORY_CURATE: "1" })),
+    ).toThrow(WorkerConfigError);
   });
 
   it("derives database timeouts below a short lease TTL", () => {
