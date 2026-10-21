@@ -6,6 +6,8 @@ and per-agent permission controls.
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from app.auth.dependencies import require_role
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -21,7 +23,7 @@ from app.schemas.admin import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_role("owner", "admin"))])
 
 
 def _get_tenant_id(request: Request) -> UUID:

@@ -34,7 +34,7 @@ from app.models.tool_approval import ToolApproval
 
 settings = get_settings()
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role("owner", "admin"))])
 
 
 class AuditEventResponse(BaseModel):
@@ -228,6 +228,10 @@ class AuditChainVerifyResponse(BaseModel):
     checked: int
     legacy_unchained: int
     first_break: Optional[AuditChainBreak] = None
+    # Rows in the (trigger-written) audit_events log. They are not part of the signed chain, so
+    # they are reported rather than silently ignored.
+    unchained_audit_events: int = 0
+    message: Optional[str] = None
 
 
 class WorkflowReplayResponse(BaseModel):
@@ -384,7 +388,26 @@ async def verify_audit_chain(
     written before the chain existed are reported as ``legacy_unchained`` and never rewritten.
     """
     chain = AuditChain(db)
-    return AuditChainVerifyResponse(**await chain.verify_chain(tenant_id))
+    result = await chain.verify_chain(tenant_id)
+    unchained = (await db.execute(
+        select(func.count()).select_from(AuditEvent).where(AuditEvent.tenant_id == UUID(str(tenant_id)))
+    )).scalar() or 0
+    result["unchained_audit_events"] = unchained
+
+    if result["ok"] and result["checked"] == 0 and (unchained or result["legacy_unchained"]):
+        # Never report a vacuous "ok": nothing was actually verified.
+        result["ok"] = False
+        result["message"] = (
+            "Nothing could be verified: no signed chain entries exist, while "
+            f"{unchained} audit event(s) and {result['legacy_unchained']} legacy compliance "
+            "entr(ies) predate or sit outside the signed chain."
+        )
+    elif result["ok"] and unchained:
+        result["message"] = (
+            f"{result['checked']} signed chain entries verified. {unchained} audit event(s) "
+            "are outside the signed chain and are not covered."
+        )
+    return AuditChainVerifyResponse(**result)
 
 
 # =============================================================================
