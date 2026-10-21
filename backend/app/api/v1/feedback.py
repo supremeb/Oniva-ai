@@ -44,7 +44,7 @@ def _fb_to_response(fb: AgentFeedback) -> FeedbackResponse:
 async def submit_feedback(
     data: FeedbackCreate,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Submit thumbs up/down feedback on an agent response."""
     tenant_id = _get_tenant_id(request)
@@ -77,7 +77,7 @@ async def list_feedback(
     rating: Optional[str] = Query(None, pattern="^(positive|negative)$"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """List feedback entries with optional filters."""
     tenant_id = _get_tenant_id(request)
@@ -113,7 +113,7 @@ async def list_feedback(
 async def get_feedback_summary(
     request: Request,
     agent_id: Optional[str] = Query(None, description="Agent UUID (null = all agents)"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Get aggregated feedback summary, optionally for a specific agent."""
     tenant_id = _get_tenant_id(request)
@@ -167,7 +167,7 @@ async def get_feedback_summary(
 async def delete_feedback(
     feedback_id: UUID,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Delete a feedback entry (admin use)."""
     tenant_id = _get_tenant_id(request)

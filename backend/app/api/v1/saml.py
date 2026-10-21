@@ -183,7 +183,7 @@ async def saml_login(
 @router.post("/acs")
 async def assertion_consumer_service(
     request: Request,
-    db: AsyncSession = Depends(get_db_no_tenant),
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function"),
     provider: SAMLAuthProvider = Depends(require_saml_enabled)
 ):
     """

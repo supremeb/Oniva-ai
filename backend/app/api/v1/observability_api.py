@@ -178,7 +178,7 @@ class ToolMetricsResponse(BaseModel):
 @router.get("/dashboard-metrics", response_model=ObservabilityDashboardResponse)
 async def get_dashboard_metrics(
     window_minutes: int = Query(60, ge=1, le=10080),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ) -> ObservabilityDashboardResponse:
@@ -324,7 +324,7 @@ async def search_traces(
     date_to: datetime | None = Query(None),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ) -> TraceSearchResponse:
@@ -439,7 +439,7 @@ async def search_traces(
 
 @router.get("/agent-health", response_model=AllAgentsHealthResponse)
 async def get_all_agents_health(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ) -> AllAgentsHealthResponse:
@@ -531,7 +531,7 @@ class SessionCleanupResponse(BaseModel):
 @router.post("/session-cleanup", response_model=SessionCleanupResponse)
 async def trigger_session_cleanup(
     retention_days: int = Query(None, ge=1, le=365),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
 ) -> SessionCleanupResponse:
     """Trigger session cleanup to delete stale sessions.

@@ -39,7 +39,7 @@ def alias_to_response(alias: AgentAlias, version: AgentVersion = None) -> AliasR
 @router.get("/{agent_id}/aliases", response_model=AliasListResponse)
 async def list_aliases(
     agent_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -75,7 +75,7 @@ async def list_aliases(
 async def get_alias(
     agent_id: UUID,
     alias_name: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -105,7 +105,7 @@ async def create_or_update_alias(
     agent_id: UUID,
     alias_name: str,
     request: AliasCreateOrUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -220,7 +220,7 @@ async def create_or_update_alias(
 async def delete_alias(
     agent_id: UUID,
     alias_name: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):

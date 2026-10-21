@@ -65,7 +65,7 @@ def session_to_response(session: ChatSession) -> ChatSessionResponse:
 @router.post("", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED)
 async def create_chat_session(
     session_data: ChatSessionCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id)
 ):
@@ -184,7 +184,7 @@ async def _list_union(db: AsyncSession, user_id: UUID, page: int, page_size: int
 
 @router.get("", response_model=Union[ChatSessionListResponse, ConversationListResponse])
 async def list_chat_sessions(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     include: Optional[Literal["engine"]] = Query(
         None, description="'engine' returns the union list of legacy sessions and engine conversations "
@@ -252,7 +252,7 @@ async def list_chat_sessions(
 @router.get("/{session_id}", response_model=ChatSessionDetailResponse)
 async def get_chat_session(
     session_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """
@@ -317,7 +317,7 @@ async def get_chat_session(
 async def update_chat_session(
     session_id: UUID,
     session_data: ChatSessionUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """
@@ -356,7 +356,7 @@ async def update_chat_session(
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat_session(
     session_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """
@@ -386,7 +386,7 @@ async def delete_chat_session(
 async def add_message(
     session_id: UUID,
     request: AddMessageRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """
@@ -437,7 +437,7 @@ async def add_message(
 @router.post("/{session_id}/clear", response_model=ChatSessionResponse)
 async def clear_messages(
     session_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user)
 ):
     """
@@ -486,7 +486,7 @@ class ContinueBody(BaseModel):
 async def continue_chat_session(
     session_id: UUID,
     body: ContinueBody,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     engine: EngineClient = Depends(get_engine_client),
 ):
@@ -562,7 +562,7 @@ async def continue_chat_session(
 @router.get("/agent/{agent_id}/recent", response_model=ChatSessionListResponse)
 async def get_recent_agent_sessions(
     agent_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     limit: int = Query(10, ge=1, le=50),
 ):
@@ -622,7 +622,7 @@ async def get_recent_agent_sessions(
 @router.get("/workflow/{workflow_id}/recent", response_model=ChatSessionListResponse)
 async def get_recent_workflow_sessions(
     workflow_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     limit: int = Query(10, ge=1, le=50),
 ):

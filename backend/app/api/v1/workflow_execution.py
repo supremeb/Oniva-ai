@@ -58,7 +58,7 @@ async def execute_workflow_stream(
     agent_id: str,
     session_id: UUID,
     request: WorkflowExecuteRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):

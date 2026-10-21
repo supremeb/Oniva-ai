@@ -73,7 +73,7 @@ async def export_workflow(
     format: str = Query("yaml", description="Export format: yaml or json"),
     version_id: Optional[uuid.UUID] = Query(None, description="Export specific version"),
     download: bool = Query(False, description="Return as downloadable file"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
     """
@@ -156,7 +156,7 @@ async def export_workflow(
 async def import_to_workflow(
     workflow_id: uuid.UUID,
     request: ImportRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):
@@ -247,7 +247,7 @@ async def import_to_workflow(
 @router.post("/workflows/import", response_model=ImportResponse)
 async def create_workflow_from_dsl(
     request: ImportRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
     user_id: uuid.UUID = Depends(get_current_user_id),
 ):

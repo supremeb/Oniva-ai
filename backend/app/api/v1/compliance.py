@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
 
-from app.core.database import get_db
+from app.core.database import get_db, get_db_streaming
 from app.auth.dependencies import get_current_user, get_current_tenant_id, get_current_user_id
 from app.auth.providers.base import AuthUser
 from app.templates.compliance import get_compliance_templates, get_template_by_id
@@ -170,7 +170,7 @@ async def get_compliance_template(
 async def execute_compliance_template(
     template_id: str,
     request: ExecuteTemplateRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
@@ -236,7 +236,8 @@ async def execute_compliance_template(
 async def execute_compliance_template_stream(
     template_id: str,
     request: ExecuteTemplateRequest,
-    db: AsyncSession = Depends(get_db),
+    # Streaming route: the legacy orchestrator keeps using this session while streaming.
+    db: AsyncSession = Depends(get_db_streaming),
     user_id: uuid.UUID = Depends(get_current_user_id),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
 ):
@@ -267,6 +268,7 @@ async def execute_compliance_template_stream(
         try:
             async for update in updates:
                 yield f"data: {json.dumps(update)}\n\n"
+            await db.commit()  # explicit: the dependency teardown runs after the stream
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
@@ -446,7 +448,7 @@ async def list_review_queue(
     risk_level: Optional[str] = Query(None, description="Filter by risk level"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
     user: AuthUser = Depends(get_current_user)
 ):
@@ -495,7 +497,7 @@ async def list_review_queue(
 
 @router.get("/review-queue/stats")
 async def get_review_queue_stats(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
     user: AuthUser = Depends(get_current_user)
 ):
@@ -543,7 +545,7 @@ async def get_review_queue_stats(
 @router.get("/review-queue/{execution_id}", response_model=ReviewQueueDetailResponse)
 async def get_review_item(
     execution_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
     user: AuthUser = Depends(get_current_user)
 ):
@@ -594,7 +596,7 @@ async def get_review_item(
 async def submit_review(
     execution_id: uuid.UUID,
     request: SubmitReviewRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
     user_id: uuid.UUID = Depends(get_current_user_id),
     user: AuthUser = Depends(get_current_user)
@@ -662,7 +664,7 @@ async def list_executions(
     template_id: Optional[str] = Query(None, description="Filter by template ID"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
     user: AuthUser = Depends(get_current_user)
 ):
@@ -711,7 +713,7 @@ async def list_executions(
 @router.get("/executions/{execution_id}")
 async def get_execution(
     execution_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
     user: AuthUser = Depends(get_current_user)
 ):

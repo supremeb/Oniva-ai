@@ -52,7 +52,7 @@ def binding_to_ref(row: Any) -> run_handlers.RunRef:
 
 
 @router.post("/runs/finished")
-async def run_finished(body: RunFinishedBody, db: AsyncSession = Depends(get_system_db)):
+async def run_finished(body: RunFinishedBody, db: AsyncSession = Depends(get_system_db, scope="function")):
     try:
         conversation_id = uuid.UUID(body.conversationId)
     except ValueError:

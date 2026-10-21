@@ -231,7 +231,7 @@ async def _get_general_assistant_config(
 )
 async def get_full_state_by_conversation(
     conversation_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -440,7 +440,7 @@ async def _build_full_state(
 @router.get("/deep-work/{session_id}/status", response_model=SessionStatusResponse)
 async def get_session_status(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -526,7 +526,7 @@ async def get_session_status(
 @router.get("/deep-work/{session_id}/workspace")
 async def list_workspace_files(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -559,7 +559,7 @@ async def list_workspace_files(
 async def download_workspace_file(
     session_id: str,
     file_path: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -594,7 +594,7 @@ async def download_workspace_file(
 
 @router.get("/deep-work/sessions")
 async def list_deep_work_sessions(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -659,7 +659,7 @@ async def list_deep_work_sessions(
 @router.delete("/deep-work/{session_id}")
 async def delete_deep_work_session(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -702,7 +702,7 @@ async def delete_deep_work_session(
 async def clarify_deep_work_query(
     request: Request,
     body: ClarifyRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -722,7 +722,7 @@ async def clarify_deep_work_query(
 async def plan_deep_work_engine(
     request: Request,
     body: DeepWorkEngineRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -742,7 +742,7 @@ async def plan_deep_work_engine(
 async def start_deep_work_engine(
     request: Request,
     body: DeepWorkEngineRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):
@@ -761,7 +761,7 @@ async def start_deep_work_engine(
 @router.post("/deep-work/engine/{session_id}/cancel")
 async def cancel_deep_work_engine(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user_id: UUID = Depends(get_current_user_id),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ):

@@ -35,7 +35,7 @@ async def health_check() -> Dict[str, Any]:
 
 @router.get("/health/ready")
 async def readiness_check(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ) -> Dict[str, Any]:
     """
     Detailed readiness check - verifies database and Redis.

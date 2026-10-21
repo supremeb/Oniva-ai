@@ -228,7 +228,7 @@ def require_permission_or_own(
     async def dependency(
         resource_id: str,
         user: AuthUser = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db),
+        db: AsyncSession = Depends(get_db, scope="function"),
     ) -> AuthUser:
         base_perm = permission.replace("_own", "")
         if has_permission(user.role, base_perm):

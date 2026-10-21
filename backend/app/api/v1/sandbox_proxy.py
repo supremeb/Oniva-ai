@@ -58,7 +58,7 @@ async def _extract_proxy_token(request: Request) -> str:
 async def proxy_chat_completions(
     body: SandboxProxyChatRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """OpenAI-compatible proxy for sandbox LLM calls."""
     # 1. Extract and validate token

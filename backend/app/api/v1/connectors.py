@@ -55,7 +55,7 @@ async def connect_connector(
     connector_id: str,
     request: ConnectRequest,
     user: AuthUser = Depends(require_permission("connectors:manage")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Validate credentials on a throwaway instance, then store them encrypted
     on the caller's tenant row. Nothing is retained on the registry."""
@@ -84,7 +84,7 @@ async def connect_connector(
 async def check_status(
     connector_id: str,
     user: AuthUser = Depends(require_permission("connectors:read")),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Health of THIS tenant's connection (never another tenant's)."""
     _connector_or_404(connector_id)

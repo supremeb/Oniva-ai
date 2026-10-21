@@ -45,7 +45,7 @@ from app.auth.dependencies import (  # noqa: E402
     get_current_tenant_id, get_current_user, get_current_user_id, get_current_user_with_query_token)
 from app.auth.providers.base import AuthUser  # noqa: E402
 from app.config import Settings  # noqa: E402
-from app.core.database import get_db, get_system_db  # noqa: E402
+from app.core.database import get_db, get_db_streaming, get_system_db  # noqa: E402
 from app.core.encryption import get_encryption_service  # noqa: E402
 from app.internal_api import tools  # noqa: E402
 from app.internal_api.invocations import get_session_factory  # noqa: E402
@@ -230,6 +230,7 @@ mount_internal_router(app, settings)
 assert mount_engine_conversations(app, settings)
 
 app.dependency_overrides[get_db] = request_db
+app.dependency_overrides[get_db_streaming] = request_db
 app.dependency_overrides[get_system_db] = request_db
 app.dependency_overrides[get_session_factory] = lambda: factory
 app.dependency_overrides[get_current_user] = _identity

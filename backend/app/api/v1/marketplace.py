@@ -63,7 +63,7 @@ async def list_categories() -> list[ConnectorCategory]:
 async def list_connectors(
     category: str | None = None,
     search: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> list[MarketplaceConnector]:
     """
@@ -106,7 +106,7 @@ async def list_connectors(
 @router.get("/connectors/{connector_id}", response_model=MarketplaceConnectorDetail)
 async def get_connector_detail(
     connector_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> MarketplaceConnectorDetail:
     """
@@ -193,7 +193,7 @@ def _get_required_credentials(auth_type: str) -> list[str]:
 async def enable_connector(
     connector_id: str,
     request: EnableConnectorRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> EnableConnectorResponse:
@@ -305,7 +305,7 @@ async def enable_connector(
 @router.post("/import", response_model=ImportOpenAPIResponse)
 async def import_custom_spec(
     request: ImportOpenAPIRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     current_user: User = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> ImportOpenAPIResponse:
@@ -390,7 +390,7 @@ async def import_custom_spec(
 @router.get("/connectors/{connector_id}/operations", response_model=ConnectorOperationsResponse)
 async def get_connector_operations(
     connector_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> ConnectorOperationsResponse:
     """
@@ -461,7 +461,7 @@ async def get_connector_operations(
 async def test_connection(
     connector_uuid: UUID,
     request: TestConnectionRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> TestConnectionResponse:
     """Test connectivity for an enabled connector."""
@@ -538,7 +538,7 @@ async def test_connection(
 
 @router.get("/enabled", response_model=EnabledConnectorsList)
 async def list_enabled_connectors(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> EnabledConnectorsList:
     """List all connectors enabled for the current tenant."""
@@ -576,7 +576,7 @@ async def list_enabled_connectors(
 @router.delete("/{connector_uuid}")
 async def disable_connector(
     connector_uuid: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> dict[str, str]:
     """Disable (soft-delete) a connector."""

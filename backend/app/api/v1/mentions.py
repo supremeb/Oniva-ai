@@ -309,7 +309,7 @@ async def search_mentions(
         None,
         description="Comma-separated entity types to search (skill,connector,agent,knowledge_base)",
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> MentionSearchResponse:
@@ -355,7 +355,7 @@ async def resolve_mentions(
         ...,
         description="Comma-separated {entity_type}:{entity_id} pairs to resolve",
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: UUID = Depends(get_current_tenant_id),
 ) -> MentionResolveResponse:

@@ -86,7 +86,7 @@ class WebhookTriggerCreated(WebhookTriggerResponse):
 async def receive_webhook(
     url_token: str,
     request: Request,
-    db: AsyncSession = Depends(get_db_no_tenant),  # No auth - validated via webhook signature
+    db: AsyncSession = Depends(get_db_no_tenant, scope="function"),  # No auth - validated via webhook signature
 ):
     """Receive and process inbound webhook.
 
@@ -129,7 +129,7 @@ async def create_webhook_trigger(
     workflow_id: uuid.UUID,
     request: WebhookTriggerCreate,
     http_request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -187,7 +187,7 @@ async def create_webhook_trigger(
 async def list_webhook_triggers(
     workflow_id: uuid.UUID,
     http_request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
     """List all webhook triggers for a workflow."""
@@ -217,7 +217,7 @@ async def list_webhook_triggers(
 @router.delete("/webhooks/{webhook_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_webhook_trigger(
     webhook_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
@@ -249,7 +249,7 @@ async def delete_webhook_trigger(
 async def get_webhook_trigger(
     webhook_id: uuid.UUID,
     http_request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id)
 ):
     """Get one webhook trigger. The secret is never returned after creation."""

@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 async def require_engine_chat(
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
 ) -> None:
     """Per-tenant gate (R3, defense in depth): 404 unless engine chat is on for the caller's tenant.
@@ -144,7 +144,7 @@ def _engine_http_error(e: EngineError) -> HTTPException:
 @router.post("", status_code=201)
 async def create_conversation(
     body: CreateConversationBody,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     engine: EngineClient = Depends(get_engine_client),
 ):
@@ -177,7 +177,7 @@ async def create_conversation(
 async def update_conversation(
     conversation_id: UUID,
     body: UpdateConversationBody,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
 ):
     """Rename, pin and/or (un)archive. Listing metadata only: it does not touch the engine or ``updated_at``."""
@@ -199,7 +199,7 @@ async def update_conversation(
 @router.delete("/{conversation_id}", status_code=204)
 async def archive_conversation(
     conversation_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
 ):
     """Sidebar delete: archive (hide from listings). Engine data is kept. Idempotent."""
@@ -213,7 +213,7 @@ async def archive_conversation(
 async def update_selections(
     conversation_id: UUID,
     body: Selections,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     engine: EngineClient = Depends(get_engine_client),
 ):
@@ -248,7 +248,7 @@ async def submit(
     conversation_id: UUID,
     body: SubmissionBody,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     engine: EngineClient = Depends(get_engine_client),
 ):
@@ -281,7 +281,7 @@ async def watch(
     request: Request,
     cursor: Optional[str] = Query(default=None, pattern=r"^(0|[1-9][0-9]*)$"),
     last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user_with_query_token),
     engine: EngineClient = Depends(get_engine_client),
 ):
@@ -310,7 +310,7 @@ async def watch(
 async def abort(
     conversation_id: UUID,
     body: Optional[AbortBody] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     engine: EngineClient = Depends(get_engine_client),
 ):
@@ -329,7 +329,7 @@ async def abort(
 async def cancel_submission(
     conversation_id: UUID,
     submission_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     engine: EngineClient = Depends(get_engine_client),
 ):
@@ -372,7 +372,7 @@ async def decide_approval(
     tool_task_id: str,
     body: DecisionBody,
     request: Request,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     engine: EngineClient = Depends(get_engine_client),
 ):
@@ -408,7 +408,7 @@ async def answer_question(
     conversation_id: UUID,
     tool_task_id: str,
     body: AnswerBody,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
     engine: EngineClient = Depends(get_engine_client),
 ):
@@ -464,7 +464,7 @@ def mount_engine_conversations(app: FastAPI, settings: Settings) -> bool:
 @router.get("/{conversation_id}/cost")
 async def conversation_cost_summary(
     conversation_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(get_current_user),
 ):
     """Ledger-priced cost and tokens for the conversation, grouped by run (the client never prices)."""
