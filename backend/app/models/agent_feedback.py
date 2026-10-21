@@ -12,6 +12,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class AgentFeedback(Base):
@@ -69,7 +70,7 @@ class AgentFeedback(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
-        default=datetime.utcnow,
+        default=utc_now,
     )
 
     __table_args__ = (

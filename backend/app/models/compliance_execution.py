@@ -9,6 +9,7 @@ from enum import Enum
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class ComplianceStatus(str, Enum):
@@ -95,7 +96,7 @@ class ComplianceExecution(Base):
     review_notes = Column(Text, nullable=True)
 
     # Audit
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
 
     # Relationships
     tenant = relationship("Tenant")
@@ -237,7 +238,7 @@ class ComplianceScreeningResult(Base):
     highest_match_score = Column(Numeric(5, 4), nullable=True)
     flagged = Column(String(5), nullable=False, default='false')  # Changed to match migration
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
 
     # Relationships
     execution = relationship("ComplianceExecution", backref="screening_results")

@@ -7,6 +7,7 @@ from sqlalchemy.orm import relationship
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class PasswordResetToken(Base):
@@ -55,7 +56,7 @@ class PasswordResetToken(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
-        default=datetime.utcnow
+        default=utc_now
     )
 
     # Relationships

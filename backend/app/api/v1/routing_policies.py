@@ -33,10 +33,12 @@ _DEFAULT_POLICIES = [
 
 
 @router.get(
-    "/",
+    "",
     response_model=List[RoutingPolicyResponse],
     dependencies=[Depends(get_current_user)],
 )
+@router.get("/", include_in_schema=False, response_model=List[RoutingPolicyResponse],
+            dependencies=[Depends(get_current_user)])
 async def list_routing_policies(
     db: AsyncSession = Depends(get_db),
     tenant_id: uuid.UUID = Depends(get_current_tenant_id),
@@ -51,11 +53,13 @@ async def list_routing_policies(
 
 
 @router.post(
-    "/",
+    "",
     response_model=RoutingPolicyResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_role("admin"))],
 )
+@router.post("/", include_in_schema=False, response_model=RoutingPolicyResponse,
+             status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_role("admin"))])
 async def create_routing_policy(
     body: RoutingPolicyCreate,
     db: AsyncSession = Depends(get_db),

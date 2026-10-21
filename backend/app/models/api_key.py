@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 def normalize_scopes(scopes):
@@ -57,8 +58,8 @@ class APIKey(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
     last_used_ip = Column(INET, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now, onupdate=utc_now)
 
     # Relationships
     user = relationship("User", back_populates="api_keys")

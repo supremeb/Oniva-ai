@@ -26,6 +26,7 @@ from datetime import datetime
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class WorkflowCheckpoint(Base):
@@ -107,7 +108,7 @@ class WorkflowCheckpoint(Base):
     # Timing
     started_at = Column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=utc_now,
     )
     completed_at = Column(DateTime(timezone=True), nullable=True)
     elapsed_ms = Column(Integer, nullable=True)
@@ -115,7 +116,7 @@ class WorkflowCheckpoint(Base):
     # Metadata
     created_at = Column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=utc_now,
         nullable=False,
     )
 

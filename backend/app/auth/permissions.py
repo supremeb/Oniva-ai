@@ -88,6 +88,19 @@ ROLE_PERMISSIONS: dict[str, Set[str]] = {
 # Permission Checking
 # =========================================
 
+def _effective_permissions(role: str) -> Set[str]:
+    """A role's own permissions plus those of every lower role (admin includes member's)."""
+    own = ROLE_PERMISSIONS.get(role, set())
+    rank = ROLE_HIERARCHY.get(role)
+    if rank is None:
+        return own
+    perms = set(own)
+    for other, other_rank in ROLE_HIERARCHY.items():
+        if other_rank < rank:
+            perms |= ROLE_PERMISSIONS.get(other, set())
+    return perms
+
+
 def has_permission(role: str, permission: str) -> bool:
     """
     Check if a role has a specific permission.
@@ -104,7 +117,7 @@ def has_permission(role: str, permission: str) -> bool:
         has_permission("admin", "users:manage") -> True
         has_permission("viewer", "workflows:create") -> False
     """
-    perms = ROLE_PERMISSIONS.get(role, set())
+    perms = _effective_permissions(role)
 
     # Owner has all permissions
     if "*" in perms:
@@ -124,7 +137,7 @@ def has_permission(role: str, permission: str) -> bool:
 
 def get_permissions_for_role(role: str) -> Set[str]:
     """Get all permissions for a role."""
-    perms = ROLE_PERMISSIONS.get(role, set())
+    perms = _effective_permissions(role)
     if "*" in perms:
         # Expand to all known permissions
         all_perms = set()

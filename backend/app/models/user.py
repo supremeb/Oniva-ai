@@ -8,6 +8,7 @@ from sqlalchemy.orm import relationship
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 if TYPE_CHECKING:
     pass
@@ -84,9 +85,9 @@ class User(Base):
     )
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), default=utc_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(),
-                        default=datetime.utcnow, onupdate=datetime.utcnow)
+                        default=utc_now, onupdate=utc_now)
     deleted_at = Column(DateTime(timezone=True), nullable=True, comment="Soft delete timestamp")
 
     # Relationships
