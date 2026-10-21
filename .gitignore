@@ -107,3 +107,6 @@ backend/uploads/
 
 # Fumadocs generated source map (regenerated at build time)
 frontend/.source/
+
+# eval results (only promoted baselines under backend/evals/baselines are tracked)
+backend/evals/results/
