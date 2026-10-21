@@ -170,6 +170,8 @@ export type ToolTaskCheckpoint = {
   label?: string;
   /** A typed-result subagent's one follow-up submission to its child (U19). */
   nudge?: { submissionId: string };
+  /** `steer_worker`: how many times it waited for a same-round worker to start (U21). */
+  steerWaits?: number;
 } | null;
 
 /** A tool task's `done` value. */

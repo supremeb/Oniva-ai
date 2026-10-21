@@ -226,6 +226,8 @@ async function main(): Promise<number> {
     questionTtlMs: config.questionTtlMs,
     subagentTool: config.subagentTool,
     subagentTools: config.subagentTools,
+    steerWorker: config.steerWorker,
+    completeTask: config.completeTask,
     clock,
     settings: { progressIntervalMs: config.progressIntervalMs },
     wrapStorage: (provider) => timedStorage(provider, samples),

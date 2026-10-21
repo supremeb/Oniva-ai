@@ -62,6 +62,14 @@ describe("workerConfigFromEnv", () => {
     );
   });
 
+  it("registers steer_worker and complete_task only when asked (U21)", () => {
+    expect(workerConfigFromEnv(BASE)).toMatchObject({ steerWorker: false, completeTask: false });
+    expect(
+      workerConfigFromEnv({ ...BASE, ENGINE_STEER_WORKER: "1", ENGINE_COMPLETE_TASK: "true" }),
+    ).toMatchObject({ steerWorker: true, completeTask: true });
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_STEER_WORKER: "0" }).steerWorker).toBe(false);
+  });
+
   it("derives database timeouts below a short lease TTL", () => {
     expect(defaultDbTimeouts(2_000)).toEqual({
       connectTimeoutMs: 666,
