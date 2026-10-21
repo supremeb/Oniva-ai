@@ -23,6 +23,8 @@ import {
 import { cn } from '@/lib/utils';
 import { SetInstructionsModal } from './SetInstructionsModal';
 import { ProjectMembersPanel } from './ProjectMembersPanel';
+import { ProjectMemory } from './ProjectMemory';
+import { useFeature } from '@/lib/hooks/useFeature';
 import { useAvailableModels } from '@/hooks/useLLMProviders';
 import { useAuthStore } from '@/lib/stores/auth';
 import { useProjectsStore } from '@/lib/stores/projects';
@@ -103,10 +105,17 @@ export function ProjectView({ project }: ProjectViewProps) {
     const [sessions, setSessions] = useState<Record<string, unknown>[]>([]);
     const [uploading, setUploading] = useState(false);
     const [chatInput, setChatInput] = useState('');
+    const [tab, setTab] = useState<'overview' | 'memory'>('overview');
+    const memoryFeature = useFeature('ENABLE_PROJECT_MEMORY');
+    const [memoryEnabled, setMemoryEnabled] = useState(
+        (project.settings?.memory as { enabled?: boolean } | undefined)?.enabled === true
+    );
+    const rowVersionRef = useRef(project.row_version);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     const currentUserId = useAuthStore((s) => s.user?.id ?? '');
+    const isTenantAdmin = useAuthStore((s) => s.user?.role === 'owner' || s.user?.role === 'admin');
     const { updateProject: storeUpdateProject } = useProjectsStore();
     const { createSession, setCurrentSession, selectedModel, setSelectedModel, setPendingInput } =
         useChatSessionsStore();
@@ -238,6 +247,17 @@ export function ProjectView({ project }: ProjectViewProps) {
 
     const canEdit = project.user_role === 'owner' || project.user_role === 'editor';
 
+    // Writes `settings.memory.enabled` (gates injection); a 409 surfaces to the Memory tab's error line.
+    const handleToggleMemory = async (next: boolean) => {
+        const memory = (project.settings?.memory as Record<string, unknown> | undefined) ?? {};
+        const updated = await updateProject(project.id, {
+            settings: { ...project.settings, memory: { ...memory, enabled: next } },
+            row_version: rowVersionRef.current,
+        });
+        rowVersionRef.current = updated.row_version;
+        setMemoryEnabled(next);
+    };
+
     return (
         <div className="h-full flex flex-col">
             {/* ── Project Header ── */}
@@ -277,8 +297,48 @@ export function ProjectView({ project }: ProjectViewProps) {
                 </div>
             </div>
 
+            {memoryFeature && (
+                <div role="tablist" aria-label="Project sections" className="flex gap-1 px-8 border-b border-border">
+                    {(['overview', 'memory'] as const).map((t) => (
+                        <button
+                            key={t}
+                            role="tab"
+                            id={`project-tab-${t}`}
+                            aria-selected={tab === t}
+                            aria-controls={`project-panel-${t}`}
+                            onClick={() => setTab(t)}
+                            className={cn(
+                                'px-3 py-2 text-sm capitalize border-b-2 -mb-px transition-colors',
+                                tab === t
+                                    ? 'border-primary text-foreground'
+                                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                            )}
+                        >
+                            {t}
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            {memoryFeature && tab === 'memory' && (
+                <div id="project-panel-memory" role="tabpanel" aria-labelledby="project-tab-memory" className="flex-1 min-h-0">
+                    <ScrollArea className="h-full">
+                        <ProjectMemory
+                            projectId={project.id}
+                            canEdit={canEdit}
+                            canPurge={isTenantAdmin}
+                            memoryEnabled={memoryEnabled}
+                            onToggleEnabled={handleToggleMemory}
+                        />
+                    </ScrollArea>
+                </div>
+            )}
+
             {/* ── Two-Column Layout ── */}
-            <div className="flex-1 min-h-0 border-t border-border">
+            <div
+                id="project-panel-overview"
+                className={cn('flex-1 min-h-0 border-t border-border', memoryFeature && tab === 'memory' && 'hidden')}
+            >
                 <ResizablePanelGroup direction="horizontal">
                     {/* ── LEFT PANEL: Chat + Recent Chats ── */}
                     <ResizablePanel defaultSize={65} minSize={40}>
