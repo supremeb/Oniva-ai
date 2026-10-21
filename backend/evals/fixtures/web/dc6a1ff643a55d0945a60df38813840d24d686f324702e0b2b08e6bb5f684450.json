@@ -1,0 +1,23 @@
+{
+  "key": "dc6a1ff643a55d0945a60df38813840d24d686f324702e0b2b08e6bb5f684450",
+  "tool": "web_search",
+  "args": {
+    "query": "ridgeway banking app onboarding flow",
+    "num_results": 5
+  },
+  "result": {
+    "query": "ridgeway banking app onboarding flow",
+    "results": [
+      {
+        "title": "Synthetic source sf-w2 1",
+        "url": "https://example.com/sf-w2/1",
+        "snippet": "About ridgeway banking app onboarding flow, part 1"
+      },
+      {
+        "title": "Synthetic source sf-w2 2",
+        "url": "https://example.com/sf-w2/2",
+        "snippet": "About ridgeway banking app onboarding flow, part 2"
+      }
+    ]
+  }
+}

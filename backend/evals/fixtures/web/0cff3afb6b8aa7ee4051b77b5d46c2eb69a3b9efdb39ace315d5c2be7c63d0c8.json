@@ -1,0 +1,23 @@
+{
+  "key": "0cff3afb6b8aa7ee4051b77b5d46c2eb69a3b9efdb39ace315d5c2be7c63d0c8",
+  "tool": "web_search",
+  "args": {
+    "query": "lumen scooter battery warranty",
+    "num_results": 5
+  },
+  "result": {
+    "query": "lumen scooter battery warranty",
+    "results": [
+      {
+        "title": "Synthetic source bi-w2 1",
+        "url": "https://example.com/bi-w2/1",
+        "snippet": "About lumen scooter battery warranty, part 1"
+      },
+      {
+        "title": "Synthetic source bi-w2 2",
+        "url": "https://example.com/bi-w2/2",
+        "snippet": "About lumen scooter battery warranty, part 2"
+      }
+    ]
+  }
+}

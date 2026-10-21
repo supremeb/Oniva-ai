@@ -1,0 +1,23 @@
+{
+  "key": "2b1cdbe9dd555644df8839df23d54c1fbd53e814f5ecca0cbdcdc6fc1b015102",
+  "tool": "web_search",
+  "args": {
+    "query": "harbor hosting support plans and response times",
+    "num_results": 5
+  },
+  "result": {
+    "query": "harbor hosting support plans and response times",
+    "results": [
+      {
+        "title": "Synthetic source m1-w1 1",
+        "url": "https://example.com/m1-w1/1",
+        "snippet": "About harbor hosting support plans and response times, part 1"
+      },
+      {
+        "title": "Synthetic source m1-w1 2",
+        "url": "https://example.com/m1-w1/2",
+        "snippet": "About harbor hosting support plans and response times, part 2"
+      }
+    ]
+  }
+}

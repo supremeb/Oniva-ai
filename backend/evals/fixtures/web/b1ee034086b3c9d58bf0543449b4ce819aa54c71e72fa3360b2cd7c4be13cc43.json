@@ -1,0 +1,23 @@
+{
+  "key": "b1ee034086b3c9d58bf0543449b4ce819aa54c71e72fa3360b2cd7c4be13cc43",
+  "tool": "web_search",
+  "args": {
+    "query": "ember email service free tier limits",
+    "num_results": 5
+  },
+  "result": {
+    "query": "ember email service free tier limits",
+    "results": [
+      {
+        "title": "Synthetic source m2-w3 1",
+        "url": "https://example.com/m2-w3/1",
+        "snippet": "About ember email service free tier limits, part 1"
+      },
+      {
+        "title": "Synthetic source m2-w3 2",
+        "url": "https://example.com/m2-w3/2",
+        "snippet": "About ember email service free tier limits, part 2"
+      }
+    ]
+  }
+}

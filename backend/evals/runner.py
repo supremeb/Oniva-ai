@@ -104,7 +104,7 @@ async def run_trial(
     started = time.monotonic()
     if ew.mode == "fake":
         try:
-            ew.write_script(build_script(task))
+            ew.write_script(build_script(task, ew.arm))
         except ScriptError as e:
             return _failed(trial, "error", "bad_task", str(e), started, {})
     _, miss_offset = ew.misses_since(0)
@@ -179,6 +179,7 @@ async def run_suite(
     timeout_s: float | None = None,
     replay_dir: Any = None,
     judges: JudgeRunner | bool | None = None,
+    arm: str | None = None,
 ) -> list[TrialResult]:
     """Run every task k times; results are in task order, then trial order.
 
@@ -203,7 +204,7 @@ async def run_suite(
     results: dict[tuple[str, int], TrialResult] = {}
     async with httpx.AsyncClient(timeout=60) as http:
         for web, group in by_web.items():
-            with eval_stack(mode, web=web, replay_dir=replay_dir) as ew:
+            with eval_stack(mode, web=web, replay_dir=replay_dir, arm=arm) as ew:
                 results.update(await run_on_stack(ew, group, k, meter, http, timeout_s, judges=judge_runner))
     return [results[(t.id, i)] for t in tasks for i in range(k)]
 

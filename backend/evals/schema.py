@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 TASK_KINDS = ("deep_work", "chat", "long_session", "repeat", "memory", "redteam")
-TASK_TAGS = ("smoke", "regression", "long_session", "repeat", "memory", "redteam")
+TASK_TAGS = ("smoke", "regression", "long_session", "repeat", "memory", "redteam", "dw_subagents")
 WEB_MODES = ("replay", "record", "off")
 GRADER_TYPES = (
     "tool_order",
@@ -28,6 +28,13 @@ GRADER_TYPES = (
     "no_limit_exceeded",
     "tool_error_rate",
     "learning_sources",
+    # U24 (additive): subagent contract
+    "worker_failure_rate",
+    "malformed_worker_answers",
+    "cross_worker_url_overlap",
+    "broken_citations",
+    "uncited_sections",
+    "steer_applied",
 )
 SPAN_KINDS = ("model", "tool", "subagent", "compaction")
 

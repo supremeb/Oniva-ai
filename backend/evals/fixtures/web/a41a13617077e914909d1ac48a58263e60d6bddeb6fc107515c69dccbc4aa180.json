@@ -1,0 +1,23 @@
+{
+  "key": "a41a13617077e914909d1ac48a58263e60d6bddeb6fc107515c69dccbc4aa180",
+  "tool": "web_search",
+  "args": {
+    "query": "cedar project tracker pricing plans",
+    "num_results": 5
+  },
+  "result": {
+    "query": "cedar project tracker pricing plans",
+    "results": [
+      {
+        "title": "Synthetic source ss-w3 1",
+        "url": "https://example.com/ss-w3/1",
+        "snippet": "About cedar project tracker pricing plans, part 1"
+      },
+      {
+        "title": "Synthetic source ss-w3 2",
+        "url": "https://example.com/ss-w3/2",
+        "snippet": "About cedar project tracker pricing plans, part 2"
+      }
+    ]
+  }
+}

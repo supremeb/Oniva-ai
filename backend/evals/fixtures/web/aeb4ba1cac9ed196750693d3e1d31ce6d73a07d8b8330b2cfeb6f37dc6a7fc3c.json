@@ -1,0 +1,23 @@
+{
+  "key": "aeb4ba1cac9ed196750693d3e1d31ce6d73a07d8b8330b2cfeb6f37dc6a7fc3c",
+  "tool": "web_search",
+  "args": {
+    "query": "eastvale and westmoor broadband programme cost review requirements",
+    "num_results": 5
+  },
+  "result": {
+    "query": "eastvale and westmoor broadband programme cost review requirements",
+    "results": [
+      {
+        "title": "Synthetic source gr-w3 1",
+        "url": "https://example.com/gr-w3/1",
+        "snippet": "About eastvale and westmoor broadband programme cost review requirements, part 1"
+      },
+      {
+        "title": "Synthetic source gr-w3 2",
+        "url": "https://example.com/gr-w3/2",
+        "snippet": "About eastvale and westmoor broadband programme cost review requirements, part 2"
+      }
+    ]
+  }
+}

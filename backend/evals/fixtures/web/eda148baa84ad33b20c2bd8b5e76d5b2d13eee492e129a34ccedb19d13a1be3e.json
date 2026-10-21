@@ -1,0 +1,23 @@
+{
+  "key": "eda148baa84ad33b20c2bd8b5e76d5b2d13eee492e129a34ccedb19d13a1be3e",
+  "tool": "web_search",
+  "args": {
+    "query": "pike hosting support plans and response times",
+    "num_results": 5
+  },
+  "result": {
+    "query": "pike hosting support plans and response times",
+    "results": [
+      {
+        "title": "Synthetic source m1-w2 1",
+        "url": "https://example.com/m1-w2/1",
+        "snippet": "About pike hosting support plans and response times, part 1"
+      },
+      {
+        "title": "Synthetic source m1-w2 2",
+        "url": "https://example.com/m1-w2/2",
+        "snippet": "About pike hosting support plans and response times, part 2"
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "key": "7cb08683f3e51984a73c34c6b6551179249f95b9a899da4be60635d7a93d83d1",
+  "tool": "web_search",
+  "args": {
+    "query": "ridgeway banking app identity verification step",
+    "num_results": 5
+  },
+  "result": {
+    "query": "ridgeway banking app identity verification step",
+    "results": [
+      {
+        "title": "Synthetic source sf-w2 1",
+        "url": "https://example.com/sf-w2/1",
+        "snippet": "About ridgeway banking app identity verification step, part 1"
+      },
+      {
+        "title": "Synthetic source sf-w2 2",
+        "url": "https://example.com/sf-w2/2",
+        "snippet": "About ridgeway banking app identity verification step, part 2"
+      }
+    ]
+  }
+}

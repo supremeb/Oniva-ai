@@ -20,5 +20,11 @@ These rows were written by an AI assistant, not verified by a person. Each row c
 - Known borderline rows to look at first: `recall_probe` rows whose answer hedges but states the right value, and
   `claim_supported` rows that need a small inference from the evidence.
 
+`claim_supported.jsonl` also holds 12 rows (`cs-sa-*`, rationale prefixed `subagent-suite (U24)`) written for the
+Deep Work subagent suite: claims whose attribution was swapped between two workers' learnings, claims that merge a
+second subject into one learning, claims that add an unsupported detail, and a citation that maps to no learning. They
+are `reviewed: false` like the rest and need the same human pass before the judge can gate Gate C's unsupported-claim
+criterion.
+
 Row format: `{"id", "label": "yes"|"no", "input": {<the judge's fields>}, "reviewed", "review_note", "draft_rationale"}`.
 Input fields per judge are in `evals/graders/judge.py` (`JUDGE_FIELDS`). All text is synthetic; no real data.

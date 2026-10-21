@@ -1,0 +1,72 @@
+# [hard] Guards a worker that stays malformed after the reminder. With contract v2 the orchestrator gets an error result (never a malformed answer as if it were good); the worker counts as failed, which this task accepts.
+id: dws-malformed-no-recovery
+kind: deep_work
+tags:
+- dw_subagents
+input:
+  query: Compare the cancellation rules of the Fjord and Gale gyms
+  plan:
+    title: DWPLAN_M3_DWS_MALFORMED_NO_RECOVERY
+    sub_queries:
+    - worker_id: m3-w1
+      sub_query: fjord gym membership cancellation rules
+      tools:
+      - web_search
+    - worker_id: m3-w2
+      sub_query: gale gym membership cancellation rules
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Fjord needs thirty days notice [1][2] and Gale allows cancellation online at any time [3][4].
+  scenario:
+    prose:
+      m3-w2: prose
+    nudge: ignore
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: worker_failure_rate
+  gating: false
+  params:
+    max_rate: 0.5
+    gate: false
+- id: malformed
+  type: malformed_worker_answers
+  params:
+    max: 0
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.5
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 12
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 12

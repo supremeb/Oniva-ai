@@ -1,0 +1,23 @@
+{
+  "key": "c7cd744789c38f80187d916b19fd2565260b9176e4e356e2dae00eaa2a2b64cb",
+  "tool": "web_search",
+  "args": {
+    "query": "birch project tracker pricing plans",
+    "num_results": 5
+  },
+  "result": {
+    "query": "birch project tracker pricing plans",
+    "results": [
+      {
+        "title": "Synthetic source ss-w2 1",
+        "url": "https://example.com/ss-w2/1",
+        "snippet": "About birch project tracker pricing plans, part 1"
+      },
+      {
+        "title": "Synthetic source ss-w2 2",
+        "url": "https://example.com/ss-w2/2",
+        "snippet": "About birch project tracker pricing plans, part 2"
+      }
+    ]
+  }
+}

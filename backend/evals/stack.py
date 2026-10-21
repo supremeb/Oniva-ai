@@ -34,8 +34,31 @@ FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "web"
 WEB_TO_REPLAY = {"replay": "replay", "record": "record", "off": "replay"}
 
 
+ARMS = ("baseline", "v2")
+ARM_VAR = "EVAL_ARM"
+# Subagent contract v2 (U22). The fake arm leaves `fork` off: the scripted model keys on the last message, and a
+# forked child would see the parent's history. Live runs use the production defaults (all four sub-switches).
+V2_SWITCHES = {"fake": "typed_results,verifier,steer_worker", "live": "typed_results,verifier,steer_worker,fork"}
+
+
 class LiveModeError(Exception):
     """Live mode cannot start (no key). Raised before anything is booted or spent."""
+
+
+def resolve_arm(arm: str | None = None, env: Mapping[str, str] | None = None) -> str:
+    """`arm`, else `EVAL_ARM`, else `baseline`; anything but `baseline` or `v2` is an error."""
+    chosen = (arm or (os.environ if env is None else env).get(ARM_VAR, "") or "baseline").strip()
+    if chosen not in ARMS:
+        raise ValueError(f"unknown arm {chosen!r}; expected one of {ARMS}")
+    return chosen
+
+
+def arm_env(arm: str, mode: str) -> tuple[dict[str, str], dict[str, str]]:
+    """(backend env, worker env) that select an arm. `baseline` changes nothing: contract v2 stays off."""
+    if arm != "v2":
+        return {}, {}
+    backend = {"ENABLE_ENGINE_SUBAGENT_V2": "true", "ENGINE_SUBAGENT_V2_SWITCHES": V2_SWITCHES[mode]}
+    return backend, {"ENGINE_COMPLETE_TASK": "1", "ENGINE_STEER_WORKER": "1"}
 
 
 @dataclass
@@ -46,6 +69,7 @@ class EvalWorld:
     replay_dir: Path
     miss_log: Path
     script_path: Path
+    arm: str = "baseline"
 
     def engine_api(self) -> EngineApi:
         return EngineApi(
@@ -76,8 +100,15 @@ def require_live_key(env: Mapping[str, str] | None = None) -> None:
 
 
 @contextlib.contextmanager
-def eval_stack(mode: str, *, web: str = "replay", replay_dir: Path | None = None) -> Iterator[EvalWorld]:
-    """Boot the stack for `mode` and `web` (`replay`, `record` or `off`) with one worker running."""
+def eval_stack(
+    mode: str, *, web: str = "replay", replay_dir: Path | None = None, arm: str | None = None
+) -> Iterator[EvalWorld]:
+    """Boot the stack for `mode` and `web` (`replay`, `record` or `off`) with one worker running.
+
+    `arm` selects the subagent contract (`baseline`: v2 off, as shipped; `v2`: `ENABLE_ENGINE_SUBAGENT_V2` on and the
+    engine's `complete_task` / `steer_worker` tools registered). Default: the `EVAL_ARM` environment variable.
+    """
+    arm = resolve_arm(arm)
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}; expected one of {MODES}")
     if web not in WEB_TO_REPLAY:
@@ -109,6 +140,9 @@ def eval_stack(mode: str, *, web: str = "replay", replay_dir: Path | None = None
             )
             worker_command = ["npm", "run", "--silent", "worker"]
             worker_env = {KEY_VAR: "", "ENGINE_POLICY": "backend"}
+        arm_backend, arm_worker = arm_env(arm, mode)
+        extra_env.update(arm_backend)
+        worker_env.update(arm_worker)
         with stack(extra_env=extra_env, worker_command=worker_command, worker_env=worker_env) as world:
             world.start_worker(1)
             yield EvalWorld(
@@ -118,4 +152,5 @@ def eval_stack(mode: str, *, web: str = "replay", replay_dir: Path | None = None
                 replay_dir=directory,
                 miss_log=miss_log,
                 script_path=world.script,
+                arm=arm,
             )

@@ -1,0 +1,23 @@
+{
+  "key": "5aac5bf8be594087403485709760f1a2cf6fee81b19c8d46567fad7f13e451cc",
+  "tool": "web_search",
+  "args": {
+    "query": "kestrel scooter battery warranty",
+    "num_results": 5
+  },
+  "result": {
+    "query": "kestrel scooter battery warranty",
+    "results": [
+      {
+        "title": "Synthetic source bi-w1 1",
+        "url": "https://example.com/bi-w1/1",
+        "snippet": "About kestrel scooter battery warranty, part 1"
+      },
+      {
+        "title": "Synthetic source bi-w1 2",
+        "url": "https://example.com/bi-w1/2",
+        "snippet": "About kestrel scooter battery warranty, part 2"
+      }
+    ]
+  }
+}

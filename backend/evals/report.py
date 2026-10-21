@@ -138,6 +138,10 @@ def build_report(
                     "cost_usd": round(t.cost_usd, 6),
                     "latency_s": t.latency_s,
                     "failed_graders": _failed_graders(t),
+                    "graders": [  # every grader's outcome: `evals.gate_c` reads its measurements from the details
+                        {"id": g.grader_id, "passed": g.passed, "gating": g.gating, "detail": g.detail}
+                        for g in t.grader_results
+                    ],
                     "trace": trace_files.get((tid, t.trial.index)),
                 }
                 for t in trials

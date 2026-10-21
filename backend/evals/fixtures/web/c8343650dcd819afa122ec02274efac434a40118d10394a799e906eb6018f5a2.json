@@ -1,0 +1,23 @@
+{
+  "key": "c8343650dcd819afa122ec02274efac434a40118d10394a799e906eb6018f5a2",
+  "tool": "web_search",
+  "args": {
+    "query": "eastvale community broadband programme rules",
+    "num_results": 5
+  },
+  "result": {
+    "query": "eastvale community broadband programme rules",
+    "results": [
+      {
+        "title": "Synthetic source gr-w1 1",
+        "url": "https://example.com/gr-w1/1",
+        "snippet": "About eastvale community broadband programme rules, part 1"
+      },
+      {
+        "title": "Synthetic source gr-w1 2",
+        "url": "https://example.com/gr-w1/2",
+        "snippet": "About eastvale community broadband programme rules, part 2"
+      }
+    ]
+  }
+}
