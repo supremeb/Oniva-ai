@@ -396,6 +396,37 @@ BUILTIN_SKILLS = [
         category="deep_work",
         module_path="app.services.deep_work.engine_tools"
     ),
+    # Project memory gateway tools (engine path, U26; granted only with ENABLE_PROJECT_MEMORY)
+    SkillManifest(
+        name="memory_view",
+        description="View or list the project's memory files",
+        category="memory",
+        module_path="app.services.project_memory_tools"
+    ),
+    SkillManifest(
+        name="memory_create",
+        description="Create or replace a project memory file",
+        category="memory",
+        module_path="app.services.project_memory_tools"
+    ),
+    SkillManifest(
+        name="memory_str_replace",
+        description="Replace one exact piece of text in a project memory file",
+        category="memory",
+        module_path="app.services.project_memory_tools"
+    ),
+    SkillManifest(
+        name="memory_insert",
+        description="Insert text at a line of a project memory file",
+        category="memory",
+        module_path="app.services.project_memory_tools"
+    ),
+    SkillManifest(
+        name="memory_delete",
+        description="Delete a project memory file",
+        category="memory",
+        module_path="app.services.project_memory_tools"
+    ),
     # Deep Work sandbox and output tools (engine path, U5)
     SkillManifest(
         name="shell_exec",

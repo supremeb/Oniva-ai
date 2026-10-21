@@ -112,6 +112,12 @@ FLAG_METADATA: dict[str, FlagMeta] = {
         operator_only=True,
     ),
 
+    "ENABLE_PROJECT_MEMORY": FlagMeta(
+        group="Core",
+        description="Project memory tools and injection (off by default; the project must also enable memory)",
+        operator_only=True,
+    ),
+
     "ENABLE_ENGINE_FLEET": FlagMeta(
         group="Core",
         description="Run Fleet background agents on the engine (needs global flag + ENABLE_ENGINE_API + engine capability)",
