@@ -110,3 +110,5 @@ frontend/.source/
 
 # eval results (only promoted baselines under backend/evals/baselines are tracked)
 backend/evals/results/
+# Eval harness (judge verdict cache)
+backend/evals/.cache/

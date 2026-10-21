@@ -51,6 +51,16 @@ class BudgetMeter:
         self.largest_trial = max(self.largest_trial, cost_usd)
         self.trials += 1
 
+    def charge(self, cost_usd: float) -> None:
+        """Spend that is not a trial (a judge call): counts toward the cap, not toward the trial statistics."""
+        self.spent += max(0.0, cost_usd)
+
+    def can_spend(self, estimate_usd: float = 0.0) -> bool:
+        """Whether a small non-trial charge (a judge call) fits; an exhausted cap refuses everything."""
+        if self.max_usd is None:
+            return True
+        return self.spent < self.max_usd and self.spent + max(0.0, estimate_usd) <= self.max_usd
+
     def can_start(self, task_max_usd: float | None = None) -> bool:
         """Whether one more trial fits under the cap (an exhausted cap stops everything)."""
         if self.max_usd is None:
