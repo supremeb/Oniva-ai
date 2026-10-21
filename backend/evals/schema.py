@@ -28,6 +28,11 @@ GRADER_TYPES = (
     "no_limit_exceeded",
     "tool_error_rate",
     "learning_sources",
+    # U17 (additive)
+    "context_tokens",
+    "probe_recall",
+    "reread_after_clear",
+    "no_verbatim_oversize",
 )
 SPAN_KINDS = ("model", "tool", "subagent", "compaction")
 
@@ -145,6 +150,7 @@ class TrialResult:
     phases: dict[str, float] = field(default_factory=dict)
     fixture_misses: tuple[str, ...] = ()
     ledger: dict[str, Any] | None = None
+    metrics: dict[str, Any] | None = None  # per-trial context metrics (long sessions; `graders.context.trial_metrics`)
 
     @property
     def passed(self) -> bool:

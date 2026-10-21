@@ -11,23 +11,33 @@ so a skipped judge never gates and never fakes a verdict. Judges run after the c
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Iterable, Sequence
 from typing import Any
 
 import httpx
 
+from . import arms as arms_mod
+from . import long_session
 from .budget import ENV_VAR, BudgetConfigError, BudgetMeter
 from .drivers import AUTH, DriverContext, DriverError, DriverOutput, drive
 from .fake_scripts import ScriptError, build_script
 from .graders import GradeContext, grade, to_grader_result
+from .graders.context import trial_metrics
 from .graders.judge import JudgeConfigError, JudgeRunner
 from .ledger import settle_cost, with_ledger_cost
 from .schema import GraderResult, Task, Trial, TrialResult
-from .stack import EvalWorld, LiveModeError, eval_stack, require_live_key
+from .stack import FIXTURE_DIR, EvalWorld, LiveModeError, eval_stack, require_live_key
 from .trace import TraceTruncated, flatten
 
 DEFAULT_TIMEOUT_S = {"fake": 180.0, "live": 900.0}
+
+
+def default_timeout(task: Task, mode: str) -> float:
+    """Seconds a trial may take: a flat default, more for a long session (it scales with its turns)."""
+    base = DEFAULT_TIMEOUT_S[mode]
+    return max(base, long_session.timeout_s(task, mode)) if task.kind == "long_session" else base
 
 
 def run_error_kind(raw: dict[str, Any] | None) -> str | None:
@@ -113,7 +123,7 @@ async def run_trial(
         ew=ew,
         task=task,
         trial_index=index,
-        timeout_s=timeout_s or DEFAULT_TIMEOUT_S[ew.mode],
+        timeout_s=timeout_s or default_timeout(task, ew.mode),
         http=http,
         api=api,
     )
@@ -150,6 +160,7 @@ async def run_trial(
         graders += skipped_judges(task, f"the trial ended {status}")
     return TrialResult(
         trial=trial,
+        metrics=trial_metrics(out.raw),
         grader_results=graders,
         trace=trace,
         error=error,
@@ -179,11 +190,16 @@ async def run_suite(
     timeout_s: float | None = None,
     replay_dir: Any = None,
     judges: JudgeRunner | bool | None = None,
+    tiers: str | None = None,
 ) -> list[TrialResult]:
     """Run every task k times; results are in task order, then trial order.
 
     `judges`: a `JudgeRunner` to use; `None` (default) builds one from the environment in live mode and none in fake
     mode (fake stays offline and deterministic: judge graders are `skipped`); `False` never judges.
+
+    Context tiers (U17): `tiers` pins every task to one `ENGINE_CONTEXT_TIERS` value. Without it, each `long_session`
+    task that pins no tier is expanded into one task per arm (`<id>@<tier>`, see `evals.arms`). A stack is booted per
+    (web mode, tier) group, so the returned results may name more tasks than were passed.
     """
     if k < 1:
         raise ValueError("k must be at least 1")
@@ -192,18 +208,27 @@ async def run_suite(
         if meter is None or meter.max_usd is None or meter.max_usd <= 0:
             raise BudgetConfigError(f"live mode needs a spend cap: set {ENV_VAR} (USD) before running")
     meter = meter or BudgetMeter(None)
+    if tiers is not None:
+        tasks = [arms_mod.with_tiers(t, tiers) for t in tasks]
+    else:
+        tasks = arms_mod.expand_arms(tasks)
     if judges is None:
         judges = _live_judges(tasks, meter) if mode == "live" else False
     elif isinstance(judges, JudgeRunner) and judges.meter is None:
         judges.meter = meter
     judge_runner = judges if isinstance(judges, JudgeRunner) else None
-    by_web: dict[str, list[Task]] = {}
+    groups: dict[tuple[str, str | None], list[Task]] = {}
     for t in tasks:
-        by_web.setdefault(t.environment.web, []).append(t)
+        groups.setdefault((t.environment.web, arms_mod.tiers_of(t)), []).append(t)
     results: dict[tuple[str, int], TrialResult] = {}
     async with httpx.AsyncClient(timeout=60) as http:
-        for web, group in by_web.items():
-            with eval_stack(mode, web=web, replay_dir=replay_dir) as ew:
+        for (web, tier), group in groups.items():
+            env = arms_mod.stack_env(tier, mode)
+            generated = web != "off" and any(t.kind == "long_session" for t in group)
+            base = replay_dir or FIXTURE_DIR
+            with contextlib.ExitStack() as stack:
+                directory = stack.enter_context(long_session.replay_dir_for(group, base)) if generated else replay_dir
+                ew = stack.enter_context(eval_stack(mode, web=web, replay_dir=directory, backend_env=env))
                 results.update(await run_on_stack(ew, group, k, meter, http, timeout_s, judges=judge_runner))
     return [results[(t.id, i)] for t in tasks for i in range(k)]
 

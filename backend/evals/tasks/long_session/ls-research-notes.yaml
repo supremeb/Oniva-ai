@@ -1,0 +1,87 @@
+# [medium] Guards a shorter research-notes session (80 turns, smaller pages): the tiers should still engage, and
+# the facts and ids given up front must survive. The cheapest long-session task, useful as a quick arm comparison.
+id: ls-research-notes
+kind: long_session
+tags:
+- long_session
+input:
+  turns: 80
+  probe_at: [0.5, 0.8, 1.0]
+  page_tokens: 2500
+  oversize_every: 4
+  oversize_tokens: 11000
+  chat_every: 5
+  recap_every: 12
+  facts:
+  - id: participants
+    kind: fact
+    statement: The pilot study has 14 participants.
+    question: How many participants does the pilot study have?
+    expect: ["14", "fourteen"]
+  - id: deadline
+    kind: fact
+    statement: The interview window closes on 12 March.
+    question: When does the interview window close?
+    expect: ["12 March", "March 12"]
+  - id: study
+    kind: id
+    statement: The study protocol is registered as STUDY-0412.
+    question: Under what identifier is the study protocol registered?
+    expect: ["STUDY-0412"]
+  - id: coding
+    kind: id
+    statement: The coding scheme we use is CODE-KM7.
+    question: Which coding scheme do we use?
+    expect: ["CODE-KM7"]
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake: {}
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.05
+- id: no-oversize-verbatim
+  type: no_verbatim_oversize
+  params:
+    max_tokens: 8000
+- id: context-tokens
+  type: context_tokens
+  gating: false
+  params:
+    after_turn: 30
+- id: probe-facts
+  type: probe_recall
+  gating: false
+  params:
+    kind: fact
+- id: probe-ids
+  type: probe_recall
+  gating: false
+  params:
+    kind: id
+- id: rereads
+  type: reread_after_clear
+  gating: false
+  params:
+    max_rate: 0.1
+- id: probe-judge
+  type: judge
+  params:
+    judge: recall_probe
+    all_probes: true
+- id: budget
+  type: budget
+  params:
+    max_rounds: 320
+budget:
+  max_usd: 1.0
+  max_rounds: 320
