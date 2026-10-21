@@ -33,7 +33,7 @@
                 "reflector",
                 "research_worker"
               ],
-              "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              "fingerprint": "f002ce7794c13208899c2f0f87b325beb1d6d67189d84010534e97f21f35c64a"
             },
             "createdAt": 1000000
           },
@@ -276,9 +276,15 @@
             },
             "deepWorkRunId": "run-1"
           },
-          "compaction": null,
+          "compaction": {
+            "enabled": true,
+            "reserveTokens": 20000,
+            "backgroundMargin": 40000,
+            "keepRecentTokens": 20000
+          },
           "maxRounds": 40,
-          "deadlineMs": 1000600000
+          "deadlineMs": 1000600000,
+          "cacheTtl": "1h"
         },
         "toolOutput": {},
         "compaction": {
@@ -364,7 +370,7 @@
                 "reflector",
                 "research_worker"
               ],
-              "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              "fingerprint": "f002ce7794c13208899c2f0f87b325beb1d6d67189d84010534e97f21f35c64a"
             },
             "createdAt": 1000000
           },
@@ -645,9 +651,15 @@
             },
             "deepWorkRunId": "run-1"
           },
-          "compaction": null,
+          "compaction": {
+            "enabled": true,
+            "reserveTokens": 20000,
+            "backgroundMargin": 40000,
+            "keepRecentTokens": 20000
+          },
           "maxRounds": 40,
-          "deadlineMs": 1000600000
+          "deadlineMs": 1000600000,
+          "cacheTtl": "1h"
         },
         "toolOutput": {},
         "compaction": {
@@ -774,9 +786,15 @@
             },
             "deepWorkRunId": "run-1"
           },
-          "compaction": null,
+          "compaction": {
+            "enabled": true,
+            "reserveTokens": 20000,
+            "backgroundMargin": 40000,
+            "keepRecentTokens": 20000
+          },
           "maxRounds": 40,
-          "deadlineMs": 1000600000
+          "deadlineMs": 1000600000,
+          "cacheTtl": "1h"
         },
         "toolOutput": {},
         "compaction": {
@@ -847,7 +865,7 @@
                 "reflector",
                 "research_worker"
               ],
-              "fingerprint": "b8300c06c6122e4ad7ca1a03a60664ad479a4f75145dad00009bfb8583398e70"
+              "fingerprint": "f002ce7794c13208899c2f0f87b325beb1d6d67189d84010534e97f21f35c64a"
             },
             "createdAt": 1000000
           }

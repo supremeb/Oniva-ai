@@ -35,6 +35,8 @@ MAX_SECTION_CHARS = 100_000
 MAX_REFLECTION_ITEMS = 20
 RESERVED_HEADING = "sources"
 _FENCE = re.compile(r"^\s*(```|~~~)")
+_CITATION = re.compile(r"\[(\d{1,4}(?:\s*[,–-]\s*\d{1,4})*)\](?!\()")
+UNCITED_MIN_CHARS = 200  # shorter sections (intro lines, transitions) are not flagged for missing citations
 
 
 # --- plumbing -----------------------------------------------------------------
@@ -178,6 +180,20 @@ def _render_todo(run: dws.RunSnapshot) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _status_line(run: dws.RunSnapshot) -> str:
+    """One short line of plan progress, returned by state-changing tools so it stays in recent context (recitation)."""
+    latest = _latest_round(run)
+    if not latest:
+        return "No round registered yet."
+    entry = _round_entry(run, latest) or {}
+    registered = _registered(entry)
+    saved = [w["worker_id"] for w in registered if w["worker_id"] in entry.get("workers", {})]
+    line = f"Round {latest}: {len(saved)}/{len(registered)} workers saved"
+    if open_ids := _open_workers(entry):
+        line += f"; open: {', '.join(open_ids)}"
+    return line + "."
+
+
 # --- report sections ----------------------------------------------------------
 
 
@@ -212,6 +228,36 @@ def _normalize_heading(heading: str) -> str:
     return " ".join(heading.strip().lstrip("#").split())
 
 
+def _strip_code(markdown: str) -> str:
+    kept, fenced = [], False
+    for line in markdown.splitlines():
+        if _FENCE.match(line):
+            fenced = not fenced
+        elif not fenced:
+            kept.append(re.sub(r"`[^`]*`", "", line))
+    return "\n".join(kept)
+
+
+def _cited_indexes(markdown: str) -> List[int]:
+    out: List[int] = []
+    for group in _CITATION.findall(_strip_code(markdown)):
+        out.extend(int(n) for n in re.findall(r"\d+", group))
+    return out
+
+
+def lint_citations(sections: List[Tuple[str, str]], source_count: int) -> Tuple[Dict[str, List[int]], List[str]]:
+    """Out-of-range citations per section (blocking) and sections with factual text but no citation (warning)."""
+    invalid: Dict[str, List[int]] = {}
+    uncited: List[str] = []
+    for heading, body in sections:
+        cited = _cited_indexes(body)
+        if bad := sorted({n for n in cited if n < 1 or n > source_count}):
+            invalid[heading] = bad
+        elif not cited and len(body) >= UNCITED_MIN_CHARS:
+            uncited.append(heading)
+    return invalid, uncited
+
+
 # --- tools --------------------------------------------------------------------
 
 
@@ -220,7 +266,8 @@ def _normalize_heading(heading: str) -> str:
     description=(
         "Register a research round before launching its workers. Rounds are numbered consecutively from 1; "
         "each has at most the configured number of workers. Writes plan.md and todo.md. Repeating a round "
-        "that is already registered changes nothing."
+        "that is already registered changes nothing. "
+        'Example: {"round": 1, "workers": [{"worker_id": "w1", "sub_query": "Market size of X in 2025"}]}'
     ),
     category="deep_work",
     author="oniva",
@@ -303,7 +350,9 @@ async def _write_plan_files(run: dws.RunSnapshot) -> List[str]:
     name="dw_save_learnings",
     description=(
         "Save a research worker's learnings (facts with source URLs; source_type 'model_knowledge' needs no URL). Replaces anything that worker saved "
-        "before, so saving twice is safe. Call once, when the worker is done."
+        "before, so saving twice is safe. Call once, when the worker is done. "
+        'Example: {"worker_id": "w1", "learnings": [{"fact": "X grew 12% in 2025.", "source_url": '
+        '"https://example.com/r", "confidence": 0.8, "source_type": "web"}]}'
     ),
     category="deep_work",
     author="oniva",
@@ -362,7 +411,7 @@ async def dw_save_learnings(ctx: SkillContext, worker_id: str, learnings: List[D
     payload = {
         "worker_id": worker_id, "round": entry["round"], "learning_count": len(stored),
         "source_count": len({l.source_url for l in parsed if l.source_url}),
-        "workers_still_open": remaining,
+        "workers_still_open": remaining, "status": _status_line(run),
     }
     notes = []
     if details:
@@ -474,7 +523,7 @@ async def dw_record_reflection(
     can_continue = bool(should_continue) and round < cap + 1
     return _ok(
         {"round": round, "recorded": True, "next": "dw_start_round" if can_continue else "synthesis",
-         "workers_still_open": _open_workers(_round_entry(run, round) or {})},
+         "workers_still_open": _open_workers(_round_entry(run, round) or {}), "status": _status_line(run)},
     )
 
 
@@ -586,13 +635,27 @@ async def dw_finalize(ctx: SkillContext, failed_workers: Optional[List[str]] = N
         ]
         if not sections:
             return _err("The report has no sections. Write them with dw_write_section, then finalize.", "no_sections")
+        learnings = _all_learnings(run)
+        source_count = len({l.source_url for l in learnings if l.source_url})
+        invalid, uncited = lint_citations(sections, source_count)
+        if invalid:
+            valid = f"[1] to [{source_count}]" if source_count else "none (no source URLs were saved)"
+            named = "; ".join(f"{h!r}: {', '.join(f'[{n}]' for n in bad)}" for h, bad in invalid.items())
+            return _err(
+                f"Citations out of range. The Sources section lists {source_count} source(s); valid citations are {valid}. "
+                f"Fix these sections with dw_write_section, then call dw_finalize again. {named}.",
+                "invalid_citations", sections=list(invalid), source_count=source_count,
+            )
         body = _render_report(_title(run), sections).rstrip()
-        report = body + "\n" + build_sources_section(_all_learnings(run)) + "\n"
+        report = body + "\n" + build_sources_section(learnings) + "\n"
         path = await _write(run, "report.md", report)
         locked.advance(phase="done", status="completed")
         artifacts = locked.run.artifacts
     await _teardown_sandbox(run.id, "output_agent")  # U5: nothing outlives the run
-    return _ok({"report_length": len(report), "artifacts": artifacts}, [path])
+    payload: Dict[str, Any] = {"report_length": len(report), "artifacts": artifacts}
+    if uncited:
+        payload["warnings"] = [f"Section(s) with factual content but no [N] citation: {', '.join(uncited)}."]
+    return _ok(payload, [path])
 
 
 @skill(
@@ -622,7 +685,7 @@ async def dw_get_learnings(
     selected = select_learnings(everything, max_tokens=max(1000, min(int(max_tokens), 100_000)))
     return _ok({
         "total": len(everything), "returned": len(selected),
-        "learnings": [l.model_dump(exclude_none=True) for l in selected],
+        "learnings": [l.model_dump(exclude_none=True) for l in selected], "status": _status_line(run),
     })
 
 

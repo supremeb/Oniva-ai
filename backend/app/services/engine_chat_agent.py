@@ -54,8 +54,9 @@ CAPABILITY_FAMILIES = (
 
 
 # Compaction (U11, R9). The agent config names no model (the policy endpoint picks it per
-# request), so the context window is a conservative default rather than a per-model lookup.
-# Background compaction starts at COMPACT_FRACTION of the window; a request waits for one
+# request and returns the chosen model's ``contextWindow``, which the engine uses for the
+# thresholds). DEFAULT_CONTEXT_WINDOW only sizes the reserve/margin/keep-recent token counts
+# and is the engine's fallback when the policy gave no window. Background compaction starts at COMPACT_FRACTION of the window; a request waits for one
 # once only the reply reserve is left.
 ASK_USER_TOOL = "ask_user"
 DEFAULT_CONTEXT_WINDOW = 200_000
@@ -65,18 +66,23 @@ KEEP_RECENT_FRACTION = 0.10
 
 
 def compaction_settings(
-    context_window: int = DEFAULT_CONTEXT_WINDOW, compact_fraction: float = COMPACT_FRACTION,
+    context_window: Optional[int] = None, compact_fraction: float = COMPACT_FRACTION,
 ) -> Dict[str, Any]:
-    """Engine ``CompactionOverrides`` for a conversation (camelCase, engine schema)."""
-    reserve = int(context_window * RESERVE_FRACTION)
-    background_start = int(context_window * compact_fraction)
+    """Engine ``CompactionOverrides`` for a conversation (camelCase, engine schema).
+
+    ``context_window`` None (the default) leaves the window to the model policy, which returns the
+    chosen model's; pass a number to pin it.
+    """
+    basis = context_window or DEFAULT_CONTEXT_WINDOW
+    reserve = int(basis * RESERVE_FRACTION)
+    background_start = int(basis * compact_fraction)
     return {
         "enabled": True,
-        "contextWindow": context_window,
+        **({"contextWindow": context_window} if context_window else {}),
         "reserveTokens": reserve,
         # Engine: background starts at window - reserve - margin == background_start.
-        "backgroundMargin": max(0, context_window - reserve - background_start),
-        "keepRecentTokens": int(context_window * KEEP_RECENT_FRACTION),
+        "backgroundMargin": max(0, basis - reserve - background_start),
+        "keepRecentTokens": int(basis * KEEP_RECENT_FRACTION),
     }
 
 

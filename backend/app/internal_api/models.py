@@ -14,7 +14,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.config.llm_pricing import calculate_cost_with_cache, find_model_pricing
+from app.config.llm_pricing import calculate_cost_with_cache, context_window_for, find_model_pricing
 from app.core.database import get_system_db
 from app.models.engine import EngineConversation
 from app.models.llm_provider import LLMProvider
@@ -82,6 +82,7 @@ class PolicyAllow(BaseModel):
     model: str
     api_key: SecretStr
     max_tokens: int
+    context_window: Optional[int] = None
     expires_at: int
     request_id: str
 
@@ -105,6 +106,7 @@ def _serialize_allow(a: PolicyAllow) -> Dict[str, Any]:
         "model": a.model,
         "apiKey": a.api_key.get_secret_value(),
         "maxTokens": a.max_tokens,
+        **({"contextWindow": a.context_window} if a.context_window else {}),
         "expiresAt": a.expires_at,
         "requestId": a.request_id,
     }
@@ -203,6 +205,7 @@ async def decide(db: AsyncSession, req: PolicyRequest) -> Dict[str, Any]:
         model=model,
         api_key=SecretStr(provider.api_key),
         max_tokens=max_tokens,
+        context_window=context_window_for(model),
         expires_at=int(time.time() * 1000) + KEY_TTL_MS,
         request_id=req.request_id,
     )

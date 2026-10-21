@@ -195,6 +195,8 @@ export class BackendPolicyClient {
   readonly #url: string;
   readonly #token: string;
   readonly #providers: () => string[];
+  /** Context windows the backend reported, by resolved model id. */
+  readonly #windows = new Map<string, number>();
   readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
   readonly #log: BackendLog;
@@ -212,6 +214,11 @@ export class BackendPolicyClient {
     this.#fetch = options.fetch ?? fetch;
     this.#log = options.log ?? (() => {});
     this.#backoff = new Backoff(options);
+  }
+
+  /** The context window the backend last reported for `model`, if any. */
+  contextWindowFor(model: string): number | undefined {
+    return this.#windows.get(model);
   }
 
   async resolveModelRequest(info: ModelRequestInfo): Promise<ModelResolution> {
@@ -433,13 +440,23 @@ export class BackendPolicyClient {
       Number.isInteger(json.maxTokens) &&
       json.maxTokens > 0
     ) {
-      return {
+      const resolution: ModelResolution = {
         ok: true,
         provider: json.provider,
         model: json.model,
         apiKey: json.apiKey,
         maxTokens: json.maxTokens,
       };
+      // Optional: older backends omit it. Remember it per model for compaction thresholds.
+      if (
+        typeof json.contextWindow === "number" &&
+        Number.isInteger(json.contextWindow) &&
+        json.contextWindow > 0
+      ) {
+        resolution.contextWindow = json.contextWindow;
+        this.#windows.set(json.model, json.contextWindow);
+      }
+      return resolution;
     }
     this.#log("policy_error", { requestId, error: "malformed response" });
     return unavailable("malformed response");

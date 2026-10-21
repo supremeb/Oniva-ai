@@ -102,7 +102,15 @@ export interface ModelRequest {
   thinking?: ThinkingLevel;
   /** Prompt caching hints (default true). */
   cache?: boolean;
+  /**
+   * Lifetime of the system-prompt cache breakpoint: "5m" (default) or "1h"
+   * (costs more to write; worth it when rounds wait longer than 5 minutes).
+   */
+  cacheTtl?: CacheTtl;
 }
+
+/** Prompt-cache lifetime. */
+export type CacheTtl = "5m" | "1h";
 
 /** A request addressed to a registered provider. */
 export interface ModelCall extends ModelRequest {
@@ -249,6 +257,8 @@ export type ModelResolution =
       apiKey: string;
       maxTokens: number;
       thinking?: ThinkingLevel;
+      /** The model's context window in tokens, when the host knows it. */
+      contextWindow?: number;
     }
   | {
       ok: false;
@@ -267,4 +277,5 @@ export interface ModelInput {
   tools?: ToolSpec[];
   thinking?: ThinkingLevel;
   cache?: boolean;
+  cacheTtl?: CacheTtl;
 }

@@ -247,7 +247,11 @@ export function generationTaskDefinition(
 
     if (settings.enabled && !compacted) {
       const estimate = estimateContextTokens(entries);
-      const limits = compactionThresholds(settings, estimate.model);
+      const limits = compactionThresholds(
+        settings,
+        estimate.model,
+        estimate.model === null ? undefined : deps.policy.contextWindowFor?.(estimate.model),
+      );
       const compactionInput = { runId, round, cause: "threshold" as const };
       if (estimate.tokens >= limits.blocking) {
         return rt.commit((tx, ops) =>
@@ -282,6 +286,7 @@ export function generationTaskDefinition(
     let input: ModelInput = { messages };
     if (specs.length > 0) input.tools = specs;
     if (agent.thinking !== null) input.thinking = agent.thinking;
+    if (agent.cacheTtl !== null) input.cacheTtl = agent.cacheTtl;
     input = await deps.hooks.beforeRequest({ conversation, agent, runId, round, input }, task.id);
 
     const stream = deps.models.resolveAndStream(
@@ -550,7 +555,12 @@ export function generationTaskDefinition(
           // Faulted after the intent: the effect may have run even though its
           // result never committed. Warn the model rather than call it a failure.
           const stored = (await tx.doc(toolOutputDoc, call.taskId)).value;
-          const result = capToolResult(call, interruptedResult(stored), deps.limits.maxEntryBytes);
+          const result = capToolResult(
+            call,
+            interruptedResult(stored),
+            deps.limits.maxEntryBytes,
+            deps.limits.maxToolResultTokens,
+          );
           appendToolResult(
             tx,
             conversationId,

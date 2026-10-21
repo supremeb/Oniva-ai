@@ -11,6 +11,10 @@ export interface RunCost {
   inputTokens: number;
   outputTokens: number;
   unpriced: boolean;
+  /** Tokens served from the provider cache; absent on older backends. */
+  cacheReadTokens?: number;
+  /** cacheRead / (input + cacheRead), 0-1; null when the ledger has no cache reads. */
+  cacheHitRatio?: number | null;
   startedAt: string | null;
 }
 
@@ -21,6 +25,10 @@ export interface PurposeCost {
   inputTokens: number;
   outputTokens: number;
   unpriced: boolean;
+  /** Tokens served from the provider cache; absent on older backends. */
+  cacheReadTokens?: number;
+  /** cacheRead / (input + cacheRead), 0-1; null when the ledger has no cache reads. */
+  cacheHitRatio?: number | null;
 }
 
 export interface StageCost {
@@ -30,6 +38,10 @@ export interface StageCost {
   inputTokens: number;
   outputTokens: number;
   unpriced: boolean;
+  /** Tokens served from the provider cache; absent on older backends. */
+  cacheReadTokens?: number;
+  /** cacheRead / (input + cacheRead), 0-1; null when the ledger has no cache reads. */
+  cacheHitRatio?: number | null;
 }
 
 export interface ConversationCost {
@@ -37,6 +49,10 @@ export interface ConversationCost {
   inputTokens: number;
   outputTokens: number;
   unpriced: boolean;
+  /** Tokens served from the provider cache; absent on older backends. */
+  cacheReadTokens?: number;
+  /** cacheRead / (input + cacheRead), 0-1; null when the ledger has no cache reads. */
+  cacheHitRatio?: number | null;
   runs: RunCost[];
   /** Same rows as `runs`, partitioned by purpose (root plus subagent usage). Absent on older backends. */
   byPurpose?: PurposeCost[];
