@@ -254,3 +254,4 @@ export * from './compliance';
 export * from './knowledge-bases';
 export * from './schedules';
 export * from './inbox';
+export * from './project-memory';
