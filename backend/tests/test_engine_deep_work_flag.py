@@ -100,46 +100,31 @@ def make_client(t: Tenant, settings: Settings, *others: Tenant):
     return TestClient(app, raise_server_exceptions=False)
 
 
-def test_ae1_engine_tenant_dispatches_off_tenant_stays_legacy_and_gets_404_on_engine_only(monkeypatch):
+def test_ae1_engine_tenant_dispatches_off_tenant_gets_404_everywhere():
     a, b = tenant(True), tenant(False)
     s = cfg()
-    legacy_calls = []
-
-    async def legacy_config(db, tenant_id):
-        legacy_calls.append(tenant_id)
-        raise RuntimeError("legacy handler reached")
-
-    monkeypatch.setattr(dw, "_get_general_assistant_config", legacy_config)
 
     ca = make_client(a, s, b)
     for path, body in [("clarify", {"query": "research query"}), ("plan", {"query": "research query"}), ("", {"query": "research query"})]:
         r = ca.post(f"/api/v1/deep-work/engine/{path}".rstrip("/"), json=body)
         assert r.status_code in (422, 500), path  # engine handler (needs project / engine), not legacy
-    assert legacy_calls == []
     # Steer passes the gate for the flagged tenant (then fails on the unknown session), unlike tenant B below.
     assert ca.post("/api/v1/deep-work/s1/steer", json={"text": "x"}).status_code == 404
 
     cb = make_client(b, s, a)
-    for path in ["clarify", "plan"]:
-        cb.post(f"/api/v1/deep-work/engine/{path}", json={"query": "research query"})
-    assert len(legacy_calls) == 2  # tenant B reached the legacy handlers
+    for path in ["clarify", "plan", ""]:
+        r = cb.post(f"/api/v1/deep-work/engine/{path}".rstrip("/"), json={"query": "research query"})
+        assert r.status_code == 404 and r.json()["detail"] == "Deep Work unavailable", path
     assert cb.post("/api/v1/deep-work/s1/steer").status_code == 404
 
 
-def test_global_off_and_unconfigured_engine_keep_legacy(monkeypatch):
+def test_global_off_and_unconfigured_engine_return_404():
     a = tenant(True)
-    reached = []
-
-    async def legacy_config(db, tenant_id):
-        reached.append(1)
-        raise RuntimeError
-
-    monkeypatch.setattr(dw, "_get_general_assistant_config", legacy_config)
     for s in (cfg(ENABLE_ENGINE_DEEP_WORK=False), cfg(ENGINE_URL="")):
         c = make_client(a, s)
-        c.post("/api/v1/deep-work/engine/clarify", json={"query": "research query"})
+        r = c.post("/api/v1/deep-work/engine/clarify", json={"query": "research query"})
+        assert r.status_code == 404 and r.json()["detail"] == "Deep Work unavailable"
         assert c.post("/api/v1/deep-work/s1/steer").status_code == 404
-    assert len(reached) == 2
 
 
 def test_legacy_session_routes_unchanged_by_flag():

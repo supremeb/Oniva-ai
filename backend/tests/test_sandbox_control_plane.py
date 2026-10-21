@@ -215,39 +215,3 @@ class TestSandboxProxy:
                 await proxy_chat_completions(body, mock_request, mock_db)
 
             assert exc_info.value.status_code == 429
-
-
-# ── Integration test ─────────────────────────────────────────────
-
-
-class TestSandboxEnvVars:
-    """Test env var generation for sandbox."""
-
-    @pytest.mark.asyncio
-    async def test_sandbox_env_vars_contain_token_not_keys(self):
-        """_build_control_plane_env_vars returns token + proxy URL, not real keys."""
-        mock_redis, _ = _make_mock_redis_with_pipeline()
-
-        with patch("app.services.sandbox_tokens.get_redis_service", return_value=mock_redis):
-            from app.services.deep_work.engine import _build_control_plane_env_vars
-
-            token, env_vars = await _build_control_plane_env_vars(
-                tenant_id="tenant-1",
-                user_id="user-1",
-                session_id="sess-1",
-                worker_id="w0",
-                proxy_url="https://api.oniva.ai",
-            )
-
-            # Token is opaque, not a real API key
-            assert token.startswith("sbx_tok_")
-            assert "sk-" not in token
-
-            # Env vars contain proxy URL and token
-            assert env_vars["OPENAI_API_KEY"] == token
-            assert env_vars["OPENAI_BASE_URL"] == "https://api.oniva.ai/api/v1/sandbox-proxy/v1"
-            assert env_vars["SESSION_ID"] == "sess-1"
-
-            # No real API keys present
-            assert "ANTHROPIC_API_KEY" not in env_vars
-            assert "OPENROUTER_API_KEY" not in env_vars

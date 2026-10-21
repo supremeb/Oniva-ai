@@ -4,7 +4,6 @@
  * Manages:
  * - Fetching Deep Work state from backend via TanStack Query
  * - Hydrating the Zustand store from the backend response
- * - SSE connection for active sessions
  * - Result saving as assistant message on completion
  */
 
@@ -40,12 +39,10 @@ export function useDeepWorkChat(currentSessionId: string | null) {
     });
 
     // Hydrate store when backend data arrives or conversation changes.
-    // Guard: skip hydration if SSE is active for THIS conversation (SSE is source of truth).
-    // No ref-based dedup — the SSE guard is sufficient and avoids stale cache lock-in.
     useEffect(() => {
         if (!currentSessionId || !fullState) return;
 
-        // Engine-runtime sessions: no hydration and no EventSource. The card reads the
+        // Engine-runtime sessions: no hydration. The card reads the
         // run from its watch stream; only the ids are needed. Not gated on the flag:
         // existing engine runs stay readable after a tenant switches back (R3).
         if (isEngineRuntimeSession(fullState)) {
@@ -64,34 +61,13 @@ export function useDeepWorkChat(currentSessionId: string | null) {
         }
         if (useEngineSessionStore.getState().session) useEngineSessionStore.getState().setSession(null);
 
-        const store = useDeepWorkStore.getState();
-
-        // If SSE is already connected for this conversation, it's the source of truth
-        if (store.eventSource && store.conversationId === fullState.conversation_id) {
-            return;
-        }
-        // Disconnect stale SSE from a different conversation
-        if (store.eventSource) {
-            store.disconnectEvents();
-        }
-
-        store.hydrateFromBackend(fullState);
-
-        // Connect SSE for active sessions
-        const activeStatuses = ['running', 'executing', 'paused', 'awaiting_input', 'pending'];
-        if (activeStatuses.includes(fullState.status)) {
-            // Only the legacy v2 pipeline streams; v1 executor sessions are history (read-only).
-            if (fullState.is_engine) store.connectEngineEvents(fullState.session_id);
-        }
+        // Historical (v1/v2) sessions open read-only: no executor and no stream remain.
+        useDeepWorkStore.getState().hydrateFromBackend(fullState);
     }, [fullState, currentSessionId]);
 
-    // Clean up SSE when switching conversations (prevents orphaned connections)
+    // Drop the engine session when switching conversations
     useEffect(() => {
         return () => {
-            const store = useDeepWorkStore.getState();
-            if (store.eventSource) {
-                store.disconnectEvents();
-            }
             useEngineSessionStore.getState().setSession(null);
         };
     }, [currentSessionId]);

@@ -17,6 +17,7 @@ import { createChatSession } from '@/lib/api/chat-sessions';
 import { BUILTIN_AGENT_UUIDS, isBuiltinAgentId } from '@/lib/builtin-agents';
 import { useDeepWorkChat } from '@/hooks/useDeepWorkChat';
 import { useDeepWorkIntake } from '@/hooks/useDeepWorkIntake';
+import { ENGINE_DEEP_WORK_FLAG, useFeature } from '@/lib/hooks/useFeature';
 import { useStreamingParts } from '@/hooks/useStreamingParts';
 import { ArtifactModal } from './shared/ArtifactModal';
 import type { ArtifactModalData } from './shared/data/FilePreview';
@@ -95,6 +96,9 @@ export function LegacyChat({ projectId }: LegacyChatProps = {}) {
     const [streamingMessageId, setStreamingMessageId] = useState<string | undefined>(undefined);
     const [deepWorkMode, setDeepWorkMode] = useState(false);
     const [deepWorkSuggestion, setDeepWorkSuggestion] = useState<string | null>(null);
+    const deepWorkAvailable = useFeature(ENGINE_DEEP_WORK_FLAG);
+    const deepWorkAvailableRef = useRef(deepWorkAvailable);
+    deepWorkAvailableRef.current = deepWorkAvailable;
     const lastUserMessageRef = useRef<string>('');
     const [activeToolCalls, setActiveToolCalls] = useState<ActiveToolCall[]>([]);
     const [selectedSkills, setSelectedSkills] = useState<Skill[]>([]);
@@ -452,7 +456,6 @@ export function LegacyChat({ projectId }: LegacyChatProps = {}) {
             loadedForSessionRef.current = null;
             setError(null);
             deepWorkResultAppendedRef.current = null;
-            useDeepWorkStore.getState().disconnectEvents();
 
             // Only reset streaming UI if we're NOT returning to the actively streaming session
             if (streamingForSessionRef.current !== currentSessionId) {
@@ -773,7 +776,8 @@ export function LegacyChat({ projectId }: LegacyChatProps = {}) {
                         richPartHandlers.onPart?.(partData);
                     },
                     onDeepWorkSuggested: (reasoning) => {
-                        setDeepWorkSuggestion(reasoning);
+                        // No suggestion when Deep Work is off for this tenant.
+                        if (deepWorkAvailableRef.current) setDeepWorkSuggestion(reasoning);
                     },
                     onWorkflowPreview: (data) => {
                         lastEventTimeRef.current = Date.now();

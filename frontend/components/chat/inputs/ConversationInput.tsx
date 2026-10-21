@@ -2,6 +2,7 @@
 
 import { memo, useRef, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
+import { ENGINE_DEEP_WORK_FLAG, useFeature } from '@/lib/hooks/useFeature';
 import { ConnectorPopover } from '../ConnectorPopover';
 import { SkillPicker } from '../SkillPicker';
 import { SendButton, SkillTagRow } from './shared';
@@ -69,6 +70,8 @@ export const ConversationInput = memo(function ConversationInput({
     deepWorkActivity,
     modelName,
 }: ConversationInputProps) {
+    // The Deep Work toggle only exists where Deep Work runs on the engine (per-tenant flag).
+    const deepWorkAvailable = useFeature(ENGINE_DEEP_WORK_FLAG);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Auto-resize textarea
@@ -155,7 +158,7 @@ export const ConversationInput = memo(function ConversationInput({
                             onSkillSelect={onSkillSelect}
                         />
                         <ThinkingToggle active={thinkingEnabled} onToggle={onThinkingToggle} supported={thinkingSupported} compact />
-                        <DeepWorkToggle active={deepWorkMode} onToggle={onDeepWorkToggle} compact />
+                        {deepWorkAvailable && <DeepWorkToggle active={deepWorkMode} onToggle={onDeepWorkToggle} compact />}
                     </div>
 
                     {/* Right side - model badge + send button */}

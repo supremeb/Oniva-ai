@@ -13,7 +13,6 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from app.config import get_settings
-from app.services.deep_work.event_sink import EventSink
 
 if TYPE_CHECKING:
     from app.services.sandbox_executor import SandboxHandle
@@ -206,7 +205,6 @@ async def execute_sandbox_tool(
     arguments: dict[str, Any],
     sandbox: SandboxHandle,
     api_keys: dict[str, str] | None = None,
-    event_sink: EventSink | None = None,
     artifact_ctx: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Route a sandbox tool call to the appropriate handler.
@@ -216,7 +214,6 @@ async def execute_sandbox_tool(
         arguments: Tool arguments from the LLM.
         sandbox: Active sandbox handle.
         api_keys: Optional API keys for browser tools (e.g., OpenAI for Browser Use).
-        event_sink: Optional EventSink for emitting events (needed by publish_artifact).
         artifact_ctx: Optional context dict with tenant_id, session_id, user_id
             (needed by publish_artifact to store files).
 
@@ -232,7 +229,7 @@ async def execute_sandbox_tool(
     elif tool_name == "inspect_artifact":
         return await _exec_inspect_artifact(sandbox, arguments)
     elif tool_name == "publish_artifact":
-        return await _exec_publish_artifact(sandbox, arguments, event_sink, artifact_ctx)
+        return await _exec_publish_artifact(sandbox, arguments, artifact_ctx)
     else:
         return {"error": f"Unknown sandbox tool: {tool_name}"}
 
@@ -446,7 +443,6 @@ async def _exec_inspect_artifact(
 async def _exec_publish_artifact(
     sandbox: SandboxHandle,
     arguments: dict[str, Any],
-    event_sink: EventSink | None = None,
     artifact_ctx: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Publish an artifact from sandbox to persistent storage."""
@@ -503,27 +499,6 @@ async def _exec_publish_artifact(
             session_id=session_id,
             file_path=f"deliverables/{filename}",
         )
-
-        # Emit enriched FilePart SSE event
-        if event_sink:
-            await event_sink.emit("deep_work_engine_output_complete", {
-                "artifact_uri": artifact_uri,
-                "download_url": download_url,
-                "preview_url": None,
-                "file_part": {
-                    "type": "file",
-                    "filename": filename,
-                    "size": len(file_content),
-                    "fileType": _guess_mime_type(filename),
-                    "downloadUrl": download_url,
-                    "title": title,
-                    "description": description,
-                    "artifactType": artifact_type,
-                    "artifactUri": artifact_uri,
-                    "tags": tags,
-                    "pageCount": None,
-                },
-            })
 
         return {
             "status": "published",

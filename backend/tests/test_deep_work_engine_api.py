@@ -352,17 +352,43 @@ async def test_ae1_engine_only_routes_404_without_the_flag_and_legacy_handlers_s
     assert (await w.http.get(f"/api/v1/deep-work/{sid}/workers/{uuid.uuid4()}/watch")).status_code == 404
     assert (await w.http.post(f"/api/v1/deep-work/engine/{sid}/cancel")).status_code in (404, 500, 403)
 
-    reached = []
-
-    async def legacy(db, tenant_id):
-        reached.append(1)
-        raise RuntimeError("legacy handler reached")
-
-    monkeypatch.setattr(dw, "_get_general_assistant_config", legacy)
-    with pytest.raises(RuntimeError, match="legacy handler reached"):
-        await w.http.post("/api/v1/deep-work/engine/plan", json={"query": "compare vendor pricing", "project_id": str(w.pb)})
-    assert reached == [1]  # tenant B is routed to the legacy pipeline, never to the engine
+    # An opted-out tenant is never routed to a legacy pipeline: every engine-served URL answers 404.
+    for path, payload in (
+        ("/api/v1/deep-work/engine/clarify", {"query": "compare vendor pricing", "project_id": str(w.pb)}),
+        ("/api/v1/deep-work/engine/plan", {"query": "compare vendor pricing", "project_id": str(w.pb)}),
+        ("/api/v1/deep-work/engine", {"query": "compare vendor pricing", "project_id": str(w.pb)}),
+    ):
+        r = await w.http.post(path, json=payload)
+        assert r.status_code == 404 and r.json()["detail"] == "Deep Work unavailable", path
     assert w.engine.count("create") == 1
+
+
+def test_openapi_has_no_v2_stream_route_and_keeps_the_four_engine_urls():
+    from app.main import app
+
+    paths = app.openapi()["paths"]
+    assert "/api/v1/deep-work/engine/{session_id}/stream" not in paths
+    assert "post" in paths["/api/v1/deep-work/engine/clarify"]
+    assert "post" in paths["/api/v1/deep-work/engine/plan"]
+    assert "post" in paths["/api/v1/deep-work/engine"]
+    assert "post" in paths["/api/v1/deep-work/engine/{session_id}/cancel"]
+
+
+def test_no_import_of_removed_legacy_modules_remains():
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    needles = ("services.deep_work.engine import", "services.deep_work.engine as", "services.deep_work import engine\n",
+               "services.deep_work.worker", "services.deep_work.event_sink", "services.deep_work import worker",
+               "services.deep_work import event_sink")
+    offenders = []
+    for base in (root / "app", root / "tests"):
+        for f in base.rglob("*.py"):
+            if f == pathlib.Path(__file__).resolve():
+                continue
+            text = f.read_text()
+            offenders += [f"{f.name}: {n}" for n in needles if n in text]
+    assert not offenders, offenders
 
 
 # --- clarify / plan -------------------------------------------------------------------------------------------
@@ -856,6 +882,32 @@ async def test_historical_v1_session_opens_read_only_with_its_files(w):
     for method, path in REMOVED_V1:
         r = await w.http.request(method.upper(), f"/api/v1{path.format(session_id=sid)}", json={})
         assert r.status_code in (404, 405), (method, path, r.status_code)
+
+
+async def test_historical_v2_session_opens_read_only_with_its_files_and_stale_running_is_failed(w):
+    chat, sid, running_sid = uuid.uuid4(), "v2-session-1", "v2-session-2"
+    async with w.factory() as db:
+        db.add(BackgroundJob(
+            id=uuid.uuid4(), tenant_id=w.ta, user_id=w.ua, job_type="deep_work", status="completed", trigger="manual",
+            session_id=sid, conversation_id=chat, input_data={"query": "old v2 study", "engine": "orchestrator-worker"},
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc), completed_at=datetime(2026, 1, 2, tzinfo=timezone.utc)))
+        db.add(BackgroundJob(
+            id=uuid.uuid4(), tenant_id=w.ta, user_id=w.ua, job_type="deep_work", status="running", trigger="manual",
+            session_id=running_sid, input_data={"query": "interrupted", "engine": "orchestrator-worker"},
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    await w.storage.write(str(w.ta), sid, "engine_report.md", "# V2 report")
+    await w.storage.write(str(w.ta), sid, "engine_plan.json", json.dumps({"title": "V2 study", "sub_queries": []}))
+    await w.storage.write(str(w.ta), sid, "workspace/report.md", "# V2 workspace report")
+
+    full = (await w.http.get(f"/api/v1/deep-work/by-conversation/{chat}/full-state")).json()
+    assert full["session_id"] == sid and full["status"] == "completed" and full["runtime"] == "legacy"
+    assert [f["path"] for f in full["workspace_files"]] == ["report.md"]
+    assert (await w.http.get(f"/api/v1/deep-work/{sid}/workspace/report.md")).text == "# V2 workspace report"
+    items = {i["session_id"]: i for i in (await w.http.get("/api/v1/deep-work/sessions")).json()["sessions"]}
+    assert items[sid]["status"] == "completed" and items[running_sid]["status"] == "failed"
+    # no stream, cancel falls to 404 for a legacy session
+    assert (await w.http.get(f"/api/v1/deep-work/engine/{sid}/stream")).status_code in (404, 405)
+    assert (await w.http.post(f"/api/v1/deep-work/engine/{sid}/cancel")).status_code == 404
 
 
 # --- inbox support: awaiting_input and closing approvals (Approvals & Policy U7) -----------------------------------------

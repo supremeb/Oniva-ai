@@ -1,14 +1,11 @@
 /**
  * Deep Work intake on the engine API (flag ENABLE_ENGINE_DEEP_WORK): clarify -> plan -> approve ->
  * start calls the engine functions with the chat's project, and a started run is published to the
- * engine session store. The legacy path (no engine option) is exercised to stay on the old API.
+ * engine session store. Without an engine project there is no intake.
  */
 const mockClarifyEngine = jest.fn();
 const mockPlanEngine = jest.fn();
 const mockStartEngineRun = jest.fn();
-const mockClarifyQuery = jest.fn();
-const mockGenerateEnginePlan = jest.fn();
-const mockStartEngine = jest.fn();
 
 jest.mock('@/lib/engine/deepWorkApi', () => ({
   clarifyEngine: (...a: unknown[]) => mockClarifyEngine(...a),
@@ -17,11 +14,6 @@ jest.mock('@/lib/engine/deepWorkApi', () => ({
 }));
 jest.mock('@/lib/api/deep-work', () => ({
   listWorkspaceFiles: jest.fn(),
-  startEngine: (...a: unknown[]) => mockStartEngine(...a),
-  cancelEngine: jest.fn(),
-  buildEngineEventsUrl: jest.fn(() => 'http://x/stream'),
-  generateEnginePlan: (...a: unknown[]) => mockGenerateEnginePlan(...a),
-  clarifyQuery: (...a: unknown[]) => mockClarifyQuery(...a),
 }));
 jest.mock('@/lib/api', () => {
   class APIError extends Error {
@@ -59,7 +51,6 @@ describe('engine intake', () => {
 
     await useDeepWorkStore.getState().clarify('battery market', 'chat_1', ['kb1'], ['c1'], ENGINE);
     expect(mockClarifyEngine).toHaveBeenCalledWith({ query: 'battery market', projectId: 'proj-1', availableKbs: ['kb1'], availableConnectors: ['c1'], chatId: 'chat_1' });
-    expect(mockClarifyQuery).not.toHaveBeenCalled();
     expect(useDeepWorkStore.getState().status).toBe('clarifying');
     expect(useDeepWorkStore.getState().intakeResult?.questions?.[0].text).toBe('Region?');
 
@@ -85,7 +76,6 @@ describe('engine intake', () => {
       connectorIds: ['c1'],
       chatId: 'chat_1',
     });
-    expect(mockStartEngine).not.toHaveBeenCalled();
     expect(useEngineSessionStore.getState().session).toEqual({
       sessionId: 'dw_1',
       conversationId: 'conv_1',
@@ -97,7 +87,6 @@ describe('engine intake', () => {
     // legacy store is cleared: no legacy card/progress bar next to the engine card
     expect(useDeepWorkStore.getState().status).toBe('idle');
     expect(useDeepWorkStore.getState().engineIntake).toBeNull();
-    expect(useDeepWorkStore.getState().eventSource).toBeNull();
   });
 
   it('clarify "proceed" goes straight to the plan with the enriched query', async () => {
@@ -154,24 +143,16 @@ describe('engine intake', () => {
   });
 });
 
-describe('legacy intake (flag off)', () => {
-  it('uses the legacy endpoints and never the engine API', async () => {
-    mockClarifyQuery.mockResolvedValue({ action: 'proceed', questions: null, enriched_query: null });
-    mockGenerateEnginePlan.mockResolvedValue({ title: 'T', steps: ['s'], raw_plan: { k: 1 } });
-    mockStartEngine.mockResolvedValue({ session_id: 'legacy_1' });
-    // connectEngineEvents opens an EventSource; stub it out
-    useDeepWorkStore.setState({ connectEngineEvents: jest.fn() });
-
+describe('engine Deep Work off for the tenant', () => {
+  it('clarify without an engine project reports Deep Work unavailable and calls no API', async () => {
     await useDeepWorkStore.getState().clarify('q', 'chat_1', [], []);
-    expect(mockClarifyQuery).toHaveBeenCalled();
     expect(mockClarifyEngine).not.toHaveBeenCalled();
-    expect(useDeepWorkStore.getState().engineIntake).toBeNull();
-
-    await useDeepWorkStore.getState().approveEnginePlan();
-    expect(mockStartEngine).toHaveBeenCalledWith({ query: 'q', conversation_id: 'chat_1', plan: { k: 1 } });
+    expect(mockPlanEngine).not.toHaveBeenCalled();
     expect(mockStartEngineRun).not.toHaveBeenCalled();
+    const s = useDeepWorkStore.getState();
+    expect(s.status).toBe('error');
+    expect(s.error).toMatch(/unavailable/i);
     expect(useEngineSessionStore.getState().session).toBeNull();
-    expect(useDeepWorkStore.getState().sessionId).toBe('legacy_1');
   });
 });
 

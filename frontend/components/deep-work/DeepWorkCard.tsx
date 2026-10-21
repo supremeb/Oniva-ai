@@ -66,7 +66,6 @@ const DeepWorkLegacyCard = memo(function DeepWorkLegacyCard() {
   const artifacts = useDeepWorkStore((s) => s.artifacts);
   const approveEnginePlan = useDeepWorkStore((s) => s.approveEnginePlan);
   const rejectEnginePlan = useDeepWorkStore((s) => s.rejectEnginePlan);
-  const cancelEngineSession = useDeepWorkStore((s) => s.cancelEngineSession);
   const generatePlan = useDeepWorkStore((s) => s.generatePlan);
   const enginePendingQuery = useDeepWorkStore((s) => s.enginePendingQuery);
   const skipClarification = useDeepWorkStore((s) => s.skipClarification);
@@ -340,13 +339,6 @@ const DeepWorkLegacyCard = memo(function DeepWorkLegacyCard() {
                 {sourceCount} source{sourceCount !== 1 ? 's' : ''}
               </span>
             )}
-            <button
-              onClick={(e) => { e.stopPropagation(); cancelEngineSession(); }}
-              className="h-5 w-5 flex items-center justify-center rounded text-neutral-400 hover:text-red-500 transition-colors flex-shrink-0 ml-auto"
-              title="Stop"
-            >
-              <Stop className="h-3.5 w-3.5" weight="fill" />
-            </button>
           </div>
 
           {/* Collapsible body */}

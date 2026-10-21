@@ -3,6 +3,7 @@
 import { memo, useRef, useEffect, useCallback } from 'react';
 import { MagnifyingGlass, Brain } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
+import { ENGINE_DEEP_WORK_FLAG, useFeature } from '@/lib/hooks/useFeature';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ConnectorPopover } from '../ConnectorPopover';
 import { SkillPicker } from '../SkillPicker';
@@ -132,6 +133,8 @@ export const WelcomeInput = memo(function WelcomeInput({
     webSearchPopover,
     knowledgePopover,
 }: WelcomeInputProps) {
+    // The Deep Work toggle only exists where Deep Work runs on the engine (per-tenant flag).
+    const deepWorkAvailable = useFeature(ENGINE_DEEP_WORK_FLAG);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Auto-resize textarea
@@ -215,7 +218,7 @@ export const WelcomeInput = memo(function WelcomeInput({
                         />
                         <div className="ml-1 flex items-center gap-1">
                             <ThinkingToggle active={thinkingEnabled} onToggle={onThinkingToggle} supported={thinkingSupported} />
-                            <DeepWorkToggle active={deepWorkMode} onToggle={onDeepWorkToggle} />
+                            {deepWorkAvailable && <DeepWorkToggle active={deepWorkMode} onToggle={onDeepWorkToggle} />}
                         </div>
                     </div>
 

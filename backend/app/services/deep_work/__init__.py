@@ -1,5 +1,4 @@
-"""Deep Work Orchestrator-Worker Engine."""
-from app.services.deep_work.engine import DeepWorkEngine
+"""Deep Work: data models and engine-path helpers (execution runs on @oniva/engine)."""
 from app.services.deep_work.models import (
     DeepWorkPlan,
     Learning,
@@ -9,7 +8,6 @@ from app.services.deep_work.models import (
 )
 
 __all__ = [
-    "DeepWorkEngine",
     "DeepWorkPlan",
     "Learning",
     "ReflectionResult",

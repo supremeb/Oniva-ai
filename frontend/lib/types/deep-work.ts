@@ -136,17 +136,6 @@ export interface SourceUpdateEvent {
 
 export type EnginePhase = 'researching' | 'reflecting' | 'synthesizing' | 'generating_output';
 
-export type DeepWorkEngineEvent =
-  | { type: 'deep_work_engine_planned'; sub_queries: string[] }
-  | { type: 'deep_work_engine_gap_tasks'; sub_queries: Array<{ worker_id: string; sub_query: string }>; round: number }
-  | { type: 'deep_work_engine_worker_started'; worker_id: string; sub_query: string }
-  | { type: 'deep_work_engine_worker_activity'; worker_id: string; activity_type: string; description: string; recent_actions?: string[] }
-  | { type: 'deep_work_engine_worker_complete'; worker_id: string; learning_count: number; source_count?: number; top_findings?: string[]; duration_seconds?: number; tool_call_count?: number; error?: string | null }
-  | { type: 'deep_work_engine_reflection'; score: number; gaps: string[]; round: number; continuing: boolean }
-  | { type: 'deep_work_engine_phase'; phase: EnginePhase }
-  | { type: 'deep_work_engine_synthesis_chunk'; content: string }
-  | { type: 'deep_work_engine_complete'; report_length: number }
-  | { type: 'deep_work_engine_error'; message: string };
 
 export type EngineWorkerStatus = 'idle' | 'researching' | 'complete' | 'error';
 
