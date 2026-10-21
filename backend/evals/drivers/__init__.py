@@ -76,9 +76,11 @@ class DriverOutput:
 
 
 async def drive(ctx: DriverContext) -> DriverOutput:
-    """Run the task's driver. Kinds without a dedicated driver (U17/U24/U34 add theirs) are chat-like."""
-    from . import chat, deep_work
+    """Run the task's driver. Kinds without a dedicated driver (U24/U34 add theirs) are chat-like."""
+    from . import chat, deep_work, long_session
 
     if ctx.task.kind == "deep_work":
         return await deep_work.run(ctx)
+    if ctx.task.kind == "long_session":
+        return await long_session.run(ctx)
     return await chat.run(ctx)

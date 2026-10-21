@@ -3,7 +3,8 @@
 The worker's `ScriptedModel` answers each request from the LAST message alone, by the first matching rule
 (`engine/test/support/scripted-model.ts`). A task provides:
 
-- chat-like tasks (`chat`, `long_session`, `memory`, `repeat`, `redteam`): `fake.rules`, a list of rules in the
+- `long_session`: the rules are generated from `input` (`evals.long_session.fake_rules`); `fake.rules` come first;
+- chat-like tasks (`chat`, `memory`, `repeat`, `redteam`): `fake.rules`, a list of rules in the
   scripted model's own format (`when: {role, includes, tool}`, `respond: {steps, usage}`). A `tool_call` step with
   `times: N` expands to N identical calls; a `text` step with `repeat: N` repeats its text (the model's own feature);
 - `deep_work`: the plan in `input.plan` (worker ids `<prefix>-w1`, `<prefix>-w2`, ...). The orchestrator, worker and
@@ -22,6 +23,7 @@ from typing import Any
 
 from tests.e2e import dw_script
 
+from . import long_session
 from .schema import Task
 
 DEFAULT_FALLBACK: dict[str, Any] = {"steps": [{"type": "text", "text": "ok"}]}
@@ -79,6 +81,11 @@ def build_script(task: Task) -> dict[str, Any]:
             plan["title"], ids, queries, prefix, findings_md=task.fake.get("findings_md")
         )
         rules += dw_script.finish_rules()
+    elif task.kind == "long_session":
+        try:
+            rules += long_session.fake_rules(task)  # explicit fake.rules (e.g. a forced error) are tried first
+        except long_session.SpecError as e:
+            raise ScriptError(str(e)) from None
     elif not rules:
         raise ScriptError(f"task '{task.id}': fake mode needs fake.rules")
     return {"rules": rules, "fallback": task.fake.get("fallback") or DEFAULT_FALLBACK}

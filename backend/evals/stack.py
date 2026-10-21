@@ -76,8 +76,13 @@ def require_live_key(env: Mapping[str, str] | None = None) -> None:
 
 
 @contextlib.contextmanager
-def eval_stack(mode: str, *, web: str = "replay", replay_dir: Path | None = None) -> Iterator[EvalWorld]:
-    """Boot the stack for `mode` and `web` (`replay`, `record` or `off`) with one worker running."""
+def eval_stack(
+    mode: str, *, web: str = "replay", replay_dir: Path | None = None, backend_env: Mapping[str, str] | None = None
+) -> Iterator[EvalWorld]:
+    """Boot the stack for `mode` and `web` (`replay`, `record` or `off`) with one worker running.
+
+    `backend_env` is added to the backend's environment (the context-tier arms set `ENGINE_CONTEXT_TIERS` here).
+    """
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}; expected one of {MODES}")
     if web not in WEB_TO_REPLAY:
@@ -96,6 +101,7 @@ def eval_stack(mode: str, *, web: str = "replay", replay_dir: Path | None = None
             "EVAL_REPLAY_MODE": WEB_TO_REPLAY[web],
             "EVAL_REPLAY_DIR": str(directory),
             "EVAL_REPLAY_MISS_LOG": str(miss_log),
+            **(backend_env or {}),
         }
         worker_command = None
         worker_env: dict[str, str] = {}

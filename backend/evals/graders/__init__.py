@@ -50,7 +50,7 @@ def needs_raw(what: str) -> Outcome:
 
 
 def registry() -> dict[str, GraderFn]:
-    from . import code, deep_work, trajectory
+    from . import code, context, deep_work, trajectory
 
     return {
         "budget": code.budget,
@@ -66,6 +66,10 @@ def registry() -> dict[str, GraderFn]:
         "learning_sources": deep_work.learning_sources,
         "url_resolves": deep_work.url_resolves,
         "trajectory_match": trajectory.trajectory_match,
+        "context_tokens": context.context_tokens,
+        "probe_recall": context.probe_recall,
+        "reread_after_clear": context.reread_after_clear,
+        "no_verbatim_oversize": context.no_verbatim_oversize,
     }
 
 

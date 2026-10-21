@@ -1,6 +1,7 @@
 # Judge calibration labels
 
-One `<judge>.jsonl` per judge in `evals/judges/`: 20 `yes` and 20 `no` examples each (200 rows), the minimum per
+One `<judge>.jsonl` per judge in `evals/judges/`: 20 `yes` and 20 `no` examples each (200 rows; `recall_probe` has 25
+pairs, the last five on early-ID probes for the long-session suite), the minimum per
 class that `python -m evals.calibrate` requires.
 
 ## Every label here is a DRAFT and needs human review

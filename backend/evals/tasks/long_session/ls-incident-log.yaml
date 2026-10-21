@@ -1,0 +1,88 @@
+# [hard] Guards the longest session (150 turns): an operations rule, a region and two incident ids are given at the
+# start and asked again three times. Context grows the most here, so a clearing or offload bug that drops state shows
+# up as a lost id.
+id: ls-incident-log
+kind: long_session
+tags:
+- long_session
+input:
+  turns: 150
+  probe_at: [0.4, 0.7, 1.0]
+  page_tokens: 3000
+  oversize_every: 5
+  oversize_tokens: 12000
+  chat_every: 6
+  recap_every: 15
+  facts:
+  - id: rotation
+    kind: fact
+    statement: The staging database password rotates every 45 days.
+    question: How often does the staging database password rotate?
+    expect: ["45 days"]
+  - id: region
+    kind: fact
+    statement: The failover region for the incident drills is eu-north-2.
+    question: Which region is the failover region for the incident drills?
+    expect: ["eu-north-2"]
+  - id: incident
+    kind: id
+    statement: The incident we are tracking is INC-60417.
+    question: Which incident are we tracking?
+    expect: ["INC-60417"]
+  - id: runbook
+    kind: id
+    statement: The runbook revision to follow is RUN-9a3f21.
+    question: Which runbook revision should we follow?
+    expect: ["RUN-9a3f21"]
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake: {}
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.05
+- id: no-oversize-verbatim
+  type: no_verbatim_oversize
+  params:
+    max_tokens: 8000
+- id: context-tokens
+  type: context_tokens
+  gating: false
+  params:
+    after_turn: 30
+- id: probe-facts
+  type: probe_recall
+  gating: false
+  params:
+    kind: fact
+- id: probe-ids
+  type: probe_recall
+  gating: false
+  params:
+    kind: id
+- id: rereads
+  type: reread_after_clear
+  gating: false
+  params:
+    max_rate: 0.1
+- id: probe-judge
+  type: judge
+  params:
+    judge: recall_probe
+    all_probes: true
+- id: budget
+  type: budget
+  params:
+    max_rounds: 600
+budget:
+  max_usd: 2.0
+  max_rounds: 600

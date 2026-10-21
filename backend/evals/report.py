@@ -139,6 +139,8 @@ def build_report(
                     "latency_s": t.latency_s,
                     "failed_graders": _failed_graders(t),
                     "trace": trace_files.get((tid, t.trial.index)),
+                    # long sessions: the numbers Gate B reads (`graders.context.trial_metrics`)
+                    **({"context": t.metrics} if t.metrics is not None else {}),
                 }
                 for t in trials
             ],

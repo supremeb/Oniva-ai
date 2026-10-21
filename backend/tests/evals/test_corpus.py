@@ -47,9 +47,11 @@ def replayed_requests(task: Task) -> list[tuple[str, dict]]:
 def test_corpus_size_and_mix(tasks):
     # The two U5 smoke tasks stay at the folder root (other tests load them by that path).
     by_folder = Counter(p.parent.name for p in (EVALS / "tasks").rglob("*.yaml"))
-    assert by_folder == {"deep_work": 12, "chat": 8, "smoke": 2, "tasks": 2}
-    assert len(tasks) == 24
-    assert Counter(t.kind for t in tasks) == {"deep_work": 13, "chat": 11}
+    assert by_folder == {"deep_work": 12, "chat": 8, "smoke": 2, "tasks": 2, "long_session": 6}
+    assert len(tasks) == 30
+    assert Counter(t.kind for t in tasks) == {"deep_work": 13, "chat": 11, "long_session": 6}
+    # Long sessions take minutes even in fake mode, so none may join the CI regression subset (U17).
+    assert all("regression" not in t.tags and "long_session" in t.tags for t in tasks if t.kind == "long_session")
     smoke = select_by_tags(tasks, ["smoke"])
     assert len(smoke) == 4 and all("regression" in t.tags for t in smoke)
     assert len(select_by_tags(tasks, ["regression"])) >= 8

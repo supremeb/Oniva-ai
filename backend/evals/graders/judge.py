@@ -461,6 +461,18 @@ def extract_memory_applied(ctx: GradeContext, params: dict[str, Any]) -> list[It
 
 
 def extract_recall_probe(ctx: GradeContext, params: dict[str, Any]) -> list[Item]:
+    """One item, or with `all_probes: true` one per probe of a long session (from the driver's `evalContext`)."""
+    if params.get("all_probes"):
+        from .context import answers_by_request, eval_context
+
+        ec = eval_context(ctx.raw)
+        if ctx.raw is None or ec is None or not ec.get("probes"):
+            raise MissingInput("all_probes needs the long-session driver's 'evalContext' in the raw trace")
+        answers = answers_by_request(ctx.raw)
+        return [
+            {"fact": p["fact"], "question": p["question"], "answer": answers.get(p["requestId"]) or "(no answer)"}
+            for p in ec["probes"]
+        ][: int(params.get("max_items", MAX_ITEMS))]
     answer = params.get("answer") or ctx.files.get("probe_answer") or final_assistant_text(ctx)
     if not isinstance(answer, str) or not answer.strip():
         raise MissingInput("needs 'answer' (a file 'probe_answer' or an assistant message in the trace)")

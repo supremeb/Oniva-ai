@@ -6,6 +6,10 @@
     record-web record web_search/browse_url fixtures for replay (never overwrites without --force)
     compare  diff a stored result against a baseline (KTD5); exits 1 on a regression; `--promote` saves a baseline
     promote-baseline  write baselines/<suite>-<mode>.json from a results run (refuses failed trials / existing files)
+    gate-b   read a `run --suite long_session` report (one task per context-tier arm) against the Gate B criteria
+
+`run --suite long_session` runs every long-session task in each arm (`off`, `offload+clear`, `full`); `--tiers T` runs
+any selection with one tier instead (for example the regression suite with the tiers on).
 
 Exit codes: 0 ok, 1 a regression (or, without a baseline, a failed trial), 2 refused or bad usage.
 Live mode keeps the runner's gates: it needs `EVAL_OPENROUTER_API_KEY` and a positive `EVAL_MAX_USD` (or `--max-usd`)
@@ -23,6 +27,9 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from datetime import UTC, datetime
+
+from . import arms, gate_b
 from . import calibrate as cal
 from . import report as rpt
 from . import web_record
@@ -57,10 +64,14 @@ def _select(args: argparse.Namespace) -> list[Task]:
     return tasks
 
 
-def estimate_cost(tasks: Sequence[Task], k: int, previous: dict | None) -> tuple[float, int]:
-    """(USD, tasks with no figure): per-trial cost from a previous report, else the task's own budget cap."""
+def estimate_cost(tasks: Sequence[Task], k: int, previous: dict | None, tiers: str | None = None) -> tuple[float, int]:
+    """(USD, tasks with no figure): per-trial cost from a previous report, else the task's own budget cap.
+
+    Long sessions count once per arm (`--tiers` pins one), as the runner will run them.
+    """
     total, unknown = 0.0, 0
-    for t in tasks:
+    expanded = [arms.with_tiers(t, tiers, suffix=False) for t in tasks] if tiers else arms.expand_arms(tasks)
+    for t in expanded:
         prev = (previous or {}).get("tasks", {}).get(t.id)
         if prev and prev.get("trials"):
             per_trial = prev["cost_usd"] / prev["trials"]
@@ -115,8 +126,9 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     results_dir = Path(args.results_dir)
     if args.dry_run:  # no gates, no stack, no engine call: estimate only
         previous = baseline or _latest_result(results_dir)
-        est, unknown = estimate_cost(tasks, args.k, previous)
-        print(f"dry run: {len(tasks)} task(s) x k={args.k} in {mode} mode: " + ", ".join(t.id for t in tasks))
+        est, unknown = estimate_cost(tasks, args.k, previous, args.tiers)
+        planned = [arms.with_tiers(t, args.tiers) for t in tasks] if args.tiers else arms.expand_arms(tasks)
+        print(f"dry run: {len(planned)} task(s) x k={args.k} in {mode} mode: " + ", ".join(t.id for t in planned))
         print(f"estimated cost: ${est:.4f}" + (f" ({unknown} task(s) with no figure)" if unknown else ""))
         return 0
 
@@ -124,7 +136,13 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
         meter = BudgetMeter.from_env(run_env, required=mode == "live")
         results = asyncio.run(
             runner.run_suite(
-                tasks, mode=mode, k=args.k, meter=meter, timeout_s=args.timeout, judges=False if args.no_judges else None
+                tasks,
+                mode=mode,
+                k=args.k,
+                meter=meter,
+                timeout_s=args.timeout,
+                judges=False if args.no_judges else None,
+                **({"tiers": args.tiers} if args.tiers else {}),
             )
         )
     except (LiveModeError, BudgetConfigError, JudgeConfigError) as e:
@@ -149,6 +167,9 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     out_md.write_text(rpt.render_markdown(report))
     print(runner.summarize(results))
     print(f"report: {out_json}\nmarkdown: {out_md}")
+    verdicts = gate_b.evaluate(report)
+    if verdicts:  # a long-session run measured the tier arms: show the Gate B reading (`gate-b` is the exit-coded form)
+        print(gate_b.render_markdown(report, verdicts))
 
     if args.push_braintrust:
         from .braintrust_push import push_report
@@ -162,6 +183,50 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
         return 1 if diff.regressed else 0
     counted = [r for r in results if r.status != "skipped_budget"]
     return 0 if all(r.passed for r in counted) else 1
+
+
+def cmd_gate_b(args: argparse.Namespace, env: Mapping[str, str]) -> int:
+    """Gate B over a long-session report. Exit 0 every measured criterion passes for some arm, 1 none does, 3 incomplete."""
+    baselines_dir = Path(args.baselines_dir)
+    try:
+        report = rpt.load_report(args.report)
+        regressions: dict[str, bool] = {}
+        if args.regression:
+            if not args.regression_baseline:
+                print("--regression needs --regression-baseline (the Phase A baseline name or path)", file=sys.stderr)
+                return 2
+            reg_base = rpt.load_report(resolve_report(args.regression_baseline, baselines_dir))
+            for item in args.regression:
+                arm, sep, path = item.partition("=")
+                if not sep or arm not in arms.TIERS:
+                    print(f"--regression expects TIER=RESULT.json, got {item!r}", file=sys.stderr)
+                    return 2
+                regressions[arm] = rpt.diff_reports(reg_base, rpt.load_report(path)).regressed
+    except (OSError, ValueError) as e:
+        print(f"cannot read report: {e}", file=sys.stderr)
+        return 2
+    verdicts = gate_b.evaluate(report, baseline_arm=args.baseline_arm, regressions=regressions)
+    print(gate_b.render_markdown(report, verdicts, baseline_arm=args.baseline_arm), end="")
+    if not verdicts:
+        return 2
+    if args.promote:
+        if report["mode"] != "live":
+            print("not promoting: only a live run can be a Gate B baseline", file=sys.stderr)
+        elif not any(v.decision == gate_b.PASS for v in verdicts):
+            print("not promoting: no arm passes", file=sys.stderr)
+        else:
+            try:
+                target = rpt.promote_baseline(
+                    report, baselines_dir, name=f"phaseB-{datetime.now(UTC):%Y-%m-%d}", commit=_head_commit(), force=False,
+                    allow_failures=True,
+                )
+            except rpt.PromoteError as e:
+                print(str(e), file=sys.stderr)
+                return 1
+            print(f"promoted baseline: {target}")
+    if any(v.decision == gate_b.PASS for v in verdicts):
+        return 0
+    return 3 if all(v.decision == "incomplete" for v in verdicts) else 1
 
 
 def cmd_report(args: argparse.Namespace, env: Mapping[str, str]) -> int:
@@ -288,7 +353,25 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--baseline", help="baseline name or path: diff after the run, exit 1 on a regression")
     run.add_argument("--out", help="result file (default: results/<date>-<suite>-<mode>.json)")
     run.add_argument("--push-braintrust", action="store_true", help="also log the report to Braintrust (needs its key)")
+    run.add_argument(
+        "--tiers",
+        choices=arms.TIERS,
+        default=None,
+        help="run every selected task with this ENGINE_CONTEXT_TIERS value (default: long_session tasks run once per arm)",
+    )
     run.set_defaults(func=cmd_run)
+
+    gb = sub.add_parser("gate-b", help="read a long_session report against the Gate B criteria (exit 0 pass, 1 fail, 3 incomplete)")
+    gb.add_argument("report", help="a report written by `run --suite long_session`")
+    gb.add_argument("--baseline-arm", default=arms.BASELINE_ARM, choices=arms.TIERS)
+    gb.add_argument(
+        "--regression", action="append", default=[], metavar="TIER=RESULT",
+        help="a `run --suite regression --tiers TIER` result to diff against --regression-baseline (repeatable)",
+    )
+    gb.add_argument("--regression-baseline", help="the regression baseline (name or path) those runs are compared with")
+    gb.add_argument("--promote", action="store_true", help="on a live pass, record baselines/phaseB-<date>.json")
+    gb.add_argument("--baselines-dir", default=str(DEFAULT_BASELINES_DIR))
+    gb.set_defaults(func=cmd_gate_b)
 
     rep = sub.add_parser("report", help="render a stored result as markdown")
     rep.add_argument("path")

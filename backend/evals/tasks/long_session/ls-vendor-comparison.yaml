@@ -1,0 +1,87 @@
+# [hard] Guards decision recall over 120 turns: a budget cap, a vendor decision and two contract ids are stated early,
+# then many vendor datasheets are read. The tiers must not make the assistant forget the decision or the ids.
+id: ls-vendor-comparison
+kind: long_session
+tags:
+- long_session
+input:
+  turns: 120
+  probe_at: [0.45, 0.75, 1.0]
+  page_tokens: 3500
+  oversize_every: 4
+  oversize_tokens: 13000
+  chat_every: 6
+  recap_every: 10
+  facts:
+  - id: budget-cap
+    kind: fact
+    statement: The agreed budget cap for the vendor programme is 18,500 euros.
+    question: What is the agreed budget cap for the vendor programme?
+    expect: ["18,500", "18500"]
+  - id: decision
+    kind: fact
+    statement: We chose Brightwell over Ostrand as the primary vendor.
+    question: Which vendor did we choose as the primary vendor?
+    expect: ["Brightwell"]
+  - id: purchase-order
+    kind: id
+    statement: The purchase order for Brightwell is PO-2291-B.
+    question: What is the purchase order number for Brightwell?
+    expect: ["PO-2291-B"]
+  - id: contract
+    kind: id
+    statement: The master contract is filed as CN-5530.
+    question: Under what number is the master contract filed?
+    expect: ["CN-5530"]
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake: {}
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.05
+- id: no-oversize-verbatim
+  type: no_verbatim_oversize
+  params:
+    max_tokens: 8000
+- id: context-tokens
+  type: context_tokens
+  gating: false
+  params:
+    after_turn: 30
+- id: probe-facts
+  type: probe_recall
+  gating: false
+  params:
+    kind: fact
+- id: probe-ids
+  type: probe_recall
+  gating: false
+  params:
+    kind: id
+- id: rereads
+  type: reread_after_clear
+  gating: false
+  params:
+    max_rate: 0.1
+- id: probe-judge
+  type: judge
+  params:
+    judge: recall_probe
+    all_probes: true
+- id: budget
+  type: budget
+  params:
+    max_rounds: 480
+budget:
+  max_usd: 1.5
+  max_rounds: 480

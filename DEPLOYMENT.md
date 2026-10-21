@@ -389,6 +389,54 @@ Roll the engine workers first (the new names are inert while the flag is off), t
 turn the flag off; new runs use the legacy config and in-flight runs finish with theirs. The default flips only
 after Gate C (U24).
 
+### Context tiers: rollout and kill switch
+
+Tiered context reduction keeps long conversations small: Tier 0 saves a big tool result to the conversation
+workspace and leaves a preview and a pointer, Tier 1 shows old tool results as one-line stubs (view only; stored
+entries never change), Tier 2 writes structured summaries when a conversation does compact. **It ships off.** Nothing
+changes until `ENGINE_CONTEXT_TIERS` is raised, and it is raised only after Gate B passes (below).
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `ENGINE_CONTEXT_TIERS` | `off` | `off`, `offload`, `offload+clear` or `full` (each includes the one before). An unknown value means `off` |
+| `features.ENABLE_ENGINE_CONTEXT_TIERS` | absent | Per-tenant override in the tenant's `features`. `true` gives that tenant `full`, `false` gives it `off`, in both cases over the global value |
+| `ENGINE_CONTEXT_OFFLOAD_TOKENS` | `8000` | A tool result above this is saved out of context |
+| `ENGINE_CONTEXT_CLEAR_FRACTION` | `0.5` | Clearing starts at this fraction of the model's context window |
+| `ENGINE_CONTEXT_KEEP_TOOL_RESULTS` | `5` | The newest tool results are never cleared |
+| `ENGINE_CONTEXT_CLEAR_AT_LEAST_TOKENS` | `8000` | A clearing pass must free at least this much |
+
+The tier is read when a conversation's agent config is built (creation, or `PUT .../agent`). **Existing
+conversations keep their behaviour until they are reconfigured**, in both directions.
+
+**Kill switch.** To turn the tiers off for new conversations:
+
+1. Find tenants that opted in and set the flag to `false` (or remove the key so they follow the global value). A
+   tenant flag wins over the global, so `ENGINE_CONTEXT_TIERS=off` alone does not switch off a tenant with the flag
+   set to `true`:
+
+   ```sql
+   SELECT id, name FROM tenants WHERE settings->'features'->>'ENABLE_ENGINE_CONTEXT_TIERS' = 'true';
+   ```
+
+2. Set `ENGINE_CONTEXT_TIERS=off` on the backend and roll it.
+3. Reconfigure running conversations if they must stop at once. Turning clearing off restores verbatim tool results
+   in the next request; results already offloaded stay in the workspace and the model can still read them with
+   `read_file`. Nothing is deleted.
+
+**Rollout order.** Gate B decides which tiers ship; a tier that fails its criteria stays off while the others go on.
+
+1. Run the long-session suite: `cd backend && uv run --env-file .env python -m evals.cli run --suite long_session --mode live -k 3 --max-usd 30`
+   (three arms: `off`, `offload+clear`, `full`; see `TESTING.md` for the eval setup). Then run the regression suite
+   once per arm under test with `--tiers <arm>` and read everything with `python -m evals.cli gate-b <report>`.
+   The live run spends real credit; the key is the separate eval key, never a deployed one.
+2. On a pass the gate records `evals/baselines/phaseB-<date>.json`.
+3. Raise `ENGINE_CONTEXT_TIERS` one step at a time (`offload`, then `offload+clear`, then `full`) on an internal
+   environment first. The global value applies to every tenant of that environment; only `full` can be given to a
+   single tenant (through the flag), so the two intermediate steps are an environment-wide change, not an opt-in.
+4. Watch, after each step: engine run failures (`context_overflow`, `compaction_failed`), calls to
+   `/internal/workspace/offload` that fail (the engine keeps the full result when the store fails, so a failing
+   store looks like no effect, not an error), and cost per conversation. Roll back with the kill switch above.
+
 ## Approvals and audit
 
 A tool call that needs a human is decided by the Python control plane under RBAC; the engine only parks the
