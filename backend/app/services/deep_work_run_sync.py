@@ -51,9 +51,29 @@ async def on_finished(ref: run_handlers.RunRef, snapshot: dict) -> None:
         return
     factory = dwe.tenant_factory(ref.tenant_id)
     run = await dws.load_run_by_id(factory, ref.tenant_id, ref.ref_id)
-    if run is None or run.status != "running":
+    if run is None:
         return
-    await dwe.refresh_run(dwe._engine(), factory, run, reap=True)
+    if run.status == "running":
+        await dwe.refresh_run(dwe._engine(), factory, run, reap=True)
+        run = await dws.load_run_by_id(factory, ref.tenant_id, ref.ref_id)
+    await enqueue_curation(run)
+
+
+async def enqueue_curation(run) -> None:
+    """After a Deep Work run settled as completed, start the memory curator for it (U31).
+
+    A no-op unless ``MEMORY_CURATOR_MODE`` is on; idempotent (the curator run id is deterministic per Deep Work
+    run), so settling by a read first and by this hook later both land on the same run. Never raises.
+    """
+    if run is None or run.status != "completed":
+        return
+    from app.services import memory_curator
+
+    if memory_curator.curator_mode() == "off":
+        return
+    from app.core.database import SystemSessionLocal
+
+    await memory_curator.start_curation(SystemSessionLocal, conversation_id=run.conversation_id, run_id=str(run.id))
 
 
 def register_hooks() -> None:
