@@ -150,6 +150,57 @@ describe('DeepWorkEngineCard', () => {
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
   });
 
+  describe('U23: verifier step', () => {
+    const verifier = (over: Record<string, unknown> = {}) => ({
+      key: 'call_v',
+      callId: 'call_v',
+      taskId: 'task_v',
+      childConversationId: 'child_v',
+      status: 'complete' as const,
+      verdict: {
+        unsupportedClaims: [{ section: 'Findings', claim: 'Grew 40%' }],
+        missingCitations: [],
+        brokenCitations: [{ section: 'Findings', citation: '[9]' }],
+        issueCount: 2,
+      },
+      startedAt: null,
+      endedAt: null,
+      ...over,
+    });
+
+    it('names the step, shows the claims-checked line, and is not a worker row or counted', () => {
+      setHook({ deepWork: state({ verifier: verifier() }) });
+      render(<DeepWorkEngineCard session={SESSION} />);
+      const step = screen.getByTestId('verifier-step');
+      expect(step).toHaveTextContent('Verifying the report');
+      expect(step).toHaveTextContent('Claims checked: 2 issues found');
+      expect(step).toHaveTextContent('1 unsupported');
+      expect(step).toHaveTextContent('1 broken citation');
+      expect(screen.getAllByTestId('worker-row')).toHaveLength(2);
+      expect(screen.getByText('1/2')).toBeInTheDocument();
+    });
+
+    it('clean, running and unreadable states', () => {
+      const clean = { unsupportedClaims: [], missingCitations: [], brokenCitations: [], issueCount: 0 };
+      setHook({ deepWork: state({ verifier: verifier({ verdict: clean }) }) });
+      const { rerender } = render(<DeepWorkEngineCard session={SESSION} />);
+      expect(screen.getByTestId('verifier-step')).toHaveTextContent('Claims checked: no issues found');
+      setHook({ deepWork: state({ verifier: verifier({ status: 'running', verdict: null }) }) });
+      rerender(<DeepWorkEngineCard session={{ ...SESSION }} />);
+      expect(screen.getByTestId('verifier-step')).toHaveTextContent('Checking claims');
+      setHook({ deepWork: state({ verifier: verifier({ verdict: null }) }) });
+      rerender(<DeepWorkEngineCard session={{ ...SESSION }} />);
+      expect(screen.getByTestId('verifier-step')).toHaveTextContent('Verification finished');
+      expect(screen.getByTestId('verifier-step')).not.toHaveTextContent('Claims checked');
+    });
+
+    it('renders nothing extra without a verifier', () => {
+      setHook();
+      render(<DeepWorkEngineCard session={SESSION} />);
+      expect(screen.queryByTestId('verifier-step')).not.toBeInTheDocument();
+    });
+  });
+
   it('workers carry a text status cue besides colour', () => {
     setHook();
     render(<DeepWorkEngineCard session={SESSION} />);

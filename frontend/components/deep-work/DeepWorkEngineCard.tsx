@@ -10,7 +10,7 @@ import { FilePreview } from '@/components/chat/shared/data/FilePreview';
 import { useEngineDeepWork } from '@/lib/engine/useEngineDeepWork';
 import { useConversationCost } from '@/lib/engine/cost';
 import { CostPopover } from './CostPopover';
-import { WorkerActivityCard } from './WorkerActivityCard';
+import { VerifierStepCard, WorkerActivityCard } from './WorkerActivityCard';
 import { WorkerTranscript } from './WorkerTranscript';
 import { RunTree } from '@/components/run/RunTree';
 import { toRunTree } from '@/lib/engine/deepWork';
@@ -199,6 +199,12 @@ export const DeepWorkEngineCard = memo(function DeepWorkEngineCard({ session }: 
                     renderDetail={w.childConversationId ? () => <WorkerTranscript sessionId={sessionId} childConversationId={w.childConversationId as string} /> : undefined}
                   />
                 ))}
+              </div>
+            )}
+
+            {deepWork.verifier && (
+              <div className="px-5 pb-3">
+                <VerifierStepCard verifier={deepWork.verifier} />
               </div>
             )}
 

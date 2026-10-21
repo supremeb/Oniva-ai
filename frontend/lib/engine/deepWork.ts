@@ -93,6 +93,45 @@ export interface DeepWorkSection {
   markdown: string;
 }
 
+/** One finding of the verifier (contract v2, plan 2026-10-21-001 U22/U23). */
+export interface VerifierClaim {
+  section: string;
+  claim: string;
+  reason?: string;
+}
+export interface VerifierMissingCitation {
+  section: string;
+  claim: string;
+}
+export interface VerifierBrokenCitation {
+  section: string;
+  citation: string;
+}
+
+export interface DeepWorkVerdict {
+  unsupportedClaims: VerifierClaim[];
+  missingCitations: VerifierMissingCitation[];
+  brokenCitations: VerifierBrokenCitation[];
+  issueCount: number;
+}
+
+/**
+ * The verification step: a named subagent that is NOT a worker (never in `workers`,
+ * `rounds`, counts or progress). `verdict` is null while running, on failure, or when the
+ * result is unreadable.
+ */
+export interface DeepWorkVerifier {
+  key: string;
+  callId: string;
+  taskId: string | null;
+  childConversationId: string | null;
+  status: 'running' | 'complete' | 'error';
+  verdict: DeepWorkVerdict | null;
+  error?: string;
+  startedAt: string | null;
+  endedAt: string | null;
+}
+
 export interface DeepWorkState {
   status: DeepWorkRunStatus;
   /** Null once completed or stopped. */
@@ -108,6 +147,8 @@ export interface DeepWorkState {
   sources: DeepWorkSource[];
   artifacts: DeepWorkArtifact[];
   usage: { requests: number; inputTokens: number; outputTokens: number; totalTokens: number; workerTokens: number };
+  /** The latest verifier step (contract v2). Absent on runs without one. */
+  verifier?: DeepWorkVerifier;
   /** An interrupted result or a run-resumed marker has appeared. Never cleared. */
   resumed: boolean;
   /** `resumed` and the orchestrator has not produced anything since. Clears on the first later turn. */
@@ -162,7 +203,8 @@ export function parseLooseJson(text: string): Obj | null {
 // ---------------------------------------------------------------------------
 
 const WORKER_TOOL = 'research_worker';
-const SUBAGENT_TOOLS = new Set([WORKER_TOOL, 'reflector', 'output_agent']);
+const VERIFIER_TOOL = 'verifier';
+const SUBAGENT_TOOLS = new Set([WORKER_TOOL, 'reflector', 'output_agent', VERIFIER_TOOL]);
 const OUTPUT_TOOLS = new Set([
   'output_agent',
   'shell_exec',
@@ -175,7 +217,7 @@ const OUTPUT_TOOLS = new Set([
 function phaseOfTool(name: string): EnginePhase | null {
   if (name === 'dw_start_round' || name === WORKER_TOOL) return 'researching';
   if (name === 'reflector' || name === 'dw_record_reflection') return 'reflecting';
-  if (name === 'dw_write_section' || name === 'dw_get_learnings' || name === 'dw_get_report') return 'synthesizing';
+  if (name === VERIFIER_TOOL || name === 'dw_write_section' || name === 'dw_get_learnings' || name === 'dw_get_report') return 'synthesizing';
   if (OUTPUT_TOOLS.has(name)) return 'generating_output';
   return null;
 }
@@ -395,6 +437,67 @@ function buildWorker(i: WorkerInputs): DeepWorkWorker {
     worker.error = `Worker ${sub?.status ?? 'failed'}`;
   }
   return worker;
+}
+
+function listOf<T>(v: unknown, pick: (o: Obj) => T | null): T[] {
+  if (!Array.isArray(v)) return [];
+  const out: T[] = [];
+  for (const x of v) {
+    const item = isObj(x) ? pick(x) : null;
+    if (item) out.push(item);
+  }
+  return out;
+}
+
+/** The typed verdict from `details.result`, else the JSON content. Null when neither is an object. */
+function verdictOf(result: Result): DeepWorkVerdict | null {
+  const raw = isObj(result.details?.result) ? result.details.result : parseLooseJson(result.content);
+  if (!raw) return null;
+  const unsupportedClaims = listOf(raw.unsupported_claims, (o): VerifierClaim | null => {
+    const section = str(o.section);
+    const claim = str(o.claim);
+    if (section === undefined || claim === undefined) return null;
+    const reason = str(o.reason);
+    return { section, claim, ...(reason ? { reason } : {}) };
+  });
+  const missingCitations = listOf(raw.missing_citations, (o): VerifierMissingCitation | null => {
+    const section = str(o.section);
+    const claim = str(o.claim);
+    return section === undefined || claim === undefined ? null : { section, claim };
+  });
+  const brokenCitations = listOf(raw.broken_citations, (o): VerifierBrokenCitation | null => {
+    const section = str(o.section);
+    const citation = str(o.citation);
+    return section === undefined || citation === undefined ? null : { section, citation };
+  });
+  return {
+    unsupportedClaims,
+    missingCitations,
+    brokenCitations,
+    issueCount: unsupportedClaims.length + missingCitations.length + brokenCitations.length,
+  };
+}
+
+function verifierOf(scanned: Scan, taskByCall: Map<string, string>, subagents: Record<string, SubagentView>): DeepWorkVerifier | undefined {
+  const c = scanned.calls.findLast((x) => x.name === VERIFIER_TOOL);
+  if (!c) return undefined;
+  const result = scanned.results.get(c.id);
+  const taskId = taskByCall.get(c.id) ?? null;
+  const sub = taskId ? subagents[taskId] : undefined;
+  const failed = result !== undefined ? !ok(result) : sub?.status === 'failed' || sub?.status === 'aborted';
+  const status: DeepWorkVerifier['status'] = failed ? 'error' : result !== undefined ? 'complete' : 'running';
+  const msg = result !== undefined && result.status !== 'ok' ? result.content.trim() : '';
+  return {
+    key: c.id,
+    callId: c.id,
+    taskId,
+    childConversationId: sub?.conversationId ?? null,
+    status,
+    verdict: ok(result) ? verdictOf(result) : null,
+    ...(failed ? { error: msg ? (msg.length > 300 ? `${msg.slice(0, 300)}…` : msg) : `Verifier ${(result as Result | undefined)?.status ?? sub?.status ?? 'failed'}` } : {}),
+    startedAt: sub?.startedAt ?? null,
+    endedAt: sub?.endedAt ?? null,
+  };
 }
 
 function reflectionsOf(scanned: Scan): DeepWorkReflection[] {
@@ -651,7 +754,9 @@ export function createDeepWorkAdapter(): DeepWorkAdapter {
     const root = tally(view.usage?.total);
     let workerIn = 0;
     let workerOut = 0;
-    for (const s of Object.values(subagents)) {
+    const verifier = verifierOf(scanned, taskByCall, subagents);
+    for (const [taskId, s] of Object.entries(subagents)) {
+      if (verifier?.taskId === taskId) continue; // the verifier is not a worker
       const t = tally(s.usage);
       workerIn += t.input;
       workerOut += t.output;
@@ -679,6 +784,7 @@ export function createDeepWorkAdapter(): DeepWorkAdapter {
       report: sections.map((s) => `## ${s.heading}\n\n${s.markdown}`).join('\n\n'),
       sources: keep('sources', sources),
       artifacts: keep('artifacts', artifacts),
+      ...(verifier ? { verifier: keep('verifier', verifier) } : {}),
       usage: keep('usage', usage),
       resumed,
       recovering,

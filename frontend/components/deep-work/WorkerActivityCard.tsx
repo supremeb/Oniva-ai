@@ -13,7 +13,7 @@ import {
 } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 import type { EngineWorkerState } from '@/lib/types/deep-work';
-import { workerToRunNode, type DeepWorkWorker } from '@/lib/engine/deepWork';
+import { workerToRunNode, type DeepWorkVerifier, type DeepWorkWorker } from '@/lib/engine/deepWork';
 
 interface WorkerActivityCardProps {
   worker: EngineWorkerState | DeepWorkWorker;
@@ -182,6 +182,53 @@ export const WorkerActivityCard = memo(function WorkerActivityCard({
           )}
         </div>
       )}
+    </div>
+  );
+});
+
+// ── Verifier step (contract v2) ─────────────────────────────────
+// A named step, not a worker: it is never counted in the worker totals.
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+export function verifierLine(v: DeepWorkVerifier): string | null {
+  if (v.status !== 'complete' || !v.verdict) return null;
+  const d = v.verdict;
+  if (d.issueCount === 0) return 'Claims checked: no issues found';
+  const parts = [
+    d.unsupportedClaims.length ? `${d.unsupportedClaims.length} unsupported` : '',
+    d.missingCitations.length ? `${plural(d.missingCitations.length, 'missing citation')}` : '',
+    d.brokenCitations.length ? `${plural(d.brokenCitations.length, 'broken citation')}` : '',
+  ].filter(Boolean);
+  return `Claims checked: ${plural(d.issueCount, 'issue')} found (${parts.join(', ')})`;
+}
+
+export const VerifierStepCard = memo(function VerifierStepCard({ verifier }: { verifier: DeepWorkVerifier }) {
+  const line = verifierLine(verifier);
+  const detail =
+    verifier.status === 'running'
+      ? 'Checking claims against the research…'
+      : verifier.status === 'error'
+      ? (verifier.error ?? 'Verification failed')
+      : (line ?? 'Verification finished');
+  return (
+    <div
+      data-testid="verifier-step"
+      data-status={verifier.status}
+      className={cn(
+        'flex items-center gap-2 rounded-lg border px-3 py-2',
+        verifier.status === 'error' ? 'border-red-200 bg-red-50/50' : 'border-neutral-100 bg-neutral-50/50',
+      )}
+    >
+      {verifier.status === 'running' ? (
+        <CircleNotch className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-blue-500 motion-reduce:animate-none" />
+      ) : verifier.status === 'error' ? (
+        <WarningCircle className="h-3.5 w-3.5 flex-shrink-0 text-red-500" weight="fill" />
+      ) : (
+        <CheckCircle className="h-3.5 w-3.5 flex-shrink-0 text-neutral-500" weight="fill" />
+      )}
+      <span className="text-xs font-medium text-neutral-800">Verifying the report</span>
+      <span className="ml-auto min-w-0 truncate text-right text-xs text-neutral-400">{detail}</span>
     </div>
   );
 });
