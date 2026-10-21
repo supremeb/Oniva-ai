@@ -107,3 +107,6 @@ backend/uploads/
 
 # Fumadocs generated source map (regenerated at build time)
 frontend/.source/
+
+# Eval harness (judge verdict cache)
+backend/evals/.cache/
