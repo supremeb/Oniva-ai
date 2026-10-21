@@ -5,6 +5,7 @@
     calibrate  run a judge over its labelled set; TPR and TNR must both reach 0.85 (exit 1 if not)
     record-web record web_search/browse_url fixtures for replay (never overwrites without --force)
     compare  diff a stored result against a baseline (KTD5); exits 1 on a regression; `--promote` saves a baseline
+    promote-baseline  write baselines/<suite>-<mode>.json from a results run (refuses failed trials / existing files)
 
 Exit codes: 0 ok, 1 a regression (or, without a baseline, a failed trial), 2 refused or bad usage.
 Live mode keeps the runner's gates: it needs `EVAL_OPENROUTER_API_KEY` and a positive `EVAL_MAX_USD` (or `--max-usd`)
@@ -17,6 +18,7 @@ import argparse
 import asyncio
 import os
 import shutil
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -155,7 +157,7 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
         print("braintrust: pushed" if pushed.pushed else f"braintrust push skipped: {pushed.reason}", file=sys.stderr)
 
     if baseline is not None:
-        diff = rpt.diff_reports(baseline, report)
+        diff = rpt.diff_reports(baseline, report, strict=args.strict)
         _print_diff(diff, baseline, report)
         return 1 if diff.regressed else 0
     counted = [r for r in results if r.status != "skipped_budget"]
@@ -184,7 +186,7 @@ def cmd_compare(args: argparse.Namespace, env: Mapping[str, str]) -> int:
         return 2
     regressed = False
     if baseline is not None:
-        diff = rpt.diff_reports(baseline, current)
+        diff = rpt.diff_reports(baseline, current, strict=args.strict)
         _print_diff(diff, baseline, current)
         regressed = diff.regressed
     if args.promote:
@@ -196,6 +198,35 @@ def cmd_compare(args: argparse.Namespace, env: Mapping[str, str]) -> int:
             shutil.copyfile(args.current, target)
             print(f"promoted baseline: {target}")
     return 1 if regressed else 0
+
+
+def _head_commit() -> str | None:
+    try:
+        out = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10, cwd=EVALS_DIR)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (out.stdout.strip() or None) if out.returncode == 0 else None
+
+
+def cmd_promote_baseline(args: argparse.Namespace, env: Mapping[str, str]) -> int:
+    try:
+        current = rpt.load_report(args.result)
+        target = rpt.promote_baseline(
+            current,
+            args.baselines_dir,
+            name=args.name,
+            commit=args.commit or _head_commit(),
+            force=args.force,
+            allow_failures=args.allow_failures,
+        )
+    except (OSError, ValueError) as e:
+        print(f"cannot read report: {e}", file=sys.stderr)
+        return 2
+    except rpt.PromoteError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print(f"promoted baseline: {target}")
+    return 0
 
 
 def cmd_calibrate(args: argparse.Namespace, env: Mapping[str, str]) -> int:
@@ -270,6 +301,15 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_.add_argument("--name", help="baseline name when promoting (default: the result's name)")
     cmp_.set_defaults(func=cmd_compare)
 
+    pb = sub.add_parser("promote-baseline", help="write baselines/<suite>-<mode>.json from a results run")
+    pb.add_argument("result", help="a report written by `run`")
+    pb.add_argument("--name", help="baseline name (default: <suite>-<mode>, e.g. regression-fake)")
+    pb.add_argument("--commit", help="commit sha to record (default: HEAD of the repo)")
+    pb.add_argument("--force", action="store_true", help="replace an existing baseline of that name")
+    pb.add_argument("--allow-failures", action="store_true", help="record a run that has failed trials")
+    pb.add_argument("--baselines-dir", default=str(DEFAULT_BASELINES_DIR))
+    pb.set_defaults(func=cmd_promote_baseline)
+
     cal_ = sub.add_parser("calibrate", help="calibrate LLM judges against their labelled sets (spends money)")
     cal_.add_argument("judges", nargs="*", help=f"judge names ({', '.join(JUDGE_FIELDS)})")
     cal_.add_argument("--all", action="store_true", help="every judge that has a labelled set")
@@ -290,6 +330,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     for sp in (run, cmp_):
         sp.add_argument("--baselines-dir", default=str(DEFAULT_BASELINES_DIR))
+        sp.add_argument(
+            "--strict",
+            action="store_true",
+            help="CI gate for deterministic fake runs: also fail on a missing baseline task or a newly failing gating grader",
+        )
     run.add_argument("--results-dir", default=str(DEFAULT_RESULTS_DIR))
     return p
 

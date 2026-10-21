@@ -273,6 +273,7 @@ class Diff:
     tasks: list[TaskDiff] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)  # in the baseline, not in the current report
     new: list[str] = field(default_factory=list)  # in the current report only
+    strict_failures: list[str] = field(default_factory=list)  # strict mode only: why the gate fails beyond KTD5
 
     @property
     def regressions(self) -> list[TaskDiff]:
@@ -280,11 +281,20 @@ class Diff:
 
     @property
     def regressed(self) -> bool:
-        return bool(self.regressions) or bool(self.suite and self.suite.regressed)
+        return bool(self.regressions) or bool(self.suite and self.suite.regressed) or bool(self.strict_failures)
 
 
-def diff_reports(baseline: dict[str, Any], current: dict[str, Any]) -> Diff:
-    """Compare two reports with KTD5. Tasks with no counted trials on either side are not compared."""
+def _failing_graders(entry: dict[str, Any]) -> set[str]:
+    return {g["id"] for r in entry["results"] if r["status"] != "skipped_budget" for g in r["failed_graders"]}
+
+
+def diff_reports(baseline: dict[str, Any], current: dict[str, Any], *, strict: bool = False) -> Diff:
+    """Compare two reports with KTD5. Tasks with no counted trials on either side are not compared.
+
+    `strict` (the deterministic fake-mode CI gate) also fails when a baseline task is missing from the current
+    report (a deleted or renamed task must be a deliberate re-baseline), or when a gating grader fails in the
+    current report that did not fail in the baseline, even if the pass rate stayed inside the KTD5 noise band.
+    """
     b_tasks, c_tasks = baseline["tasks"], current["tasks"]
     common = sorted(set(b_tasks) & set(c_tasks))
     diff = Diff(
@@ -315,6 +325,10 @@ def diff_reports(baseline: dict[str, Any], current: dict[str, Any]) -> Diff:
         diff.tasks.append(TaskDiff(tid, cmp, tuple(dict.fromkeys(failing)), tuple(traces)))
         pooled_b += b["outcomes"]
         pooled_c += c["outcomes"]
+        if strict and (flipped := sorted(_failing_graders(c) - _failing_graders(b))):
+            diff.strict_failures.append(f"{tid}: gating graders newly failing: {', '.join(flipped)}")
+    if strict:
+        diff.strict_failures += [f"{tid}: in the baseline but not in this run" for tid in diff.missing]
     if pooled_b and pooled_c:
         bt, ct = baseline["totals"], current["totals"]
         diff.suite = metrics.compare(
@@ -351,8 +365,58 @@ def render_diff_markdown(diff: Diff, *, baseline_name: str, current_name: str) -
             graders = ", ".join(t.failing_graders) or "none recorded"
             links = " ".join(f"[trace]({p})" for p in t.traces)
             lines.append(f"- `{t.task_id}`: failing graders: {graders} {links}".rstrip())
+    if diff.strict_failures:
+        lines += ["", "## Strict gate", ""] + [f"- {m}" for m in diff.strict_failures]
     if diff.missing:
         lines += ["", f"Missing from the current report: {', '.join(diff.missing)}"]
     if diff.new:
         lines += ["", f"New in the current report (no baseline): {', '.join(diff.new)}"]
     return "\n".join(lines) + "\n"
+
+
+# --- promoting a baseline ------------------------------------------------------------------------------------------
+
+
+class PromoteError(Exception):
+    """The result cannot become a baseline (it has failures, the target exists, ...)."""
+
+
+def baseline_name(report: dict[str, Any]) -> str:
+    """`<suite>-<mode>`, e.g. `regression-fake` (the file name CI compares against)."""
+    return f"{'+'.join(report.get('suite') or []) or 'all'}-{report['mode']}"
+
+
+def promote_baseline(
+    report: dict[str, Any],
+    baselines_dir: Path | str,
+    *,
+    name: str | None = None,
+    commit: str | None = None,
+    force: bool = False,
+    allow_failures: bool = False,
+) -> Path:
+    """Write `<baselines_dir>/<name>.json` from a results run and return the path.
+
+    The stored copy is the report with its run-local bits removed (trace file paths point into a results folder
+    that is not committed) and `name` and `commit` set. A run with a failed trial is refused unless
+    `allow_failures`, and an existing baseline is not replaced without `force`: a baseline records the engine as
+    it was, and moving it is a decision.
+    """
+    counted = [r for e in report["tasks"].values() for r in e["results"] if r["status"] != "skipped_budget"]
+    if not counted:
+        raise PromoteError("the result has no counted trials")
+    bad = sorted({tid for tid, e in report["tasks"].items() for r in e["results"] if not r["passed"] and r["status"] != "skipped_budget"})
+    if bad and not allow_failures:
+        raise PromoteError(f"not promoting: failed trials in {', '.join(bad)} (use --allow-failures to record them)")
+    target_name = name or baseline_name(report)
+    target = Path(baselines_dir) / f"{target_name}.json"
+    if target.exists() and not force:
+        raise PromoteError(f"{target} already exists (use --force to replace it)")
+    stored = json.loads(json.dumps(report))
+    stored["name"] = target_name
+    if commit:
+        stored["commit"] = commit
+    for entry in stored["tasks"].values():
+        for r in entry["results"]:
+            r["trace"] = None
+    return write_report(stored, target)
