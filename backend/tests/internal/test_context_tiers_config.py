@@ -304,8 +304,11 @@ def test_deep_work_orchestrator_and_workers_get_the_tier_block():
     assert block["clearTriggerTokens"] == 100_000 and block["excludeTools"][: len(EXCLUDE)] == EXCLUDE
     child = {k: v for k, v in block.items() if k != "excludeTools"}
     for name in ("research_worker", "reflector", "output_agent"):
-        sub = cfg["metadata"]["subagents"][name]["compaction"]
-        assert sub["excludeTools"] == EXCLUDE
+        spec = cfg["metadata"]["subagents"][name]
+        sub = spec["compaction"]
+        # A child without read_file cannot follow an offload pointer: its own tools are excluded as well.
+        extra = [] if "read_file" in spec["tools"] else [t for t in spec["tools"] if t not in EXCLUDE]
+        assert sub["excludeTools"] == EXCLUDE + extra
         assert {k: v for k, v in sub.items() if k != "excludeTools"} == child
 
 

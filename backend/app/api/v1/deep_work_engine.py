@@ -483,7 +483,7 @@ async def start(body, db: AsyncSession, user_id, tenant_id) -> dict:
     tiers = await resolve_context_tiers(db, tenant_id)
     windows = windows_for_models([models.high, models.mid, models.low, models.worker]) if tier_rank(tiers) else None
     execute = edw.compose_execute_config(edw.ExecuteInputs(
-        tiers=tiers, context_windows=windows,
+        tiers=tiers, context_windows=windows, subagent_v2=await edw.resolve_subagent_v2(db, tenant_id),
         plan=approved, models=models, has_search=await _has_search(db, tenant_id),
         knowledge_base_ids=kb_ids, searchable_kb_ids=await _kbs_with_documents(db, kb_ids),
         has_files=bool(chat.project_files), connector_ids=connector_ids, sandbox_enabled=sandbox_available(),

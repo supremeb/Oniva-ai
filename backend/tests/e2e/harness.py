@@ -278,7 +278,8 @@ def stack(extra_env: dict | None = None, worker_command: list | None = None, wor
                         "ENGINE_POLICY_URL": w.backend_url, "ENGINE_TEST_MODEL_SCRIPT": str(w.script),
                         "ENGINE_TEST_MODEL_PROVIDER": "anthropic", "ENGINE_LEASE_TTL_MS": "3000",
                         "ENGINE_PROGRESS_INTERVAL_MS": "50",
-                        "ENGINE_SUBAGENT_TOOLS": "research_worker,reflector,output_agent", **(worker_env or {})}
+                        "ENGINE_SUBAGENT_TOOLS": "research_worker,reflector,output_agent,verifier",
+                        **(worker_env or {})}
         w.worker_command = worker_command or ["npm", "run", "--silent", "worker:test"]
         w.procs = procs
         w.start_worker = lambda n: _start_worker(w, n)

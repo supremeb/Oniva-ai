@@ -276,6 +276,19 @@ def lint_citations(sections: List[Tuple[str, str]], source_count: int) -> Tuple[
     return invalid, uncited
 
 
+def citation_warnings(invalid: Dict[str, List[int]], uncited: List[str], source_count: int) -> List[str]:
+    """Readable lint messages (U22): one per section citing beyond the listed sources, then one for uncited sections.
+
+    Deterministic and section-named, so the orchestrator (and the verifier step) can act on them. Out-of-range
+    citations still block ``dw_finalize`` as before; the messages ride along in the error ``details``.
+    """
+    out = [f"Section {h!r} cites {', '.join(f'[{n}]' for n in bad)} but only {source_count} source(s) are listed."
+           for h, bad in invalid.items()]
+    if uncited:
+        out.append(f"Section(s) with factual content but no [N] citation: {', '.join(uncited)}.")
+    return out
+
+
 # --- tools --------------------------------------------------------------------
 
 
@@ -666,6 +679,7 @@ async def dw_finalize(ctx: SkillContext, failed_workers: Optional[List[str]] = N
                 f"Citations out of range. The Sources section lists {source_count} source(s); valid citations are {valid}. "
                 f"Fix these sections with dw_write_section, then call dw_finalize again. {named}.",
                 "invalid_citations", sections=list(invalid), source_count=source_count,
+                warnings=citation_warnings(invalid, uncited, source_count),
             )
         body = _render_report(_title(run), sections).rstrip()
         report = body + "\n" + build_sources_section(learnings) + "\n"
@@ -674,8 +688,8 @@ async def dw_finalize(ctx: SkillContext, failed_workers: Optional[List[str]] = N
         artifacts = locked.run.artifacts
     await _teardown_sandbox(run.id, "output_agent")  # U5: nothing outlives the run
     payload: Dict[str, Any] = {"report_length": len(report), "artifacts": artifacts}
-    if uncited:
-        payload["warnings"] = [f"Section(s) with factual content but no [N] citation: {', '.join(uncited)}."]
+    if warnings := citation_warnings({}, uncited, 0):
+        payload["warnings"] = warnings
     return _ok(payload, [path])
 
 
