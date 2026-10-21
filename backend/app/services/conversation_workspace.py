@@ -22,7 +22,10 @@ HISTORY_PREFIX = "conversation_history/"
 MAX_BYTES = 2 * 1024 * 1024  # one offloaded body
 
 _ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
-_TOOL_RESULT_PATH = re.compile(r"tool_results/([A-Za-z0-9_-]{1,128})\.txt")
+# Tool call ids are the engine's (`[A-Za-z0-9_.:-]{1,128}`, engine/test/support/fake-gateway.ts); provider ids
+# such as `functions.get:0` are legal. Dots and colons are harmless in a file name (no separator).
+_TOOL_CALL_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
+_TOOL_RESULT_PATH = re.compile(r"tool_results/([A-Za-z0-9_.:-]{1,128})\.txt")
 _HISTORY_PATH = re.compile(r"conversation_history/([A-Za-z0-9_-]{1,128})\.md")
 
 
@@ -82,20 +85,23 @@ def _resolve(file_path: str) -> str:
 
 
 async def _put(tenant_id: str, root: str, rel: str, content: str) -> PutResult:
+    tenant, key = _tenant(tenant_id), session_key(root)
+    storage = get_session_storage()
+    existing = storage._get_session_path(tenant, key) / rel
+    if existing.exists():
+        # Idempotent repeat: answer what is stored, even when this body differs or is over the cap.
+        return PutResult(rel, False, existing.stat().st_size)
     size = len(content.encode("utf-8"))
     if size > MAX_BYTES:
         raise TooLarge(f"body is {size} bytes; limit is {MAX_BYTES}")
-    tenant, key = _tenant(tenant_id), session_key(root)
-    storage = get_session_storage()
-    if (storage._get_session_path(tenant, key) / rel).exists():
-        return PutResult(rel, False, size)
     await storage.write(tenant, key, rel, content)
     return PutResult(rel, True, size)
 
 
 async def put_tool_result(tenant_id: str, root_conversation_id: str, tool_call_id: str, content: str) -> PutResult:
     """Write ``tool_results/<toolCallId>.txt`` once; a second put with the same id is a no-op."""
-    _check_id(tool_call_id, "tool call id")
+    if not _TOOL_CALL_ID.fullmatch(tool_call_id):
+        raise InvalidId("invalid tool call id")
     return await _put(tenant_id, root_conversation_id, f"{TOOL_RESULTS_PREFIX}{tool_call_id}.txt", content)
 
 

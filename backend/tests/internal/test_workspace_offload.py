@@ -52,8 +52,8 @@ async def world(maker):  # noqa: F811
 
 
 def body(t, project, conv, call="call_1", content="hello", run="run-1", **kw):
-    return {"runId": run, "toolCallId": call, "tenantId": str(t), "projectId": str(project),
-            "conversationId": str(conv), "content": content, **kw}
+    return {"runId": run, "toolCallId": call, "toolName": "run_code", "tenantId": str(t), "projectId": str(project),
+            "conversationId": str(conv), "text": content, **kw}
 
 
 def headers(call="call_1", run="run-1"):
@@ -71,7 +71,7 @@ async def test_put_is_idempotent(client, maker):  # noqa: F811
     again = await client.post("/internal/workspace/offload", json=body(t, p, c, content="OTHER"), headers=headers())
     assert first.status_code == again.status_code == 200
     assert first.json()["path"] == again.json()["path"] == "tool_results/call_1.txt"
-    assert first.json()["created"] is True and again.json()["created"] is False
+    assert first.json() == again.json() == {"path": "tool_results/call_1.txt", "bytes": 5}
     assert await cw.read(str(t), str(c), "tool_results/call_1.txt") == "hello"
 
 
@@ -96,7 +96,7 @@ async def test_history_kind(client, maker):  # noqa: F811
     assert r.status_code == 200 and r.json()["path"] == "conversation_history/cmp-1.md"
 
 
-@pytest.mark.parametrize("call", ["../x", "a/b", "", ".h"])
+@pytest.mark.parametrize("call", ["../x", "a/b", "", "a b"])
 async def test_bad_id_is_400(client, maker, call):  # noqa: F811
     t, p, c = await world(maker)
     r = await client.post("/internal/workspace/offload", json=body(t, p, c, call=call),
@@ -107,7 +107,15 @@ async def test_bad_id_is_400(client, maker, call):  # noqa: F811
 async def test_idempotency_key_must_match(client, maker):  # noqa: F811
     t, p, c = await world(maker)
     r = await client.post("/internal/workspace/offload", json=body(t, p, c), headers={**AUTH, "idempotency-key": "x:y"})
-    assert r.status_code == 400
+    assert r.status_code == 400 and r.json() == {"error": "invalid_request"}
+
+
+async def test_engine_tool_call_ids_with_dots_and_colons_are_accepted(client, maker):  # noqa: F811
+    t, p, c = await world(maker)
+    call = "functions.get_weather:0"
+    r = await client.post("/internal/workspace/offload", json=body(t, p, c, call=call), headers=headers(call))
+    assert r.status_code == 200 and r.json()["path"] == f"tool_results/{call}.txt"
+    assert await cw.read(str(t), str(c), r.json()["path"]) == "hello"
 
 
 async def test_unknown_conversation_and_cross_tenant_are_404(client, maker):  # noqa: F811
