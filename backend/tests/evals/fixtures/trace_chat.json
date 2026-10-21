@@ -1,0 +1,169 @@
+{
+  "conversationId": "conv-chat",
+  "entries": [
+    {
+      "id": "e001",
+      "conversationId": "conv-chat",
+      "taskId": "t",
+      "kind": "system",
+      "payload": {
+        "text": "You are helpful."
+      },
+      "createdAt": 1760000001000
+    },
+    {
+      "id": "e002",
+      "conversationId": "conv-chat",
+      "taskId": "t",
+      "kind": "user",
+      "payload": {
+        "submissionId": "s1",
+        "content": "Summarise https://example.com"
+      },
+      "createdAt": 1760000002000
+    },
+    {
+      "id": "e003",
+      "conversationId": "conv-chat",
+      "taskId": "t",
+      "kind": "assistant",
+      "payload": {
+        "runId": "r1",
+        "round": 1,
+        "usage": {
+          "inputTokens": 600,
+          "outputTokens": 30,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 300,
+          "cost": {
+            "input": 0.003,
+            "output": 0.0018,
+            "cacheRead": 0.0006000000000000001,
+            "cacheWrite": 0.0006000000000000001,
+            "total": 0.006
+          }
+        },
+        "message": {
+          "role": "assistant",
+          "provider": "fake",
+          "model": "fake-1",
+          "blocks": [
+            {
+              "type": "tool_call",
+              "id": "b1",
+              "name": "browse_url",
+              "arguments": {
+                "url": "https://example.com"
+              }
+            }
+          ],
+          "stopReason": "tool_use"
+        }
+      },
+      "createdAt": 1760000003000
+    },
+    {
+      "id": "e004",
+      "conversationId": "conv-chat",
+      "taskId": "t",
+      "kind": "tool_result",
+      "payload": {
+        "runId": "r1",
+        "toolCallId": "b1",
+        "toolName": "browse_url",
+        "status": "ok",
+        "content": "<page>",
+        "isError": false,
+        "details": {},
+        "terminate": false,
+        "attempts": 1
+      },
+      "createdAt": 1760000004000
+    },
+    {
+      "id": "e005",
+      "conversationId": "conv-chat",
+      "taskId": "t",
+      "kind": "compaction",
+      "payload": {
+        "summary": "User asked for a page summary; page fetched.",
+        "firstKeptEntryId": "e004"
+      },
+      "createdAt": 1760000005000
+    },
+    {
+      "id": "e006",
+      "conversationId": "conv-chat",
+      "taskId": "t",
+      "kind": "assistant",
+      "payload": {
+        "runId": "r1",
+        "round": 2,
+        "usage": {
+          "inputTokens": 250,
+          "outputTokens": 25,
+          "cacheReadTokens": 500,
+          "cacheWriteTokens": 0,
+          "cost": {
+            "input": 0.0015,
+            "output": 0.0009,
+            "cacheRead": 0.00030000000000000003,
+            "cacheWrite": 0.00030000000000000003,
+            "total": 0.003
+          }
+        },
+        "message": {
+          "role": "assistant",
+          "provider": "fake",
+          "model": "fake-1",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "It is an example page."
+            }
+          ],
+          "stopReason": "end_turn"
+        }
+      },
+      "createdAt": 1760000006000
+    }
+  ],
+  "children": {},
+  "usage": {
+    "requests": 2,
+    "inputTokens": 850,
+    "outputTokens": 55,
+    "cacheReadTokens": 500,
+    "cacheWriteTokens": 300,
+    "costUsd": 0.009
+  },
+  "taint": {
+    "tainted": true,
+    "total": 1,
+    "sources": [
+      {
+        "kind": "tool_result",
+        "name": "browse_url",
+        "ref": "b1",
+        "at": 1760000004000
+      }
+    ]
+  },
+  "compactions": [
+    {
+      "entryId": "e005",
+      "conversationId": "conv-chat",
+      "summaryChars": 43
+    }
+  ],
+  "agent": {
+    "depth": 0,
+    "tools": [
+      "browse_url"
+    ],
+    "model": "fake-1",
+    "metadata": {}
+  },
+  "truncated": false,
+  "nextCursor": null
+}
