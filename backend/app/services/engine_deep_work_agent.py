@@ -8,6 +8,7 @@ per request (purposes ``deep_work.*``, KTD14).
 The pure builders take already-resolved inputs and are unit-tested without a database.
 ``resolve_deep_work_models`` does the model-tier lookups.
 """
+import copy
 import json
 import logging
 import re
@@ -32,6 +33,10 @@ RESEARCH_WORKER = "research_worker"
 REFLECTOR = "reflector"
 OUTPUT_AGENT = "output_agent"
 SUBAGENT_TOOLS = (RESEARCH_WORKER, REFLECTOR, OUTPUT_AGENT)
+# Contract v2 (U22): the verifier is one more subagent tool; the worker registers it in ENGINE_SUBAGENT_TOOLS.
+VERIFIER = "verifier"
+SUBAGENT_TOOLS_V2 = (*SUBAGENT_TOOLS, VERIFIER)
+STEER_TOOL = "steer_worker"
 
 WEB_TOOLS = ("web_search", "browse_url")
 KNOWLEDGE_TOOL = "search_knowledge"
@@ -44,6 +49,7 @@ ORCHESTRATOR_TOOLS = (
     "dw_start_round", "dw_get_learnings", "dw_write_section", "dw_finalize", "dw_get_report")
 WORKER_SAVE_TOOL = "dw_save_learnings"
 REFLECTOR_TOOLS = ("dw_get_learnings", "dw_record_reflection")
+VERIFIER_TOOLS = ("dw_get_report", "dw_get_learnings")  # no web, no way to rewrite learnings or the report
 
 # Policy purposes (KTD14): the model policy maps each to a tier.
 PURPOSE_ORCHESTRATOR = "deep_work.orchestrator"
@@ -102,6 +108,8 @@ class ExecuteInputs:
     # Context tier (U16): off | offload | offload+clear | full. Off leaves every output as it was before U16.
     tiers: str = "off"
     context_windows: Optional[Dict[str, int]] = None  # model id -> window, for the models the run can use
+    # Contract v2 sub-switches (U22): any of typed_results, verifier, steer_worker, fork. Empty leaves every output as before.
+    subagent_v2: frozenset = frozenset()
 
 
 # --- intake and plan -------------------------------------------------------------------------
@@ -230,6 +238,26 @@ async def resolve_deep_work_models(
     return DeepWorkModels(high=tiers["high"], mid=tiers["mid"], low=tiers["low"], worker=worker)
 
 
+async def resolve_subagent_v2(db: Any, tenant_id: Any) -> frozenset:
+    """The tenant's contract v2 sub-switches (flag over global); empty without a database or when the lookup fails."""
+    import uuid
+
+    from app.models.tenant import Tenant
+    from app.services.feature_flags import subagent_v2_switches
+
+    tenant = None
+    if db is not None:
+        try:
+            tenant = await db.get(Tenant, uuid.UUID(str(tenant_id)))
+        except Exception:
+            logger.warning("tenant lookup for subagent v2 failed; using the global setting", exc_info=True)
+    try:
+        return subagent_v2_switches(tenant)
+    except Exception:
+        logger.warning("subagent v2 flag resolution failed; contract v2 off", exc_info=True)
+        return frozenset()
+
+
 # --- execute ---------------------------------------------------------------------------------
 
 
@@ -316,6 +344,8 @@ def worker_tools_section(inputs: ExecuteInputs) -> str:
 def worker_prompt(inputs: ExecuteInputs, now: datetime) -> str:
     """worker_engine.md with its tool-dependent parts replaced by what this run's worker really has."""
     text = load_prompt("worker_engine.md")
+    if "typed_results" in inputs.subagent_v2:
+        text = _typed_final(text, "worker_engine_typed_final.md")  # the engine adds complete_task and the schema
     tools = set(worker_tools(inputs))
     if "{{TOOLS_SECTION}}" not in text:
         return _with_date(text, now)
@@ -335,6 +365,90 @@ def has_output_agent(inputs: ExecuteInputs) -> bool:
     return bool(inputs.plan.deliverable) and inputs.sandbox_enabled
 
 
+# --- contract v2 (U22) -------------------------------------------------------------------------
+
+
+def _str(**kw: Any) -> Dict[str, Any]:
+    return {"type": "string", **kw}
+
+
+def _items(item: Dict[str, Any], **kw: Any) -> Dict[str, Any]:
+    return {"type": "array", "items": item, **kw}
+
+
+def _record(props: Dict[str, Dict[str, Any]], required: List[str]) -> Dict[str, Any]:
+    return {"type": "object", "properties": props, "required": required}
+
+
+# The current worker JSON summary (worker_engine.md "Final answer"); frontend/lib/engine/deepWork.ts reads these keys.
+WORKER_OUTPUT_SCHEMA: Dict[str, Any] = _record({
+    "summary": _str(),
+    "learning_count": {"type": "integer", "minimum": 0},
+    "source_count": {"type": "integer", "minimum": 0},
+    "top_findings": _items(_str(), maxItems=5),
+    "sources": _items(_record({"title": _str(), "url": _str(), "type": _str()}, []), maxItems=20),
+}, ["summary", "learning_count", "source_count", "top_findings", "sources"])
+
+# reflection_engine.md "Final answer".
+REFLECTOR_OUTPUT_SCHEMA: Dict[str, Any] = _record({
+    "score": {"type": "integer", "minimum": 0, "maximum": 100},
+    "gaps": _items(_str()),
+    "round": {"type": "integer", "minimum": 0},
+    "continuing": {"type": "boolean"},
+}, ["score", "gaps", "round", "continuing"])
+
+# KTD15: what the verifier reports; the orchestrator fixes the sections it names.
+VERIFIER_OUTPUT_SCHEMA: Dict[str, Any] = _record({
+    "unsupported_claims": _items(_record({"section": _str(), "claim": _str(), "reason": _str()}, ["section", "claim"])),
+    "missing_citations": _items(_record({"section": _str(), "claim": _str()}, ["section", "claim"])),
+    "broken_citations": _items(_record({"section": _str(), "citation": _str()}, ["section", "citation"])),
+}, ["unsupported_claims", "missing_citations", "broken_citations"])
+
+MAX_PREAMBLE_CHARS = 4000  # the engine's cap on contextPreamble
+MAX_SIBLING_QUERY_CHARS = 400
+
+
+def worker_context_preamble(plan: DeepWorkPlan) -> str:
+    """Scope awareness for the workers: every worker's sub-query, so each can avoid its siblings' topics.
+
+    Built from the approved plan, so it is the same text for every worker of the run (one cached prefix). Capped
+    at the engine's limit by shortening each sub-query, then by cutting the tail.
+    """
+    head = ("## Other workers\n\nOther workers cover the topics below at the same time. Research only your own "
+            "sub-query and avoid their topics (the worker id in your task says which one is yours).\n\n")
+
+    def line(q: Any, limit: int) -> str:
+        text = " ".join(str(q.sub_query).split())
+        return f"- `{q.worker_id}`: {text[:limit] + '...' if len(text) > limit else text}"
+
+    limit = MAX_SIBLING_QUERY_CHARS
+    while True:
+        out = head + "\n".join(line(q, limit) for q in plan.sub_queries)
+        if len(out) <= MAX_PREAMBLE_CHARS or limit <= 40:
+            break
+        limit = max(40, limit // 2)
+    return out[:MAX_PREAMBLE_CHARS]
+
+
+def _v2_prompt_parts(switches: frozenset) -> List[str]:
+    parts: List[str] = []
+    if switches & {"typed_results", "steer_worker"}:
+        parts.append(load_prompt("orchestrator_v2_labels.md").strip())
+    if "verifier" in switches:
+        parts.append(load_prompt("orchestrator_v2_verifier.md").strip())
+    if "steer_worker" in switches:
+        parts.append(load_prompt("orchestrator_v2_steer.md").strip())
+    return parts
+
+
+def _typed_final(prompt: str, fragment: str) -> str:
+    """The prompt with its last ``## Final answer`` section replaced by the ``complete_task`` variant."""
+    head, sep, _ = prompt.rpartition("## Final answer")
+    if not sep:
+        return prompt
+    return head + load_prompt(fragment).strip() + "\n"
+
+
 ORCHESTRATOR_CACHE_TTL = "1h"
 CONTEXT_NOTE_FILE = "orchestrator_context_note.md"  # appended to the orchestrator prompt only with tiers on
 
@@ -348,6 +462,12 @@ def compose_execute_config(
     models = inputs.models
     with_output = has_output_agent(inputs)
 
+    v2 = frozenset(inputs.subagent_v2 or ())
+    typed = "typed_results" in v2
+    reflector_prompt = load_prompt("reflection_engine.md")
+    if typed:
+        reflector_prompt = _typed_final(reflector_prompt, "reflection_engine_typed_final.md")
+
     subagents: Dict[str, Dict[str, Any]] = {
         RESEARCH_WORKER: {
             "model": models.worker or models.mid,
@@ -357,7 +477,7 @@ def compose_execute_config(
         REFLECTOR: {
             "model": models.mid,
             "tools": sorted(REFLECTOR_TOOLS),
-            "systemPrompt": _with_date(load_prompt("reflection_engine.md"), now),
+            "systemPrompt": _with_date(reflector_prompt, now),
         },
     }
     parent_tools: List[str] = list(ORCHESTRATOR_TOOLS) + [RESEARCH_WORKER, REFLECTOR]
@@ -369,6 +489,25 @@ def compose_execute_config(
         }
         parent_tools.append(OUTPUT_AGENT)
 
+    if typed:
+        # The result shape each child promises; the engine adds complete_task and the schema to the child itself.
+        subagents[RESEARCH_WORKER]["outputSchema"] = copy.deepcopy(WORKER_OUTPUT_SCHEMA)
+        subagents[RESEARCH_WORKER]["contextPreamble"] = worker_context_preamble(inputs.plan)
+        subagents[REFLECTOR]["outputSchema"] = copy.deepcopy(REFLECTOR_OUTPUT_SCHEMA)
+    if "fork" in v2:
+        # The reflector sees the approved plan and any steers the orchestrator saw, without being told them again.
+        subagents[REFLECTOR]["mode"] = "fork"
+    if "verifier" in v2:
+        subagents[VERIFIER] = {
+            "model": models.mid,
+            "tools": sorted(VERIFIER_TOOLS),
+            "systemPrompt": _with_date(load_prompt("verifier_engine.md"), now),
+            "outputSchema": copy.deepcopy(VERIFIER_OUTPUT_SCHEMA),  # always typed: the orchestrator acts on its fields
+        }
+        parent_tools.append(VERIFIER)
+    if "steer_worker" in v2:
+        parent_tools.append(STEER_TOOL)
+
     prompt_parts = [_with_date(load_prompt("orchestrator_loop.md"), now)]
     tiered = bool(tier_rank(inputs.tiers))
     if tiered:
@@ -378,6 +517,7 @@ def compose_execute_config(
             "## Tool availability\n\nWeb search is NOT available on this run. Workers answer from their own "
             "knowledge (and any knowledge bases or connectors) and save it as `model_knowledge` learnings; "
             "do not tell a worker to search the web or browse pages.")
+    prompt_parts += _v2_prompt_parts(v2)
     prompt_parts.append("## Approved plan\n\n```json\n" + inputs.plan.model_dump_json(indent=2) + "\n```")
     if not with_output:
         prompt_parts.append("This plan has no deliverable file: skip step 7 and do not look for `output_agent`.")
@@ -387,6 +527,11 @@ def compose_execute_config(
         # Same block for the children (they inherit the parent's today; named here so a child override works).
         for sub in subagents.values():
             sub["compaction"] = dict(compaction)
+            if FILE_TOOL not in sub["tools"]:
+                # No read_file: it could not follow an offload pointer (the reflector, verifier and output agent
+                # only have bounded dw_* tools and sandbox tools), so keep every result of its tools inline.
+                sub["compaction"]["excludeTools"] = _dedupe(
+                    list(sub["compaction"].get("excludeTools", [])) + list(sub["tools"]))
         # The orchestrator has no read_file, so it could not follow an offload pointer: keep every result of
         # its own tools (all bounded, backend-generated dw_* tools and the subagent calls) inline.
         compaction = dict(compaction)

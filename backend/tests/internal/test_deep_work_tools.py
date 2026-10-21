@@ -341,6 +341,33 @@ async def test_finalize_warns_about_long_uncited_sections_without_blocking(dw):
     assert "Intro" not in r["data"]["warnings"][0] and "Cited" not in r["data"]["warnings"][0]
 
 
+async def test_finalize_lint_names_a_citation_beyond_four_learnings_as_a_warning_with_the_error(dw):
+    """U22: [9] with 4 learnings is reported per section as a warning; a cited section stays clean."""
+    await dw.research("w1", "w2", save=False)
+    await dw.call("dw_save_learnings", {"worker_id": "w1", "learnings": [learning(1), learning(2)]})
+    await dw.call("dw_save_learnings", {"worker_id": "w2", "learnings": [learning(3), learning(4)]})
+    await dw.call("dw_write_section", {"heading": "Market", "markdown": "Supported claim [1] and [4]. " * 10})
+    await dw.call("dw_write_section", {"heading": "Risks", "markdown": "A risk [9]."})
+    r = await dw.call("dw_finalize")
+    assert r["isError"] and r["details"]["error"] == "invalid_citations"
+    assert r["details"]["warnings"] == ["Section 'Risks' cites [9] but only 4 source(s) are listed."]
+    assert (await dw.state()).status == "running"  # the existing hard check is unchanged
+    await dw.call("dw_write_section", {"heading": "Risks", "markdown": "A risk [3]."})
+    assert not (await dw.call("dw_finalize"))["isError"]
+
+
+def test_citation_warnings_are_deterministic_and_section_named():
+    from app.services.deep_work.engine_tools import citation_warnings, lint_citations
+
+    sections = [("A", "Claim [9]."), ("B", "Plain facts without any marker. " * 10), ("C", "Short."), ("D", "Fine [1]. " * 30)]
+    invalid, uncited = lint_citations(sections, 4)
+    assert invalid == {"A": [9]} and uncited == ["B"]
+    assert citation_warnings(invalid, uncited, 4) == [
+        "Section 'A' cites [9] but only 4 source(s) are listed.",
+        "Section(s) with factual content but no [N] citation: B."]
+    assert citation_warnings({}, [], 4) == []
+
+
 async def test_save_learnings_and_reflection_return_a_short_status_line(dw):
     await dw.call("dw_start_round", {"round": 1, "workers": workers("w1", "w2")})
     r = await dw.call("dw_save_learnings", {"worker_id": "w1", "learnings": [learning(1)]})

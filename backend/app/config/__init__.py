@@ -386,6 +386,13 @@ class Settings(BaseSettings):
     ENGINE_CONTEXT_CLEAR_FRACTION: float = 0.5       # clearing starts at this fraction of the context window
     ENGINE_CONTEXT_KEEP_TOOL_RESULTS: int = 5        # newest tool results never cleared
     ENGINE_CONTEXT_CLEAR_AT_LEAST_TOKENS: int = 8000  # a clearing pass must free at least this much
+    # Deep Work subagent contract v2 (evals/context plan, U22): typed worker results (complete_task), labels, sibling
+    # context, steer_worker and a verifier step. The per-tenant flag features.ENABLE_ENGINE_SUBAGENT_V2 overrides this.
+    # The engine worker must also run with ENGINE_COMPLETE_TASK=1 / ENGINE_STEER_WORKER=1 and list "verifier" in
+    # ENGINE_SUBAGENT_TOOLS (DEPLOYMENT.md). Read when the execute config is built; running conversations keep theirs.
+    ENABLE_ENGINE_SUBAGENT_V2: bool = False
+    # Sub-switches applied when the flag is on (comma list of typed_results, verifier, steer_worker, fork).
+    ENGINE_SUBAGENT_V2_SWITCHES: str = "typed_results,verifier,steer_worker,fork"
     # Run reconciler (plan 003 U5): rows stuck active for this long are checked against the engine.
     RUN_RECONCILE_AFTER_S: int = 120
     RUN_RECONCILE_INTERVAL_S: float = 60.0

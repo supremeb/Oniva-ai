@@ -137,6 +137,13 @@ FLAG_METADATA: dict[str, FlagMeta] = {
         operator_only=True,
     ),
 
+    "ENABLE_ENGINE_SUBAGENT_V2": FlagMeta(
+        group="Core",
+        description="Deep Work subagent contract v2 on the engine (typed worker results, labels, sibling context, "
+                    "steer_worker, verifier); tenant value overrides the global ENABLE_ENGINE_SUBAGENT_V2",
+        operator_only=True,
+    ),
+
     # Infrastructure (operator-only — cost/security implications)
     "ENABLE_SANDBOX": FlagMeta(
         group="Infrastructure",
@@ -229,6 +236,28 @@ def context_tiers_for(tenant: Optional[Tenant], settings=None) -> str:
         logger.warning("ENGINE_CONTEXT_TIERS=%r is not one of %s; using off", value, CONTEXT_TIER_VALUES)
         return "off"
     return value
+
+
+ENGINE_SUBAGENT_V2_FLAG = "ENABLE_ENGINE_SUBAGENT_V2"
+SUBAGENT_V2_SWITCHES = ("typed_results", "verifier", "steer_worker", "fork")
+
+
+def subagent_v2_switches(tenant: Optional[Tenant], settings=None) -> frozenset:
+    """The Deep Work contract v2 sub-switches a tenant's execute config is built with (U22).
+
+    Empty when the flag is off (tenant value first, then the global ``ENABLE_ENGINE_SUBAGENT_V2``); when on, the
+    names in ``ENGINE_SUBAGENT_V2_SWITCHES`` (unknown names ignored). A missing tenant uses the global setting.
+    """
+    s = settings if settings is not None else get_settings()
+    on = bool(getattr(s, ENGINE_SUBAGENT_V2_FLAG, False))
+    if tenant is not None:
+        raw = ((tenant.settings or {}).get("features") or {}).get(ENGINE_SUBAGENT_V2_FLAG)
+        if raw is not None:
+            on = bool(raw)
+    if not on:
+        return frozenset()
+    wanted = {n.strip() for n in str(getattr(s, "ENGINE_SUBAGENT_V2_SWITCHES", "") or "").split(",")}
+    return frozenset(n for n in SUBAGENT_V2_SWITCHES if n in wanted)
 
 
 def _engine_tenant_flag(tenant: Tenant, flag: str, global_on: bool, settings) -> bool:

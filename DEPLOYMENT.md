@@ -357,6 +357,38 @@ engine routes).
 
 **Smoke test**: `ONIVA_E2E=1 uv run pytest -m e2e tests/e2e/test_engine_smoke.py` (needs Node 22, `initdb`/`pg_ctl`).
 
+### Deep Work subagent contract v2 (`ENABLE_ENGINE_SUBAGENT_V2`)
+
+Off by default (flags and rollout plan: `docs/plans/2026-10-21-001-...`, Phase C, U22). With the flag off, the
+Deep Work execute config and every prompt are byte-identical to before. With it on, the execute config:
+
+- gives the research worker and the reflector an `outputSchema` (the worker's is the same
+  `summary` / `learning_count` / `source_count` / `top_findings` / `sources` object the Deep Work card has always
+  parsed) so they end by calling `complete_task`;
+- passes each worker a `contextPreamble` listing the other workers' sub-queries, and tells the orchestrator to pass
+  `label = worker_id` on every `research_worker` call and a `context.brief` on gap rounds;
+- adds the `verifier` subagent (tools `dw_get_report`, `dw_get_learnings` only), run once before `dw_finalize`,
+  and the `steer_worker` tool for the orchestrator;
+- with `fork` on, runs the reflector in `mode: "fork"` (it sees the parent's recent conversation, bodies elided).
+
+The flag resolves like the others: tenant `features.ENABLE_ENGINE_SUBAGENT_V2` first, then the global setting.
+`ENGINE_SUBAGENT_V2_SWITCHES` (default `typed_results,verifier,steer_worker,fork`) narrows which pieces a tenant
+with the flag on gets. The config is read when a run starts, so running conversations keep their config.
+
+**The engine worker must be started to match** (the engine only runs tools its worker registered, so a tool the
+config names but the worker lacks cannot be used):
+
+```bash
+ENGINE_SUBAGENT_TOOLS=research_worker,reflector,output_agent,verifier \
+ENGINE_COMPLETE_TASK=1 \
+ENGINE_STEER_WORKER=1 \
+npm run worker
+```
+
+Roll the engine workers first (the new names are inert while the flag is off), then turn the flag on. To roll back,
+turn the flag off; new runs use the legacy config and in-flight runs finish with theirs. The default flips only
+after Gate C (U24).
+
 ## Approvals and audit
 
 A tool call that needs a human is decided by the Python control plane under RBAC; the engine only parks the
