@@ -12,11 +12,18 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.pool import StaticPool
 
 from app.models import Base
-from sqlalchemy.dialects.postgresql import JSONB, INET, TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, INET, TSVECTOR, UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.types import ARRAY as GenericARRAY
 from sqlalchemy.ext.compiler import compiles
 from pgvector.sqlalchemy import Vector
+
+@compiles(PG_UUID, "sqlite")
+def compile_uuid_sqlite(type_, compiler, **kw):
+    # A bare "UUID" type name gets NUMERIC affinity in SQLite: a uuid4 hex of all digits (or digits plus one
+    # "e") is coerced to INTEGER/REAL and reloads as a number -> flaky "'float' has no attribute 'replace'".
+    return "CHAR(32)"
+
 
 @compiles(JSONB, "sqlite")
 def compile_jsonb_sqlite(type_, compiler, **kw):
