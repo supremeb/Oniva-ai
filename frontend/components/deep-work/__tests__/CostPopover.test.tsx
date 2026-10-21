@@ -78,4 +78,13 @@ describe('CostPopover', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cost by phase' }));
     expect(screen.getByTestId('cost-popover').querySelectorAll('li')[0]).toHaveTextContent('Generation');
   });
+
+  it('shows a small cache line only when there is a hit ratio', () => {
+    const rows = [{ purpose: 'generation', usd: 0.02, inputTokens: 100, outputTokens: 1, unpriced: false }];
+    const { rerender } = render(<CostPopover cost={{ ...base, byPurpose: rows, cacheHitRatio: 0.73 }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Cost by phase' }));
+    expect(screen.getByTestId('cost-popover-cache')).toHaveTextContent('cache 73%');
+    rerender(<CostPopover cost={{ ...base, byPurpose: rows, cacheHitRatio: null }} />);
+    expect(screen.queryByTestId('cost-popover-cache')).not.toBeInTheDocument();
+  });
 });

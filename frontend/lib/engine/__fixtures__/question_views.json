@@ -158,7 +158,8 @@
       "metadata": {},
       "compaction": null,
       "maxRounds": null,
-      "deadlineMs": null
+      "deadlineMs": null,
+      "cacheTtl": null
     },
     "toolOutput": {},
     "compaction": {
@@ -393,7 +394,8 @@
       "metadata": {},
       "compaction": null,
       "maxRounds": null,
-      "deadlineMs": null
+      "deadlineMs": null,
+      "cacheTtl": null
     },
     "toolOutput": {},
     "compaction": {
@@ -611,7 +613,8 @@
       "metadata": {},
       "compaction": null,
       "maxRounds": null,
-      "deadlineMs": null
+      "deadlineMs": null,
+      "cacheTtl": null
     },
     "toolOutput": {},
     "compaction": {

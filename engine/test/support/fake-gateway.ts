@@ -216,7 +216,14 @@ const INVOCATION = /^\/internal\/tools\/invocations\/([^/]+)$/;
 
 /** What the fake answers a model policy request with. */
 export type FakePolicy =
-  | { ok: true; provider?: string; model?: string; apiKey?: string; maxTokens?: number }
+  | {
+      ok: true;
+      provider?: string;
+      model?: string;
+      apiKey?: string;
+      maxTokens?: number;
+      contextWindow?: number;
+    }
   | { ok: false; code: string; reason: string; retryable?: boolean }
   | { status: number; body?: JsonValue; headers?: Record<string, string> }
   | { hang: true }
@@ -457,6 +464,7 @@ export class FakeGateway {
         model: answer.model ?? "fake-model",
         apiKey: answer.apiKey ?? "fake-key",
         maxTokens: answer.maxTokens ?? 1024,
+        ...(answer.contextWindow === undefined ? {} : { contextWindow: answer.contextWindow }),
         expiresAt: Date.now() + 60_000,
         requestId: b.requestId,
       },

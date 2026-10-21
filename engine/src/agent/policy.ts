@@ -70,6 +70,12 @@ export type ToolVerdict =
 export interface HostPolicy {
   resolveModelRequest(info: ModelRequestInfo): ModelResolution | Promise<ModelResolution>;
   authorizeTool(request: ToolAuthorizationRequest): ToolVerdict | Promise<ToolVerdict>;
+  /**
+   * Context window of a model this policy has resolved before (from
+   * `ModelResolution.contextWindow`), or undefined when unknown. Compaction
+   * thresholds use it ahead of the engine's default window.
+   */
+  contextWindowFor?(model: string): number | undefined;
 }
 
 /** Run `authorizeTool`. A throw or a malformed verdict blocks the call. */
