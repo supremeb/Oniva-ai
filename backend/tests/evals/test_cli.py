@@ -15,8 +15,9 @@ KEY_VAR = "EVAL_OPENROUTER_API_KEY"
 
 
 def _fake_run(passing: bool):
-    async def run_suite(tasks, *, mode, k, meter, timeout_s=None, replay_dir=None):
+    async def run_suite(tasks, *, mode, k, meter, timeout_s=None, replay_dir=None, judges=None):
         run_suite.calls.append((mode, k, [t.id for t in tasks]))
+        run_suite.judges.append(judges)
         trace = Trace(
             root=Span(kind="subagent", name="root"), usage_by_role={"root": Usage(input_tokens=10, cost_usd=0.01)}
         )
@@ -28,6 +29,7 @@ def _fake_run(passing: bool):
         ]
 
     run_suite.calls = []
+    run_suite.judges = []
     return run_suite
 
 
