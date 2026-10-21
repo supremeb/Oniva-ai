@@ -33,6 +33,13 @@ export interface OffloadPutRequest {
   toolName: string;
   /** The full result text. */
   text: string;
+  /**
+   * What is stored: a tool result (default; the path is
+   * `tool_results/<toolCallId>.txt`) or an archived transcript (`"history"`,
+   * keyed by the compaction id passed as `toolCallId`; the path is
+   * `conversation_history/<toolCallId>.md`).
+   */
+  kind?: "tool_result" | "history";
   /** Cancelled with the tool call; a store should stop when it aborts. */
   signal?: AbortSignal;
 }

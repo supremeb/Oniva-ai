@@ -31,6 +31,7 @@
  */
 import { z } from "zod";
 import type { Context } from "../core/context.js";
+import { LeaseLost } from "../core/errors.js";
 import type { JsonValue } from "../core/json.js";
 import { modelError } from "../models/stream.js";
 import type { Message, ModelError, ModelInput, TextContent, Usage } from "../models/types.js";
@@ -47,6 +48,7 @@ import {
   type TaskScope,
   type TaskState,
 } from "../tasks/define.js";
+import type { ToolConversation } from "../tools/registry.js";
 import {
   assistantText,
   buildContext,
@@ -55,6 +57,7 @@ import {
   payloadOf,
   toEntryPayload,
 } from "./context-builder.js";
+import type { CompactionQuality } from "./hooks.js";
 import {
   type CompactionOverrides,
   type CompactionSettings,
@@ -85,6 +88,8 @@ export const DEFAULT_COMPACTION_SETTINGS: Readonly<CompactionSettings> = Object.
 });
 
 const CHARS_PER_TOKEN = 4;
+/** A structured summary under this share of what it replaced is reported as suspect. */
+const MIN_SUMMARY_RATIO = 0.01;
 /** Longest single item (message, tool result) quoted into a summary request. */
 const MAX_ITEM_CHARS = 8_000;
 
@@ -94,6 +99,41 @@ export const COMPACTION_SYSTEM_PROMPT = [
   "Keep: the user's goals and instructions, decisions made, facts learned, names, identifiers, paths and numbers that may matter later, tool calls made and what they returned, and any work still open.",
   "Drop pleasantries and repetition. If a previous summary is given, fold it in.",
   "Reply with the summary only.",
+].join("\n");
+
+// ---- structured summary (Tier 2) -----------------------------------------------
+
+/** The six sections of a structured summary, in order. */
+export const STRUCTURED_HEADINGS = [
+  "Goal and constraints",
+  "Decisions",
+  "Facts and IDs",
+  "Files and artifacts",
+  "Open tasks",
+  "Errors and dead ends",
+] as const;
+
+export type StructuredHeading = (typeof STRUCTURED_HEADINGS)[number];
+
+const GOAL_HEADING: StructuredHeading = "Goal and constraints";
+const EMPTY_SECTION = "(nothing recorded)";
+
+/** Used when `structuredSummary` is on; the plain prompt stays the default. */
+export const STRUCTURED_COMPACTION_PROMPT = [
+  "You maintain a running summary of a long conversation between a user and an AI assistant that uses tools.",
+  "The assistant will continue from this summary alone, so it must stay accurate and must not shrink away detail from earlier rounds.",
+  "Write the summary as exactly these six sections, with these headings, in this order:",
+  ...STRUCTURED_HEADINGS.map((h) => `## ${h}`),
+  "What goes where:",
+  "- Goal and constraints: what the user wants and every instruction or constraint they gave, quoted in their own words. Copy this section from the previous summary byte for byte (verbatim), then add new user instructions as new lines after it. Never reword, merge or drop a line of it.",
+  "- Decisions: choices made and why.",
+  "- Facts and IDs: facts learned, plus names, identifiers, URLs, numbers and values that may be needed again, exactly as they appeared.",
+  "- Files and artifacts: paths, documents and outputs produced or read, with what each holds.",
+  "- Open tasks: work still to do, and the next step.",
+  "- Errors and dead ends: what failed or was ruled out, so it is not tried again.",
+  "When a previous summary is given, edit its sections in place: keep each existing line unless the new messages make it wrong or finished, change only what the new messages change, and add the new material under the right heading. Do not rewrite sections from scratch and do not shorten them to save space.",
+  "Leave a section with the single line (nothing recorded) when it has nothing to hold.",
+  "Reply with the six sections only, no preface.",
 ].join("\n");
 
 // ---- settings ---------------------------------------------------------------
@@ -314,35 +354,240 @@ function clip(text: string): string {
 const plain = (content: string | TextContent[]) =>
   typeof content === "string" ? content : content.map((c) => c.text).join("");
 
+function renderEntries(entries: readonly EntryRecord[], limit: (text: string) => string): string {
+  const lines: string[] = [];
+  for (const e of entries) {
+    if (e.kind === ENTRY_KINDS.user) {
+      lines.push(`[user]\n${limit(plain(payloadOf(e, ENTRY_KINDS.user).content))}`);
+    } else if (e.kind === ENTRY_KINDS.assistant) {
+      const message = payloadOf(e, ENTRY_KINDS.assistant).message;
+      const text = assistantText(message);
+      if (text.length > 0) lines.push(`[assistant]\n${limit(text)}`);
+      for (const b of message.blocks) {
+        // A partial reply's tool calls were never run.
+        if (b.type === "tool_call" && payloadOf(e, ENTRY_KINDS.assistant).partial !== true) {
+          lines.push(`[assistant called tool ${b.name}]\n${limit(JSON.stringify(b.arguments))}`);
+        }
+      }
+    } else {
+      const r = payloadOf(e, ENTRY_KINDS.toolResult);
+      const flag = r.isError ? ` (${r.status})` : "";
+      lines.push(`[result of ${r.toolName}${flag}]\n${limit(plain(r.content))}`);
+    }
+  }
+  return lines.join("\n\n");
+}
+
 /** The summary request's user message: the previous summary and the entries, as text. */
 export function renderTranscript(plan: CompactionPlan): string {
   const parts: string[] = [];
   if (plan.previousSummary !== null) {
     parts.push(`<previous_summary>\n${plan.previousSummary}\n</previous_summary>`);
   }
-  const lines: string[] = [];
-  for (const e of plan.summarized) {
-    if (e.kind === ENTRY_KINDS.user) {
-      lines.push(`[user]\n${clip(plain(payloadOf(e, ENTRY_KINDS.user).content))}`);
-    } else if (e.kind === ENTRY_KINDS.assistant) {
-      const message = payloadOf(e, ENTRY_KINDS.assistant).message;
-      const text = assistantText(message);
-      if (text.length > 0) lines.push(`[assistant]\n${clip(text)}`);
-      for (const b of message.blocks) {
-        // A partial reply's tool calls were never run.
-        if (b.type === "tool_call" && payloadOf(e, ENTRY_KINDS.assistant).partial !== true) {
-          lines.push(`[assistant called tool ${b.name}]\n${clip(JSON.stringify(b.arguments))}`);
-        }
-      }
-    } else {
-      const r = payloadOf(e, ENTRY_KINDS.toolResult);
-      const flag = r.isError ? ` (${r.status})` : "";
-      lines.push(`[result of ${r.toolName}${flag}]\n${clip(plain(r.content))}`);
-    }
-  }
-  parts.push(`<conversation>\n${lines.join("\n\n")}\n</conversation>`);
+  parts.push(`<conversation>\n${renderEntries(plan.summarized, clip)}\n</conversation>`);
   parts.push("Summarize the conversation above.");
   return parts.join("\n\n");
+}
+
+/**
+ * The structured request's user message: the previous summary's sections,
+ * apart from the new transcript. The trailer a summary carries (archive
+ * paths, open todo) is not shown; it is derived again each time.
+ */
+export function renderStructuredTranscript(plan: CompactionPlan): string {
+  const parts: string[] = [];
+  if (plan.previousSummary !== null) {
+    const { body } = splitSummaryTrailer(plan.previousSummary);
+    parts.push(`<previous_summary_sections>\n${body}\n</previous_summary_sections>`);
+  }
+  parts.push(`<conversation>\n${renderEntries(plan.summarized, clip)}\n</conversation>`);
+  parts.push(
+    plan.previousSummary === null
+      ? "Write the six-section summary of the conversation above."
+      : "Edit the previous summary's sections in place to cover the new conversation above. Carry Goal and constraints forward byte for byte and only add new user instructions to it.",
+  );
+  return parts.join("\n\n");
+}
+
+/** The whole summarized range as text, with no per-item clip, for the archive. */
+export function renderArchive(plan: CompactionPlan): string {
+  return `${renderEntries(plan.summarized, (t) => t)}\n`;
+}
+
+// ---- structured summary: parsing, repair, trailer ----------------------------
+
+const ARCHIVE_LINE = "Full earlier transcript: ";
+const TODO_HEADER = "Open todo (as of the summary):";
+
+/** Split off the lines compaction appends after the sections. */
+export function splitSummaryTrailer(summary: string): {
+  body: string;
+  archives: string[];
+  todo: string[];
+} {
+  const lines = summary.split("\n");
+  const archives: string[] = [];
+  const todo: string[] = [];
+  let cut = lines.length;
+  let inTodo = false;
+  for (const [i, line] of lines.entries()) {
+    if (inTodo) {
+      if (/^- \[[ ~]\] /.test(line)) todo.push(line);
+      continue;
+    }
+    if (line.startsWith(ARCHIVE_LINE)) {
+      archives.push(line.slice(ARCHIVE_LINE.length).trim());
+      cut = Math.min(cut, i);
+    } else if (line === TODO_HEADER) {
+      inTodo = true;
+      cut = Math.min(cut, i);
+    }
+  }
+  return { body: lines.slice(0, cut).join("\n").trimEnd(), archives, todo };
+}
+
+/** The summary with its trailer: archive paths, then the open todo. */
+export function withTrailer(
+  body: string,
+  trailer: { archives: readonly string[]; todo: readonly string[] },
+): string {
+  let out = body;
+  if (trailer.archives.length > 0) {
+    out += `\n\n${trailer.archives.map((p) => `${ARCHIVE_LINE}${p}`).join("\n")}`;
+  }
+  if (trailer.todo.length > 0) out += `\n\n${TODO_HEADER}\n${trailer.todo.join("\n")}`;
+  return out;
+}
+
+const headingOf = (line: string): StructuredHeading | null => {
+  const m = /^#{1,3}\s+(.+?)\s*:?\s*$/.exec(line.trim());
+  const name = m?.[1]?.toLowerCase();
+  return STRUCTURED_HEADINGS.find((h) => h.toLowerCase() === name) ?? null;
+};
+
+/**
+ * The sections of a summary body by heading. Text before the first known
+ * heading is dropped; lines under any other heading stay with the section
+ * above them.
+ */
+export function parseSummarySections(body: string): Map<StructuredHeading, string> {
+  const out = new Map<StructuredHeading, string[]>();
+  let current: string[] | null = null;
+  for (const line of body.split("\n")) {
+    const h = headingOf(line);
+    if (h !== null) {
+      current = out.get(h) ?? [];
+      out.set(h, current);
+    } else {
+      current?.push(line);
+    }
+  }
+  return new Map([...out].map(([h, lines]) => [h, lines.join("\n").trim()]));
+}
+
+/**
+ * The model's summary, made whole: every heading present, in order, and the
+ * goal section carried forward byte for byte. A missing section comes back
+ * verbatim from the previous summary (or reads "(nothing recorded)" when
+ * there is none), so a bad summary can only lose detail from the new
+ * material. A goal section that no longer starts with the previous one keeps
+ * the previous text and gains only the lines it did not have.
+ */
+export function completeStructuredSummary(
+  raw: string,
+  previousSummary: string | null,
+): { summary: string; missing: StructuredHeading[] } {
+  const got = parseSummarySections(splitSummaryTrailer(raw).body);
+  const prev =
+    previousSummary === null
+      ? new Map<StructuredHeading, string>()
+      : parseSummarySections(splitSummaryTrailer(previousSummary).body);
+  const missing: StructuredHeading[] = [];
+  const blocks: string[] = [];
+  for (const h of STRUCTURED_HEADINGS) {
+    let text = got.get(h);
+    if (text === undefined) {
+      missing.push(h);
+      text = prev.get(h) ?? EMPTY_SECTION;
+    } else if (h === GOAL_HEADING) {
+      const old = prev.get(h);
+      if (old !== undefined && old !== EMPTY_SECTION && !text.startsWith(old)) {
+        const had = new Set(old.split("\n"));
+        const added = text.split("\n").filter((l) => l.trim() !== "" && !had.has(l));
+        text = [old, ...added].join("\n");
+      }
+    }
+    blocks.push(`## ${h}\n${text}`);
+  }
+  return { summary: blocks.join("\n\n"), missing };
+}
+
+// ---- structured summary: open todo -------------------------------------------
+
+type TodoItem = { text: string; status: "pending" | "in_progress" | "completed" };
+
+const asObject = (v: unknown): Record<string, unknown> | null =>
+  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+
+function snapshotItem(v: unknown): TodoItem | null {
+  if (typeof v === "string") return v.trim() ? { text: v.trim(), status: "pending" } : null;
+  const o = asObject(v);
+  const raw = o?.text ?? o?.content ?? o?.title;
+  if (!o || typeof raw !== "string" || raw.trim() === "") return null;
+  const done = o.status === "completed" || o.status === "done" || o.done === true;
+  const status = done ? "completed" : o.status === "in_progress" ? "in_progress" : "pending";
+  return { text: raw.trim(), status };
+}
+
+function applyTodoCall(list: TodoItem[], args: unknown): TodoItem[] {
+  const a = asObject(args);
+  if (!a) return list;
+  const full = Array.isArray(a.todos) ? a.todos : Array.isArray(a.items) ? a.items : null;
+  if (full) return full.map(snapshotItem).filter((i): i is TodoItem => i !== null);
+  const next = list.map((i) => ({ ...i }));
+  const done = new Set(
+    (Array.isArray(a.completed) ? a.completed : [])
+      .filter((c): c is string => typeof c === "string")
+      .map((c) => c.toLowerCase().trim()),
+  );
+  for (const i of next) if (done.has(i.text.toLowerCase().trim())) i.status = "completed";
+  for (const t of Array.isArray(a.add) ? a.add : []) {
+    if (typeof t === "string" && t.trim() !== "") next.push({ text: t.trim(), status: "pending" });
+  }
+  return next;
+}
+
+/**
+ * The open todo items as of the end of the summarized range, as `- [ ] text`
+ * (`- [~]` for in progress) lines: the previous summary's open todo, with
+ * every `update_todo` call of the range applied in order. A call carrying a
+ * whole list (`todos` or `items`) replaces what came before it.
+ */
+export function openTodoItems(
+  summarized: readonly EntryRecord[],
+  previousSummary: string | null,
+): string[] {
+  let list: TodoItem[] = [];
+  if (previousSummary !== null) {
+    for (const line of splitSummaryTrailer(previousSummary).todo) {
+      list.push({
+        text: line.slice(6),
+        status: line.startsWith("- [~] ") ? "in_progress" : "pending",
+      });
+    }
+  }
+  for (const e of summarized) {
+    if (e.kind !== ENTRY_KINDS.assistant) continue;
+    const p = payloadOf(e, ENTRY_KINDS.assistant);
+    if (p.partial === true) continue;
+    for (const b of p.message.blocks) {
+      if (b.type === "tool_call" && b.name === "update_todo")
+        list = applyTodoCall(list, b.arguments);
+    }
+  }
+  return list
+    .filter((i) => i.status !== "completed")
+    .map((i) => `- [${i.status === "in_progress" ? "~" : " "}] ${i.text}`);
 }
 
 // ---- durable state ----------------------------------------------------------
@@ -518,6 +763,48 @@ export function compactionTaskDefinition(
   defaultsOf.set(def, structuredClone(defaults));
   return def;
 
+  /**
+   * Archive the summarized range (`archiveSummarized`, with a store) and, for
+   * a structured summary, re-attach the open todo. Both are appended to the
+   * summary text. An archive failure is reported and skipped, never fatal.
+   */
+  async function attachTrailer(
+    summary: string,
+    plan: CompactionPlan,
+    settings: CompactionSettings,
+    structured: boolean,
+    at: { task: State; ctx: Context; conversation: ToolConversation; runId: string },
+  ): Promise<string> {
+    const archives = structured ? splitSummaryTrailer(plan.previousSummary ?? "").archives : [];
+    if (settings.archiveSummarized && deps.offload) {
+      try {
+        const stored = await deps.offload.put({
+          conversation: at.conversation,
+          runId: at.runId,
+          toolCallId: at.task.id,
+          toolName: "compaction",
+          text: renderArchive(plan),
+          kind: "history",
+          signal: at.ctx.signal,
+        });
+        if (typeof stored?.path !== "string" || stored.path.length === 0) {
+          throw new TypeError("offload store answered without a path");
+        }
+        archives.push(stored.path);
+      } catch (err) {
+        if (err instanceof LeaseLost) throw err;
+        at.ctx.throwIfCancelled();
+        deps.report(err, {
+          during: "offload",
+          taskId: at.task.id,
+          conversationId: at.task.conversationId,
+        });
+      }
+    }
+    const todo = structured ? openTodoItems(plan.summarized, plan.previousSummary) : [];
+    return withTrailer(summary, { archives, todo });
+  }
+
   async function summarize(task: State, rt: Scope, ctx: Context): Promise<Committed> {
     const conversationId = task.conversationId;
     const { runId, round, cause } = task.input;
@@ -529,10 +816,17 @@ export function compactionTaskDefinition(
       return finish(rt, task, null, { outcome: "skipped" });
     }
 
+    const structured = settings.structuredSummary;
     const input: ModelInput = {
       messages: [
-        { role: "system", text: COMPACTION_SYSTEM_PROMPT },
-        { role: "user", content: renderTranscript(plan) },
+        {
+          role: "system",
+          text: structured ? STRUCTURED_COMPACTION_PROMPT : COMPACTION_SYSTEM_PROMPT,
+        },
+        {
+          role: "user",
+          content: structured ? renderStructuredTranscript(plan) : renderTranscript(plan),
+        },
       ],
       cache: false,
     };
@@ -566,11 +860,44 @@ export function compactionTaskDefinition(
     }
     const message = terminal.message;
     const spend = { provider: message.provider, model: message.model, usage: terminal.usage };
+    const raw = assistantText(message).trim();
+    let summary = raw;
+    let quality: CompactionQuality | undefined;
+    if (structured && raw.length > 0) {
+      const done = completeStructuredSummary(raw, plan.previousSummary);
+      summary = done.summary;
+      const summarizedChars = plan.summarized.reduce((n, e) => n + entryChars(e), 0);
+      quality = {
+        summaryChars: summary.length,
+        summarizedChars,
+        ratio: summarizedChars > 0 ? summary.length / summarizedChars : null,
+        missingHeadings: done.missing,
+      };
+    }
     await deps.hooks.afterCompaction(
-      { conversation, agent, runId, round, taskId: task.id, message, usage: terminal.usage },
+      {
+        conversation,
+        agent,
+        runId,
+        round,
+        taskId: task.id,
+        message,
+        usage: terminal.usage,
+        ...(quality ? { quality } : {}),
+      },
       task.id,
     );
-    const summary = assistantText(message).trim();
+    if (
+      quality &&
+      (quality.missingHeadings.length > 0 || (quality.ratio ?? 1) < MIN_SUMMARY_RATIO)
+    ) {
+      deps.report(
+        new Error(
+          `compaction summary quality: ratio ${quality.ratio?.toFixed(4) ?? "n/a"}, missing headings: ${quality.missingHeadings.join(", ") || "none"}`,
+        ),
+        { during: "compaction_quality", taskId: task.id, conversationId },
+      );
+    }
     if (summary.length === 0) {
       const error = modelError("provider", "the summary request returned no text", {
         retryable: false,
@@ -579,6 +906,12 @@ export function compactionTaskDefinition(
         if (cause === "background") d.backgroundFailedAt = plan.headEntryId ?? "";
       });
     }
+    summary = await attachTrailer(summary, plan, settings, structured, {
+      task,
+      ctx,
+      conversation,
+      runId,
+    });
     return finish(
       rt,
       task,
