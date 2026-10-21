@@ -1,0 +1,23 @@
+{
+  "key": "964da3bd7f7ceca9f2729e05f545f5eb8838e69856c68681c67ce35ffaeee986",
+  "tool": "web_search",
+  "args": {
+    "query": "eastmere district garden watering restrictions",
+    "num_results": 5
+  },
+  "result": {
+    "query": "eastmere district garden watering restrictions",
+    "results": [
+      {
+        "title": "Synthetic source bt-w1 1",
+        "url": "https://example.com/bt-w1/1",
+        "snippet": "Eastmere bans sprinklers between ten and four on summer days."
+      },
+      {
+        "title": "Synthetic source bt-w1 2",
+        "url": "https://example.com/bt-w1/2",
+        "snippet": "Hand watering is allowed at any hour."
+      }
+    ]
+  }
+}

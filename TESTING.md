@@ -58,6 +58,32 @@ cd frontend && npm test -- --ci
 
 Both should be green before opening a PR.
 
+## Evals
+
+The eval harness lives in `backend/evals/` (tasks in `evals/tasks/`, reports in `evals/results/` which is not
+committed, promoted baselines in `evals/baselines/`). Run from `backend/`:
+
+```bash
+# fake mode: scripted model, replayed web, no judges, no key, free. Needs the local stack (engine deps in engine/node_modules, Postgres tools on PATH)
+ONIVA_E2E=1 uv run python -m evals run --tag regression -k 3 --baseline regression-fake --strict
+# after a deliberate change, re-baseline (refuses failed trials and existing files unless --force)
+ONIVA_E2E=1 uv run python -m evals run --tag regression -k 3 --out evals/results/new.json
+uv run python -m evals promote-baseline evals/results/new.json --force
+# harness tests: offline ones always, stack ones with ONIVA_E2E=1
+ONIVA_E2E=1 uv run pytest -q -p no:cacheprovider -m "e2e or eval" tests/evals
+```
+
+- **CI** (`.github/workflows/evals.yml`, path-filtered): the `regression` tag at k=3 in fake mode against
+  `evals/baselines/regression-fake.json`, then the mutation meta-eval. About 3 minutes (the stack boot dominates; the
+  27 trials take about 25 seconds). It fails on a pass-rate drop beyond max(0.05, 2 standard errors), a cost per
+  pass rise over 15%, a gating grader that newly fails, or a baseline task that is missing (`--strict`).
+- **Mutation meta-eval** (`evals/mutate.py`, `tests/evals/test_mutations.py`): injects known faults (dropped
+  citations, limit exceeded, wrong tool order, run error, cost blow-up, ...) into recorded traces and asserts the
+  grader meant to catch each one fails. A grader that misses its mutation fails the test.
+- **Live mode** (`--live`) spends money: it needs `EVAL_OPENROUTER_API_KEY` and a spend cap (`EVAL_MAX_USD` or
+  `--max-usd`), and refuses to start without both. CI never uses it. Keep the key in `.env` and load it with
+  `uv run --env-file .env ...`; never print it.
+
 ## Conventions
 
 - External services (E2B, LLM providers, Linear, OFAC, etc.) are mocked in

@@ -1,0 +1,73 @@
+# [medium] Guards plan coverage on a three-way comparison with a recommendation: every named option and the
+# recommendation ask must appear in the plan and the report.
+id: dw-three-way-comparison
+kind: deep_work
+tags: []
+input:
+  query: Compare Pinecrest, Quarry and Rook note-taking apps on offline support and price, then recommend one for
+    a small team
+  plan:
+    title: DWPLAN_TC_DW_THREE_WAY_COMPARISON
+    sub_queries:
+    - worker_id: tc-w1
+      sub_query: pinecrest note app offline support and price
+      tools:
+      - web_search
+    - worker_id: tc-w2
+      sub_query: quarry note app offline support and price
+      tools:
+      - web_search
+    - worker_id: tc-w3
+      sub_query: rook note app offline support and price
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Pinecrest works fully offline at 6 euros per user [1]. Quarry has no offline mode at 4 euros [3].
+    Rook caches the last 50 notes at 5 euros [5]. For a small team that travels, Pinecrest is the safest choice
+    [1][2].
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 8
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+- id: plan-covers-request
+  type: judge
+  params:
+    judge: plan_coverage
+    plan: 'tc-w1: pinecrest note app offline support and price; tc-w2: quarry note app offline support and price;
+      tc-w3: rook note app offline support and price'
+budget:
+  max_usd: 1.5
+  max_rounds: 8

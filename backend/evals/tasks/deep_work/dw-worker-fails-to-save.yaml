@@ -1,0 +1,71 @@
+# [hard] Guards partial failure: the second worker's model call errors so it never saves learnings. The run must
+# still end without a run_error and the report must not cite a source nobody saved. no_failed_workers is advisory
+# here because it fails by design.
+id: dw-worker-fails-to-save
+kind: deep_work
+tags: []
+input:
+  query: Compare the warranty terms of the Kestrel and Lumen e-bikes
+  plan:
+    title: DWPLAN_SF_DW_WORKER_FAILS_TO_SAVE
+    sub_queries:
+    - worker_id: sf-w1
+      sub_query: kestrel e-bike warranty terms
+      tools:
+      - web_search
+    - worker_id: sf-w2
+      sub_query: lumen e-bike warranty terms
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Kestrel offers a three-year frame warranty [1] and a two-year battery warranty [2].
+  rules:
+  - when:
+      role: user
+      includes: 'WORKER sf-w2:'
+    respond:
+      steps:
+      - type: error
+        kind: invalid_request
+        message: scripted worker failure
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+  gating: false
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.5
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 8
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 8

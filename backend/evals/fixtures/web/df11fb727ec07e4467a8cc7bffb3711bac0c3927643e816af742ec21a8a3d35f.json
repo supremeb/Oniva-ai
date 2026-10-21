@@ -1,0 +1,23 @@
+{
+  "key": "df11fb727ec07e4467a8cc7bffb3711bac0c3927643e816af742ec21a8a3d35f",
+  "tool": "web_search",
+  "args": {
+    "query": "brennick community solar programme rules",
+    "num_results": 5
+  },
+  "result": {
+    "query": "brennick community solar programme rules",
+    "results": [
+      {
+        "title": "Synthetic source fg-w2 1",
+        "url": "https://example.com/fg-w2/1",
+        "snippet": "Brennick allows projects up to five megawatts."
+      },
+      {
+        "title": "Synthetic source fg-w2 2",
+        "url": "https://example.com/fg-w2/2",
+        "snippet": "Brennick requires at least ten subscribers per project."
+      }
+    ]
+  }
+}

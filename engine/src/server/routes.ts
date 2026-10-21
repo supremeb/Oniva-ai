@@ -27,6 +27,11 @@
  *   `ask_user` question. Body: `{ answer: { optionIds?, text? } }`; principal
  *   from `X-Oniva-Principal`. → 200 `{ question }`; 400 invalid, 404 not_owned,
  *   409 already_answered / not_waiting, 410 expired.
+ * - `GET /v1/conversations/:id/trace` → 200 `ConversationTrace`: the entries of
+ *   the conversation and of every subagent child below it, usage, taint and
+ *   compactions. Read-only. `?limit=` (entries) and `?cursor=` page it: a
+ *   response that does not hold everything has `truncated: true` and
+ *   `nextCursor`. 400 for a bad limit or cursor.
  * - `PUT /v1/conversations/:id/agent` updates the agent configuration. Body:
  *   a partial agent config (unknown or mistyped fields → 400, nothing
  *   committed); it applies from the next model request and reaches watchers
@@ -51,6 +56,7 @@ import type { Session } from "../session/session.js";
 import { type ConversationRecord, MAX_PAGE_LIMIT } from "../storage/types.js";
 import { SignalRejected, type TaskDefinition } from "../tasks/define.js";
 import type { WatchHub } from "../watch/stream.js";
+import { buildTrace, InvalidTraceCursor } from "../watch/trace.js";
 import { bindingMatches, headerValue, ONIVA_HEADERS, type TenantBinding } from "./auth.js";
 
 /** The engine API version reported by `GET /v1/health` (KTD16). */
@@ -505,6 +511,32 @@ export const ROUTES: readonly Route[] = Object.freeze([
         status: 200,
         body: { conversationId: conv.id, questions: questions as unknown as JsonObject },
       };
+    },
+  },
+  {
+    method: "GET",
+    pattern: "/v1/conversations/:id/trace",
+    auth: true,
+    async handle(ctx) {
+      const conv = await ctx.conversation();
+      const rawLimit = ctx.url.searchParams.get("limit");
+      let limit: number | undefined;
+      if (rawLimit !== null) {
+        if (!/^[1-9][0-9]*$/.test(rawLimit) || !Number.isSafeInteger(Number(rawLimit))) {
+          throw bad("limit must be a positive integer");
+        }
+        limit = Number(rawLimit);
+      }
+      try {
+        const trace = await buildTrace(ctx.harness.session, conv.id, {
+          ...(limit === undefined ? {} : { limit }),
+          cursor: ctx.url.searchParams.get("cursor"),
+        });
+        return { status: 200, body: trace as unknown as JsonObject };
+      } catch (err) {
+        if (err instanceof InvalidTraceCursor) throw bad(err.message);
+        throw err;
+      }
     },
   },
   {

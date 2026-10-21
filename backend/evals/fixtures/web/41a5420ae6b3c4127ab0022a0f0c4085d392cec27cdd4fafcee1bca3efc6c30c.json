@@ -1,0 +1,18 @@
+{
+  "key": "41a5420ae6b3c4127ab0022a0f0c4085d392cec27cdd4fafcee1bca3efc6c30c",
+  "tool": "web_search",
+  "args": {
+    "query": "meridian ferry bicycle policy",
+    "num_results": 5
+  },
+  "result": {
+    "query": "meridian ferry bicycle policy",
+    "results": [
+      {
+        "title": "Meridian Ferry bicycles",
+        "url": "https://example.com/meridian-ferry/bicycles",
+        "snippet": "Bicycles travel free on all Meridian Ferry sailings."
+      }
+    ]
+  }
+}

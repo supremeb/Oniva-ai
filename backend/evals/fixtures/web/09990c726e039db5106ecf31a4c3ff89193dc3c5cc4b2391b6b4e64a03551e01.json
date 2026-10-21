@@ -1,0 +1,23 @@
+{
+  "key": "09990c726e039db5106ecf31a4c3ff89193dc3c5cc4b2391b6b4e64a03551e01",
+  "tool": "web_search",
+  "args": {
+    "query": "marrow line transit ridership and fares",
+    "num_results": 5
+  },
+  "result": {
+    "query": "marrow line transit ridership and fares",
+    "results": [
+      {
+        "title": "Synthetic source cd-w1 1",
+        "url": "https://example.com/cd-w1/1",
+        "snippet": "Marrow Line carries about 80 thousand riders per weekday."
+      },
+      {
+        "title": "Synthetic source cd-w1 2",
+        "url": "https://example.com/cd-w1/2",
+        "snippet": "A single Marrow Line fare costs 2.40 euros."
+      }
+    ]
+  }
+}

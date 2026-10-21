@@ -1,0 +1,23 @@
+{
+  "key": "3beebf936657453c1451dee368ad382891189d16b3f48ab321ff49f8853fb652",
+  "tool": "web_search",
+  "args": {
+    "query": "veltra orbit smartwatch battery life and charging speed",
+    "num_results": 5
+  },
+  "result": {
+    "query": "veltra orbit smartwatch battery life and charging speed",
+    "results": [
+      {
+        "title": "Synthetic source ts-w1 1",
+        "url": "https://example.com/ts-w1/1",
+        "snippet": "Veltra Orbit lasts about nine days per charge in standard mode."
+      },
+      {
+        "title": "Synthetic source ts-w1 2",
+        "url": "https://example.com/ts-w1/2",
+        "snippet": "A full Orbit charge takes roughly seventy minutes."
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "key": "84b98aefb79d264be3869a1ed9347c7c69e75941d9c41b772c2bbee8ef1fdc24",
+  "tool": "web_search",
+  "args": {
+    "query": "pinecrest note app offline support and price",
+    "num_results": 5
+  },
+  "result": {
+    "query": "pinecrest note app offline support and price",
+    "results": [
+      {
+        "title": "Synthetic source tc-w1 1",
+        "url": "https://example.com/tc-w1/1",
+        "snippet": "Pinecrest works offline and costs 6 euros per user per month."
+      },
+      {
+        "title": "Synthetic source tc-w1 2",
+        "url": "https://example.com/tc-w1/2",
+        "snippet": "Pinecrest syncs on reconnect."
+      }
+    ]
+  }
+}

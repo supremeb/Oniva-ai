@@ -1,0 +1,23 @@
+{
+  "key": "34ef15e57748a7e867713c6ee35a601ec7d3a0a7d29151211f5e543c6e1e73bc",
+  "tool": "web_search",
+  "args": {
+    "query": "veltra orbit price euro",
+    "num_results": 5
+  },
+  "result": {
+    "query": "veltra orbit price euro",
+    "results": [
+      {
+        "title": "Veltra Orbit product page",
+        "url": "https://example.com/veltra/orbit",
+        "snippet": "The Veltra Orbit smartwatch retails for 249 euros."
+      },
+      {
+        "title": "Veltra price list",
+        "url": "https://example.com/veltra/prices",
+        "snippet": "Orbit 249 euros, Orbit Lite 179 euros."
+      }
+    ]
+  }
+}

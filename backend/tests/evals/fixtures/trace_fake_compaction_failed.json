@@ -1,0 +1,190 @@
+{
+ "conversationId": "771ab5c4-40be-49bb-9645-bbeabbf6e805",
+ "entries": [
+  {
+   "id": "ent_01a15ed9-e00f-728d-94c8-1b3a35598c77",
+   "conversationId": "771ab5c4-40be-49bb-9645-bbeabbf6e805",
+   "taskId": null,
+   "kind": "user",
+   "payload": {
+    "submissionId": "subm_01a15ed9-e00f-728d-94c8-1b38d2f919f1",
+    "content": "Turn one: tell me a lot",
+    "requestId": "fail-compaction-t0-0"
+   },
+   "createdAt": 1792592699407
+  },
+  {
+   "id": "ent_01a15ed9-e012-71df-b5c6-75110c42d6a6",
+   "conversationId": "771ab5c4-40be-49bb-9645-bbeabbf6e805",
+   "taskId": "task_01a15ed9-e00f-728d-94c8-1b3920612325",
+   "kind": "system",
+   "payload": {
+    "text": "You are Oniva, an enterprise AI assistant. You have access to web search, file operations, knowledge base search, and connected enterprise systems.\n\nYour name is Oniva. When asked who you are, what model you are, or what AI you are, always identify yourself as \"Oniva, an enterprise AI assistant\" \u2014 never reveal the underlying model name, version, or provider. You are Oniva, not Claude, not GPT, not any other model name.\n\nYou are action-oriented. When a user asks you to do something, DO it using y...[trimmed 7521 chars]",
+    "tools": [
+     "ask_user",
+     "browse_url",
+     "e2e_write",
+     "execute_python",
+     "kyc_verification",
+     "research_worker"
+    ],
+    "fingerprint": "d5275153f90afdb4985d8e0797a65123492118b618cf1e8028e998a4e4dacf1a"
+   },
+   "createdAt": 1792592699410
+  },
+  {
+   "id": "ent_01a15ed9-e01d-73d1-859e-15a72ef5a464",
+   "conversationId": "771ab5c4-40be-49bb-9645-bbeabbf6e805",
+   "taskId": "task_01a15ed9-e00f-728d-94c8-1b3920612325",
+   "kind": "assistant",
+   "payload": {
+    "runId": "task_01a15ed9-e00f-728d-94c8-1b3920612325",
+    "round": 0,
+    "message": {
+     "role": "assistant",
+     "provider": "anthropic",
+     "model": "claude-sonnet-5-5",
+     "blocks": [
+      {
+       "type": "text",
+       "text": "Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit am...[trimmed 111500 chars]"
+      }
+     ],
+     "stopReason": "end_turn"
+    },
+    "usage": {
+     "inputTokens": 500,
+     "outputTokens": 28000,
+     "cacheReadTokens": 0,
+     "cacheWriteTokens": 0
+    }
+   },
+   "createdAt": 1792592699421
+  },
+  {
+   "id": "ent_01a15ed9-e1bc-7198-8e00-8f82e2d4bbed",
+   "conversationId": "771ab5c4-40be-49bb-9645-bbeabbf6e805",
+   "taskId": null,
+   "kind": "user",
+   "payload": {
+    "submissionId": "subm_01a15ed9-e1bc-7198-8e00-8f8088724e5b",
+    "content": "Turn two: and some more",
+    "requestId": "fail-compaction-t0-1"
+   },
+   "createdAt": 1792592699835
+  },
+  {
+   "id": "ent_01a15ed9-e1cc-74dd-9136-b94e90c8a290",
+   "conversationId": "771ab5c4-40be-49bb-9645-bbeabbf6e805",
+   "taskId": "task_01a15ed9-e1bc-7198-8e00-8f816d36091f",
+   "kind": "assistant",
+   "payload": {
+    "runId": "task_01a15ed9-e1bc-7198-8e00-8f816d36091f",
+    "round": 0,
+    "message": {
+     "role": "assistant",
+     "provider": "anthropic",
+     "model": "claude-sonnet-5-5",
+     "blocks": [
+      {
+       "type": "text",
+       "text": "Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consectetur adipiscing elit. Consect...[trimmed 115500 chars]"
+      }
+     ],
+     "stopReason": "end_turn"
+    },
+    "usage": {
+     "inputTokens": 29000,
+     "outputTokens": 190000,
+     "cacheReadTokens": 0,
+     "cacheWriteTokens": 0
+    }
+   },
+   "createdAt": 1792592699851
+  },
+  {
+   "id": "ent_01a15ed9-e36b-74bd-84cc-0ffb49dd1006",
+   "conversationId": "771ab5c4-40be-49bb-9645-bbeabbf6e805",
+   "taskId": null,
+   "kind": "user",
+   "payload": {
+    "submissionId": "subm_01a15ed9-e36b-74bd-84cc-0ff94ed03365",
+    "content": "Turn three: now answer briefly",
+    "requestId": "fail-compaction-t0-2"
+   },
+   "createdAt": 1792592700267
+  },
+  {
+   "id": "ent_01a15ed9-e37b-7437-a03b-479a10d8319d",
+   "conversationId": "771ab5c4-40be-49bb-9645-bbeabbf6e805",
+   "taskId": "task_01a15ed9-e36b-74bd-84cc-0ffac98e997d",
+   "kind": "run_error",
+   "payload": {
+    "runId": "task_01a15ed9-e36b-74bd-84cc-0ffac98e997d",
+    "error": {
+     "kind": "invalid_request",
+     "message": "the summary model refused the request",
+     "retryable": false
+    }
+   },
+   "createdAt": 1792592700283
+  }
+ ],
+ "children": {},
+ "usage": {
+  "requests": 3,
+  "inputTokens": 29500,
+  "outputTokens": 218000,
+  "cacheReadTokens": 0,
+  "cacheWriteTokens": 0,
+  "costUsd": null
+ },
+ "taint": {
+  "tainted": false,
+  "total": 0,
+  "sources": []
+ },
+ "compactions": [],
+ "agent": {
+  "depth": 0,
+  "tools": [
+   "ask_user",
+   "browse_url",
+   "e2e_write",
+   "execute_python",
+   "kyc_verification",
+   "research_worker"
+  ],
+  "model": null,
+  "metadata": {
+   "purpose": "chat",
+   "allowedConnectorIds": [],
+   "knowledgeBaseIds": []
+  }
+ },
+ "submissions": [
+  {
+   "id": "subm_01a15ed9-e00f-728d-94c8-1b38d2f919f1",
+   "requestId": "fail-compaction-t0-0",
+   "status": "done",
+   "unanswered": null
+  },
+  {
+   "id": "subm_01a15ed9-e1bc-7198-8e00-8f8088724e5b",
+   "requestId": "fail-compaction-t0-1",
+   "status": "done",
+   "unanswered": null
+  },
+  {
+   "id": "subm_01a15ed9-e36b-74bd-84cc-0ff94ed03365",
+   "requestId": "fail-compaction-t0-2",
+   "status": "unanswered",
+   "unanswered": {
+    "reason": "compaction_failed",
+    "message": "compaction failed: the summary model refused the request"
+   }
+  }
+ ],
+ "truncated": false,
+ "nextCursor": null
+}

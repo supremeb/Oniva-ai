@@ -1,0 +1,70 @@
+# [hard] Guards multi-round research: four workers cover four markets and the reflector should find a gap worth a
+# second round. The fake script runs one round only; the gap round needs live mode.
+id: dw-four-worker-gap-round
+kind: deep_work
+tags: []
+input:
+  query: 'Survey community solar programme rules in four fictional regions: Aldermark, Brennick, Corvale and Dunmoor'
+  plan:
+    title: DWPLAN_FG_DW_FOUR_WORKER_GAP_ROUND
+    sub_queries:
+    - worker_id: fg-w1
+      sub_query: aldermark community solar programme rules
+      tools:
+      - web_search
+    - worker_id: fg-w2
+      sub_query: brennick community solar programme rules
+      tools:
+      - web_search
+    - worker_id: fg-w3
+      sub_query: corvale community solar programme rules
+      tools:
+      - web_search
+    - worker_id: fg-w4
+      sub_query: dunmoor community solar programme rules
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Aldermark caps projects at two megawatts [1] and Brennick at five [3]; Dunmoor sets no cap [7]. Corvale
+    pays eleven cents per kilowatt hour [5] and limits one subscriber to forty percent [6]. Brennick needs ten subscribers
+    [4] and Dunmoor pays quarterly [8].
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 2.5
+    max_rounds: 12
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 2.5
+  max_rounds: 12

@@ -1,0 +1,23 @@
+{
+  "key": "5311ce277fbddde25eb3dc5c16b8d612cf4e48ea4f219ce8b7cc82fba349d84f",
+  "tool": "web_search",
+  "args": {
+    "query": "eval smoke es-w2 vendor pricing",
+    "num_results": 5
+  },
+  "result": {
+    "query": "eval smoke es-w2 vendor pricing",
+    "results": [
+      {
+        "title": "Source es-w2 1",
+        "url": "https://example.com/es-w2/1",
+        "snippet": "About eval smoke es-w2 vendor pricing, part 1"
+      },
+      {
+        "title": "Source es-w2 2",
+        "url": "https://example.com/es-w2/2",
+        "snippet": "About eval smoke es-w2 vendor pricing, part 2"
+      }
+    ]
+  }
+}

@@ -1,0 +1,92 @@
+name: evals
+
+# Fake-mode regression subset of the eval harness (plan 2026-10-21-001, U10). Deterministic and offline: a scripted
+# model, replayed web fixtures, no judges, no API keys, nothing spent. It boots the same stack as the `engine-smoke`
+# job (Postgres, the backend, an engine worker), runs the `regression`-tagged tasks 3 times each and fails when the
+# result is worse than the committed baseline (backend/evals/baselines/regression-fake.json).
+#
+# Fails when (python -m evals run ... --baseline regression-fake --strict):
+#   - a task's pass rate drops by more than max(0.05, 2 x the baseline's standard error);
+#   - a task's cost per passing trial rises by more than 15%;
+#   - a gating grader fails that did not fail in the baseline (even inside the noise band);
+#   - a baseline task is missing from the run.
+# After a deliberate change: re-run locally and `python -m evals promote-baseline <result> --force` (see TESTING.md).
+# The same job runs the offline mutation meta-eval and the harness's own tests (tests/evals).
+
+on:
+  push:
+    paths:
+      - "engine/src/agent/**"
+      - "backend/app/services/deep_work/**"
+      - "backend/app/services/engine_*_agent.py"
+      - "backend/evals/**"
+      - "backend/tests/evals/**"
+      - "backend/tests/e2e/**"
+      - ".github/workflows/evals.yml"
+  pull_request:
+    paths:
+      - "engine/src/agent/**"
+      - "backend/app/services/deep_work/**"
+      - "backend/app/services/engine_*_agent.py"
+      - "backend/evals/**"
+      - "backend/tests/evals/**"
+      - "backend/tests/e2e/**"
+      - ".github/workflows/evals.yml"
+
+jobs:
+  regression-fake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ONIVA_E2E: "1"
+      ONIVA_E2E_PG_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci
+        working-directory: engine
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+        working-directory: backend
+      - name: Regression subset against the committed baseline
+        run: >
+          uv run python -m evals run --tag regression -k 3 --mode fake
+          --baseline regression-fake --strict
+          --out evals/results/ci-regression-fake.json
+        working-directory: backend
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f evals/results/ci-regression-fake.md ]; then cat evals/results/ci-regression-fake.md >> "$GITHUB_STEP_SUMMARY"; fi
+        working-directory: backend
+      - name: Mutation meta-eval and harness tests
+        run: uv run pytest -q -p no:cacheprovider -m "e2e or eval" tests/evals
+        working-directory: backend
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: eval-results
+          path: backend/evals/results/
+          retention-days: 7

@@ -131,6 +131,9 @@ async def lifespan(_app):
     await tools.ensure_skills_loaded()
     dw_fakes.install(DW)  # after the real skills are loaded: web_search, E2B, tokens, Redis
     dw_fakes.install_approval_fakes(DW)  # the sandbox behind execute_python, an offline browse_url
+    from evals import replay  # eval trials: hash-keyed web fixtures; a no-op unless EVAL_REPLAY_MODE + _DIR are set
+
+    replay.install_from_env()
     run_handlers.bootstrap()  # the fleet start / settle hooks, as main.py does
     _serialize_fleet_settle()
     reconciler = RunReconciler(factory, settings, engine_factory=get_engine_client)
@@ -169,10 +172,18 @@ async def _seed():
         db.add(Project(id=PROJECT, tenant_id=TENANT, name="e2e", owner_id=USER))
         await db.commit()
         await _seed_identities(db)
-        db.add(LLMProvider(
-            tenant_id=TENANT, name="anthropic", display_name="anthropic", provider_type="anthropic",
-            api_key_encrypted=get_encryption_service().encrypt("sk-ant-FAKE-e2e-key-0123456789"),
-            default_model="anthropic/claude-sonnet-4-5", priority=0, is_enabled=True))
+        if E.get("E2E_LIVE_PROVIDER") == "openrouter":
+            # Eval live mode (evals/stack.py): the tenant's only provider is OpenRouter, pinned to one model. The key
+            # comes from the environment, is stored encrypted and is never logged.
+            db.add(LLMProvider(
+                tenant_id=TENANT, name="openrouter", display_name="openrouter", provider_type="openrouter",
+                api_key_encrypted=get_encryption_service().encrypt(E["EVAL_OPENROUTER_API_KEY"]),
+                default_model=E["EVAL_LIVE_MODEL"], priority=0, is_enabled=True))
+        else:
+            db.add(LLMProvider(
+                tenant_id=TENANT, name="anthropic", display_name="anthropic", provider_type="anthropic",
+                api_key_encrypted=get_encryption_service().encrypt("sk-ant-FAKE-e2e-key-0123456789"),
+                default_model="anthropic/claude-sonnet-4-5", priority=0, is_enabled=True))
         await db.commit()
         # Core insert: explicit NULLs for the ARRAY columns SQLite cannot bind (tools are set in the seam below).
         await db.execute(CustomAgent.__table__.insert().values(
@@ -248,6 +259,8 @@ _build_agent = _conversations.build_engine_chat_agent
 async def _build_agent_with_e2e_tools(*args, **kwargs):
     """The composer offers no way to pick the e2e tools, so the allow-list always carries them."""
     built = await _build_agent(*args, **kwargs)
+    if E.get("E2E_LIVE_PROVIDER"):  # eval live mode: the model sees only the tools production would offer
+        return built
     built.agent["tools"] = sorted({*built.agent["tools"], "e2e_write", "kyc_verification", "execute_python",
                                    "browse_url", "research_worker"})
     return built
@@ -291,6 +304,8 @@ _compose_execute_config = _dw_agent.compose_execute_config
 def _compose_with_e2e_hold(inputs, now=None):
     """Test seam (like the chat one): the orchestrator may call ``e2e_hold``, a gated non-replayable write."""
     config = _compose_execute_config(inputs, now)
+    if E.get("E2E_LIVE_PROVIDER"):  # eval live mode: no test-only tools
+        return config
     config["tools"] = sorted({*config["tools"], "e2e_hold"})
     return config
 

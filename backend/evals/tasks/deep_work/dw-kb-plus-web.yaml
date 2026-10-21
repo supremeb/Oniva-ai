@@ -1,0 +1,64 @@
+# [medium] Guards mixed sourcing: one worker reads the knowledge base and one searches the web, and the report
+# must keep both kinds of source distinct. KB seeding is not wired into the driver yet (input.kb lists the
+# documents).
+id: dw-kb-plus-web
+kind: deep_work
+tags: []
+input:
+  query: Summarise our travel expense policy and compare its daily meal limit with the public per diem for Lakemont
+  plan:
+    title: DWPLAN_KW_DW_KB_PLUS_WEB
+    sub_queries:
+    - worker_id: kw-w1
+      sub_query: travel expense policy daily meal limit
+      tools: &id001
+      - search_knowledge
+      - web_search
+    - worker_id: kw-w2
+      sub_query: lakemont public per diem meal allowance
+      tools: *id001
+    deliverable: null
+  kb:
+  - fixtures/kb/travel-expense-policy.md
+environment:
+  web: replay
+fake:
+  findings_md: Our policy caps meals at fifty-five euros a day [1], below the Lakemont public per diem of sixty-two
+    euros [3]. Receipts are required above fifteen euros [2]; the public rate is reviewed each January [4].
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 8
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 8

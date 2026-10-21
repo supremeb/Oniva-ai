@@ -1,0 +1,63 @@
+# [easy] Guards the web-needed path: a time-sensitive question must trigger exactly one search and the answer must
+# use its result.
+id: chat-smoke-web-search
+kind: chat
+tags:
+- smoke
+- regression
+input:
+  turns:
+  - When does the Meridian Ferry sail on Saturday?
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake:
+  rules:
+  - when:
+      role: user
+      includes: Meridian Ferry sail on Saturday
+    respond:
+      steps:
+      - type: tool_call
+        name: web_search
+        arguments:
+          query: meridian ferry saturday timetable
+      usage:
+        inputTokens: 300
+        outputTokens: 40
+  - when:
+      role: tool_result
+      tool: web_search
+    respond:
+      steps:
+      - type: text
+        text: The Meridian Ferry sails from Pier 4 at 08:15, 11:40 and 16:05 on Saturdays.
+      usage:
+        inputTokens: 480
+        outputTokens: 40
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: expected-tools
+  type: trajectory_match
+  params:
+    mode: exact
+    expected:
+    - web_search
+- id: budget
+  type: budget
+  params:
+    max_usd: 0.25
+    max_rounds: 4
+budget:
+  max_usd: 0.25
+  max_rounds: 4

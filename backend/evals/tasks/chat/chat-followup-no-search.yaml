@@ -1,0 +1,72 @@
+# [medium] Guards redundant tool calls across turns: the second turn asks about something already answered, so it
+# must reuse the first turn's result.
+id: chat-followup-no-search
+kind: chat
+tags: []
+input:
+  turns:
+  - How long does the Norrin Pulse battery last?
+  - And is that more or fewer days than a week?
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake:
+  rules:
+  - when:
+      role: user
+      includes: How long does the Norrin Pulse battery last
+    respond:
+      steps:
+      - type: tool_call
+        name: web_search
+        arguments:
+          query: norrin pulse battery rating
+      usage:
+        inputTokens: 300
+        outputTokens: 40
+  - when:
+      role: tool_result
+      tool: web_search
+    respond:
+      steps:
+      - type: text
+        text: The Norrin Pulse is rated for five days of typical use.
+      usage:
+        inputTokens: 450
+        outputTokens: 30
+  - when:
+      role: user
+      includes: more or fewer days than a week
+    respond:
+      steps:
+      - type: text
+        text: 'Fewer: five days is two days short of a week.'
+      usage:
+        inputTokens: 700
+        outputTokens: 20
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: expected-tools
+  type: trajectory_match
+  params:
+    mode: exact
+    expected:
+    - web_search
+- id: budget
+  type: budget
+  params:
+    max_usd: 0.25
+    max_rounds: 4
+budget:
+  max_usd: 0.25
+  max_rounds: 4
