@@ -373,6 +373,8 @@ class Settings(BaseSettings):
     ENABLE_ENGINE_WORKFLOWS: bool = False  # global gate for engine-backed workflow runs; tenants opt in via settings.features
     # Project memory (U26): global gate for the memory tools; tenants override via settings.features.
     ENABLE_PROJECT_MEMORY: bool = False
+    # Project memory retention (U32): pending rows nobody approved are swept after this many days.
+    MEMORY_RETENTION_DAYS: int = 30
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
     # Tiered context reduction (evals/context plan, U16). off | offload | offload+clear | full. The per-tenant
     # flag features.ENABLE_ENGINE_CONTEXT_TIERS (true = full, false = off) overrides this. Read when an agent
