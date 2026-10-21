@@ -31,7 +31,7 @@
  */
 import { z } from "zod";
 import type { JsonObject, JsonValue } from "../core/json.js";
-import type { SubmissionRecord } from "../storage/types.js";
+import { type EntryRecord, MAX_PAGE_LIMIT, type SubmissionRecord } from "../storage/types.js";
 import {
   type Committed,
   type TaskDefinition,
@@ -42,6 +42,12 @@ import {
 import { defineTool, type ToolDefinition, type ToolResult } from "../tools/registry.js";
 import { agentResultDoc, COMPLETE_TASK_TOOL, metadataOutputSchema } from "./complete-task.js";
 import type { ToolResultStatus } from "./context-builder.js";
+import {
+  CONTEXT_PREAMBLE_MAX_CHARS,
+  composeChildPrompt,
+  contextProblem,
+  renderForkBlock,
+} from "./context-seed.js";
 import {
   GENERATION_TASK_KIND,
   type GenerationCheckpoint,
@@ -59,6 +65,7 @@ import {
   toSubmissionInput,
   toSubmissionResult,
 } from "./submission.js";
+import { rootConversationId, taintDoc } from "./taint.js";
 import type { AgentDeps, ToolTaskCheckpoint, ToolTaskInput } from "./tool-task.js";
 
 /** The tool task phase that runs a subagent call. */
@@ -84,7 +91,15 @@ export interface SubagentToolOptions {
    * parent receives the validated payload. Absent: the child answers in text.
    */
   outputSchema?: JsonObject;
+  /**
+   * `"isolated"` (default): the child sees only its prompt and any per-call
+   * `context`. `"fork"`: its first entry also holds a bounded narrative of the
+   * parent's conversation (`context-seed.ts`).
+   */
+  mode?: SubagentMode;
 }
+
+export type SubagentMode = "isolated" | "fork";
 
 /** What a subagent tool overrides in the child's configuration, and its depth limit. */
 export interface SubagentSpec {
@@ -92,10 +107,15 @@ export interface SubagentSpec {
   tools?: string[];
   systemPrompt?: string;
   outputSchema?: JsonObject;
+  mode?: SubagentMode;
   maxDepth: number;
 }
 
-/** `context` is accepted but not acted on yet (U20 gives it meaning). */
+/**
+ * Per-call context (R17): `brief` is text for the child (for example what the
+ * sibling workers cover); `files` are conversation-workspace paths the child is
+ * told to read (pointers, not content).
+ */
 export type SubagentContext = { brief?: string | undefined; files?: string[] | undefined };
 
 export type SubagentArgs = {
@@ -147,8 +167,12 @@ export function createSubagentTool(options: SubagentToolOptions): SubagentToolDe
       throw new TypeError(`subagent ${options.name}: outputSchema: ${problems.join("; ")}`);
     }
   }
+  if (options.mode !== undefined && options.mode !== "isolated" && options.mode !== "fork") {
+    throw new TypeError(`subagent ${options.name}: mode must be "isolated" or "fork"`);
+  }
   const spec: SubagentSpec = {
     maxDepth,
+    ...(options.mode === undefined ? {} : { mode: options.mode }),
     ...(options.outputSchema === undefined
       ? {}
       : { outputSchema: structuredClone(options.outputSchema) }),
@@ -196,19 +220,27 @@ export function isSubagentTool(tool: ToolDefinition | undefined): tool is Subage
  * can be overridden; `maxDepth` (and any other key) is ignored, so metadata can
  * never loosen the depth limit.
  */
-const subagentOverrideSchema = z.object({
-  model: z.string().nullable().optional(),
-  tools: z.array(z.string()).optional(),
-  systemPrompt: z.string().optional(),
-  outputSchema: z
-    .record(z.string(), jsonValue)
-    .superRefine((schema, ctx) => {
-      for (const message of schemaProblems(schema)) ctx.addIssue({ code: "custom", message });
-    })
-    .optional(),
-});
+let overrideSchemaCache: ReturnType<typeof buildOverrideSchema> | undefined;
+/** Built on first use: `context-seed.ts` and this file import each other through `compaction.ts`. */
+const subagentOverrideSchema = () => (overrideSchemaCache ??= buildOverrideSchema());
 
-export type SubagentOverride = z.infer<typeof subagentOverrideSchema>;
+const buildOverrideSchema = () =>
+  z.object({
+    model: z.string().nullable().optional(),
+    tools: z.array(z.string()).optional(),
+    systemPrompt: z.string().optional(),
+    /** Static text placed first in every child's first entry. */
+    contextPreamble: z.string().max(CONTEXT_PREAMBLE_MAX_CHARS).optional(),
+    mode: z.enum(["isolated", "fork"]).optional(),
+    outputSchema: z
+      .record(z.string(), jsonValue)
+      .superRefine((schema, ctx) => {
+        for (const message of schemaProblems(schema)) ctx.addIssue({ code: "custom", message });
+      })
+      .optional(),
+  });
+
+export type SubagentOverride = z.infer<ReturnType<typeof buildOverrideSchema>>;
 
 /** The override for `toolName` in the parent's metadata: none, valid, or malformed. */
 export function subagentOverride(
@@ -221,7 +253,7 @@ export function subagentOverride(
     return { ok: false, reason: "agent.metadata.subagents must be an object" };
   }
   if (!Object.hasOwn(all, toolName)) return { ok: true, value: null };
-  const parsed = subagentOverrideSchema.safeParse(all[toolName]);
+  const parsed = subagentOverrideSchema().safeParse(all[toolName]);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return {
@@ -301,22 +333,20 @@ export async function subagentPhase(
         isError: true,
       });
     }
+    // Caps live here, not in the schema: the schema is part of the prompt fingerprint.
+    const tooBig = contextProblem(parsed.data.context);
+    if (tooBig !== null) {
+      return fail("invalid_arguments", {
+        content: `Invalid arguments for ${call.name}: ${tooBig}`,
+        isError: true,
+      });
+    }
     // The registry erases I/C (heterogeneous kinds); re-narrow to the generation kind.
     const generation = rt.runtime.registry.get(GENERATION_TASK_KIND) as unknown as
       | TaskDefinition<GenerationInput, GenerationCheckpoint>
       | undefined;
     if (!generation) throw new Error("the generation task kind is not registered");
-    return spawnChild(
-      task,
-      rt,
-      tool.subagent,
-      parsed.data.prompt,
-      parsed.data.label,
-      args,
-      generation,
-      deps,
-      writeResult,
-    );
+    return spawnChild(task, rt, tool.subagent, parsed.data, args, generation, deps, writeResult);
   }
   return awaitChild(task, rt, link, writeResult);
 }
@@ -326,14 +356,14 @@ function spawnChild(
   task: State,
   rt: Scope,
   spec: SubagentSpec,
-  prompt: string,
-  label: string | undefined,
+  call: SubagentArgs,
   args: JsonObject,
   generation: TaskDefinition<GenerationInput, GenerationCheckpoint>,
   deps: Deps,
   writeResult: WriteResult,
 ): Promise<Committed> {
   const maxDepth = Math.min(spec.maxDepth, deps.limits.maxSubagentDepth);
+  const label = call.label;
   return rt.commit(async (tx, ops) => {
     const parent = await tx.getConversation(task.conversationId);
     if (!parent) throw new Error(`unknown conversation ${task.conversationId}`);
@@ -358,6 +388,34 @@ function spawnChild(
           content: `Subagent depth limit reached: ${task.input.call.name} would run at depth ${agent.depth}, the maximum is ${maxDepth}. Do the task without delegating it.`,
           isError: true,
           details: { depth: agent.depth, maxDepth },
+        },
+        0,
+      );
+    }
+    // The first entry: the prompt alone, unless context was asked for. Table
+    // reads come before the commit's first write.
+    const mode = override.value?.mode ?? spec.mode ?? "isolated";
+    let fork: string | null = null;
+    if (mode === "fork") {
+      const entries = await parentEntries(tx, task.conversationId);
+      const root = await rootConversationId(tx, parent);
+      const tainted = (await tx.doc(taintDoc, root)).value.tainted;
+      fork = renderForkBlock(entries, { tainted });
+    }
+    const prompt = composeChildPrompt(call.prompt, {
+      preamble: override.value?.contextPreamble,
+      fork,
+      brief: call.context?.brief,
+      files: call.context?.files,
+    });
+    if (prompt.length > deps.limits.maxEntryBytes / 2) {
+      return writeResult(
+        tx,
+        task,
+        "invalid_arguments",
+        {
+          content: `The subagent's task and context are too large (${prompt.length} characters).`,
+          isError: true,
         },
         0,
       );
@@ -397,6 +455,20 @@ function spawnChild(
       },
     });
   });
+}
+
+/** The parent's entries, oldest first (read before the commit's first write). */
+async function parentEntries(
+  tx: Parameters<WriteResult>[0],
+  conversationId: string,
+): Promise<EntryRecord[]> {
+  const out: EntryRecord[] = [];
+  for (let cursor: string | null = null; ; ) {
+    const page = await tx.listEntries(conversationId, { limit: MAX_PAGE_LIMIT, cursor });
+    out.push(...page.items);
+    cursor = page.nextCursor;
+    if (cursor === null) return out;
+  }
 }
 
 /** Steps 2 and 3: follow the child's run until its submission settles, then answer. */
