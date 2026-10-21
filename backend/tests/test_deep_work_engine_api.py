@@ -637,6 +637,23 @@ async def test_the_reconciler_settles_a_run_that_ended_while_nobody_read_it(w):
     assert (await run_of(w, unstarted)).status == "running"
 
 
+async def test_the_background_job_ends_with_the_run(w):
+    # dw_finalize completes the run under run_lock; the job used to stay "running" after a successful report.
+    sid, cid = await started(w)
+    run = await run_of(w, sid)
+    async with dws.run_lock(w.factory, w.ta, run.conversation_id) as locked:
+        locked.advance(phase="done", status="completed")
+    async with w.factory() as db:
+        job = await db.get(BackgroundJob, run.job_id)
+    assert job.status == "completed" and job.completed_at is not None
+
+    sid2, _ = await started(w)
+    run2 = await run_of(w, sid2)
+    await dws.update_run(w.factory, w.ta, run2.conversation_id, status="failed")
+    async with w.factory() as db:
+        assert (await db.get(BackgroundJob, run2.job_id)).status == "failed"
+
+
 async def test_queued_submission_counts_as_active(w):
     sid, cid = await started(w)
     c = w.engine.of(cid)
