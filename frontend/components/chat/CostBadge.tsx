@@ -10,6 +10,11 @@ export function formatUsd(usd: number): string {
   return usd < 1 ? `$${usd.toFixed(3)}` : `$${usd.toFixed(2)}`;
 }
 
+/** "cache 73%" for a ratio in 0-1; null when there is nothing to show. */
+export function cacheLabel(ratio: number | null | undefined): string | null {
+  return typeof ratio === 'number' && ratio > 0 ? `cache ${Math.round(ratio * 100)}%` : null;
+}
+
 /** The i-th run in start order is the i-th turn (the engine entry carries no runId on the wire). */
 export function runForTurn(cost: ConversationCost | null, turnIndex: number): RunCost | null {
   return cost?.runs[turnIndex] ?? null;
@@ -37,6 +42,8 @@ export function CostBadge({ variant, run, cost, active, liveTokens, onRefresh }:
     const usd = 'totalUsd' in src ? src.totalUsd : src.usd;
     const price = src.unpriced ? (usd > 0 ? `${formatUsd(usd)}+ (some n/a)` : 'n/a') : formatUsd(usd);
     text = `${fmtTokens(src.inputTokens)} in / ${fmtTokens(src.outputTokens)} out · ${price}`;
+    const cache = cacheLabel(src.cacheHitRatio);
+    if (cache) text += ` · ${cache}`;
   }
   if (!text) return null;
   return (

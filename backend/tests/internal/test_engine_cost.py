@@ -122,7 +122,7 @@ async def test_legacy_null_role_rows_are_orchestrator_and_empty_has_no_stages(te
     await test_db.commit()
     out = await conversation_cost(test_db, tenant, conv)
     assert out["byStage"] == [{"stage": "orchestrator", "usd": 0.01, "inputTokens": 1, "outputTokens": 1,
-                               "unpriced": False}]
+                               "cacheReadTokens": 0, "unpriced": False, "cacheHitRatio": None}]
     assert (await conversation_cost(test_db, await _tenant(test_db), uuid.uuid4()))["byStage"] == []
 
 
@@ -133,7 +133,7 @@ async def test_chat_conversation_without_purpose_unchanged(test_db):
     out = await conversation_cost(test_db, tenant, conv)
     assert out["totalUsd"] == 0.01 and len(out["runs"]) == 1
     assert out["byPurpose"] == [{"purpose": "generation", "usd": 0.01, "inputTokens": 1, "outputTokens": 1,
-                                 "unpriced": False}]
+                                 "cacheReadTokens": 0, "unpriced": False, "cacheHitRatio": None}]
 
 
 async def test_empty_conversation_has_empty_by_purpose(test_db):
@@ -162,3 +162,21 @@ def test_route_404_for_other_tenant_and_403_for_non_owner(env):  # noqa: F811
     assert env.http.get(f"/api/v1/engine/conversations/{other}/cost").status_code == 404
     not_mine = env.seed(owner=str(uuid.uuid4()))
     assert env.http.get(f"/api/v1/engine/conversations/{not_mine}/cost").status_code == 403
+
+
+async def test_cache_read_tokens_and_hit_ratio_per_run_stage_and_total(test_db):
+    tenant, conv = await _tenant(test_db), uuid.uuid4()
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    hit = _row(tenant, conv, "r1", "a", "0.01", 100, 10, t0, purpose="generation")
+    hit.cache_read_tokens = 300
+    worker = _row(tenant, conv, "r1", "b", "0.01", 100, 10, t0, purpose="generation", role="research_worker")
+    worker.cache_read_tokens = None  # no cache data
+    cold = _row(tenant, conv, "r2", "c", "0.01", 50, 5, t0 + timedelta(minutes=1), purpose="generation")
+    test_db.add_all([hit, worker, cold])
+    await test_db.commit()
+    out = await conversation_cost(test_db, tenant, conv)
+    assert out["runs"][0]["cacheReadTokens"] == 300 and out["runs"][0]["cacheHitRatio"] == 0.6   # 300 / (200 + 300)
+    assert out["runs"][1]["cacheReadTokens"] == 0 and out["runs"][1]["cacheHitRatio"] is None
+    by = {s["stage"]: s for s in out["byStage"]}
+    assert by["orchestrator"]["cacheHitRatio"] == 0.6667 and by["worker"]["cacheHitRatio"] is None
+    assert out["cacheReadTokens"] == 300 and out["cacheHitRatio"] == round(300 / 550, 4)

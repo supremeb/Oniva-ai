@@ -2,7 +2,7 @@
 
 import { useId, useState } from 'react';
 import type { ConversationCost } from '@/lib/engine/cost';
-import { formatUsd } from '@/components/chat/CostBadge';
+import { cacheLabel, formatUsd } from '@/components/chat/CostBadge';
 
 const PURPOSE_LABEL: Record<string, string> = {
   'deep_work.orchestrator': 'Orchestrator',
@@ -87,6 +87,11 @@ export function CostPopover({ cost }: { cost: ConversationCost | null }) {
               </li>
             ))}
           </ul>
+          {cacheLabel(cost.cacheHitRatio) && (
+            <div className="mt-2 text-neutral-500" data-testid="cost-popover-cache">
+              {cacheLabel(cost.cacheHitRatio)}
+            </div>
+          )}
         </div>
       )}
     </span>

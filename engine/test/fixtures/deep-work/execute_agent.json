@@ -18,12 +18,19 @@
     "subagents": {
       "research_worker": {
         "model": "m/worker",
-        "tools": ["browse_url", "dw_save_learnings", "web_search"],
+        "tools": [
+          "browse_url",
+          "dw_save_learnings",
+          "web_search"
+        ],
         "systemPrompt": "<prompt:research_worker>"
       },
       "reflector": {
         "model": "m/mid",
-        "tools": ["dw_get_learnings", "dw_record_reflection"],
+        "tools": [
+          "dw_get_learnings",
+          "dw_record_reflection"
+        ],
         "systemPrompt": "<prompt:reflector>"
       }
     },

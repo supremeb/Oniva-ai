@@ -136,7 +136,12 @@
             "description": "Worker ids of this round that failed without saving learnings."
           }
         },
-        "required": ["round", "score", "gaps", "should_continue"],
+        "required": [
+          "round",
+          "score",
+          "gaps",
+          "should_continue"
+        ],
         "type": "object"
       },
       "sideEffect": "write",
@@ -147,7 +152,7 @@
     },
     {
       "name": "dw_save_learnings",
-      "description": "Save a research worker's learnings (facts with source URLs; source_type 'model_knowledge' needs no URL). Replaces anything that worker saved before, so saving twice is safe. Call once, when the worker is done.",
+      "description": "Save a research worker's learnings (facts with source URLs; source_type 'model_knowledge' needs no URL). Replaces anything that worker saved before, so saving twice is safe. Call once, when the worker is done. Example: {\"worker_id\": \"w1\", \"learnings\": [{\"fact\": \"X grew 12% in 2025.\", \"source_url\": \"https://example.com/r\", \"confidence\": 0.8, \"source_type\": \"web\"}]}",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -164,7 +169,10 @@
             "type": "array"
           }
         },
-        "required": ["worker_id", "learnings"],
+        "required": [
+          "worker_id",
+          "learnings"
+        ],
         "type": "object"
       },
       "sideEffect": "write",
@@ -175,7 +183,7 @@
     },
     {
       "name": "dw_start_round",
-      "description": "Register a research round before launching its workers. Rounds are numbered consecutively from 1; each has at most the configured number of workers. Writes plan.md and todo.md. Repeating a round that is already registered changes nothing.",
+      "description": "Register a research round before launching its workers. Rounds are numbered consecutively from 1; each has at most the configured number of workers. Writes plan.md and todo.md. Repeating a round that is already registered changes nothing. Example: {\"round\": 1, \"workers\": [{\"worker_id\": \"w1\", \"sub_query\": \"Market size of X in 2025\"}]}",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -192,7 +200,10 @@
             "type": "array"
           }
         },
-        "required": ["round", "workers"],
+        "required": [
+          "round",
+          "workers"
+        ],
         "type": "object"
       },
       "sideEffect": "write",
@@ -216,7 +227,10 @@
             "type": "string"
           }
         },
-        "required": ["heading", "markdown"],
+        "required": [
+          "heading",
+          "markdown"
+        ],
         "type": "object"
       },
       "sideEffect": "write",
