@@ -16,9 +16,16 @@
  */
 import type { z } from "zod";
 import { toJSONSchema } from "zod";
+import type {
+  AgentDeps,
+  ToolTaskCheckpoint,
+  ToolTaskInput,
+  writeToolResult,
+} from "../agent/tool-task.js";
 import type { Context } from "../core/context.js";
 import type { JsonObject, JsonValue } from "../core/json.js";
 import type { TextContent, ToolSpec } from "../models/types.js";
+import type { Committed, TaskScope, TaskState } from "../tasks/define.js";
 
 export type ReplayPolicy = "safe" | "unsafe";
 
@@ -43,6 +50,30 @@ export const INTERNAL_NATIVE_TOOLS: readonly string[] = Object.freeze([
   "present_plan",
   "update_todo",
 ]);
+
+/**
+ * The tool task phases an `enginePhase` handler may run in. `subagent` is the
+ * phase subagent calls have always used (kept so in-flight tasks and views
+ * are unchanged); `engine` is the general one.
+ */
+export const ENGINE_PHASES: readonly string[] = Object.freeze(["engine", "subagent"]);
+
+/**
+ * A tool that runs inside its tool task instead of through `execute` (KTD12).
+ * After authorization the tool task enters `phase` and calls `run` on every
+ * wake. `run` gets the harness deps, the task, its scope (commit, wait on
+ * tasks, read the runtime) and `writeResult` to commit the tool result. It
+ * must resolve to a committed transition, as any task phase handler.
+ */
+export interface EnginePhase {
+  readonly phase: string;
+  run(
+    deps: AgentDeps,
+    task: TaskState<ToolTaskInput, ToolTaskCheckpoint>,
+    rt: TaskScope<ToolTaskCheckpoint>,
+    writeResult: typeof writeToolResult,
+  ): Promise<Committed>;
+}
 
 /** What a tool returns. Strings and text parts reach the model as-is. */
 export interface ToolResult {
@@ -137,6 +168,8 @@ export interface ToolDefinition<A = unknown> {
    * durable question and the answer becomes the result. `execute` is not called.
    */
   readonly humanInput: boolean;
+  /** Engine-phase handler (see {@link EnginePhase}); `execute` is not called when set. */
+  readonly enginePhase?: EnginePhase;
   execute(args: A, api: ToolApi): ToolResult | Promise<ToolResult>;
   /**
    * After a restart that interrupted an `unsafe` call between intent and
@@ -160,6 +193,8 @@ export interface ToolDefinitionInput<A> {
   untrustedOutput?: boolean;
   /** Mark a tool that asks a person; see {@link ToolDefinition.humanInput}. */
   humanInput?: boolean;
+  /** Run the tool inside its tool task; see {@link EnginePhase}. */
+  enginePhase?: EnginePhase;
   execute(args: A, api: ToolApi): ToolResult | Promise<ToolResult>;
   reconcile?(args: A, api: ToolReconcileApi): ToolResult | null | Promise<ToolResult | null>;
 }
@@ -176,6 +211,16 @@ export function defineTool<A>(input: ToolDefinitionInput<A>): ToolDefinition<A> 
   if (input.source !== undefined && input.source !== "gateway" && input.source !== "native") {
     throw new TypeError(`tool ${input.name}: source must be "gateway" or "native"`);
   }
+  if (input.enginePhase !== undefined) {
+    if (!ENGINE_PHASES.includes(input.enginePhase.phase)) {
+      throw new TypeError(
+        `tool ${input.name}: enginePhase.phase must be one of ${ENGINE_PHASES.join(", ")}`,
+      );
+    }
+    if (typeof input.enginePhase.run !== "function") {
+      throw new TypeError(`tool ${input.name}: enginePhase.run must be a function`);
+    }
+  }
   if (typeof input.execute !== "function") {
     throw new TypeError(`tool ${input.name}: execute must be a function`);
   }
@@ -190,6 +235,7 @@ export function defineTool<A>(input: ToolDefinitionInput<A>): ToolDefinition<A> 
     untrustedOutput: input.untrustedOutput ?? false,
     humanInput: input.humanInput ?? false,
     execute: input.execute,
+    ...(input.enginePhase ? { enginePhase: Object.freeze({ ...input.enginePhase }) } : {}),
     ...(input.reconcile ? { reconcile: input.reconcile } : {}),
   });
 }
