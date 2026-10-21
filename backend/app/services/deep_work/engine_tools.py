@@ -191,7 +191,7 @@ def _status_line(run: dws.RunSnapshot) -> str:
     line = f"Round {latest}: {len(saved)}/{len(registered)} workers saved"
     if open_ids := _open_workers(entry):
         line += f"; open: {', '.join(open_ids)}"
-    return line + ". Full list: todo.md."
+    return line + "."
 
 
 # --- report sections ----------------------------------------------------------
@@ -685,7 +685,7 @@ async def dw_get_learnings(
     selected = select_learnings(everything, max_tokens=max(1000, min(int(max_tokens), 100_000)))
     return _ok({
         "total": len(everything), "returned": len(selected),
-        "learnings": [l.model_dump(exclude_none=True) for l in selected],
+        "learnings": [l.model_dump(exclude_none=True) for l in selected], "status": _status_line(run),
     })
 
 

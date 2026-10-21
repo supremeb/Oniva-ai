@@ -344,9 +344,10 @@ async def test_finalize_warns_about_long_uncited_sections_without_blocking(dw):
 async def test_save_learnings_and_reflection_return_a_short_status_line(dw):
     await dw.call("dw_start_round", {"round": 1, "workers": workers("w1", "w2")})
     r = await dw.call("dw_save_learnings", {"worker_id": "w1", "learnings": [learning(1)]})
-    assert r["data"]["status"] == "Round 1: 1/2 workers saved; open: w2. Full list: todo.md."
+    assert r["data"]["status"] == "Round 1: 1/2 workers saved; open: w2."
     r = await dw.call("dw_record_reflection", {"round": 1, "score": 50, "gaps": [], "should_continue": False})
     assert r["data"]["status"].startswith("Round 1: 1/2 workers saved")
+    assert (await dw.call("dw_get_learnings"))["data"]["status"] == "Round 1: 1/2 workers saved; open: w2."
 
 
 def test_start_round_and_save_learnings_descriptions_carry_a_json_example(gw):
