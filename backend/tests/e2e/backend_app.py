@@ -131,6 +131,9 @@ async def lifespan(_app):
     await tools.ensure_skills_loaded()
     dw_fakes.install(DW)  # after the real skills are loaded: web_search, E2B, tokens, Redis
     dw_fakes.install_approval_fakes(DW)  # the sandbox behind execute_python, an offline browse_url
+    from evals import replay  # eval trials: hash-keyed web fixtures; a no-op unless EVAL_REPLAY_MODE + _DIR are set
+
+    replay.install_from_env()
     run_handlers.bootstrap()  # the fleet start / settle hooks, as main.py does
     _serialize_fleet_settle()
     reconciler = RunReconciler(factory, settings, engine_factory=get_engine_client)
