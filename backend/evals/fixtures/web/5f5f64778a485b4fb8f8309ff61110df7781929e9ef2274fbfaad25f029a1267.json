@@ -1,0 +1,23 @@
+{
+  "key": "5f5f64778a485b4fb8f8309ff61110df7781929e9ef2274fbfaad25f029a1267",
+  "tool": "web_search",
+  "args": {
+    "query": "yarrow loop transit ridership and fares",
+    "num_results": 5
+  },
+  "result": {
+    "query": "yarrow loop transit ridership and fares",
+    "results": [
+      {
+        "title": "Synthetic source cd-w3 1",
+        "url": "https://example.com/cd-w3/1",
+        "snippet": "Yarrow Loop carries about 35 thousand riders per weekday."
+      },
+      {
+        "title": "Synthetic source cd-w3 2",
+        "url": "https://example.com/cd-w3/2",
+        "snippet": "A single Yarrow Loop fare costs 1.90 euros."
+      }
+    ]
+  }
+}

@@ -51,6 +51,7 @@ class Example:
     id: str
     label: str
     input: dict[str, Any]
+    reviewed: bool = True  # a row with `"reviewed": false` is a draft label (see calibration/README.md)
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,7 @@ def load_examples(judge: str, calibration_dir: Path = CALIBRATION_DIR) -> list[E
             missing = [f for f in JUDGE_FIELDS[judge] if not str(inp.get(f, "")).strip()]
             if missing:
                 raise ValueError(f"input is missing {', '.join(missing)}")
-            out.append(Example(str(row.get("id", f"line{n}")), label, inp))
+            out.append(Example(str(row.get("id", f"line{n}")), label, inp, reviewed=row.get("reviewed", True) is not False))
         except (ValueError, KeyError, TypeError) as e:
             raise LabelError(f"{path.name} line {n}: {e}") from None
     if len({e.id for e in out}) != len(out):
@@ -195,6 +196,11 @@ def main(
     parser.add_argument("--all", action="store_true", help="every judge that has a labelled set")
     parser.add_argument("--threshold", type=float, default=MIN_RATE)
     parser.add_argument("--min-per-class", type=int, default=MIN_PER_CLASS)
+    parser.add_argument(
+        "--allow-unreviewed",
+        action="store_true",
+        help="calibrate on draft labels (reviewed=false); the record is a dry run, never evidence for gating",
+    )
     args = parser.parse_args(argv)
 
     names = list(args.judges)
@@ -207,6 +213,7 @@ def main(
     if unknown:
         print(f"unknown judge(s): {', '.join(unknown)}", file=sys.stderr)
         return 2
+    drafts: dict[str, int] = {}
     try:
         meter = meter or BudgetMeter.from_env(required=True)  # the cap is mandatory: this spends money
         extra: dict[str, Any] = {"calibration_dir": calibration_dir, **({"cache": cache} if cache else {})}
@@ -215,6 +222,10 @@ def main(
         else:
             runner = JudgeRunner.from_env(transport, meter=meter, **extra)
         sets = {n: load_examples(n, calibration_dir) for n in names}
+        drafts = {n: sum(not e.reviewed for e in ex) for n, ex in sets.items() if any(not e.reviewed for e in ex)}
+        if drafts and not args.allow_unreviewed:
+            detail = ", ".join(f"{n} ({k} unreviewed)" for n, k in drafts.items())
+            raise LabelError(f"labels need human review before calibration counts: {detail}; see calibration/README.md")
     except (JudgeConfigError, BudgetConfigError, LabelError) as e:
         print(f"refusing to run: {e}", file=sys.stderr)
         return 2
@@ -225,7 +236,8 @@ def main(
             cal = await calibrate(
                 runner, n, sets[n], threshold=args.threshold, min_per_class=args.min_per_class
             )
-            write_record(cal, runner, calibration_dir)
+            if n not in drafts:  # a dry run on draft labels never writes a record that could enable gating
+                write_record(cal, runner, calibration_dir)
             print(cal.summary())
             out.append(cal)
         return out

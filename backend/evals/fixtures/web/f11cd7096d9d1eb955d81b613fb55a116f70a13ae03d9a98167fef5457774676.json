@@ -1,0 +1,23 @@
+{
+  "key": "f11cd7096d9d1eb955d81b613fb55a116f70a13ae03d9a98167fef5457774676",
+  "tool": "web_search",
+  "args": {
+    "query": "travel expense policy daily meal limit",
+    "num_results": 5
+  },
+  "result": {
+    "query": "travel expense policy daily meal limit",
+    "results": [
+      {
+        "title": "Synthetic source kw-w1 1",
+        "url": "https://example.com/kw-w1/1",
+        "snippet": "The internal policy sets the daily meal limit at fifty-five euros."
+      },
+      {
+        "title": "Synthetic source kw-w1 2",
+        "url": "https://example.com/kw-w1/2",
+        "snippet": "Receipts are required for any single meal above fifteen euros."
+      }
+    ]
+  }
+}

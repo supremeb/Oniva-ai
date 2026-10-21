@@ -1,0 +1,23 @@
+{
+  "key": "60acf39d11c754a94a0c6e84deab7603e9a9b0fa0fbe52b202c64b7b33810a59",
+  "tool": "web_search",
+  "args": {
+    "query": "quarry note app offline support and price",
+    "num_results": 5
+  },
+  "result": {
+    "query": "quarry note app offline support and price",
+    "results": [
+      {
+        "title": "Synthetic source tc-w2 1",
+        "url": "https://example.com/tc-w2/1",
+        "snippet": "Quarry has no offline mode and costs 4 euros per user per month."
+      },
+      {
+        "title": "Synthetic source tc-w2 2",
+        "url": "https://example.com/tc-w2/2",
+        "snippet": "Quarry needs a connection to open notes."
+      }
+    ]
+  }
+}

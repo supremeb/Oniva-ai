@@ -1,0 +1,60 @@
+# [medium] Guards a knowledge-only plan: workers carry no web tool, so learnings must be labelled model_knowledge
+# instead of inventing source URLs. The fake script still searches, so this task is only meaningful in live mode.
+id: dw-no-web-knowledge-only
+kind: deep_work
+tags: []
+input:
+  query: Explain the difference between optimistic and pessimistic locking, without browsing the web
+  plan:
+    title: DWPLAN_NW_DW_NO_WEB_KNOWLEDGE_ONLY
+    sub_queries:
+    - worker_id: nw-w1
+      sub_query: how optimistic locking detects conflicts at commit time
+      tools: &id001
+      - read_file
+    - worker_id: nw-w2
+      sub_query: how pessimistic locking prevents concurrent writes
+      tools: *id001
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Optimistic locking validates a version stamp at commit and retries on conflict [1][2]. Pessimistic
+    locking takes the lock first so other writers wait [3][4].
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 8
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 8

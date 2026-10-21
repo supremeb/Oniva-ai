@@ -1,0 +1,23 @@
+{
+  "key": "0a072427b76d2fd7fba462b00cb83a3af38faca5f5ff12b3ba07d5f104abe118",
+  "tool": "web_search",
+  "args": {
+    "query": "rook note app offline support and price",
+    "num_results": 5
+  },
+  "result": {
+    "query": "rook note app offline support and price",
+    "results": [
+      {
+        "title": "Synthetic source tc-w3 1",
+        "url": "https://example.com/tc-w3/1",
+        "snippet": "Rook works offline for the last 50 notes and costs 5 euros per user per month."
+      },
+      {
+        "title": "Synthetic source tc-w3 2",
+        "url": "https://example.com/tc-w3/2",
+        "snippet": "Rook caches notes in the browser."
+      }
+    ]
+  }
+}

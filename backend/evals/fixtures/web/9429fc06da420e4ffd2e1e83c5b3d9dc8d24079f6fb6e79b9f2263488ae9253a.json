@@ -1,0 +1,23 @@
+{
+  "key": "9429fc06da420e4ffd2e1e83c5b3d9dc8d24079f6fb6e79b9f2263488ae9253a",
+  "tool": "web_search",
+  "args": {
+    "query": "corvale community solar programme rules",
+    "num_results": 5
+  },
+  "result": {
+    "query": "corvale community solar programme rules",
+    "results": [
+      {
+        "title": "Synthetic source fg-w3 1",
+        "url": "https://example.com/fg-w3/1",
+        "snippet": "Corvale offers a bill credit of eleven cents per kilowatt hour."
+      },
+      {
+        "title": "Synthetic source fg-w3 2",
+        "url": "https://example.com/fg-w3/2",
+        "snippet": "Corvale limits any one subscriber to forty percent of a project."
+      }
+    ]
+  }
+}

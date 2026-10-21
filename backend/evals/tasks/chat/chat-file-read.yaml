@@ -1,0 +1,62 @@
+# [medium] Guards workspace file use: a question about an attached file must read it with read_file instead of
+# guessing. The file lives in fixtures/kb/ and is listed in input.files for the driver to place in the workspace.
+id: chat-file-read
+kind: chat
+tags: []
+input:
+  turns:
+  - According to launch-plan.md, which day is the beta freeze?
+  files:
+  - path: launch-plan.md
+    source: fixtures/kb/launch-plan.md
+environment:
+  web: replay
+fake:
+  rules:
+  - when:
+      role: user
+      includes: launch-plan.md
+    respond:
+      steps:
+      - type: tool_call
+        name: read_file
+        arguments:
+          path: launch-plan.md
+      usage:
+        inputTokens: 300
+        outputTokens: 40
+  - when:
+      role: tool_result
+      tool: read_file
+    respond:
+      steps:
+      - type: text
+        text: The launch plan puts the beta freeze on Thursday 14 May.
+      usage:
+        inputTokens: 520
+        outputTokens: 30
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: expected-tools
+  type: trajectory_match
+  params:
+    mode: exact
+    expected:
+    - read_file
+- id: budget
+  type: budget
+  params:
+    max_usd: 0.25
+    max_rounds: 4
+budget:
+  max_usd: 0.25
+  max_rounds: 4

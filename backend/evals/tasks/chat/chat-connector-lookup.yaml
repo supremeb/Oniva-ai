@@ -1,0 +1,77 @@
+# [medium] Guards connector discovery order: list the available connectors, read the schema of the right one, then
+# answer. The connector stub is described in environment.connectors; the fake model only checks the call order.
+id: chat-connector-lookup
+kind: chat
+tags: []
+input:
+  turns:
+  - Which connectors can I use to look up issues, and what can the tracker one do?
+environment:
+  web: replay
+  connectors:
+    tracker:
+      kind: stub
+      tools:
+      - name: search_issues
+        mode: read
+fake:
+  rules:
+  - when:
+      role: user
+      includes: Which connectors can I use
+    respond:
+      steps:
+      - type: tool_call
+        name: list_available_connectors
+        arguments: {}
+      usage:
+        inputTokens: 300
+        outputTokens: 40
+  - when:
+      role: tool_result
+      tool: list_available_connectors
+    respond:
+      steps:
+      - type: tool_call
+        name: get_connector_schema
+        arguments:
+          connector: tracker
+      usage:
+        inputTokens: 400
+        outputTokens: 30
+  - when:
+      role: tool_result
+      tool: get_connector_schema
+    respond:
+      steps:
+      - type: text
+        text: The tracker connector can search issues; it is read only.
+      usage:
+        inputTokens: 560
+        outputTokens: 30
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: expected-tools
+  type: trajectory_match
+  params:
+    mode: exact
+    expected:
+    - list_available_connectors
+    - get_connector_schema
+- id: budget
+  type: budget
+  params:
+    max_usd: 0.25
+    max_rounds: 4
+budget:
+  max_usd: 0.25
+  max_rounds: 4

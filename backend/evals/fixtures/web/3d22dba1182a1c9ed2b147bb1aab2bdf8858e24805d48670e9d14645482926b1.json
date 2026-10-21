@@ -1,0 +1,23 @@
+{
+  "key": "3d22dba1182a1c9ed2b147bb1aab2bdf8858e24805d48670e9d14645482926b1",
+  "tool": "web_search",
+  "args": {
+    "query": "aldermark community solar programme rules",
+    "num_results": 5
+  },
+  "result": {
+    "query": "aldermark community solar programme rules",
+    "results": [
+      {
+        "title": "Synthetic source fg-w1 1",
+        "url": "https://example.com/fg-w1/1",
+        "snippet": "Aldermark caps community solar projects at two megawatts."
+      },
+      {
+        "title": "Synthetic source fg-w1 2",
+        "url": "https://example.com/fg-w1/2",
+        "snippet": "Aldermark subscribers must live in the same utility district."
+      }
+    ]
+  }
+}

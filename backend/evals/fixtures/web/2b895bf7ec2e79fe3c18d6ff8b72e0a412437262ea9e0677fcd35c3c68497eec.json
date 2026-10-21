@@ -1,0 +1,23 @@
+{
+  "key": "2b895bf7ec2e79fe3c18d6ff8b72e0a412437262ea9e0677fcd35c3c68497eec",
+  "tool": "web_search",
+  "args": {
+    "query": "north fjord cloud region reliability uptime",
+    "num_results": 5
+  },
+  "result": {
+    "query": "north fjord cloud region reliability uptime",
+    "results": [
+      {
+        "title": "Synthetic source df-w1 1",
+        "url": "https://example.com/df-w1/1",
+        "snippet": "North Fjord reported 99.98 percent uptime last year."
+      },
+      {
+        "title": "Synthetic source df-w1 2",
+        "url": "https://example.com/df-w1/2",
+        "snippet": "North Fjord had one outage longer than an hour."
+      }
+    ]
+  }
+}

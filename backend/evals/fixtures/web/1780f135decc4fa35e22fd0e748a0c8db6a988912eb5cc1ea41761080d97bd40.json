@@ -1,0 +1,23 @@
+{
+  "key": "1780f135decc4fa35e22fd0e748a0c8db6a988912eb5cc1ea41761080d97bd40",
+  "tool": "web_search",
+  "args": {
+    "query": "how pessimistic locking prevents concurrent writes",
+    "num_results": 5
+  },
+  "result": {
+    "query": "how pessimistic locking prevents concurrent writes",
+    "results": [
+      {
+        "title": "Synthetic source nw-w2 1",
+        "url": "https://example.com/nw-w2/1",
+        "snippet": "Pessimistic locking takes a lock before reading the row."
+      },
+      {
+        "title": "Synthetic source nw-w2 2",
+        "url": "https://example.com/nw-w2/2",
+        "snippet": "Other writers wait until the lock is released."
+      }
+    ]
+  }
+}

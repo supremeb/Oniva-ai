@@ -1,0 +1,23 @@
+{
+  "key": "11771c0f690f57b09aaf552515d10c0c03311f2b3ebf43d7c29bfe824fc68d97",
+  "tool": "web_search",
+  "args": {
+    "query": "glenhaven bridge opening date",
+    "num_results": 5
+  },
+  "result": {
+    "query": "glenhaven bridge opening date",
+    "results": [
+      {
+        "title": "Synthetic source fc-w1 1",
+        "url": "https://example.com/fc-w1/1",
+        "snippet": "The Glenhaven bridge opened to traffic in 1962."
+      },
+      {
+        "title": "Synthetic source fc-w1 2",
+        "url": "https://example.com/fc-w1/2",
+        "snippet": "The opening ceremony was held in June."
+      }
+    ]
+  }
+}

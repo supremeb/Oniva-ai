@@ -1,0 +1,23 @@
+{
+  "key": "7ca0137dd220862ce82e3057b140c8b8eb09113d0e478f4e08a29abc11d58538",
+  "tool": "web_search",
+  "args": {
+    "query": "how optimistic locking detects conflicts at commit time",
+    "num_results": 5
+  },
+  "result": {
+    "query": "how optimistic locking detects conflicts at commit time",
+    "results": [
+      {
+        "title": "Synthetic source nw-w1 1",
+        "url": "https://example.com/nw-w1/1",
+        "snippet": "Optimistic locking checks a version stamp when the write is committed."
+      },
+      {
+        "title": "Synthetic source nw-w1 2",
+        "url": "https://example.com/nw-w1/2",
+        "snippet": "Conflicts are resolved by retrying the transaction."
+      }
+    ]
+  }
+}

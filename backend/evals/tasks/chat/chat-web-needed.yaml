@@ -1,0 +1,75 @@
+# [medium] Guards research depth for a current-price question: search, then open the best result and answer from
+# the page, not from the snippet or memory.
+id: chat-web-needed
+kind: chat
+tags:
+- regression
+input:
+  turns:
+  - What does the Veltra Orbit cost, and how water resistant is it?
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake:
+  rules:
+  - when:
+      role: user
+      includes: Veltra Orbit cost
+    respond:
+      steps:
+      - type: tool_call
+        name: web_search
+        arguments:
+          query: veltra orbit price euro
+      usage:
+        inputTokens: 300
+        outputTokens: 40
+  - when:
+      role: tool_result
+      tool: web_search
+    respond:
+      steps:
+      - type: tool_call
+        name: browse_url
+        arguments:
+          url: https://example.com/veltra/orbit
+      usage:
+        inputTokens: 500
+        outputTokens: 30
+  - when:
+      role: tool_result
+      tool: browse_url
+    respond:
+      steps:
+      - type: text
+        text: The Veltra Orbit costs 249 euros and is water resistant to 50 metres.
+      usage:
+        inputTokens: 700
+        outputTokens: 36
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: expected-tools
+  type: trajectory_match
+  params:
+    mode: ordered
+    expected:
+    - web_search
+    - browse_url
+- id: budget
+  type: budget
+  params:
+    max_usd: 0.3
+    max_rounds: 5
+budget:
+  max_usd: 0.3
+  max_rounds: 5

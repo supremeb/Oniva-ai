@@ -1,0 +1,23 @@
+{
+  "key": "a17ca95abd52f2b1fd6412f878a693f6493086b728fa1f7d96beeca8138636cb",
+  "tool": "web_search",
+  "args": {
+    "query": "glenhaven bridge length and span",
+    "num_results": 5
+  },
+  "result": {
+    "query": "glenhaven bridge length and span",
+    "results": [
+      {
+        "title": "Synthetic source fc-w2 1",
+        "url": "https://example.com/fc-w2/1",
+        "snippet": "The Glenhaven bridge is 840 metres long."
+      },
+      {
+        "title": "Synthetic source fc-w2 2",
+        "url": "https://example.com/fc-w2/2",
+        "snippet": "Its main span is 310 metres."
+      }
+    ]
+  }
+}
