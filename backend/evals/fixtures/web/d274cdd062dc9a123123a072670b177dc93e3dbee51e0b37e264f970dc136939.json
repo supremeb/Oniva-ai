@@ -1,0 +1,23 @@
+{
+  "key": "d274cdd062dc9a123123a072670b177dc93e3dbee51e0b37e264f970dc136939",
+  "tool": "web_search",
+  "args": {
+    "query": "eval smoke es-w1 vendor pricing",
+    "num_results": 5
+  },
+  "result": {
+    "query": "eval smoke es-w1 vendor pricing",
+    "results": [
+      {
+        "title": "Source es-w1 1",
+        "url": "https://example.com/es-w1/1",
+        "snippet": "About eval smoke es-w1 vendor pricing, part 1"
+      },
+      {
+        "title": "Source es-w1 2",
+        "url": "https://example.com/es-w1/2",
+        "snippet": "About eval smoke es-w1 vendor pricing, part 2"
+      }
+    ]
+  }
+}

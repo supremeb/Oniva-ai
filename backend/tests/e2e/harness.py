@@ -167,8 +167,13 @@ class World:
 
 
 @contextlib.contextmanager
-def stack():
-    """Boot the Postgres + backend + (no worker yet) stack; yield a World; tear everything down."""
+def stack(extra_env: dict | None = None, worker_command: list | None = None, worker_env: dict | None = None):
+    """Boot the Postgres + backend + (no worker yet) stack; yield a World; tear everything down.
+
+    Additive knobs for the eval harness (defaults leave every e2e test unchanged): ``extra_env`` is merged into the
+    backend's environment, ``worker_command`` replaces ``npm run worker:test`` (the production worker, in live mode),
+    ``worker_env`` is merged into the worker's environment.
+    """
     w = World()
     tmp = Path(tempfile.mkdtemp(prefix="oniva-e2e-"))
     procs: list[Proc] = []
@@ -234,7 +239,8 @@ def stack():
                "ENABLE_ENGINE_API": "true", "ENABLE_ENGINE_DEEP_WORK": "true", "ENABLE_DEEP_WORK": "true",
                "ENABLE_SANDBOX": "true", "E2B_API_KEY": "e2b-FAKE-e2e", "SANDBOX_PROXY_URL": "http://proxy.invalid",
                "TAVILY_API_KEY": "tvly-FAKE-e2e", "SESSION_BASE_PATH": str(w.dw_dir / "sessions"), "ENGINE_GATEWAY_TOKEN": GATEWAY_TOKEN,
-               "ENGINE_SERVICE_TOKEN": SERVICE_TOKEN, "ENGINE_URL": w.engine_url, "ENGINE_SESSION_ID": SESSION}
+               "ENGINE_SERVICE_TOKEN": SERVICE_TOKEN, "ENGINE_URL": w.engine_url, "ENGINE_SESSION_ID": SESSION,
+               **(extra_env or {})}
         backend = Proc([sys.executable, "-m", "tests.e2e.backend_app"], env, BACKEND, tmp / "backend.log")
         procs.append(backend)
         w.backend = backend
@@ -272,7 +278,8 @@ def stack():
                         "ENGINE_POLICY_URL": w.backend_url, "ENGINE_TEST_MODEL_SCRIPT": str(w.script),
                         "ENGINE_TEST_MODEL_PROVIDER": "anthropic", "ENGINE_LEASE_TTL_MS": "3000",
                         "ENGINE_PROGRESS_INTERVAL_MS": "50",
-                        "ENGINE_SUBAGENT_TOOLS": "research_worker,reflector,output_agent"}
+                        "ENGINE_SUBAGENT_TOOLS": "research_worker,reflector,output_agent", **(worker_env or {})}
+        w.worker_command = worker_command or ["npm", "run", "--silent", "worker:test"]
         w.procs = procs
         w.start_worker = lambda n: _start_worker(w, n)
         yield w
@@ -300,7 +307,7 @@ def world():
 
 def _start_worker(w: World, n: int) -> Proc:
     w.worker_n = n
-    worker = Proc(["npm", "run", "--silent", "worker:test"], w.worker_env, ENGINE, w.tmp / f"worker{n}.log")
+    worker = Proc(w.worker_command, w.worker_env, ENGINE, w.tmp / f"worker{n}.log")
     w.procs.append(worker)
 
     def owner():

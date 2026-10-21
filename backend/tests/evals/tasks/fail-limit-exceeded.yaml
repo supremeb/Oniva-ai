@@ -1,0 +1,23 @@
+# Test input, not corpus: a round of 33 tool calls (the engine runs at most 32 per round; the 33rd gets a
+# limit_exceeded result). Used to record how limit_exceeded really appears in a trace.
+id: fail-limit-exceeded
+kind: chat
+tags: []
+input:
+  turns: ["FLOOD the tools"]
+  selections: { web_search: true }
+fake:
+  rules:
+    - when: { role: user, includes: "FLOOD the tools" }
+      respond:
+        steps:
+          - { type: tool_call, name: browse_url, arguments: { url: "https://example.com/pricing" }, times: 33 }
+        usage: { inputTokens: 300, outputTokens: 900 }
+    - when: { role: tool_result, tool: browse_url }
+      respond:
+        steps: [{ type: text, text: "Read the page." }]
+        usage: { inputTokens: 900, outputTokens: 8 }
+graders:
+  - { id: no-limit-exceeded, type: no_limit_exceeded }
+  - { id: no-run-error, type: no_run_error }
+  - { id: tools-ok, type: tool_error_rate, params: { max_rate: 0.0 } }

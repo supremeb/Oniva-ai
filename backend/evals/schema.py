@@ -121,23 +121,43 @@ class Trial:
     mode: Literal["fake", "live"] = "fake"
 
 
+TRIAL_STATUSES = ("ok", "run_error", "timeout", "fixture_miss", "error", "skipped_budget")
+
+
 @dataclass(frozen=True)
 class TrialResult:
+    """One trial's outcome.
+
+    `status`: `ok` (the run finished), `run_error` (the engine ended the run with a `run_error`; `error_code` is the
+    error kind), `timeout`, `fixture_miss` (a web call had no fixture), `error` (the driver failed), or
+    `skipped_budget` (never run: the `EVAL_MAX_USD` cap would have been crossed). Only `ok` trials can pass; reports
+    leave `skipped_budget` trials out of pass rates.
+    """
+
     trial: Trial
     grader_results: tuple[GraderResult, ...] = ()
     trace: Trace | None = None
     error: str | None = None
     latency_s: float = 0.0
+    status: str = "ok"
+    error_code: str | None = None
+    raw: dict[str, Any] | None = None
+    phases: dict[str, float] = field(default_factory=dict)
+    fixture_misses: tuple[str, ...] = ()
+    ledger: dict[str, Any] | None = None
 
     @property
     def passed(self) -> bool:
-        """A trial passes when no error occurred and every gating grader passed."""
-        if self.error is not None:
+        """A trial passes when it ended `ok` and every gating grader passed."""
+        if self.error is not None or self.status != "ok":
             return False
         return all(r.passed for r in self.grader_results if r.gating)
 
     @property
     def cost_usd(self) -> float:
+        """Whole-run cost, compaction requests included (the runner puts the backend ledger's dollars on the trace)."""
         if self.trace is None:
             return 0.0
+        if self.trace.usage_by_role:
+            return sum(u.cost_usd for u in self.trace.usage_by_role.values())
         return sum(s.usage.cost_usd for s in self.trace.walk())

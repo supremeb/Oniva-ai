@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createSubagentTool } from "../../src/agent/subagents.js";
-import { fakeText, fakeToolCall } from "../../src/models/fake.js";
+import { fakeError, fakeText, fakeToolCall } from "../../src/models/fake.js";
 import { defineTool } from "../../src/tools/registry.js";
 import { buildTrace } from "../../src/watch/trace.js";
 import { loadConversationView } from "../../src/watch/view.js";
@@ -161,6 +161,41 @@ export function defineTraceSuite(backend: AgentBackend): void {
       expect(trace.compactions[0]).toMatchObject({ summaryChars: "old stuff".length });
       expect(JSON.stringify(trace)).not.toContain("sk-abcdefghijklmnop");
       expect(trace.agent.metadata).toMatchObject({ team: "a" });
+      await w.crash();
+    });
+
+    it("says how each submission ended, the unanswered reason included, for the root and each child", async () => {
+      const fx = await backend.fixture();
+      const research = createSubagentTool({ name: "research", tools: ["wait"] });
+      fx.provider.enqueue(
+        fakeText("first answer"),
+        fakeToolCall("research", { prompt: "one" }, { id: "c1" }),
+        fakeText("child one"),
+        fakeText("second answer"),
+        fakeError("invalid_request", "the model refused"),
+      );
+      const w = await fx.open({ tools: [research, quickWait()] });
+      const conv = await w.harness.createConversation({
+        tenantId: "t1",
+        projectId: "p1",
+        agent: { systemPrompt: "s", tools: ["research"] },
+      });
+      await (await conv.submit({ text: "one", requestId: "r1" })).wait();
+      await (await conv.submit({ text: "two", requestId: "r2" })).wait();
+      await (await conv.submit({ text: "three", requestId: "r3" })).wait();
+
+      const trace = await buildTrace(w.harness.session, conv.id);
+      const byRequest = Object.fromEntries(trace.submissions.map((s) => [s.requestId, s]));
+      expect(byRequest.r1).toMatchObject({ status: "done", unanswered: null });
+      expect(byRequest.r2).toMatchObject({ status: "done", unanswered: null });
+      expect(byRequest.r3?.status).toBe("unanswered");
+      expect(byRequest.r3?.unanswered).toEqual({
+        reason: "model_error",
+        message: expect.any(String),
+      });
+      const [child] = Object.values(trace.children);
+      expect(child?.submissions).toHaveLength(1);
+      expect(child?.submissions[0]).toMatchObject({ status: "done", unanswered: null });
       await w.crash();
     });
 

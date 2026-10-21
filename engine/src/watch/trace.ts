@@ -23,7 +23,12 @@ import { TOOL_TASK_KIND } from "../agent/tool-task.js";
 import { type UsageTotals, usageDoc } from "../agent/usage.js";
 import { DEFAULT_LIMITS } from "../core/limits.js";
 import type { Session } from "../session/session.js";
-import { type EntryRecord, MAX_PAGE_LIMIT, type TaskRecord } from "../storage/types.js";
+import {
+  type EntryRecord,
+  MAX_PAGE_LIMIT,
+  type SubmissionRecord,
+  type TaskRecord,
+} from "../storage/types.js";
 import { maskSecrets } from "../worker/redact.js";
 import { UnknownConversation } from "./view.js";
 
@@ -46,6 +51,19 @@ export interface TraceCompaction {
   summaryChars: number;
 }
 
+/**
+ * How one submission (one user input, one run) ended. The entries do not say: a run that fails before answering
+ * leaves a `run_error` entry whose error is the provider's, while the reason it ended unanswered
+ * (`compaction_failed`, `model_error`, `aborted`, ...) lives only on the submission.
+ */
+export interface TraceSubmission {
+  id: string;
+  requestId: string;
+  status: SubmissionRecord["status"];
+  /** The `unanswered` reason and message; null while open and for an answered submission. */
+  unanswered: { reason: string; message: string | null } | null;
+}
+
 export interface TraceAgent {
   depth: number;
   tools: string[];
@@ -60,6 +78,8 @@ export interface TraceChild {
   /** The conversation that holds the spawning tool task. */
   parentConversationId: string;
   entries: EntryRecord[];
+  /** The child's submissions; the whole list on every page, like `compactions`. */
+  submissions: TraceSubmission[];
   usage: UsageTotals;
   agent: TraceAgent;
 }
@@ -67,6 +87,8 @@ export interface TraceChild {
 export interface ConversationTrace {
   conversationId: string;
   entries: EntryRecord[];
+  /** The root conversation's submissions; the whole list on every page. */
+  submissions: TraceSubmission[];
   children: { [conversationId: string]: TraceChild };
   /** Usage of the root conversation alone; a child's is on the child. */
   usage: UsageTotals["total"];
@@ -138,6 +160,35 @@ function agentOf(config: AgentConfig): TraceAgent {
       kind: agentConfigDoc.kind,
     }) as AgentConfig["metadata"],
   };
+}
+
+/** Every submission of a conversation. Results were redacted when they were written. */
+async function submissionsOf(session: Session, conversationId: string): Promise<TraceSubmission[]> {
+  const out: TraceSubmission[] = [];
+  for (let cursor: string | null = null; ; ) {
+    const page = await session.reader.listSubmissions(conversationId, {
+      limit: MAX_PAGE_LIMIT,
+      cursor,
+    });
+    for (const { id, requestId, status, result } of page.items) {
+      const r =
+        status === "unanswered" ? (result as { reason?: unknown; message?: unknown } | null) : null;
+      out.push({
+        id,
+        requestId,
+        status,
+        unanswered:
+          r === null
+            ? null
+            : {
+                reason: typeof r.reason === "string" ? r.reason : "unknown",
+                message: typeof r.message === "string" ? r.message : null,
+              },
+      });
+    }
+    cursor = page.nextCursor;
+    if (cursor === null) return out;
+  }
 }
 
 function subagentLink(task: Pick<TaskRecord, "checkpoint">): string | null {
@@ -254,6 +305,7 @@ export async function buildTrace(
       role: node.role,
       parentConversationId: node.parentConversationId,
       entries,
+      submissions: await submissionsOf(session, node.id),
       usage: await session.document(usageDoc, node.id),
       agent: agentOf(await session.document(agentConfigDoc, node.id)),
     };
@@ -262,6 +314,7 @@ export async function buildTrace(
   return {
     conversationId: rootId,
     entries: entriesBy.get(rootId) ?? [],
+    submissions: await submissionsOf(session, rootId),
     children,
     usage: rootUsage.total,
     taint: await session.document(taintDoc, rootId),

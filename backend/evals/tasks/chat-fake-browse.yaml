@@ -1,0 +1,34 @@
+# A chat turn that reads one page. Fake mode: the scripted model calls browse_url once, then answers.
+# The page is served from evals/fixtures/web (replay), so nothing touches the network.
+id: chat-fake-browse
+kind: chat
+tags: [smoke, regression]
+input:
+  turns:
+    - "Summarise https://example.com/pricing and give the Team price."
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake:
+  rules:
+    - when: { role: user, includes: "Summarise https://example.com/pricing" }
+      respond:
+        steps:
+          - { type: tool_call, name: browse_url, arguments: { url: "https://example.com/pricing" } }
+        usage: { inputTokens: 420, outputTokens: 40 }
+    - when: { role: tool_result, tool: browse_url }
+      respond:
+        steps:
+          - { type: text, text: "Acme's Team plan costs 29 EUR per seat per month; Starter is 12 EUR and Enterprise is by quote." }
+        usage: { inputTokens: 610, outputTokens: 36 }
+graders:
+  - { id: no-run-error, type: no_run_error }
+  - { id: no-limit-exceeded, type: no_limit_exceeded }
+  - { id: no-compaction-failure, type: no_compaction_failure }
+  - { id: tools-ok, type: tool_error_rate, params: { max_rate: 0.0 } }
+  - { id: read-the-page, type: trajectory_match, params: { mode: exact, expected: [browse_url] } }
+  - { id: budget, type: budget, params: { max_usd: 0.25, max_rounds: 3 } }
+budget:
+  max_usd: 0.25
+  max_rounds: 3

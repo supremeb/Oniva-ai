@@ -1,1 +1,23 @@
-{}
+{
+  "0a42fb50c37d58128282f752bbae0fc83ff746ee71d65b2b479d3add3ea88635": {
+    "args": {
+      "extract_text": true,
+      "url": "https://example.com/pricing"
+    },
+    "tool": "browse_url"
+  },
+  "5311ce277fbddde25eb3dc5c16b8d612cf4e48ea4f219ce8b7cc82fba349d84f": {
+    "args": {
+      "num_results": 5,
+      "query": "eval smoke es-w2 vendor pricing"
+    },
+    "tool": "web_search"
+  },
+  "d274cdd062dc9a123123a072670b177dc93e3dbee51e0b37e264f970dc136939": {
+    "args": {
+      "num_results": 5,
+      "query": "eval smoke es-w1 vendor pricing"
+    },
+    "tool": "web_search"
+  }
+}

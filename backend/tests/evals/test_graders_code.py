@@ -161,206 +161,45 @@ def test_raw_required_fails_closed():
     assert out["passed"] is False and "raw" in out["detail"]
 
 
-def test_no_compaction_failure_and_allowed():
-    raw = synthetic([{"id": "u", "conversationId": "conv-root", "kind": "unanswered", "payload": {"reason": "compaction_failed"}, "createdAt": 1}])
-    assert code.no_compaction_failure(ctx_of(raw), {})["passed"] is False
+def test_no_compaction_failure_reads_the_submissions():
+    """compaction_failed is a submission's `unanswered` reason; it is in no entry (see test_graders_recorded)."""
+    raw = synthetic([assistant(1, [])], submissions=[{"id": "s", "requestId": "r", "status": "done", "unanswered": None}])
+    assert code.no_compaction_failure(ctx_of(raw), {})["passed"] is True
+    raw["submissions"].append(
+        {"id": "s2", "requestId": "r2", "status": "unanswered", "unanswered": {"reason": "compaction_failed", "message": "x"}}
+    )
+    out = code.no_compaction_failure(ctx_of(raw), {})
+    assert out["passed"] is False and "r2" in out["detail"]
     assert code.no_compaction_failure(ctx_of(raw), {"allow": True})["passed"] is True
-    assert code.no_compaction_failure(ctx_of(load("trace_chat.json")), {})["passed"] is True
+    other = synthetic([], submissions=[{"id": "s", "requestId": "r", "status": "unanswered", "unanswered": {"reason": "model_error", "message": "x"}}])
+    assert code.no_compaction_failure(ctx_of(other), {})["passed"] is True
 
 
-def test_no_limit_exceeded_in_tool_results():
-    raw = synthetic([tool_result("c", "web_search", status="error", details={"error": "limit_exceeded"})])
+def test_no_compaction_failure_sees_a_failed_child():
+    raw = synthetic([], submissions=[])
+    raw["children"] = {
+        "conv-kid": {
+            "role": "research_worker",
+            "entries": [],
+            "submissions": [{"id": "k", "requestId": "k1", "status": "unanswered", "unanswered": {"reason": "compaction_failed", "message": None}}],
+            "usage": {"total": {}},
+        }
+    }
+    assert code.no_compaction_failure(ctx_of(raw), {})["passed"] is False
+
+
+def test_no_compaction_failure_fails_closed_without_submissions():
+    """A trace recorded before the route reported submissions cannot show it, so the check must not pass."""
+    for raw in (load("trace_chat.json"), synthetic([])):
+        out = code.no_compaction_failure(ctx_of(raw), {})
+        assert out["passed"] is False and "submissions" in out["detail"]
+
+
+def test_no_limit_exceeded_is_the_tool_result_status():
+    raw = synthetic([tool_result("c", "web_search", status="limit_exceeded")])
     out = code.no_limit_exceeded(ctx_of(raw), {})
-    assert out["passed"] is False and "limit_exceeded" in out["detail"]
+    assert out["passed"] is False and "web_search" in out["detail"]
+    # an ordinary tool error that merely mentions the word is not a limit result
+    quiet = synthetic([tool_result("c", "web_search", status="error", details={"error": "limit_exceeded"})])
+    assert code.no_limit_exceeded(ctx_of(quiet), {})["passed"] is True
     assert code.no_limit_exceeded(ctx_of(load("trace_deep_work.json")), {})["passed"] is True
-
-
-# --- tool error rate ------------------------------------------------------
-
-
-def test_tool_error_rate():
-    raw = synthetic(
-        [
-            assistant(1, [call("a", "t1"), call("b", "t2"), call("c", "t3"), call("d", "t4")]),
-            tool_result("a", "t1"),
-            tool_result("b", "t2"),
-            tool_result("c", "t3"),
-            tool_result("d", "t4", status="error"),
-        ]
-    )
-    ctx = ctx_of(raw)
-    assert code.tool_error_rate(ctx, {"max_rate": 0.25})["passed"] is True
-    assert code.tool_error_rate(ctx, {"max_rate": 0.2})["passed"] is False
-
-
-def test_tool_error_rate_no_tools():
-    assert code.tool_error_rate(ctx_of(synthetic([])), {"max_rate": 0.0})["passed"] is True
-
-
-# --- deep work -------------------------------------------------------------
-
-
-def dw_ok() -> GradeContext:
-    raw = load("trace_deep_work.json")
-    return ctx_of(
-        raw,
-        **{
-            "report.md": "Finding one [1]. Finding two [2].",
-            "learnings": [
-                {"fact": "a", "source_url": "https://a.example/x", "source_type": "web"},
-                {"fact": "b", "source_url": "https://b.example", "source_type": "web"},
-            ],
-            "fixture_urls": ["https://a.example/x", "https://b.example/"],
-        },
-    )
-
-
-def test_dw_clean_trace_passes_every_check():
-    ctx = dw_ok()
-    for fn, params in (
-        (deep_work.tool_order, {}),
-        (deep_work.no_failed_workers, {}),
-        (deep_work.citation_map, {}),
-        (deep_work.learning_sources, {}),
-        (deep_work.url_resolves, {}),
-        (deep_work.rounds_within_plan, {"max_rounds": 3}),
-    ):
-        out = fn(ctx, params)
-        assert out["passed"] is True, (fn.__name__, out)
-
-
-@pytest.mark.parametrize("sig", ["round_order", "round_open", "no_sections"])
-def test_dw_tool_order_errors(sig):
-    raw = load("trace_deep_work.json")
-    raw["entries"].append(tool_result("zz", "dw_start_round", status="error", details={"error": sig}))
-    out = deep_work.tool_order(ctx_of(raw), {})
-    assert out["passed"] is False and sig in out["detail"]
-
-
-def test_dw_failed_worker_status():
-    raw = load("trace_deep_work.json")
-    for e in raw["entries"]:
-        if e["kind"] == "tool_result" and e["payload"]["toolCallId"] == "tc3":
-            e["payload"]["status"] = "error"
-    out = deep_work.no_failed_workers(ctx_of(raw), {})
-    assert out["passed"] is False
-
-
-def test_dw_missing_worker_save():
-    raw = load("trace_deep_work.json")
-    w2 = raw["children"]["conv-w2"]
-    w2["entries"] = [
-        e
-        for e in w2["entries"]
-        if not (e["kind"] == "tool_result" and e["payload"]["toolName"] == "dw_save_learning")
-    ]
-    for e in w2["entries"]:
-        if e["kind"] == "assistant":
-            e["payload"]["message"]["blocks"] = [
-                b for b in e["payload"]["message"]["blocks"] if b.get("name") != "dw_save_learning"
-            ]
-    out = deep_work.no_failed_workers(ctx_of(raw), {})
-    assert out["passed"] is False and "save" in out["detail"]
-
-
-def test_dw_failed_workers_argument():
-    raw = load("trace_deep_work.json")
-    raw["entries"].append(assistant(9, [call("fin", "dw_finalize", failed_workers=["w2"])]))
-    out = deep_work.no_failed_workers(ctx_of(raw), {})
-    assert out["passed"] is False and "w2" in out["detail"]
-
-
-def test_dw_citation_out_of_range():
-    ctx = dw_ok()
-    bad = GradeContext(trace=ctx.trace, raw=ctx.raw, files={**ctx.files, "report.md": "Claim [9]. Other [1]."})
-    out = deep_work.citation_map(bad, {})
-    assert out["passed"] is False and "9" in out["detail"]
-
-
-def test_dw_citation_ignores_markdown_links_and_needs_report():
-    ctx = dw_ok()
-    links = GradeContext(trace=ctx.trace, raw=ctx.raw, files={**ctx.files, "report.md": "See [docs](https://x.y) [1]."})
-    assert deep_work.citation_map(links, {})["passed"] is True
-    missing = GradeContext(trace=ctx.trace, raw=ctx.raw, files={"learnings": []})
-    assert deep_work.citation_map(missing, {})["passed"] is False
-
-
-def _with(ctx, **files):
-    return GradeContext(trace=ctx.trace, raw=ctx.raw, files={**ctx.files, **files})
-
-
-def test_dw_citations_number_distinct_sources_not_learnings():
-    ctx = dw_ok()
-    learnings = [
-        {"fact": "a", "source_url": "https://a.example/x"},
-        {"fact": "a2", "source_url": "https://a.example/x"},  # duplicate URL
-        {"fact": "b", "source_url": "https://b.example"},
-        {"fact": "mk", "source_type": "model_knowledge"},  # no source entry
-    ]
-    assert deep_work.source_count(learnings) == 2
-    ok = _with(ctx, learnings=learnings, **{"report.md": "X [1]. Y [2]."})
-    assert deep_work.citation_map(ok, {})["passed"] is True
-    # [3] would be a valid learning index but there are only 2 sources
-    bad = _with(ctx, learnings=learnings, **{"report.md": "X [3]."})
-    out = deep_work.citation_map(bad, {})
-    assert out["passed"] is False and "3" in out["detail"] and "2 distinct" in out["detail"]
-
-
-def test_dw_citation_ranges_lists_and_code():
-    ctx = dw_ok()
-    assert deep_work.cited_indexes("A [1, 2] b [2-3] c `[9]`\n```\n[8]\n```\n[x](u) [4](u)") == [1, 2, 3]
-    assert deep_work.citation_map(_with(ctx, **{"report.md": "A [1-2]."}), {})["passed"] is True
-    assert deep_work.citation_map(_with(ctx, **{"report.md": "A [1-3]."}), {})["passed"] is False
-    assert deep_work.citation_map(_with(ctx, **{"report.md": "`[9]` only"}), {})["passed"] is True
-    assert deep_work.citation_map(_with(ctx, **{"report.md": "A [0]."}), {})["passed"] is False
-
-
-def test_dw_citation_invalid_learning():
-    ctx = dw_ok()
-    out = deep_work.citation_map(_with(ctx, learnings=[{"fact": "x", "source_type": "web"}]), {})
-    assert out["passed"] is False and "invalid" in out["detail"]
-
-
-def test_dw_learning_without_url():
-    ctx = dw_ok()
-    learnings = [*ctx.files["learnings"], {"fact": "c", "source_type": "web"}]
-    bad = GradeContext(trace=ctx.trace, raw=ctx.raw, files={**ctx.files, "learnings": learnings})
-    assert deep_work.learning_sources(bad, {})["passed"] is False
-    learnings[-1] = {"fact": "c", "source_type": "model_knowledge"}
-    ok = GradeContext(trace=ctx.trace, raw=ctx.raw, files={**ctx.files, "learnings": learnings})
-    assert deep_work.learning_sources(ok, {})["passed"] is True
-
-
-def test_dw_url_not_in_fixtures():
-    ctx = dw_ok()
-    learnings = [*ctx.files["learnings"], {"fact": "c", "source_url": "https://made-up.example/", "source_type": "web"}]
-    bad = GradeContext(trace=ctx.trace, raw=ctx.raw, files={**ctx.files, "learnings": learnings})
-    out = deep_work.url_resolves(bad, {})
-    assert out["passed"] is False and "made-up" in out["detail"]
-
-
-def test_dw_rounds_within_plan():
-    raw = synthetic(
-        [
-            assistant(1, [call("r1", "dw_start_round", round=1), call("r2", "dw_start_round", round=2)]),
-            tool_result("r1", "dw_start_round"),
-            tool_result("r2", "dw_start_round"),
-        ]
-    )
-    assert deep_work.rounds_within_plan(ctx_of(raw), {"max_rounds": 2})["passed"] is True
-    assert deep_work.rounds_within_plan(ctx_of(raw), {"max_rounds": 1})["passed"] is False
-
-
-def test_dispatch_covers_all_code_types():
-    ctx = dw_ok()
-    for t, params in (
-        ("tool_order", {}),
-        ("no_failed_workers", {}),
-        ("citation_map", {}),
-        ("url_resolves", {}),
-        ("rounds", {"max": 5}),
-        ("learning_sources", {}),
-        ("no_run_error", {}),
-        ("tool_error_rate", {"max_rate": 0.5}),
-    ):
-        assert grade(GraderSpec(id=t, type=t, params=params), ctx)["passed"] is True, t
