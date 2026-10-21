@@ -105,6 +105,18 @@ class ProviderListResponse(BaseModel):
     total: int
 
 
+async def _reject_unsafe_api_base(api_base: Optional[str]) -> None:
+    """400 for loopback/private/link-local/metadata hosts unless explicitly allowed."""
+    if not api_base or get_settings().LLM_PROVIDER_ALLOW_PRIVATE_URLS:
+        return
+    blocked = await asyncio.to_thread(is_url_safe, api_base)
+    if blocked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"api_base is not allowed: {blocked}",
+        )
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
@@ -163,6 +175,8 @@ async def create_provider(
     The API key will be encrypted before storage.
     Provider name must be unique within the tenant.
     """
+    await _reject_unsafe_api_base(data.api_base)
+
     # Check for duplicate name
     stmt = select(LLMProvider).where(
         LLMProvider.tenant_id == tenant_id,
@@ -353,6 +367,7 @@ async def update_provider(
     if data.display_name is not None:
         provider.display_name = data.display_name
     if data.api_base is not None:
+        await _reject_unsafe_api_base(data.api_base)
         provider.api_base = data.api_base if data.api_base else None
     if data.api_key is not None:
         encryption = get_encryption_service()
@@ -427,13 +442,7 @@ async def test_provider(
     Loopback / private / link-local / metadata hosts are rejected unless
     LLM_PROVIDER_ALLOW_PRIVATE_URLS is enabled.
     """
-    if data.api_base and not get_settings().LLM_PROVIDER_ALLOW_PRIVATE_URLS:
-        blocked = await asyncio.to_thread(is_url_safe, data.api_base)
-        if blocked:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"api_base is not allowed: {blocked}",
-            )
+    await _reject_unsafe_api_base(data.api_base)
     result = await verify_provider_connection(
         provider_type=data.provider_type,
         api_base=data.api_base,

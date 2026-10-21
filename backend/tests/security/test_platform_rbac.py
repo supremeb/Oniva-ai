@@ -259,3 +259,61 @@ def test_chain_verify_ok_when_empty_tenant(monkeypatch):
 def test_chain_verify_reports_uncovered_events_alongside_ok(monkeypatch):
     body = _verify(monkeypatch, {"ok": True, "checked": 7, "legacy_unchained": 0, "first_break": None}, 3)
     assert body["ok"] is True and "not covered" in body["message"]
+
+
+# --- SSRF on stored provider api_base (create / patch) ---------------------------------------
+
+INTERNAL_BASES = ["http://localhost:8787", "http://169.254.169.254/latest", "http://10.0.0.5", "http://[::1]:8000"]
+
+
+def _provider_row():
+    return SimpleNamespace(
+        id=PROVIDER_ID, name="n", display_name="N", provider_type="custom", api_base=None,
+        api_key_encrypted=None, models=[], default_model=None, embedding_model=None,
+        workflow_builder_model=None, priority=0, is_enabled=True, is_default=False)
+
+
+def _provider_client(role="admin"):
+    row = _provider_row()
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: row))
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.add = MagicMock()
+    c = make_client(role, (llm_providers.router, "/api/v1/settings"))
+    c.app.dependency_overrides[get_db] = lambda: db
+    return c, row
+
+
+@pytest.mark.parametrize("base", INTERNAL_BASES)
+def test_create_provider_rejects_internal_api_base(base):
+    c, _ = _provider_client()
+    r = c.post("/api/v1/settings/llm-providers",
+               json={"name": "n", "display_name": "N", "provider_type": "custom", "api_base": base})
+    assert r.status_code == 400 and "api_base is not allowed" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("base", INTERNAL_BASES)
+def test_patch_provider_rejects_internal_api_base(base):
+    c, row = _provider_client()
+    r = c.patch(f"/api/v1/settings/llm-providers/{PROVIDER_ID}", json={"api_base": base})
+    assert r.status_code == 400 and "api_base is not allowed" in r.json()["detail"]
+    assert row.api_base is None
+
+
+def test_patch_without_api_base_change_is_unaffected():
+    c, row = _provider_client()
+    r = c.patch(f"/api/v1/settings/llm-providers/{PROVIDER_ID}", json={"display_name": "New"})
+    assert r.status_code == 200 and row.display_name == "New"
+
+
+def test_create_and_patch_allow_internal_api_base_when_opted_in(monkeypatch):
+    monkeypatch.setattr(get_settings(), "LLM_PROVIDER_ALLOW_PRIVATE_URLS", True)
+    base = "http://localhost:11434/v1"
+    c, row = _provider_client()
+    # create: the duplicate check sees an existing row -> 400 about the duplicate, not api_base
+    r = c.post("/api/v1/settings/llm-providers",
+               json={"name": "n", "display_name": "N", "provider_type": "custom", "api_base": base})
+    assert "api_base is not allowed" not in r.text
+    r = c.patch(f"/api/v1/settings/llm-providers/{PROVIDER_ID}", json={"api_base": base})
+    assert r.status_code == 200 and row.api_base == base
