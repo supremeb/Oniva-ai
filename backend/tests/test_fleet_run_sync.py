@@ -1,4 +1,5 @@
 """Plan 003 U9: the fleet ``on_finished`` hook (SQLite tier, fake engine)."""
+import uuid
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -219,3 +220,17 @@ async def test_find_stuck_returns_quiet_running_engine_jobs_and_the_reconciler_s
     assert job.status == "completed" and delivered == [(job_id, "All done.")]
     async with factory() as db:
         assert await fe.find_stuck(db, timedelta(seconds=-1)) == []
+
+
+def test_final_answer_is_the_last_answer_after_a_steer_that_landed_after_the_first_reply():
+    job_id = uuid.uuid4()
+
+    def text(t):
+        return {"kind": "assistant", "payload": {"message": {"blocks": [{"type": "text", "text": t}]}}}
+
+    view = {"run": {"active": False}, "entries": [
+        {"kind": "user", "payload": {"requestId": fe.request_id(job_id)}},
+        text("first answer"),
+        {"kind": "user", "payload": {"requestId": f"steer:{job_id}:abc"}},
+        text("second answer BANANA")]}
+    assert frs.final_answer(view, job_id) == "second answer BANANA"

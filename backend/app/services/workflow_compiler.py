@@ -167,6 +167,13 @@ def compile_workflow(spec: Dict[str, Any], *, validate: bool = True) -> Dict[str
     edges: List[Dict[str, Any]] = list(spec.get("edges") or [])
 
     if validate:
+        if not nodes:
+            raise ValueError("Workflow has no nodes")
+        known = {n.get("id") for n in nodes}
+        for e in edges:
+            for end in ("source", "target"):
+                if e.get(end) not in known:
+                    raise ValueError(f"Edge references a node that does not exist: {e.get(end)!r}")
         checked = copy.copy(spec)
         # The four unexecuted builder types are allowed; everything else must have an executor.
         checked["nodes"] = [

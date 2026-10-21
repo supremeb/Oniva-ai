@@ -361,6 +361,7 @@ class Settings(BaseSettings):
     # ENGINE_GATEWAY_TOKEN guards /internal (engine -> backend); the router is mounted only when set.
     # ENGINE_SERVICE_TOKEN is what the backend presents to the engine (backend -> engine).
     ENGINE_URL: str = ""
+    PUBLIC_API_URL: str = ""  # public base URL of this API, used in webhook trigger URLs (default: request base URL)
     ENGINE_SESSION_ID: str = ""
     ENGINE_SERVICE_TOKEN: Optional[str] = None
     ENGINE_GATEWAY_TOKEN: Optional[str] = None

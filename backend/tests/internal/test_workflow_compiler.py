@@ -21,6 +21,20 @@ def by_id(compiled):
     return {n["id"]: n for n in compiled["nodes"]}
 
 
+def test_empty_workflow_is_rejected_by_the_compiler():
+    with pytest.raises(ValueError, match="no nodes"):
+        compile_workflow({"nodes": [], "edges": []})
+
+
+def test_edge_to_a_missing_node_is_a_value_error():
+    spec = {"nodes": [node("s", "start")], "edges": [edge("s", "zz")]}
+    with pytest.raises(ValueError, match="zz"):
+        compile_workflow(spec)
+    spec = {"nodes": [node("s", "start")], "edges": [edge("ghost", "s")]}
+    with pytest.raises(ValueError, match="ghost"):
+        compile_workflow(spec)
+
+
 def test_condition_and_classifier_expose_handles_and_untaken_edges_are_marked():
     spec = {
         "nodes": [node("s", "start"), node("c", "ifelse"), node("a", "template"), node("b", "template"),

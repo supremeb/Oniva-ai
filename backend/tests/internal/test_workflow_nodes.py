@@ -748,3 +748,13 @@ async def test_a_sub_workflow_item_runs_the_child_spec_frozen_when_the_fanout_st
         await workflow_nodes.load_run(lambda tid: wf.maker(), wf.tenant_a, item, "c2")
     # the frozen copy is not a node variable
     assert workflow_nodes.CHILD_SPECS_KEY not in view.variables
+
+
+async def test_iteration_items_expose_the_legacy_node_scoped_item_and_index_variables(wf):
+    assert (await call(wf, "it")).json()["kind"] == "fanout"
+    async with wf.maker() as db:
+        rows = (await db.execute(select(WorkflowExecution).where(WorkflowExecution.id != wf.run))).scalars().all()
+    by_index = {row.input_data["__index"]: row.input_data for row in rows}
+    assert len(by_index) == 3
+    for i, data in by_index.items():
+        assert data["it.index"] == i and data["it.item"] == data["item"]
