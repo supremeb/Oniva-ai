@@ -6,6 +6,7 @@ from datetime import datetime
 import uuid
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class AgentAccuracyHistory(Base):
@@ -56,7 +57,7 @@ class AgentAccuracyHistory(Base):
     accuracy_delta = Column(Float, nullable=True)  # Current - Previous
 
     # Timestamps
-    evaluated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
+    evaluated_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
 
     # Relationships
     tenant = relationship("Tenant")

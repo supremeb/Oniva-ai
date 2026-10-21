@@ -45,7 +45,7 @@ class AuditEntry(BaseModel):
     decision: str
     rationale: str
     data_sources: List[str] = []
-    workflow_state: str
+    workflow_state: Optional[str] = None  # approval/policy events have no workflow state
     workflow_id: Optional[str] = None
     session_id: Optional[str] = None
     user_id: Optional[str] = None

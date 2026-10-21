@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class LLMUsageRecord(Base):
@@ -81,7 +82,7 @@ class LLMUsageRecord(Base):
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
-        default=datetime.utcnow,
+        default=utc_now,
         index=True,
     )
 

@@ -10,6 +10,7 @@ import uuid
 from typing import Optional
 
 from app.models import Base
+from app.models._clock import utc_now
 
 
 class ChatSession(Base):
@@ -78,8 +79,8 @@ class ChatSession(Base):
     last_message_at = Column(DateTime(timezone=True), nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), default=utc_now, onupdate=utc_now)
 
     # Relationships
     tenant = relationship("Tenant")

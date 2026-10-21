@@ -16,7 +16,7 @@ from app.core.logging import get_logger
 from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_document import KnowledgeDocument
 from app.services.knowledge_base import KnowledgeBaseService
-from app.services.document_processor import DocumentProcessorService
+from app.services.document_processor import ALLOWED_FILE_TYPES, DocumentProcessorService, _sanitize_filename
 from app.schemas.knowledge import (
     KnowledgeBaseCreate,
     KnowledgeBaseUpdate,
@@ -184,6 +184,15 @@ async def upload_document(
     kb = await kb_service.get_kb(kb_id, UUID(str(tenant_id)))
     if not kb:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    # Unsupported type is a 415 (same as project file upload), before reading the body
+    safe_name = _sanitize_filename(file.filename or "untitled")
+    ext = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
+    if ext not in ALLOWED_FILE_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type '.{ext}'. Allowed: {', '.join(sorted(ALLOWED_FILE_TYPES))}",
+        )
 
     # Read file content
     content = await file.read()

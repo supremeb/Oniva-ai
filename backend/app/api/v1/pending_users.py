@@ -61,7 +61,7 @@ async def list_pending_users(
     limit: int = 50,
     offset: int = 0,
     user: AuthUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """List pending users who haven't completed signup yet."""
     service = UserManagementService(db)
@@ -99,7 +99,7 @@ async def add_pending_user(
     request: Request,
     body: AddPendingUserRequest,
     user: AuthUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """
     Add a user email to the organization's pending list.
@@ -164,7 +164,7 @@ async def delete_pending_user(
     request: Request,
     pending_user_id: UUID,
     user: AuthUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db, scope="function")
 ):
     """Remove a pending user before they sign up."""
     service = UserManagementService(db)

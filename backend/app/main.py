@@ -271,6 +271,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Retry-After"],  # browser clients read the lockout / rate-limit wait from it
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
