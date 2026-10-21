@@ -120,7 +120,7 @@ def test_rerun_changes_nothing_and_alembic_chains_to_head(seeded):
     assert (report.encrypted, report.backfilled) == (0, 0)
     assert [r.trigger_id for r in report.unresolvable] == [TRIG_ORPHAN]
 
-    res = run_alembic(owner, "upgrade", "head")
+    res = run_alembic(owner, "upgrade", "121_encrypt_webhook_secrets")  # pinned: later revisions chain after it
     assert res.returncode == 0, res.stderr[-3000:]
     with eng.connect() as c:
         assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "121_encrypt_webhook_secrets"
