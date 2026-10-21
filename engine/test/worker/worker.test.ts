@@ -239,4 +239,59 @@ describe("startWorker", () => {
       expect((item?.expiresAt ?? 0) - (item?.requestedAt ?? 0)).toBe(60_000);
     });
   });
+
+  describe("steer_worker and complete_task are opt-in (U21)", () => {
+    const call = async (extra: Partial<WorkerOptions>, tool: string, args: object) => {
+      const provider = new FakeProvider();
+      const w = await startWorker(
+        options(`sess-${uuidv7()}`, [], {
+          models: new ModelRegistry().register(provider),
+          ...extra,
+        }),
+      );
+      workers.push(w);
+      await w.serving;
+      const harness = w.harness as NonNullable<typeof w.harness>;
+      provider.enqueue(fakeToolCall(tool, args as never, { id: "c1" }), fakeText("ok"));
+      const conv = await harness.createConversation({
+        tenantId: "t1",
+        projectId: "p1",
+        agent: { systemPrompt: "s", tools: ["ask_user", tool] },
+      });
+      await (await conv.submit({ text: "go" })).wait();
+      const result = (await conv.entries()).find((e) => e.kind === "tool_result");
+      return {
+        text: JSON.stringify(result?.payload),
+        toolNames: (provider.requests[0]?.tools ?? []).map((t) => t.name),
+      };
+    };
+    const STEER = { label: "w1", message: "m" };
+
+    it("without the options neither tool exists, even when an agent lists it", async () => {
+      expect((await call({}, "steer_worker", STEER)).text).toContain("unknown_tool");
+      expect((await call({}, "complete_task", { result: 1 })).text).toContain("unknown_tool");
+    });
+
+    it("with steerWorker the tool is callable; completeTask stays off", async () => {
+      const r = await call({ steerWorker: true }, "steer_worker", STEER);
+      expect(r.text).not.toContain("unknown_tool");
+      expect(r.text).toContain("No labelled worker is running");
+      const c = await call({ steerWorker: true }, "complete_task", { result: 1 });
+      expect(c.text).toContain("unknown_tool");
+    });
+
+    it("with completeTask the tool is registered and refuses without an output schema", async () => {
+      const r = await call({ completeTask: true }, "complete_task", { result: 1 });
+      expect(r.text).not.toContain("unknown_tool");
+      expect(r.text).toContain("no output schema");
+    });
+
+    it("the tool list a model sees is unchanged by the options", async () => {
+      // "noop" is not a tool: the call fails, and the request still shows what the model was given.
+      const off = await call({}, "noop", {});
+      const on = await call({ steerWorker: true, completeTask: true }, "noop", {});
+      expect(on.toolNames).toEqual(off.toolNames);
+      expect(on.toolNames).toEqual(["ask_user"]);
+    });
+  });
 });

@@ -14,6 +14,7 @@ export * from "./agent/policy.js";
 export * from "./agent/progress.js";
 export * from "./agent/prompt.js";
 export * from "./agent/questions.js";
+export * from "./agent/steer-worker-tool.js";
 export * from "./agent/subagents.js";
 export * from "./agent/submission.js";
 export * from "./agent/taint.js";

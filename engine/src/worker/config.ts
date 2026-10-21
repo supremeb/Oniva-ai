@@ -26,6 +26,8 @@
  * | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle (KTD11) |
  * | `ENGINE_SUBAGENT_TOOL` | none | register a subagent tool under this name |
  * | `ENGINE_SUBAGENT_TOOLS` | none | comma-separated subagent tool names to register (with `ENGINE_SUBAGENT_TOOL`, deduplicated) |
+ * | `ENGINE_STEER_WORKER` | off | `1` registers the `steer_worker` tool (U21); only agents whose tools list it can call it |
+ * | `ENGINE_COMPLETE_TASK` | off | `1` registers the `complete_task` tool (U19/U21); it acts only in conversations with an output schema |
  * | `ENGINE_SHUTDOWN_TIMEOUT_MS` | `10000` | bound on closing the engine at shutdown |
  * | `ENGINE_DB_CONNECT_TIMEOUT_MS` | min(5000, ttl/3) | new-connection timeout |
  * | `ENGINE_DB_STATEMENT_TIMEOUT_MS` | min(10000, 2·ttl/3) | server `statement_timeout` |
@@ -81,6 +83,10 @@ export interface WorkerConfig {
   subagentTool: string | null;
   /** Every subagent tool to register: `ENGINE_SUBAGENT_TOOL` then `ENGINE_SUBAGENT_TOOLS`, deduplicated. */
   subagentTools: string[];
+  /** Register the `steer_worker` tool (`ENGINE_STEER_WORKER=1`). */
+  steerWorker: boolean;
+  /** Register the `complete_task` tool (`ENGINE_COMPLETE_TASK=1`). */
+  completeTask: boolean;
   /** Bound on closing the engine and releasing the lease at shutdown. */
   shutdownTimeoutMs: number;
   db: WorkerDbTimeouts;
@@ -147,6 +153,12 @@ function required(env: WorkerEnv, name: string): string {
   const v = text(env, name);
   if (v === null) throw new WorkerConfigError(`${name} is required`);
   return v;
+}
+
+/** An opt-in switch: only `1` or `true` turns it on. */
+function flag(env: WorkerEnv, name: string): boolean {
+  const v = text(env, name)?.toLowerCase();
+  return v === "1" || v === "true";
 }
 
 function integer(env: WorkerEnv, name: string, fallback: number, min: number): number {
@@ -247,6 +259,8 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
     ),
     subagentTool: text(env, "ENGINE_SUBAGENT_TOOL"),
     subagentTools: subagentTools(env),
+    steerWorker: flag(env, "ENGINE_STEER_WORKER"),
+    completeTask: flag(env, "ENGINE_COMPLETE_TASK"),
     shutdownTimeoutMs: integer(env, "ENGINE_SHUTDOWN_TIMEOUT_MS", DEFAULT_SHUTDOWN_TIMEOUT_MS, 1),
     db,
   };

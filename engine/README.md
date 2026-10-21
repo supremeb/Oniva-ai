@@ -166,6 +166,14 @@ With `structuredSummary: true` the compaction task uses a sectioned prompt inste
 - **Quality.** `afterCompaction` events carry `quality { summaryChars, summarizedChars, ratio, missingHeadings }`; a ratio under 0.01 or a missing heading is also reported through `onError` as `compaction_quality`.
 - The `compaction` entry payload is unchanged; the archive path and todo live inside the summary text.
 
+## Steering a subagent (`steer_worker`)
+
+`createSteerWorkerTool()` lets a parent steer a running subagent by the `label` its subagent call was made with. `steer_worker({ label, message })` looks only at the calling run's own subagent tool tasks (same conversation and run), keeps those that are not terminal, carry that label in their checkpoint and whose child is working right now, and submits `Message from the orchestrator: <message>` to each child with `whenBusy: "steer"` (not `untrusted`). The child reads it at its next tool-round boundary. The submission's `requestId` is `steer:<subagent tool task id>:<tool call id>`, written in the same commit as the tool result, so a repeated or re-run call sends nothing new. More than one live task with the label: all are steered. No match is an error result naming the labels that are running; a child that already answered is not matched (a steer never starts a new run on a finished child). Children of other runs, parents or tenants are never reachable.
+
+Tool calls of one round start together, so a steer sent in the same round as its worker may run first. It then waits (50 ms steps on the engine clock, at most 600 times) for a same-round subagent call with that label to create its child, and fails once that call ended or the budget is spent.
+
+The worker registers the tool only when `ENGINE_STEER_WORKER=1` (`WorkerOptions.steerWorker`), and `complete_task` only when `ENGINE_COMPLETE_TASK=1` (`WorkerOptions.completeTask`). With neither set the tool list and system prompts are unchanged; an agent also has to list the tool in `agent.tools` for the model to see it.
+
 ## Running a worker
 
 One worker process serves one session (KTD4). Start it with `npm run worker`

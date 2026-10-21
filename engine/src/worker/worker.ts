@@ -33,9 +33,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import type { Pool } from "pg";
 import { askUserTool } from "../agent/ask-user-tool.js";
+import { COMPLETE_TASK_TOOL, createCompleteTaskTool } from "../agent/complete-task.js";
 import { type AgentSettings, Harness } from "../agent/harness.js";
 import type { AgentHooks } from "../agent/hooks.js";
 import type { HostPolicy } from "../agent/policy.js";
+import { createSteerWorkerTool, STEER_WORKER_TOOL } from "../agent/steer-worker-tool.js";
 import { createSubagentTool } from "../agent/subagents.js";
 import { type Clock, realClock } from "../core/clock.js";
 import { errorText, NotOwner } from "../core/errors.js";
@@ -131,6 +133,10 @@ export interface WorkerOptions {
   subagentTool?: string | null;
   /** Register a subagent tool under each of these names (with `subagentTool`, deduplicated). */
   subagentTools?: readonly string[];
+  /** Register the `steer_worker` tool (U21). Off by default: the tool list is unchanged without it. */
+  steerWorker?: boolean;
+  /** Register the `complete_task` tool (U19). Off by default; it acts only in conversations with an output schema. */
+  completeTask?: boolean;
   // biome-ignore lint/suspicious/noExplicitAny: tools with any argument type
   tools?: ToolDefinition<any>[];
   /** Host task kinds registered after the harness's built-ins (KTD3). */
@@ -480,6 +486,13 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
           ...(options.subagentTools ?? []),
         ]),
       ].map((name) => createSubagentTool({ name })),
+      // Opt-in engine-phase tools; a caller-supplied tool of the same name wins.
+      ...(options.steerWorker && !supplied.some((t) => t.name === STEER_WORKER_TOOL)
+        ? [createSteerWorkerTool()]
+        : []),
+      ...(options.completeTask && !supplied.some((t) => t.name === COMPLETE_TASK_TOOL)
+        ? [createCompleteTaskTool()]
+        : []),
     ];
     const tasks: TaskDefinition[] = [...(options.hostTasks ?? [])];
     if (options.workflow) {
