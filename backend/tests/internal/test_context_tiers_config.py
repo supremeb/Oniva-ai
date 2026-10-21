@@ -301,9 +301,12 @@ def test_deep_work_orchestrator_and_workers_get_the_tier_block():
                                                 context_windows={"m/high": 200_000}), NOW)
     block = cfg["compaction"]
     assert block["structuredSummary"] and block["archiveSummarized"] and block["contextWindows"] == {"m/high": 200_000}
-    assert block["clearTriggerTokens"] == 100_000 and block["excludeTools"] == EXCLUDE
+    assert block["clearTriggerTokens"] == 100_000 and block["excludeTools"][: len(EXCLUDE)] == EXCLUDE
+    child = {k: v for k, v in block.items() if k != "excludeTools"}
     for name in ("research_worker", "reflector", "output_agent"):
-        assert cfg["metadata"]["subagents"][name]["compaction"] == block
+        sub = cfg["metadata"]["subagents"][name]["compaction"]
+        assert sub["excludeTools"] == EXCLUDE
+        assert {k: v for k, v in sub.items() if k != "excludeTools"} == child
 
 
 def test_deep_work_off_has_no_subagent_compaction():
@@ -375,3 +378,13 @@ async def test_recitation_lookup_failure_means_off(dw, monkeypatch):
     await dw.research("w1", save=False)
     r = await dw.call("dw_save_learnings", {"worker_id": "w1", "learnings": [learning(1)]})
     assert not r["isError"] and "todo" not in r["data"]
+
+
+@pytest.mark.parametrize("tiers", ["offload", "offload+clear", "full"])
+@pytest.mark.parametrize("sandbox", [False, True])
+def test_orchestrator_tool_results_are_never_offloaded_without_read_file(tiers, sandbox):
+    """The orchestrator cannot follow an offload pointer: every tool it can call is excluded or it has read_file."""
+    cfg = edw.compose_execute_config(
+        _dw_inputs(plan=_plan("pdf_report" if sandbox else None), sandbox_enabled=sandbox, tiers=tiers), NOW)
+    excluded = set(cfg["compaction"].get("excludeTools", []))
+    assert "read_file" in cfg["tools"] or set(cfg["tools"]) <= excluded

@@ -387,6 +387,10 @@ def compose_execute_config(
         # Same block for the children (they inherit the parent's today; named here so a child override works).
         for sub in subagents.values():
             sub["compaction"] = dict(compaction)
+        # The orchestrator has no read_file, so it could not follow an offload pointer: keep every result of
+        # its own tools (all bounded, backend-generated dw_* tools and the subagent calls) inline.
+        compaction = dict(compaction)
+        compaction["excludeTools"] = _dedupe(list(compaction.get("excludeTools", [])) + parent_tools)
 
     metadata: Dict[str, Any] = {
         "purpose": PURPOSE_ORCHESTRATOR,
