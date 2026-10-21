@@ -89,6 +89,15 @@ class DeepWorkModels:
         return getattr(self, name)
 
 
+@dataclass(frozen=True)
+class PlaybookBullet:
+    """One active project-playbook bullet (U29): its id (``bullet_key``), section and text."""
+
+    key: str
+    section: str
+    text: str
+
+
 @dataclass
 class ExecuteInputs:
     """Everything the execute config depends on (already loaded, tenant-scoped)."""
@@ -110,6 +119,8 @@ class ExecuteInputs:
     context_windows: Optional[Dict[str, int]] = None  # model id -> window, for the models the run can use
     # Contract v2 sub-switches (U22): any of typed_results, verifier, steer_worker, fork. Empty leaves every output as before.
     subagent_v2: frozenset = frozenset()
+    # Project playbook (U29): active bullets, best first. Empty (memory off or nothing learned) leaves every output as before.
+    playbook: Tuple[PlaybookBullet, ...] = ()
 
 
 # --- intake and plan -------------------------------------------------------------------------
@@ -256,6 +267,34 @@ async def resolve_subagent_v2(db: Any, tenant_id: Any) -> frozenset:
     except Exception:
         logger.warning("subagent v2 flag resolution failed; contract v2 off", exc_info=True)
         return frozenset()
+
+
+async def load_playbook(db: Any, tenant_id: Any, project_id: Any) -> Tuple[PlaybookBullet, ...]:
+    """The project's top active playbook bullets, or ``()`` unless both memory gates are on.
+
+    Gates: tenant/global ``ENABLE_PROJECT_MEMORY`` AND the project's ``settings.memory.enabled`` (the chat
+    injection's rule). Pending bullets are never returned; any failure degrades to no playbook.
+    """
+    import uuid
+
+    from app.models.project import Project
+    from app.models.tenant import Tenant
+    from app.services import memory_playbook, project_memory
+
+    if db is None or project_id is None:
+        return ()
+    try:
+        tid, pid = uuid.UUID(str(tenant_id)), uuid.UUID(str(project_id))
+        tenant = await db.get(Tenant, tid)
+        project = await db.get(Project, pid)
+        if project is None or project.tenant_id != tid or not project_memory.project_memory_enabled(
+                tenant, project.settings):
+            return ()
+        rows = await memory_playbook.top_bullets(db, tenant_id=tid, project_id=pid, n=PLAYBOOK_LOAD_LIMIT)
+        return tuple(PlaybookBullet(r.bullet_key, r.section, r.text) for r in rows)
+    except Exception:
+        logger.warning("playbook load failed; running Deep Work without it", exc_info=True)
+        return ()
 
 
 # --- execute ---------------------------------------------------------------------------------
@@ -449,6 +488,57 @@ def _typed_final(prompt: str, fragment: str) -> str:
     return head + load_prompt(fragment).strip() + "\n"
 
 
+# --- project playbook (U29) ---------------------------------------------------------------------
+
+PLAYBOOK_LOAD_LIMIT = 40          # best-ranked active bullets considered across all roles
+PLAYBOOK_MAX_BULLETS = 8          # per role section
+PLAYBOOK_SECTION_CHARS = 1200     # per role section, bullet lines only
+PLAYBOOK_ROLES = ("orchestrator", "worker", "writer")
+PLAYBOOK_USED_MAX = 20
+
+
+def _bullet_line(b: PlaybookBullet) -> str:
+    return f"- [{b.key}] {' '.join(b.text.split())}"
+
+
+def playbook_for_role(bullets: Iterable[PlaybookBullet], role: str) -> List[PlaybookBullet]:
+    """The bullets one role receives: its own section plus general ones, best first, within the caps.
+
+    A bullet whose section names a role goes to that role only; any other section is general. The input is
+    already ranked, so the first fit wins; a bullet that would push the section past its character cap ends it.
+    """
+    out: List[PlaybookBullet] = []
+    used = 0
+    for b in bullets:
+        section = b.section.strip().lower()
+        if section in PLAYBOOK_ROLES and section != role:
+            continue
+        line = _bullet_line(b)
+        if len(out) >= PLAYBOOK_MAX_BULLETS or used + len(line) > PLAYBOOK_SECTION_CHARS:
+            break
+        out.append(b)
+        used += len(line)
+    return out
+
+
+def playbook_section(bullets: List[PlaybookBullet], *, report_usage: bool = False) -> str:
+    """The ``## Project playbook`` prompt section ("" when there is nothing to say)."""
+    if not bullets:
+        return ""
+    text = load_prompt("playbook_section.md").strip() + "\n\n" + "\n".join(_bullet_line(b) for b in bullets)
+    if report_usage:
+        text += "\n\n" + load_prompt("playbook_worker_usage.md").strip()
+    return text
+
+
+def _before_final_answer(prompt: str, section: str) -> str:
+    """The prompt with ``section`` ahead of its last ``## Final answer`` heading (appended when there is none)."""
+    head, sep, tail = prompt.rpartition("## Final answer")
+    if not sep:
+        return prompt.rstrip("\n") + "\n\n" + section + "\n"
+    return head + section + "\n\n" + sep + tail
+
+
 ORCHESTRATOR_CACHE_TTL = "1h"
 CONTEXT_NOTE_FILE = "orchestrator_context_note.md"  # appended to the orchestrator prompt only with tiers on
 
@@ -489,9 +579,27 @@ def compose_execute_config(
         }
         parent_tools.append(OUTPUT_AGENT)
 
+    playbook = tuple(inputs.playbook or ())
+    injected: List[PlaybookBullet] = []
+    worker_b = playbook_for_role(playbook, "worker") if playbook else []
+    if worker_b:
+        subagents[RESEARCH_WORKER]["systemPrompt"] = _before_final_answer(
+            subagents[RESEARCH_WORKER]["systemPrompt"], playbook_section(worker_b, report_usage=True))
+        injected += worker_b
+    if playbook and with_output:
+        writer_b = playbook_for_role(playbook, "writer")
+        if writer_b:
+            subagents[OUTPUT_AGENT]["systemPrompt"] = (
+                subagents[OUTPUT_AGENT]["systemPrompt"].rstrip("\n") + "\n\n" + playbook_section(writer_b) + "\n")
+            injected += writer_b
+
     if typed:
         # The result shape each child promises; the engine adds complete_task and the schema to the child itself.
         subagents[RESEARCH_WORKER]["outputSchema"] = copy.deepcopy(WORKER_OUTPUT_SCHEMA)
+        if worker_b:
+            # Optional (not in ``required``): the worker names the injected bullets it relied on (U29).
+            subagents[RESEARCH_WORKER]["outputSchema"]["properties"]["playbook_used"] = _items(
+                _str(), maxItems=PLAYBOOK_USED_MAX)
         subagents[RESEARCH_WORKER]["contextPreamble"] = worker_context_preamble(inputs.plan)
         subagents[REFLECTOR]["outputSchema"] = copy.deepcopy(REFLECTOR_OUTPUT_SCHEMA)
     if "fork" in v2:
@@ -518,6 +626,10 @@ def compose_execute_config(
             "knowledge (and any knowledge bases or connectors) and save it as `model_knowledge` learnings; "
             "do not tell a worker to search the web or browse pages.")
     prompt_parts += _v2_prompt_parts(v2)
+    orchestrator_b = playbook_for_role(playbook, "orchestrator") if playbook else []
+    if orchestrator_b:
+        prompt_parts.append(playbook_section(orchestrator_b))
+        injected += orchestrator_b
     prompt_parts.append("## Approved plan\n\n```json\n" + inputs.plan.model_dump_json(indent=2) + "\n```")
     if not with_output:
         prompt_parts.append("This plan has no deliverable file: skip step 7 and do not look for `output_agent`.")
@@ -546,6 +658,10 @@ def compose_execute_config(
     }
     if inputs.run_id:
         metadata["deepWorkRunId"] = inputs.run_id
+    if injected:
+        # Every injected id, once, in rank order: the curator attributes helpful/harmful outcomes to these (U31).
+        injected_keys = {b.key for b in injected}
+        metadata["playbookBulletIds"] = [b.key for b in playbook if b.key in injected_keys]
 
     agent: Dict[str, Any] = {
         "systemPrompt": "\n\n".join(prompt_parts),
