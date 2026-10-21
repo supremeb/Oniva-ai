@@ -188,7 +188,8 @@ async def test_skills_validation_and_system_skill_detail(test_db):
 
 async def test_browse_models_route_not_captured_by_provider_id(test_db):
     from app.api.v1 import llm_providers
-    app = make_app(test_db, make_user("member"), llm_providers.router, prefix="/api/v1/settings")
+    # browse-models is admin-only (provider writes and catalog browsing are admin settings)
+    app = make_app(test_db, make_user("admin"), llm_providers.router, prefix="/api/v1/settings")
     async with client_for(app) as c:
         r = await c.get("/api/v1/settings/llm-providers/browse-models?provider_type=bogus")
         assert r.status_code == 400  # reached the handler (was 422 uuid-parse from /{provider_id})
