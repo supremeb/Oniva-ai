@@ -240,6 +240,18 @@ async def test_retire_expired_idle_runs(db):
     assert {b.bullet_key for b in await rows(db)} == {"used"}
 
 
+async def test_retire_expired_honours_memory_bullet_idle_runs_setting(db, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "MEMORY_BULLET_IDLE_RUNS", 2, raising=False)
+    assert mp._default_idle_runs() == 2
+    await seed(db, "idle")
+    await mp.retire_expired(db, tenant_id=TENANT, project_id=PROJECT, run_id="a")
+    assert len(await rows(db)) == 1
+    await mp.retire_expired(db, tenant_id=TENANT, project_id=PROJECT, run_id="b")
+    assert await rows(db) == []
+
+
 async def test_retire_expired_same_run_counts_once(db):
     await seed(db, "idle")
     for _ in range(5):

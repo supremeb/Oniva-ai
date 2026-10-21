@@ -375,6 +375,8 @@ class Settings(BaseSettings):
     ENABLE_PROJECT_MEMORY: bool = False
     # Project memory retention (U32): pending rows nobody approved are swept after this many days.
     MEMORY_RETENTION_DAYS: int = 30
+    # Playbook bullets (U27): an active bullet not bumped for this many runs is retired.
+    MEMORY_BULLET_IDLE_RUNS: int = 20
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
     # Tiered context reduction (evals/context plan, U16). off | offload | offload+clear | full. The per-tenant
     # flag features.ENABLE_ENGINE_CONTEXT_TIERS (true = full, false = off) overrides this. Read when an agent

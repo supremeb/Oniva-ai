@@ -29,6 +29,7 @@ from typing import Any, Awaitable, Callable, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models._clock import utc_now
 from app.models.project_memory import MemoryBullet
 from app.services import project_memory as store
@@ -362,12 +363,7 @@ async def _op_add(db, tenant_id, project_id, section, text, delta_id, source, ta
 
 
 def _default_idle_runs() -> int:
-    try:
-        from app.config import settings
-
-        return int(getattr(settings, "MEMORY_BULLET_IDLE_RUNS", DEFAULT_IDLE_RUNS))
-    except Exception:  # pragma: no cover
-        return DEFAULT_IDLE_RUNS
+    return int(getattr(get_settings(), "MEMORY_BULLET_IDLE_RUNS", DEFAULT_IDLE_RUNS))
 
 
 async def retire_expired(
