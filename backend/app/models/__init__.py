@@ -63,6 +63,7 @@ from app.models.run_event import RunEvent
 from app.models.engine import ToolInvocation, EngineFence, EngineConversation
 from app.models.deep_work_run import DeepWorkRun
 from app.models.tool_approval import ToolApproval
+from app.models.project_memory import MemoryFile, MemoryBullet
 
 __all__ = [
     'Base',
@@ -171,4 +172,6 @@ __all__ = [
     'EngineFence',
     'EngineConversation',
     'DeepWorkRun',
+    'MemoryFile',
+    'MemoryBullet',
 ]
