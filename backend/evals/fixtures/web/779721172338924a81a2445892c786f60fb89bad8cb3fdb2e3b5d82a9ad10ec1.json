@@ -1,0 +1,23 @@
+{
+  "key": "779721172338924a81a2445892c786f60fb89bad8cb3fdb2e3b5d82a9ad10ec1",
+  "tool": "web_search",
+  "args": {
+    "query": "lakemont public per diem meal allowance",
+    "num_results": 5
+  },
+  "result": {
+    "query": "lakemont public per diem meal allowance",
+    "results": [
+      {
+        "title": "Synthetic source kw-w2 1",
+        "url": "https://example.com/kw-w2/1",
+        "snippet": "The Lakemont public per diem for meals is sixty-two euros."
+      },
+      {
+        "title": "Synthetic source kw-w2 2",
+        "url": "https://example.com/kw-w2/2",
+        "snippet": "The per diem is reviewed every January."
+      }
+    ]
+  }
+}

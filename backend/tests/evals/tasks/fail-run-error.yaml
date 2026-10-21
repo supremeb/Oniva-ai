@@ -1,0 +1,14 @@
+# Test input, not corpus: the model errors on the first request. The trial must be a failed trial with the error
+# code, not an exception.
+id: fail-run-error
+kind: chat
+tags: []
+input:
+  turns: ["Please answer this"]
+fake:
+  rules:
+    - when: { role: user, includes: "Please answer this" }
+      respond:
+        steps: [{ type: error, kind: invalid_request, message: "scripted failure" }]
+graders:
+  - { id: no-run-error, type: no_run_error }

@@ -1,0 +1,63 @@
+# [hard] Guards steering: a redirect message sent mid-round must end the round early and the run must still
+# reflect, write sections and finalize. The driver does not send the steer yet (input.steer records the message
+# for the live driver).
+id: dw-steer-mid-round
+kind: deep_work
+tags: []
+input:
+  query: Compare the onboarding flows of two fictional banking apps, Quill and Ridgeway
+  plan:
+    title: DWPLAN_SR_DW_STEER_MID_ROUND
+    sub_queries:
+    - worker_id: sr-w1
+      sub_query: quill banking app onboarding identity verification
+      tools:
+      - web_search
+    - worker_id: sr-w2
+      sub_query: ridgeway banking app onboarding identity verification
+      tools:
+      - web_search
+    deliverable: null
+  steer: Focus on the identity verification step only.
+environment:
+  web: replay
+fake:
+  findings_md: Quill uses a document photo and selfie and takes about three minutes [1][2]. Ridgeway uses a video
+    call that is available on weekdays [3][4].
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 8
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 8

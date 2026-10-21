@@ -38,7 +38,12 @@ paths = [
   '''k8s/redis-sentinel\.yaml''',
 ]
 
+# Match regexes against the whole line so the eval-fixture rule below can anchor on its field name.
+regexTarget = "line"
 regexes = [
   # Bearer YOUR_API_KEY appears in curl examples in docs.
   '''Bearer\s+YOUR_API_KEY''',
+  # Eval web fixtures (backend/evals/fixtures/web/) are keyed by the sha256 of the request, not a secret.
+  # Only that exact line shape is allowed; recorded page content in the same files stays scanned.
+  '''^\s*"key":\s*"[0-9a-f]{64}",?\s*$''',
 ]

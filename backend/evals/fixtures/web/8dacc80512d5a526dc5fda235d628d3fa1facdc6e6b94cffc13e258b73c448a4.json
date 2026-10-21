@@ -1,0 +1,13 @@
+{
+  "key": "8dacc80512d5a526dc5fda235d628d3fa1facdc6e6b94cffc13e258b73c448a4",
+  "tool": "browse_url",
+  "args": {
+    "url": "https://example.com/veltra/orbit",
+    "extract_text": true
+  },
+  "result": {
+    "url": "https://example.com/veltra/orbit",
+    "status": "ok",
+    "content": "Veltra Orbit. Retail price 249 euros. Battery up to nine days. Water resistant to 50 metres. Available in graphite and sand."
+  }
+}

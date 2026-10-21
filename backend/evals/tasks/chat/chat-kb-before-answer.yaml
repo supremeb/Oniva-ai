@@ -1,0 +1,61 @@
+# [medium] Guards the KB-not-searched failure class: a question about company policy must search the knowledge
+# base before answering. KB seeding is not wired into the driver yet (input.kb lists the documents).
+id: chat-kb-before-answer
+kind: chat
+tags: []
+input:
+  turns:
+  - What is our refund window for annual plans?
+  kb:
+  - fixtures/kb/refund-policy.md
+environment:
+  web: replay
+fake:
+  rules:
+  - when:
+      role: user
+      includes: refund window for annual plans
+    respond:
+      steps:
+      - type: tool_call
+        name: search_knowledge
+        arguments:
+          query: refund window annual plans
+      usage:
+        inputTokens: 300
+        outputTokens: 40
+  - when:
+      role: tool_result
+      tool: search_knowledge
+    respond:
+      steps:
+      - type: text
+        text: Annual plans can be refunded within 30 days of purchase, according to the refund policy.
+      usage:
+        inputTokens: 520
+        outputTokens: 36
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: expected-tools
+  type: trajectory_match
+  params:
+    mode: exact
+    expected:
+    - search_knowledge
+- id: budget
+  type: budget
+  params:
+    max_usd: 0.25
+    max_rounds: 4
+budget:
+  max_usd: 0.25
+  max_rounds: 4

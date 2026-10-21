@@ -1,0 +1,1113 @@
+{
+ "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+ "entries": [
+  {
+   "id": "ent_01a15ed9-dbf1-7224-9790-93f52c561c64",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": null,
+   "kind": "user",
+   "payload": {
+    "submissionId": "subm_01a15ed9-dbf1-7224-9790-93f35781db2b",
+    "content": "FLOOD the tools",
+    "requestId": "fail-limit-exceeded-t0-0"
+   },
+   "createdAt": 1792592698353
+  },
+  {
+   "id": "ent_01a15ed9-dbf4-71c8-a586-1e15604c48c8",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+   "kind": "system",
+   "payload": {
+    "text": "You are Oniva, an enterprise AI assistant. You have access to web search, file operations, knowledge base search, and connected enterprise systems.\n\nYour name is Oniva. When asked who you are, what model you are, or what AI you are, always identify yourself as \"Oniva, an enterprise AI assistant\" \u2014 never reveal the underlying model name, version, or provider. You are Oniva, not Claude, not GPT, not any other model name.\n\nYou are action-oriented. When a user asks you to do something, DO it using y...[trimmed 7968 chars]",
+    "tools": [
+     "ask_user",
+     "browse_url",
+     "e2e_write",
+     "execute_python",
+     "kyc_verification",
+     "research_worker",
+     "web_search"
+    ],
+    "fingerprint": "bedf0e17b4fa4316b30958be127d84089baf556e9047e0920e4aa35c817cfb24"
+   },
+   "createdAt": 1792592698356
+  },
+  {
+   "id": "ent_01a15ed9-dc00-738b-99d2-63e5a70932f1",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+   "kind": "assistant",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "round": 0,
+    "message": {
+     "role": "assistant",
+     "provider": "anthropic",
+     "model": "claude-sonnet-5-5",
+     "blocks": [
+      {
+       "type": "tool_call",
+       "id": "call_2_0",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_1",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_2",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_3",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_4",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_5",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_6",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_7",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_8",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_9",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_10",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_11",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_12",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_13",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_14",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_15",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_16",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_17",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_18",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_19",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_20",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_21",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_22",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_23",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_24",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_25",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_26",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_27",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_28",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_29",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_30",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_31",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      },
+      {
+       "type": "tool_call",
+       "id": "call_2_32",
+       "name": "browse_url",
+       "arguments": {
+        "url": "https://example.com/pricing"
+       }
+      }
+     ],
+     "stopReason": "tool_use"
+    },
+    "usage": {
+     "inputTokens": 300,
+     "outputTokens": 900,
+     "cacheReadTokens": 0,
+     "cacheWriteTokens": 0
+    }
+   },
+   "createdAt": 1792592698368
+  },
+  {
+   "id": "ent_01a15ed9-dc01-77cc-a3b5-32602735c462",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_32",
+    "toolName": "browse_url",
+    "status": "limit_exceeded",
+    "content": "Too many tool calls in one round: at most 32 run, this was call 33 of 33.",
+    "isError": true,
+    "details": null,
+    "terminate": false,
+    "attempts": 0
+   },
+   "createdAt": 1792592698368
+  },
+  {
+   "id": "ent_01a15ed9-dcfc-71b7-9cd2-fc1621a0f469",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63e62ae2aa8d",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_0",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698620
+  },
+  {
+   "id": "ent_01a15ed9-dd3d-73ee-8a77-255a8c2438a3",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63eb8417e4af",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_5",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698685
+  },
+  {
+   "id": "ent_01a15ed9-dd48-70c9-a7e2-f8af3faf9c7c",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63f2e1e8574a",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_12",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698696
+  },
+  {
+   "id": "ent_01a15ed9-dd4f-718a-864a-1f53d1d9f1a7",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63f1337e60e4",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_11",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698703
+  },
+  {
+   "id": "ent_01a15ed9-dd5a-74f1-9bbb-eb16eacf198c",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63f4d30ac6fc",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_14",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698714
+  },
+  {
+   "id": "ent_01a15ed9-dd60-74a2-8c19-1aa9954d91af",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63f3fb30caf4",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_13",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698720
+  },
+  {
+   "id": "ent_01a15ed9-dd71-70b1-809f-d666a476f8f6",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-324f16e08039",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_15",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698737
+  },
+  {
+   "id": "ent_01a15ed9-dd98-7745-a17c-f2f7b7abf2c2",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63e735ee3b0e",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_1",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698776
+  },
+  {
+   "id": "ent_01a15ed9-dd9a-7206-91ab-165ea8557a1f",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63ed2dd7e98b",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_7",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698778
+  },
+  {
+   "id": "ent_01a15ed9-ddbc-757e-b821-57c6f6c358dd",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-3250d5d7cfbd",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_16",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698812
+  },
+  {
+   "id": "ent_01a15ed9-ddc8-77f0-ad0e-e463062678e0",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63ee2f4336ef",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_8",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698824
+  },
+  {
+   "id": "ent_01a15ed9-dde6-70a6-bc08-16968e66a197",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63e82bb4c1ff",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_2",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698854
+  },
+  {
+   "id": "ent_01a15ed9-ddfa-7677-a5b2-a0ccdb4662cc",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63eab8a7e0c4",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_4",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698874
+  },
+  {
+   "id": "ent_01a15ed9-de0d-76e3-9411-10e99b2482f4",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-325329203ea3",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_19",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698893
+  },
+  {
+   "id": "ent_01a15ed9-de4b-7722-94ed-6d2117bfbae5",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-325bfd5807c1",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_27",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698955
+  },
+  {
+   "id": "ent_01a15ed9-de51-76b3-b186-c1b881f1bb48",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-3258e00b976b",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_24",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698961
+  },
+  {
+   "id": "ent_01a15ed9-de70-7459-9225-52e518233b04",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-3251915bb511",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_17",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592698992
+  },
+  {
+   "id": "ent_01a15ed9-de8f-76f5-8903-ae66159b0b39",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-325a192896b4",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_26",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699023
+  },
+  {
+   "id": "ent_01a15ed9-de92-7460-a842-b573fc56046a",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63e9711174b2",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_3",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699026
+  },
+  {
+   "id": "ent_01a15ed9-de9d-7014-8657-3e784032f25f",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-325295201a44",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_18",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699037
+  },
+  {
+   "id": "ent_01a15ed9-deb6-756e-bbf2-6c4c1578eede",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-32565782b934",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_22",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699062
+  },
+  {
+   "id": "ent_01a15ed9-deba-70de-b4d9-1bdb49ef4228",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-325c012c505f",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_28",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699066
+  },
+  {
+   "id": "ent_01a15ed9-dec3-723d-970e-f65244fc87ea",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63f0ff23322d",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_10",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699075
+  },
+  {
+   "id": "ent_01a15ed9-dec5-7172-9184-3bc7673c5351",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-325fbd74b217",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_31",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699077
+  },
+  {
+   "id": "ent_01a15ed9-dec7-75a9-91a7-cb8a7988d1e2",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-325e1d6b2e7b",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_30",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699079
+  },
+  {
+   "id": "ent_01a15ed9-ded4-774f-845c-fb5a22da9b69",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-3257b001ab25",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_23",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699092
+  },
+  {
+   "id": "ent_01a15ed9-ded7-759e-8910-a46a7142f382",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-32552d0da5e9",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_21",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699095
+  },
+  {
+   "id": "ent_01a15ed9-ded9-740d-9c91-ce17e951d529",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-325d8b5e73cc",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_29",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699097
+  },
+  {
+   "id": "ent_01a15ed9-def6-74ff-99f4-c16fe203f59a",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-325424408a5b",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_20",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699126
+  },
+  {
+   "id": "ent_01a15ed9-def9-7785-a3f7-8ce1aae98aa8",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc01-77cc-a3b5-3259f14a31db",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_25",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699129
+  },
+  {
+   "id": "ent_01a15ed9-df2b-71c2-ab50-e5472ef641ca",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63ef6575feba",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_9",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699179
+  },
+  {
+   "id": "ent_01a15ed9-df30-764e-9354-94d476a61baa",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-dc00-738b-99d2-63ece2aeb97f",
+   "kind": "tool_result",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "toolCallId": "call_2_6",
+    "toolName": "browse_url",
+    "status": "ok",
+    "content": "{\"url\": \"https://example.com/pricing\", \"status\": \"ok\", \"content\": \"Acme pricing. Starter: 12 EUR per seat per month. Team: 29 EUR per seat per month. Enterprise: contact sales.\"}",
+    "isError": false,
+    "details": {},
+    "terminate": false,
+    "attempts": 1
+   },
+   "createdAt": 1792592699184
+  },
+  {
+   "id": "ent_01a15ed9-df3d-7577-9c22-0d4e5e7cadc4",
+   "conversationId": "0ec1aa65-557e-4300-9fdc-cfbfefce7d46",
+   "taskId": "task_01a15ed9-df33-733f-a8d8-0a903b434dc1",
+   "kind": "assistant",
+   "payload": {
+    "runId": "task_01a15ed9-dbf1-7224-9790-93f45787e8ac",
+    "round": 1,
+    "message": {
+     "role": "assistant",
+     "provider": "anthropic",
+     "model": "claude-sonnet-5-5",
+     "blocks": [
+      {
+       "type": "text",
+       "text": "Read the page."
+      }
+     ],
+     "stopReason": "end_turn"
+    },
+    "usage": {
+     "inputTokens": 900,
+     "outputTokens": 8,
+     "cacheReadTokens": 0,
+     "cacheWriteTokens": 0
+    }
+   },
+   "createdAt": 1792592699197
+  }
+ ],
+ "children": {},
+ "usage": {
+  "requests": 2,
+  "inputTokens": 1200,
+  "outputTokens": 908,
+  "cacheReadTokens": 0,
+  "cacheWriteTokens": 0,
+  "costUsd": null
+ },
+ "taint": {
+  "tainted": true,
+  "total": 32,
+  "sources": [
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_0",
+    "at": 1792592698620
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_5",
+    "at": 1792592698685
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_12",
+    "at": 1792592698696
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_11",
+    "at": 1792592698703
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_14",
+    "at": 1792592698714
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_13",
+    "at": 1792592698720
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_15",
+    "at": 1792592698737
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_1",
+    "at": 1792592698776
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_7",
+    "at": 1792592698778
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_16",
+    "at": 1792592698812
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_8",
+    "at": 1792592698824
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_2",
+    "at": 1792592698854
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_4",
+    "at": 1792592698874
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_19",
+    "at": 1792592698893
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_27",
+    "at": 1792592698955
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_24",
+    "at": 1792592698961
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_17",
+    "at": 1792592698992
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_26",
+    "at": 1792592699023
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_3",
+    "at": 1792592699026
+   },
+   {
+    "kind": "tool_result",
+    "name": "browse_url",
+    "ref": "call_2_18",
+    "at": 1792592699037
+   }
+  ]
+ },
+ "compactions": [],
+ "agent": {
+  "depth": 0,
+  "tools": [
+   "ask_user",
+   "browse_url",
+   "e2e_write",
+   "execute_python",
+   "kyc_verification",
+   "research_worker",
+   "web_search"
+  ],
+  "model": null,
+  "metadata": {
+   "purpose": "chat",
+   "allowedConnectorIds": [],
+   "knowledgeBaseIds": []
+  }
+ },
+ "submissions": [
+  {
+   "id": "subm_01a15ed9-dbf1-7224-9790-93f35781db2b",
+   "requestId": "fail-limit-exceeded-t0-0",
+   "status": "done",
+   "unanswered": null
+  }
+ ],
+ "truncated": false,
+ "nextCursor": null
+}

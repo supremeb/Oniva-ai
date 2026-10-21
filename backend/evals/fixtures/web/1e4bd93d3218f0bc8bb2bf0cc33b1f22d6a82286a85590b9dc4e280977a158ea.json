@@ -1,0 +1,13 @@
+{
+  "key": "1e4bd93d3218f0bc8bb2bf0cc33b1f22d6a82286a85590b9dc4e280977a158ea",
+  "tool": "browse_url",
+  "args": {
+    "url": "https://example.com/old/ferry-guide",
+    "extract_text": true
+  },
+  "result": {
+    "url": "https://example.com/old/ferry-guide",
+    "status": "error",
+    "content": "Page not found."
+  }
+}

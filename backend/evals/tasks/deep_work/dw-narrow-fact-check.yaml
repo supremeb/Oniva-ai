@@ -1,0 +1,60 @@
+# [easy] Guards unsourced facts: a narrow fact check where the report must repeat only what the saved learnings
+# say (the report-states-facts-no-learning-contains failure class).
+id: dw-narrow-fact-check
+kind: deep_work
+tags: []
+input:
+  query: When did the fictional Glenhaven bridge open and how long is it?
+  plan:
+    title: DWPLAN_FC_DW_NARROW_FACT_CHECK
+    sub_queries:
+    - worker_id: fc-w1
+      sub_query: glenhaven bridge opening date
+      tools:
+      - web_search
+    - worker_id: fc-w2
+      sub_query: glenhaven bridge length and span
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: The Glenhaven bridge opened in 1962 [1] and is 840 metres long with a 310 metre main span [3][4].
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 8
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 8

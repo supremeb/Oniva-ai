@@ -1,0 +1,23 @@
+{
+  "key": "780d5ffcd0e65435d08c9c69aeea4b9fc74939644e8bb4fdd08bbf96c28d0d49",
+  "tool": "web_search",
+  "args": {
+    "query": "eastmere district rainwater tank rebate",
+    "num_results": 5
+  },
+  "result": {
+    "query": "eastmere district rainwater tank rebate",
+    "results": [
+      {
+        "title": "Synthetic source bt-w2 1",
+        "url": "https://example.com/bt-w2/1",
+        "snippet": "Eastmere pays a rebate of 150 euros for a rainwater tank."
+      },
+      {
+        "title": "Synthetic source bt-w2 2",
+        "url": "https://example.com/bt-w2/2",
+        "snippet": "The rebate needs a licensed installer."
+      }
+    ]
+  }
+}

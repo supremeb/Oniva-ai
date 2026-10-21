@@ -1,0 +1,23 @@
+{
+  "key": "b1be35759fe0e4f87c559758cfb8ba02548b64ee535ea8bfa7d514b6010cf7ea",
+  "tool": "web_search",
+  "args": {
+    "query": "harbor 3 release notes known issues",
+    "num_results": 5
+  },
+  "result": {
+    "query": "harbor 3 release notes known issues",
+    "results": [
+      {
+        "title": "Synthetic source cn-w2 1",
+        "url": "https://example.com/cn-w2/1",
+        "snippet": "Harbor 3 release notes list nine known issues."
+      },
+      {
+        "title": "Synthetic source cn-w2 2",
+        "url": "https://example.com/cn-w2/2",
+        "snippet": "Release notes were published in the spring."
+      }
+    ]
+  }
+}

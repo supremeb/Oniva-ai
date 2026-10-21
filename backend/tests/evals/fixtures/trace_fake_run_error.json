@@ -1,0 +1,96 @@
+{
+ "conversationId": "52e94be3-d5a0-4dab-acfc-5b48e9519399",
+ "entries": [
+  {
+   "id": "ent_01a15ed9-d9fd-70e7-9a5b-b49f3b7bb5f4",
+   "conversationId": "52e94be3-d5a0-4dab-acfc-5b48e9519399",
+   "taskId": null,
+   "kind": "user",
+   "payload": {
+    "submissionId": "subm_01a15ed9-d9fd-70e7-9a5b-b49d998e14b8",
+    "content": "Please answer this",
+    "requestId": "fail-run-error-t0-0"
+   },
+   "createdAt": 1792592697853
+  },
+  {
+   "id": "ent_01a15ed9-da00-75ee-9c15-a1f150c54ce7",
+   "conversationId": "52e94be3-d5a0-4dab-acfc-5b48e9519399",
+   "taskId": "task_01a15ed9-d9fd-70e7-9a5b-b49ebda94ed2",
+   "kind": "system",
+   "payload": {
+    "text": "You are Oniva, an enterprise AI assistant. You have access to web search, file operations, knowledge base search, and connected enterprise systems.\n\nYour name is Oniva. When asked who you are, what model you are, or what AI you are, always identify yourself as \"Oniva, an enterprise AI assistant\" \u2014 never reveal the underlying model name, version, or provider. You are Oniva, not Claude, not GPT, not any other model name.\n\nYou are action-oriented. When a user asks you to do something, DO it using y...[trimmed 7521 chars]",
+    "tools": [
+     "ask_user",
+     "browse_url",
+     "e2e_write",
+     "execute_python",
+     "kyc_verification",
+     "research_worker"
+    ],
+    "fingerprint": "d5275153f90afdb4985d8e0797a65123492118b618cf1e8028e998a4e4dacf1a"
+   },
+   "createdAt": 1792592697856
+  },
+  {
+   "id": "ent_01a15ed9-da0b-715a-844f-72737890bd4b",
+   "conversationId": "52e94be3-d5a0-4dab-acfc-5b48e9519399",
+   "taskId": "task_01a15ed9-d9fd-70e7-9a5b-b49ebda94ed2",
+   "kind": "run_error",
+   "payload": {
+    "runId": "task_01a15ed9-d9fd-70e7-9a5b-b49ebda94ed2",
+    "error": {
+     "kind": "invalid_request",
+     "message": "scripted failure",
+     "retryable": false
+    }
+   },
+   "createdAt": 1792592697867
+  }
+ ],
+ "children": {},
+ "usage": {
+  "requests": 1,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "cacheReadTokens": 0,
+  "cacheWriteTokens": 0,
+  "costUsd": null
+ },
+ "taint": {
+  "tainted": false,
+  "total": 0,
+  "sources": []
+ },
+ "compactions": [],
+ "agent": {
+  "depth": 0,
+  "tools": [
+   "ask_user",
+   "browse_url",
+   "e2e_write",
+   "execute_python",
+   "kyc_verification",
+   "research_worker"
+  ],
+  "model": null,
+  "metadata": {
+   "purpose": "chat",
+   "allowedConnectorIds": [],
+   "knowledgeBaseIds": []
+  }
+ },
+ "submissions": [
+  {
+   "id": "subm_01a15ed9-d9fd-70e7-9a5b-b49d998e14b8",
+   "requestId": "fail-run-error-t0-0",
+   "status": "unanswered",
+   "unanswered": {
+    "reason": "model_error",
+    "message": "scripted failure"
+   }
+  }
+ ],
+ "truncated": false,
+ "nextCursor": null
+}
