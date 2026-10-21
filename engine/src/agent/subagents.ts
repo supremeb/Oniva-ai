@@ -86,7 +86,20 @@ export interface SubagentSpec {
   maxDepth: number;
 }
 
-export type SubagentArgs = { prompt: string };
+/** `context` is accepted but not acted on yet (U20 gives it meaning). */
+export type SubagentContext = { brief?: string | undefined; files?: string[] | undefined };
+
+export type SubagentArgs = {
+  prompt: string;
+  label?: string | undefined;
+  context?: SubagentContext | undefined;
+};
+
+/** A label names one subagent call so a parent can steer it later (U21). */
+const labelSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9_-]{1,64}$/, "label must be 1-64 characters of A-Z, a-z, 0-9, _ or -");
 
 export interface SubagentToolDefinition extends ToolDefinition<SubagentArgs> {
   readonly subagent: Readonly<SubagentSpec>;
@@ -126,8 +139,17 @@ export function createSubagentTool(options: SubagentToolOptions): SubagentToolDe
       "Delegate a self-contained task to a subagent and get its final answer.",
     parameters: z.object({
       prompt: z.string().min(1).describe("The task for the subagent, with everything it needs."),
+      label: labelSchema.optional().describe("A short name for this call, for later reference."),
+      context: z
+        .object({ brief: z.string().optional(), files: z.array(z.string()).optional() })
+        .optional()
+        .describe("Optional extra context for the subagent."),
     }),
     internal: true,
+    enginePhase: {
+      phase: SUBAGENT_PHASE,
+      run: (deps, task, rt, w) => subagentPhase(deps, task, rt, w),
+    },
     execute: () => ({
       content: `Subagent tool ${options.name} runs only inside the agent loop.`,
       isError: true,
@@ -231,7 +253,7 @@ export async function subagentPhase(
     const parsed = tool.parameters.safeParse(args);
     if (!parsed.success) {
       return fail("invalid_arguments", {
-        content: `Invalid arguments for ${call.name}: a non-empty "prompt" is required.`,
+        content: `Invalid arguments for ${call.name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "arguments"}: ${i.message}`).join("; ")}`,
         isError: true,
       });
     }
@@ -245,6 +267,7 @@ export async function subagentPhase(
       rt,
       tool.subagent,
       parsed.data.prompt,
+      parsed.data.label,
       args,
       generation,
       deps,
@@ -260,6 +283,7 @@ function spawnChild(
   rt: Scope,
   spec: SubagentSpec,
   prompt: string,
+  label: string | undefined,
   args: JsonObject,
   generation: TaskDefinition<GenerationInput, GenerationCheckpoint>,
   deps: Deps,
@@ -322,7 +346,11 @@ function spawnChild(
     return waiting({
       on: [runId],
       phase: SUBAGENT_PHASE,
-      checkpoint: { arguments: args, subagent: { conversationId: child.id, submissionId } },
+      checkpoint: {
+        arguments: args,
+        subagent: { conversationId: child.id, submissionId },
+        ...(label === undefined ? {} : { label }),
+      },
     });
   });
 }
