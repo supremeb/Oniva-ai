@@ -759,3 +759,144 @@ async def test_authorize_invalid_422(env):
     assert (await ta.post(env, ta.body(env, toolSource="other"))).status_code == 422
     assert (await ta.post(env, ta.body(env, arguments=["not", "an", "object"]))).status_code == 422
     assert await ta.rows(env) == []
+
+
+# ---- workspace offload (U12 engine client / U15 route) ---------------------------------------
+
+OFFLOAD = "/internal/workspace/offload"
+
+
+@pytest.fixture
+def store(tmp_path, monkeypatch):
+    from app.services import conversation_workspace as cw
+    from app.services import session_storage as ss
+
+    storage = ss.SessionStorage(base_path=tmp_path, checkpointing_enabled=False)
+    monkeypatch.setattr(ss, "_session_storage", storage, raising=False)
+    monkeypatch.setattr(cw, "get_session_storage", lambda: storage)
+    return storage
+
+
+def offload_body(w, *, run="r1", call="c1", text="hello", **kw):
+    """The body the engine's `offload` sends: the root conversation plus the calling (child) one."""
+    return {
+        "tenantId": str(w.tenant_a), "projectId": str(w.project_a), "conversationId": str(w.conv_a),
+        "engineConversationId": str(uuid.uuid4()), "runId": run, "toolCallId": call, "toolName": "run_code",
+        "text": text, **kw,
+    }
+
+
+async def put_offload(w, *, run="r1", call="c1", token=None, session=ti.SESSION, text="hello", body=None):
+    h = ti.headers(run, call, token, session)
+    return await w.client.post(OFFLOAD, json=body or offload_body(w, run=run, call=call, text=text), headers=h)
+
+
+@clause("offload-fenced")
+async def test_offload_fenced(gw, store):
+    from app.services import conversation_workspace as cw
+
+    ok = await put_offload(gw, token=5)
+    assert ok.status_code == 200 and ok.json() == {"path": "tool_results/c1.txt", "bytes": 5}
+    stale = await put_offload(gw, token=4, call="c2")
+    assert stale.status_code == 409 and stale.json() == {"error": "fence_rejected", "highWater": 5}
+    assert await cw.read(str(gw.tenant_a), str(gw.conv_a), "tool_results/c2.txt") is None
+    assert await ti.high_water(gw) == 5
+    for h in ({}, {"Authorization": "Bearer nope"}):
+        assert (await gw.client.post(OFFLOAD, json=offload_body(gw), headers=h)).status_code == 401
+
+
+@clause("offload-shape")
+async def test_offload_shape(gw, store):
+    from app.services import conversation_workspace as cw
+
+    text = "héllo ✓"  # bytes is the UTF-8 length, not the character count
+    r = await put_offload(gw, call="call_ab:1.x", text=text)
+    assert r.status_code == 200
+    assert r.json() == {"path": "tool_results/call_ab:1.x.txt", "bytes": len(text.encode("utf-8"))}
+    # stored under the root conversation (conversationId), not the engine's own child id
+    assert await cw.read(str(gw.tenant_a), str(gw.conv_a), r.json()["path"]) == text
+    # a missing engineConversationId is fine (informational); the path is never caller-supplied
+    b = offload_body(gw, call="c9", path="../../evil.txt")
+    del b["engineConversationId"]
+    again = await put_offload(gw, call="c9", body=b)
+    assert again.status_code == 200 and again.json()["path"] == "tool_results/c9.txt"
+
+
+@clause("offload-idempotent")
+async def test_offload_idempotent(gw, store):
+    from app.services import conversation_workspace as cw
+
+    first = await put_offload(gw, text="hello")
+    again = await put_offload(gw, text="a completely different body")
+    assert first.status_code == again.status_code == 200
+    assert first.json() == again.json() == {"path": "tool_results/c1.txt", "bytes": 5}
+    assert await cw.read(str(gw.tenant_a), str(gw.conv_a), "tool_results/c1.txt") == "hello"
+    # a repeat is answered from the store even when the new body would be over the cap
+    huge = await put_offload(gw, text="x" * (cw.MAX_BYTES + 1))
+    assert huge.status_code == 200 and huge.json() == first.json()
+
+
+@clause("offload-invalid-400")
+async def test_offload_invalid_400(gw, store):
+    from app.services import conversation_workspace as cw
+
+    for field in ("tenantId", "projectId", "conversationId", "runId", "toolCallId", "toolName", "text"):
+        b = offload_body(gw)
+        del b[field]
+        r = await put_offload(gw, body=b)
+        assert r.status_code == 400 and r.json() == {"error": "invalid_request"}, field
+    for field in ("tenantId", "projectId", "conversationId", "runId", "toolCallId", "toolName"):
+        r = await put_offload(gw, body=offload_body(gw, **{field: ""}))
+        assert r.status_code == 400 and r.json() == {"error": "invalid_request"}, field
+    for bad in ("../x", "a/b", "a b", "x" * 129):
+        r = await put_offload(gw, call=bad)
+        assert r.status_code == 400 and r.json() == {"error": "invalid_request"}, bad
+    for key in ("x:y", "r1:c1:extra", None):
+        h = ti.headers()
+        if key is None:
+            del h["Idempotency-Key"]
+        else:
+            h["Idempotency-Key"] = key
+        r = await gw.client.post(OFFLOAD, json=offload_body(gw), headers=h)
+        assert r.status_code == 400 and r.json() == {"error": "invalid_request"}, key
+    assert await cw.list_files(str(gw.tenant_a), str(gw.conv_a)) == []
+
+
+@clause("offload-too-large-413")
+async def test_offload_too_large_413(gw, store):
+    from app.services import conversation_workspace as cw
+
+    r = await put_offload(gw, text="x" * (cw.MAX_BYTES + 1))
+    assert r.status_code == 413 and r.json() == {"error": "too_large"}
+    assert await cw.read(str(gw.tenant_a), str(gw.conv_a), "tool_results/c1.txt") is None
+    at_cap = await put_offload(gw, call="c2", text="x" * cw.MAX_BYTES)
+    assert at_cap.status_code == 200 and at_cap.json()["bytes"] == cw.MAX_BYTES
+
+
+@clause("offload-retry-transient")
+async def test_offload_retry_transient(gw, store, monkeypatch):
+    """A failure that left nothing behind is retryable under the same key (the route is idempotent);
+    the definitive answers (400, 409, 413) are not 429/5xx."""
+    from app.services import conversation_workspace as cw
+
+    real_write = store.write
+    calls = {"n": 0}
+
+    async def flaky(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("disk hiccup")
+        return await real_write(*a, **kw)
+
+    monkeypatch.setattr(store, "write", flaky)
+    with pytest.raises(OSError):  # surfaces as a 5xx; the engine retries
+        await put_offload(gw, token=3)
+    assert await cw.read(str(gw.tenant_a), str(gw.conv_a), "tool_results/c1.txt") is None
+    retried = await put_offload(gw, token=3)
+    assert retried.status_code == 200 and retried.json() == {"path": "tool_results/c1.txt", "bytes": 5}
+    assert (await put_offload(gw, token=3, text="other")).json() == retried.json()
+    assert await cw.read(str(gw.tenant_a), str(gw.conv_a), "tool_results/c1.txt") == "hello"
+    definitive = [(await put_offload(gw, token=2, call="c2")).status_code,
+                  (await put_offload(gw, call="../x")).status_code,
+                  (await put_offload(gw, call="c3", text="x" * (cw.MAX_BYTES + 1))).status_code]
+    assert definitive == [409, 400, 413]
