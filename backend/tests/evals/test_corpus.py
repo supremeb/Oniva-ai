@@ -19,6 +19,7 @@ EVALS = Path(__file__).resolve().parents[2] / "evals"
 WEB = EVALS / "fixtures/web"
 CAL = EVALS / "calibration"
 WEB_TOOLS = ("web_search", "browse_url")
+LATER_SUITES = {"dw_subagents"}  # folder names and tags of suites added after the seed corpus
 
 
 @pytest.fixture(scope="module")
@@ -37,6 +38,10 @@ def replayed_requests(task: Task) -> list[tuple[str, dict]]:
     if task.kind == "deep_work":  # the fake Deep Work script has each worker search its sub_query once
         for sub in task.input["plan"]["sub_queries"]:
             calls.append(("web_search", {"query": sub["sub_query"]}))
+        scenario = task.fake.get("scenario") or {}  # U24: a steered worker and a gap-round worker search once more
+        for extra in (scenario.get("steer"), scenario.get("gap")):
+            if extra:
+                calls.append(("web_search", {"query": extra.get("query") or extra["sub_query"]}))
     for rule in task.fake.get("rules") or []:
         for step in rule["respond"]["steps"]:
             if step.get("type") == "tool_call" and step["name"] in WEB_TOOLS:
@@ -46,8 +51,11 @@ def replayed_requests(task: Task) -> list[tuple[str, dict]]:
 
 def test_corpus_size_and_mix(tasks):
     # The two U5 smoke tasks stay at the folder root (other tests load them by that path).
-    by_folder = Counter(p.parent.name for p in (EVALS / "tasks").rglob("*.yaml"))
+    # Later phases add their own suites in their own folders (U24: dw_subagents); this test pins the seed corpus
+    # plus U17's long_session suite.
+    by_folder = Counter(p.parent.name for p in (EVALS / "tasks").rglob("*.yaml") if p.parent.name not in LATER_SUITES)
     assert by_folder == {"deep_work": 12, "chat": 8, "smoke": 2, "tasks": 2, "long_session": 6}
+    tasks = [t for t in tasks if not set(t.tags) & LATER_SUITES]
     assert len(tasks) == 30
     assert Counter(t.kind for t in tasks) == {"deep_work": 13, "chat": 11, "long_session": 6}
     # Long sessions take minutes even in fake mode, so none may join the CI regression subset (U17).

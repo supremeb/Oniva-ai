@@ -1,0 +1,84 @@
+# [hard] Guards a gap round: the reflector finds a gap after round 1 and a third worker covers it. The new worker should build on what round 1 already found instead of saving the same pages again.
+id: dws-fork-gap-round
+kind: deep_work
+tags:
+- dw_subagents
+input:
+  query: Survey community broadband programmes in the fictional regions Eastvale and Westmoor
+  plan:
+    title: DWPLAN_GR_DWS_FORK_GAP_ROUND
+    sub_queries:
+    - worker_id: gr-w1
+      sub_query: eastvale community broadband programme rules
+      tools:
+      - web_search
+    - worker_id: gr-w2
+      sub_query: westmoor community broadband programme rules
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Eastvale funds rural fibre [1][2], Westmoor funds towers [3][4] and both require a cost review [4][5].
+  scenario:
+    gap:
+      worker_id: gr-w3
+      sub_query: eastvale and westmoor broadband programme cost review requirements
+      urls:
+        gr-w3:
+        - https://example.com/gr-w1/1
+        - https://example.com/gr-w2/1
+        - https://example.com/gr-w3/1
+      urls_v2:
+        gr-w3:
+        - https://example.com/gr-w3/1
+        - https://example.com/gr-w3/2
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: worker_failure_rate
+  gating: true
+  params:
+    max_rate: 0.0
+- id: malformed
+  type: malformed_worker_answers
+  params:
+    max: 0
+- id: gap-no-repeat
+  type: cross_worker_url_overlap
+  params:
+    max_repeat: 0.2
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 2.5
+    max_rounds: 12
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 2.5
+  max_rounds: 12

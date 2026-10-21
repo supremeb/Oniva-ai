@@ -1,0 +1,23 @@
+{
+  "key": "6b5d8c35e431b6779d00958d8be1cb0d370c14e39d3915cf08a4b36cbb3b6983",
+  "tool": "web_search",
+  "args": {
+    "query": "orchard grocery delivery options and fees",
+    "num_results": 5
+  },
+  "result": {
+    "query": "orchard grocery delivery options and fees",
+    "results": [
+      {
+        "title": "Synthetic source un-w1 1",
+        "url": "https://example.com/un-w1/1",
+        "snippet": "About orchard grocery delivery options and fees, part 1"
+      },
+      {
+        "title": "Synthetic source un-w1 2",
+        "url": "https://example.com/un-w1/2",
+        "snippet": "About orchard grocery delivery options and fees, part 2"
+      }
+    ]
+  }
+}

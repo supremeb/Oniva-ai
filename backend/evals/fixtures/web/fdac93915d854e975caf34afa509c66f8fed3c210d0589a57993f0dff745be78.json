@@ -1,0 +1,28 @@
+{
+  "key": "fdac93915d854e975caf34afa509c66f8fed3c210d0589a57993f0dff745be78",
+  "tool": "web_search",
+  "args": {
+    "query": "heat pump rebates in brennick",
+    "num_results": 5
+  },
+  "result": {
+    "query": "heat pump rebates in brennick",
+    "results": [
+      {
+        "title": "Synthetic source or-w2 1",
+        "url": "https://example.com/or-w2/1",
+        "snippet": "About heat pump rebates in brennick, part 1"
+      },
+      {
+        "title": "Synthetic source or-w2 2",
+        "url": "https://example.com/or-w2/2",
+        "snippet": "About heat pump rebates in brennick, part 2"
+      },
+      {
+        "title": "Synthetic source or-w2 3",
+        "url": "https://example.com/shared/or-national",
+        "snippet": "About heat pump rebates in brennick, part 3"
+      }
+    ]
+  }
+}

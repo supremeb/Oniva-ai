@@ -28,8 +28,8 @@ TERMINAL = ("completed", "failed", "cancelled")
 
 
 async def call(ctx: DriverContext, method: str, path: str, **kw: Any) -> Any:
-    r = await ctx.http.request(method, f"{ctx.backend}{BASE}{path}", headers=AUTH, timeout=120, **kw)
-    return r
+    headers = {**AUTH, **kw.pop("headers", {})}
+    return await ctx.http.request(method, f"{ctx.backend}{BASE}{path}", headers=headers, timeout=120, **kw)
 
 
 async def open_session(ctx: DriverContext, query: str) -> tuple[str, str]:
@@ -93,6 +93,25 @@ async def read_report(ctx: DriverContext, session_id: str) -> str | None:
     return r.text if r.status_code == 200 else None
 
 
+STEER_WAIT_S = 120.0
+
+
+async def send_steer(ctx: DriverContext, session_id: str, conversation_id: str, message: str) -> None:
+    """Send a seeded user steer once a worker is running (live mode, `input.steer` as a mapping).
+
+    The message goes through the user's own steer route, as in the browser. Whether the orchestrator turns it into a
+    `steer_worker` call is what the `steer_applied` grader measures; this driver never talks to a worker directly.
+    """
+    deadline = time.monotonic() + STEER_WAIT_S
+    while time.monotonic() < deadline and ctx.remaining() > 0:
+        raw = await fetch_trace(ctx.api, conversation_id, raw=True)
+        if raw.get("children"):
+            break
+        await asyncio.sleep(POLL_S)
+    key = f"eval-steer-{session_id}"
+    await call(ctx, "POST", f"/{session_id}/steer", headers={**AUTH, "Idempotency-Key": key}, json={"text": message, "requestId": key})
+
+
 SETTLE_S = 30.0
 OPEN_SUBMISSION = ("pending", "active")
 
@@ -125,11 +144,19 @@ async def run(ctx: DriverContext) -> DriverOutput:
     started = time.monotonic()
     await start(ctx, query, session_id, plan)
     timed_out, status = False, None
+    steer = ctx.task.input.get("steer")
+    steering = None
+    if ctx.ew.mode == "live" and isinstance(steer, dict) and steer.get("message"):
+        steering = asyncio.create_task(send_steer(ctx, session_id, conversation_id, str(steer["message"])))
     try:
         status = await wait_terminal(ctx, conversation_id)
     except TrialTimeout:
         timed_out = True
         await call(ctx, "POST", f"/engine/{session_id}/cancel")
+    finally:
+        if steering is not None:
+            steering.cancel()
+            await asyncio.gather(steering, return_exceptions=True)
     ctx.lap("run", started)
 
     started = time.monotonic()

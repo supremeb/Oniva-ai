@@ -1,0 +1,71 @@
+# [medium] Guards the answer contract: one of two workers ends its run with a plain-text recap instead of the summary object. With contract v2 the engine asks it once for complete_task, so the orchestrator never sees a malformed answer.
+id: dws-malformed-one-worker
+kind: deep_work
+tags:
+- dw_subagents
+input:
+  query: Compare the support plans of the Harbor and Pike hosting services
+  plan:
+    title: DWPLAN_M1_DWS_MALFORMED_ONE_WORKER
+    sub_queries:
+    - worker_id: m1-w1
+      sub_query: harbor hosting support plans and response times
+      tools:
+      - web_search
+    - worker_id: m1-w2
+      sub_query: pike hosting support plans and response times
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Harbor offers round-the-clock chat support [1][2] while Pike offers email support only [3][4].
+  scenario:
+    prose:
+      m1-w2: prose
+    nudge: complete
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: worker_failure_rate
+  gating: true
+  params:
+    max_rate: 0.0
+- id: malformed
+  type: malformed_worker_answers
+  params:
+    max: 0
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 12
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 12

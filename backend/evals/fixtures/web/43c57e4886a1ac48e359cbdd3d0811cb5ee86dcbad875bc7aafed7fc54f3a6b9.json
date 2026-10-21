@@ -1,0 +1,23 @@
+{
+  "key": "43c57e4886a1ac48e359cbdd3d0811cb5ee86dcbad875bc7aafed7fc54f3a6b9",
+  "tool": "web_search",
+  "args": {
+    "query": "fjord gym membership cancellation rules",
+    "num_results": 5
+  },
+  "result": {
+    "query": "fjord gym membership cancellation rules",
+    "results": [
+      {
+        "title": "Synthetic source m3-w1 1",
+        "url": "https://example.com/m3-w1/1",
+        "snippet": "About fjord gym membership cancellation rules, part 1"
+      },
+      {
+        "title": "Synthetic source m3-w1 2",
+        "url": "https://example.com/m3-w1/2",
+        "snippet": "About fjord gym membership cancellation rules, part 2"
+      }
+    ]
+  }
+}

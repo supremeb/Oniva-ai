@@ -1,0 +1,33 @@
+{
+  "key": "fc4a35ebcd07937ed21a4db369584b1d17ab6acf27e6a345f900e56a29633442",
+  "tool": "web_search",
+  "args": {
+    "query": "northwind crm cost per seat",
+    "num_results": 5
+  },
+  "result": {
+    "query": "northwind crm cost per seat",
+    "results": [
+      {
+        "title": "Synthetic source ov-w2 1",
+        "url": "https://example.com/ov-w2/1",
+        "snippet": "About northwind crm cost per seat, part 1"
+      },
+      {
+        "title": "Synthetic source ov-w2 2",
+        "url": "https://example.com/ov-w2/2",
+        "snippet": "About northwind crm cost per seat, part 2"
+      },
+      {
+        "title": "Synthetic source ov-w2 3",
+        "url": "https://example.com/shared/ov-pricing",
+        "snippet": "About northwind crm cost per seat, part 3"
+      },
+      {
+        "title": "Synthetic source ov-w2 4",
+        "url": "https://example.com/shared/ov-plans",
+        "snippet": "About northwind crm cost per seat, part 4"
+      }
+    ]
+  }
+}

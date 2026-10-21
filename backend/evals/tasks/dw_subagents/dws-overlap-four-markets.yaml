@@ -1,0 +1,108 @@
+# [hard] Guards redundant research across four workers: two cover one region each and two cover broader angles that include them. With sibling topics in view each worker should keep to its own sources.
+id: dws-overlap-four-markets
+kind: deep_work
+tags:
+- dw_subagents
+input:
+  query: Survey heat pump rebates in the fictional regions Aldermark and Brennick
+  plan:
+    title: DWPLAN_OR_DWS_OVERLAP_FOUR_MARKETS
+    sub_queries:
+    - worker_id: or-w1
+      sub_query: heat pump rebates in aldermark
+      tools:
+      - web_search
+    - worker_id: or-w2
+      sub_query: heat pump rebates in brennick
+      tools:
+      - web_search
+    - worker_id: or-w3
+      sub_query: national heat pump rebate programme
+      tools:
+      - web_search
+    - worker_id: or-w4
+      sub_query: heat pump installer subsidies in aldermark and brennick
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Aldermark pays a flat rebate [1][2], Brennick pays per kilowatt [3][4] and a national programme tops both
+    up [2][5].
+  scenario:
+    urls:
+      or-w1:
+      - https://example.com/or-w1/1
+      - https://example.com/shared/or-national
+      or-w2:
+      - https://example.com/or-w2/1
+      - https://example.com/shared/or-national
+      or-w3:
+      - https://example.com/shared/or-national
+      - https://example.com/or-w3/1
+      or-w4:
+      - https://example.com/or-w1/1
+      - https://example.com/or-w2/1
+      - https://example.com/or-w4/1
+    urls_v2:
+      or-w1:
+      - https://example.com/or-w1/1
+      - https://example.com/or-w1/2
+      or-w2:
+      - https://example.com/or-w2/1
+      - https://example.com/or-w2/2
+      or-w3:
+      - https://example.com/or-w3/1
+      - https://example.com/or-w3/2
+      or-w4:
+      - https://example.com/or-w4/1
+      - https://example.com/or-w4/2
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: worker_failure_rate
+  gating: true
+  params:
+    max_rate: 0.0
+- id: malformed
+  type: malformed_worker_answers
+  params:
+    max: 0
+- id: url-overlap
+  type: cross_worker_url_overlap
+  params:
+    max_overlap: 0.2
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 2.5
+    max_rounds: 12
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 2.5
+  max_rounds: 12

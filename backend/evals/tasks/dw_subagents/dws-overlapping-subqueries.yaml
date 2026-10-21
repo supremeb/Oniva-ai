@@ -1,0 +1,98 @@
+# [medium] Guards redundant research: three sub-queries about the same product's pricing from different angles. Told what the other workers cover, the workers should not save the same pages.
+id: dws-overlapping-subqueries
+kind: deep_work
+tags:
+- dw_subagents
+input:
+  query: Summarise the pricing of the Northwind CRM
+  plan:
+    title: DWPLAN_OV_DWS_OVERLAPPING_SUBQUERIES
+    sub_queries:
+    - worker_id: ov-w1
+      sub_query: northwind crm pricing tiers
+      tools:
+      - web_search
+    - worker_id: ov-w2
+      sub_query: northwind crm cost per seat
+      tools:
+      - web_search
+    - worker_id: ov-w3
+      sub_query: northwind crm plan comparison
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Northwind has three tiers [1][2], charges per seat [3] and compares plans on storage [4][5].
+  scenario:
+    urls:
+      ov-w1:
+      - https://example.com/shared/ov-pricing
+      - https://example.com/ov-w1/1
+      ov-w2:
+      - https://example.com/shared/ov-pricing
+      - https://example.com/shared/ov-plans
+      - https://example.com/ov-w2/1
+      ov-w3:
+      - https://example.com/shared/ov-plans
+      - https://example.com/shared/ov-pricing
+      - https://example.com/ov-w3/1
+    urls_v2:
+      ov-w1:
+      - https://example.com/ov-w1/1
+      - https://example.com/ov-w1/2
+      ov-w2:
+      - https://example.com/ov-w2/1
+      - https://example.com/ov-w2/2
+      ov-w3:
+      - https://example.com/ov-w3/1
+      - https://example.com/ov-w3/2
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: worker_failure_rate
+  gating: true
+  params:
+    max_rate: 0.0
+- id: malformed
+  type: malformed_worker_answers
+  params:
+    max: 0
+- id: url-overlap
+  type: cross_worker_url_overlap
+  params:
+    max_overlap: 0.2
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 12
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 12

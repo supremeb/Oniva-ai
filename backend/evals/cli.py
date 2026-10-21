@@ -38,7 +38,7 @@ from .budget import ENV_VAR, BudgetConfigError, BudgetMeter
 from .graders.judge import CALIBRATION_DIR, JUDGE_FIELDS, MIN_RATE, MODEL_VAR, JudgeCache, JudgeConfigError
 from .loader import TaskLoadError, load_tasks, select_by_tags
 from .schema import Task
-from .stack import LiveModeError
+from .stack import ARM_VAR, ARMS, LiveModeError, resolve_arm
 
 EVALS_DIR = Path(__file__).resolve().parent
 DEFAULT_TASKS_DIR = EVALS_DIR / "tasks"
@@ -114,6 +114,11 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     run_env = dict(env)
     if args.max_usd is not None:
         run_env[ENV_VAR] = str(args.max_usd)
+    try:
+        arm = resolve_arm(getattr(args, "arm", None), run_env)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
 
     baseline = None
     if args.baseline:
@@ -143,13 +148,14 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
                 timeout_s=args.timeout,
                 judges=False if args.no_judges else None,
                 **({"tiers": args.tiers} if args.tiers else {}),
+                **({"arm": arm} if arm != "baseline" else {}),  # baseline is the stack's own default
             )
         )
     except (LiveModeError, BudgetConfigError, JudgeConfigError) as e:
         print(f"refusing to run: {e}", file=sys.stderr)
         return 2
 
-    suite = list(args.tag)
+    suite = list(args.tag) + ([arm] if arm != "baseline" else [])  # a v2 run is named for its arm
     out_json = Path(args.out) if args.out else rpt.result_path(results_dir, suite, mode)
     traces = rpt.write_traces(results, out_json.with_suffix(".traces"))
     report = rpt.build_report(
@@ -349,6 +355,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--live", action="store_true", help="same as --mode live")
     run.add_argument("--max-usd", type=float, default=None, help=f"spend cap for this run (overrides {ENV_VAR})")
     run.add_argument("--no-judges", action="store_true", help="skip the LLM judge graders (always skipped in fake mode)")
+    run.add_argument(
+        "--arm",
+        choices=ARMS,
+        default=None,
+        help=f"subagent contract: baseline (v2 off, default) or v2 (default from {ARM_VAR})",
+    )
     run.add_argument("--dry-run", action="store_true", help="print the estimated cost and run nothing")
     run.add_argument("--baseline", help="baseline name or path: diff after the run, exit 1 on a regression")
     run.add_argument("--out", help="result file (default: results/<date>-<suite>-<mode>.json)")

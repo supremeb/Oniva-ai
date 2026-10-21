@@ -1,0 +1,23 @@
+{
+  "key": "995be27ad2dca5b4ca8460e0efe3ab409bf79c2b1987f8d34ebe9d62c564b3e1",
+  "tool": "web_search",
+  "args": {
+    "query": "quill banking app onboarding flow",
+    "num_results": 5
+  },
+  "result": {
+    "query": "quill banking app onboarding flow",
+    "results": [
+      {
+        "title": "Synthetic source sf-w1 1",
+        "url": "https://example.com/sf-w1/1",
+        "snippet": "About quill banking app onboarding flow, part 1"
+      },
+      {
+        "title": "Synthetic source sf-w1 2",
+        "url": "https://example.com/sf-w1/2",
+        "snippet": "About quill banking app onboarding flow, part 2"
+      }
+    ]
+  }
+}

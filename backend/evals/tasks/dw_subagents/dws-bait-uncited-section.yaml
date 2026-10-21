@@ -1,0 +1,74 @@
+# [hard] Guards citation hygiene: the draft has a long factual 'Background' section with no citation at all. Production only warns; the verifier step should have it cited before the report is finalized.
+id: dws-bait-uncited-section
+kind: deep_work
+tags:
+- dw_subagents
+input:
+  query: Compare the delivery options of the Orchard and Pine grocery services
+  plan:
+    title: DWPLAN_UN_DWS_BAIT_UNCITED_SECTION
+    sub_queries:
+    - worker_id: un-w1
+      sub_query: orchard grocery delivery options and fees
+      tools:
+      - web_search
+    - worker_id: un-w2
+      sub_query: pine grocery delivery options and fees
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Orchard delivers within two hours for a flat fee [1][2] and Pine delivers next day for free [3][4].
+  scenario:
+    bait: uncited
+    findings_fixed: Background. The market has several vendors with different tiers, discounts and contract terms, and buyers
+      usually compare them on price, support and the length of the commitment before they choose [1][3], which is why the
+      findings above matter.
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: worker_failure_rate
+  gating: true
+  params:
+    max_rate: 0.0
+- id: malformed
+  type: malformed_worker_answers
+  params:
+    max: 0
+- id: sections-cited
+  type: uncited_sections
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 12
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 12

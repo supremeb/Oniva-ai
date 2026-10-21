@@ -1,0 +1,23 @@
+{
+  "key": "e8d95e2d95b510283dbfb1d6fdd6e75793b2b5e82d898a3df0b98c9129747e53",
+  "tool": "web_search",
+  "args": {
+    "query": "atlas project tracker pricing plans",
+    "num_results": 5
+  },
+  "result": {
+    "query": "atlas project tracker pricing plans",
+    "results": [
+      {
+        "title": "Synthetic source ss-w1 1",
+        "url": "https://example.com/ss-w1/1",
+        "snippet": "About atlas project tracker pricing plans, part 1"
+      },
+      {
+        "title": "Synthetic source ss-w1 2",
+        "url": "https://example.com/ss-w1/2",
+        "snippet": "About atlas project tracker pricing plans, part 2"
+      }
+    ]
+  }
+}

@@ -1,0 +1,84 @@
+# [hard] Guards steering a running worker: the orchestrator sends one worker a focus change while it runs. The worker's own conversation must show the message and its next searches must follow it. Only contract v2 has steer_worker.
+id: dws-steer-focus-worker
+kind: deep_work
+tags:
+- dw_subagents
+input:
+  query: Compare the onboarding flows of two fictional banking apps, Quill and Ridgeway
+  plan:
+    title: DWPLAN_SF_DWS_STEER_FOCUS_WORKER
+    sub_queries:
+    - worker_id: sf-w1
+      sub_query: quill banking app onboarding flow
+      tools:
+      - web_search
+    - worker_id: sf-w2
+      sub_query: ridgeway banking app onboarding flow
+      tools:
+      - web_search
+    deliverable: null
+  steer:
+    message: Focus on the identity verification step only.
+    worker: sf-w2
+    keywords:
+    - identity verification
+environment:
+  web: replay
+fake:
+  findings_md: Quill verifies identity with a document photo and selfie [1][2] and Ridgeway by video call [3][4].
+  scenario:
+    steer:
+      worker: sf-w2
+      message: Focus on the identity verification step only.
+      keyword: identity verification
+      query: ridgeway banking app identity verification step
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: worker_failure_rate
+  gating: true
+  params:
+    max_rate: 0.0
+- id: malformed
+  type: malformed_worker_answers
+  params:
+    max: 0
+- id: steered
+  type: steer_applied
+  params:
+    worker: sf-w2
+    keywords:
+    - identity verification
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.2
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 12
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 12

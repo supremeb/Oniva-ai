@@ -70,17 +70,26 @@ def deep_work_plan(task: Task) -> dict[str, Any]:
     return plan
 
 
-def build_script(task: Task) -> dict[str, Any]:
+def build_script(task: Task, arm: str = "baseline") -> dict[str, Any]:
+    """The scripted model's rules for `task`. `arm` (`baseline` or `v2`) matters only to a Deep Work task with a
+    `fake.scenario` (the subagent-contract suite, U24): that scenario is scripted once per arm, see
+    `tests.e2e.dw_script.subagent_rules`."""
     rules = _rules(task)
     if task.kind == "deep_work":
         plan = deep_work_plan(task)
         ids = [s["worker_id"] for s in plan["sub_queries"]]
         queries = [s["sub_query"] for s in plan["sub_queries"]]
         prefix = ids[0][: -len("-w1")]
-        rules += dw_script.scenario_rules(
-            plan["title"], ids, queries, prefix, findings_md=task.fake.get("findings_md")
-        )
-        rules += dw_script.finish_rules()
+        if isinstance(task.fake.get("scenario"), dict):
+            rules += dw_script.subagent_rules(
+                plan["title"], ids, queries, prefix, v2=arm == "v2", spec=task.fake["scenario"],
+                findings_md=task.fake.get("findings_md"),
+            )
+        else:
+            rules += dw_script.scenario_rules(
+                plan["title"], ids, queries, prefix, findings_md=task.fake.get("findings_md")
+            )
+            rules += dw_script.finish_rules()
     elif task.kind == "long_session":
         try:
             rules += long_session.fake_rules(task)  # explicit fake.rules (e.g. a forced error) are tried first

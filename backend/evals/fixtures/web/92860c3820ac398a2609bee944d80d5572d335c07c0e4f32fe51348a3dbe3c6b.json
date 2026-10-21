@@ -1,0 +1,28 @@
+{
+  "key": "92860c3820ac398a2609bee944d80d5572d335c07c0e4f32fe51348a3dbe3c6b",
+  "tool": "web_search",
+  "args": {
+    "query": "heat pump rebates in aldermark",
+    "num_results": 5
+  },
+  "result": {
+    "query": "heat pump rebates in aldermark",
+    "results": [
+      {
+        "title": "Synthetic source or-w1 1",
+        "url": "https://example.com/or-w1/1",
+        "snippet": "About heat pump rebates in aldermark, part 1"
+      },
+      {
+        "title": "Synthetic source or-w1 2",
+        "url": "https://example.com/or-w1/2",
+        "snippet": "About heat pump rebates in aldermark, part 2"
+      },
+      {
+        "title": "Synthetic source or-w1 3",
+        "url": "https://example.com/shared/or-national",
+        "snippet": "About heat pump rebates in aldermark, part 3"
+      }
+    ]
+  }
+}

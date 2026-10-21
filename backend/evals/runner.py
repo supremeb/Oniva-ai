@@ -114,7 +114,7 @@ async def run_trial(
     started = time.monotonic()
     if ew.mode == "fake":
         try:
-            ew.write_script(build_script(task))
+            ew.write_script(build_script(task, ew.arm))
         except ScriptError as e:
             return _failed(trial, "error", "bad_task", str(e), started, {})
     _, miss_offset = ew.misses_since(0)
@@ -191,6 +191,7 @@ async def run_suite(
     replay_dir: Any = None,
     judges: JudgeRunner | bool | None = None,
     tiers: str | None = None,
+    arm: str | None = None,
 ) -> list[TrialResult]:
     """Run every task k times; results are in task order, then trial order.
 
@@ -228,7 +229,7 @@ async def run_suite(
             base = replay_dir or FIXTURE_DIR
             with contextlib.ExitStack() as stack:
                 directory = stack.enter_context(long_session.replay_dir_for(group, base)) if generated else replay_dir
-                ew = stack.enter_context(eval_stack(mode, web=web, replay_dir=directory, backend_env=env))
+                ew = stack.enter_context(eval_stack(mode, web=web, replay_dir=directory, backend_env=env, arm=arm))
                 results.update(await run_on_stack(ew, group, k, meter, http, timeout_s, judges=judge_runner))
     return [results[(t.id, i)] for t in tasks for i in range(k)]
 

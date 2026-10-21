@@ -1,0 +1,23 @@
+{
+  "key": "3a3d014b0169f99d07cbecab72716adaf7a798b549adb4807bbfba49c0a319e4",
+  "tool": "web_search",
+  "args": {
+    "query": "atlas project tracker enterprise pricing",
+    "num_results": 5
+  },
+  "result": {
+    "query": "atlas project tracker enterprise pricing",
+    "results": [
+      {
+        "title": "Synthetic source ss-w1 1",
+        "url": "https://example.com/ss-w1/1",
+        "snippet": "About atlas project tracker enterprise pricing, part 1"
+      },
+      {
+        "title": "Synthetic source ss-w1 2",
+        "url": "https://example.com/ss-w1/2",
+        "snippet": "About atlas project tracker enterprise pricing, part 2"
+      }
+    ]
+  }
+}
