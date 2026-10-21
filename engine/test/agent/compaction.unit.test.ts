@@ -99,6 +99,19 @@ describe("compaction planning", () => {
     expect(() => resolveCompactionSettings({ reserveTokens: -1 })).toThrow(RangeError);
   });
 
+  it("leaves thresholds unchanged by the context-reduction knobs", () => {
+    const base = { contextWindow: 1000, reserveTokens: 100, backgroundMargin: 200 };
+    const withKnobs = resolveCompactionSettings({
+      ...base,
+      offloadTokens: 500,
+      clearTriggerTokens: 600,
+      structuredSummary: true,
+    });
+    expect(compactionThresholds(withKnobs, null)).toEqual(
+      compactionThresholds(resolveCompactionSettings(base), null),
+    );
+  });
+
   it("keeps about keepRecentTokens verbatim and summarizes the rest", () => {
     const entries = [
       system(),

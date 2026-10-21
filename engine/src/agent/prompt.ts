@@ -33,6 +33,20 @@ export const compactionSettingsSchema = z.object({
   backgroundMargin: tokens,
   /** About this many tokens of recent context stay verbatim after a compaction. */
   keepRecentTokens: tokens,
+  /** A tool result larger than this many tokens is saved to the offload store (0 = off). */
+  offloadTokens: tokens,
+  /** Old tool results are cleared from the view once the estimate passes this (0 = off). */
+  clearTriggerTokens: tokens,
+  /** The most recent tool results that are never cleared. */
+  keepToolResults: tokens,
+  /** A clearing pass only runs when it would free at least this many tokens. */
+  clearAtLeastTokens: tokens,
+  /** Tools whose results are never cleared. */
+  excludeTools: z.array(z.string()),
+  /** Use the sectioned, edit-in-place summary prompt instead of the plain one. */
+  structuredSummary: z.boolean(),
+  /** Save the summarized history to the offload store when compacting. */
+  archiveSummarized: z.boolean(),
 });
 
 export type CompactionSettings = z.infer<typeof compactionSettingsSchema>;

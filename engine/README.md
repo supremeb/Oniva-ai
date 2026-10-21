@@ -123,6 +123,27 @@ The native `ask_user` tool (`askUserTool`, flagged `internal` and `humanInput`) 
 - **Harness API.** `harness.answerQuestion({ conversationId, toolTaskId, answer: { optionIds?, text? }, principal })` and `harness.questions(conversationId)`. A rejected answer throws `QuestionRejected` and writes nothing; `reason` is `not_owned`, `already_answered`, `expired`, `not_waiting` or `invalid` (unknown or repeated option, several options without `multiSelect`, text where not allowed, nothing chosen, an answer over 16 KiB, bad shape).
 - **Expiry.** `HarnessOptions.questionTtlMs` (default 7 days; `0` or `null` for none). The worker setting `ENGINE_QUESTION_TTL_MS` and the HTTP, watch and worker wiring come with the follow-up unit.
 
+## Compaction settings
+
+`agent.compaction` holds per-conversation overrides (any subset, unknown keys rejected, `null` for none); `resolveCompactionSettings` layers them over the harness defaults (`DEFAULT_COMPACTION_SETTINGS`). A config that omits a field gets the default below, so existing conversations behave as before.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | compaction on; off means an overflow fails the run |
+| `contextWindow` / `contextWindows` | `null` / `{}` | window in tokens, or by model id |
+| `reserveTokens` | `16384` | tokens kept free for the reply |
+| `backgroundMargin` | `16384` | a background compaction starts this far before the reserve |
+| `keepRecentTokens` | `20000` | recent context kept verbatim after a compaction |
+| `offloadTokens` | `0` (off) | tool results above this size go to the offload store |
+| `clearTriggerTokens` | `0` (off) | old tool results are cleared from the view past this estimate |
+| `keepToolResults` | `5` | most recent tool results never cleared |
+| `clearAtLeastTokens` | `8000` | a clearing pass runs only if it frees at least this much |
+| `excludeTools` | `[]` | tools whose results are never cleared |
+| `structuredSummary` | `false` | use the sectioned summary prompt |
+| `archiveSummarized` | `false` | save summarized history to the offload store |
+
+The last seven fields are validated and stored only; they take effect as the offload, clearing and summary units land.
+
 ## Running a worker
 
 One worker process serves one session (KTD4). Start it with `npm run worker`

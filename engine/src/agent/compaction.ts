@@ -75,6 +75,13 @@ export const DEFAULT_COMPACTION_SETTINGS: Readonly<CompactionSettings> = Object.
   reserveTokens: 16_384,
   backgroundMargin: 16_384,
   keepRecentTokens: 20_000,
+  offloadTokens: 0,
+  clearTriggerTokens: 0,
+  keepToolResults: 5,
+  clearAtLeastTokens: 8_000,
+  excludeTools: [],
+  structuredSummary: false,
+  archiveSummarized: false,
 });
 
 const CHARS_PER_TOKEN = 4;
