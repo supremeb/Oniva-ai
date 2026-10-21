@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.config.llm_pricing import calculate_cost_with_cache, find_model_pricing
 from app.core.database import get_system_db
 from app.models.engine import EngineConversation
@@ -155,6 +156,25 @@ def _pinned_openrouter_model(supported: List[ProviderConfig], req: PolicyRequest
     return first.default_model
 
 
+async def _default_max_tokens(db: AsyncSession, req: PolicyRequest) -> int:
+    """The output budget when the engine sends no estimate: larger for a Deep Work run (its workers report the
+    run's root conversation), the chat default otherwise."""
+    try:
+        conversation_id = uuid.UUID(req.conversation_id) if req.conversation_id else None
+    except ValueError:
+        conversation_id = None
+    if conversation_id is not None:
+        selections = (await db.execute(
+            select(EngineConversation.selections).where(
+                EngineConversation.conversation_id == conversation_id,
+                EngineConversation.tenant_id == req.tenant_id,
+            )
+        )).scalar_one_or_none()
+        if isinstance(selections, dict) and selections.get("deep_work"):
+            return get_settings().DEEP_WORK_MAX_OUTPUT_TOKENS
+    return DEFAULT_MAX_TOKENS
+
+
 async def decide(db: AsyncSession, req: PolicyRequest) -> Dict[str, Any]:
     tenant = (await db.execute(select(Tenant).where(Tenant.id == req.tenant_id))).scalar_one_or_none()
     if tenant is None or not tenant.is_active:
@@ -167,7 +187,7 @@ async def decide(db: AsyncSession, req: PolicyRequest) -> Dict[str, Any]:
     if not supported:
         return _deny("no_supported_provider", "No configured provider is supported by the engine.")
 
-    max_tokens = min(req.estimate.max_output_tokens or DEFAULT_MAX_TOKENS, MAX_TOKENS_CAP)
+    max_tokens = min(req.estimate.max_output_tokens or await _default_max_tokens(db, req), MAX_TOKENS_CAP)
     estimated = (req.estimate.input_tokens or 0) + max_tokens
     allowed, reason = await QuotaService(db).check_quota(
         req.tenant_id, _NO_USER, QuotaType.LLM_TOKENS, estimated

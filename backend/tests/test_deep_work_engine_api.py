@@ -447,6 +447,31 @@ async def test_invalid_plan_gets_one_repair_then_422_with_the_text(w):
     assert w.engine.count("submit") == 2  # the plan and exactly one repair
 
 
+async def only_run(w):
+    async with w.factory() as db:
+        [row] = (await db.execute(select(DeepWorkRun))).scalars().all()
+        return row
+
+
+async def test_an_unparseable_plan_ends_its_session(w):
+    # Asking again under the same key only replays the stored answer: the run must not stay "running" and
+    # shadow the retry (which opens a new session) when the chat looks up its run.
+    w.engine.answers += ["not a plan at all", "still { not json"]
+    r = await w.http.post("/api/v1/deep-work/engine/plan", json={"query": "compare vendor pricing", "project_id": str(w.pa)})
+    assert r.status_code == 422
+    assert (await only_run(w)).status == "failed"
+
+
+async def test_a_model_failure_during_plan_ends_its_session(w, monkeypatch):
+    async def down(*a, **kw):
+        raise EngineError(502, "model_failed")
+
+    monkeypatch.setattr(w.engine, "submit", down)
+    r = await w.http.post("/api/v1/deep-work/engine/plan", json={"query": "compare vendor pricing", "project_id": str(w.pa)})
+    assert r.status_code >= 500
+    assert (await only_run(w)).status == "failed"
+
+
 async def test_invalid_plan_repaired_once_succeeds(w):
     w.engine.answers += ["oops", json.dumps(PLAN)]
     r = await w.http.post("/api/v1/deep-work/engine/plan", json={"query": "compare vendor pricing", "project_id": str(w.pa)})
@@ -614,6 +639,47 @@ async def test_active_run_and_unstarted_session_are_not_reconciled(w):
     assert (await w.http.get(f"/api/v1/deep-work/{sid2}/status")).json()["status"] == "running"
 
 
+async def test_the_reconciler_settles_a_run_that_ended_while_nobody_read_it(w):
+    from datetime import timedelta
+    from app.services import deep_work_run_sync as sync
+
+    sid, cid = await started(w)
+    unstarted, _ = await new_session(w)  # between plan and start: not the reconciler's
+    async with w.factory() as db:
+        refs = await sync.find_stuck(db, timedelta(0))
+    assert [str(r.ref_id) for r in refs] == [sid] and str(refs[0].conversation_id) == cid
+    assert refs[0].session_id == "sess-1"
+
+    await sync.on_finished(refs[0], {})  # still active on the engine: left alone
+    assert (await run_of(w, sid)).status == "running"
+
+    w.engine.end(cid, "run_error", "provider down")
+    await sync.on_finished(refs[0], {})
+    run = await run_of(w, sid)
+    assert run.status == "failed"
+    async with w.factory() as db:
+        assert (await db.get(BackgroundJob, run.job_id)).status == "failed"
+        assert await sync.find_stuck(db, timedelta(0)) == []
+    assert (await run_of(w, unstarted)).status == "running"
+
+
+async def test_the_background_job_ends_with_the_run(w):
+    # dw_finalize completes the run under run_lock; the job used to stay "running" after a successful report.
+    sid, cid = await started(w)
+    run = await run_of(w, sid)
+    async with dws.run_lock(w.factory, w.ta, run.conversation_id) as locked:
+        locked.advance(phase="done", status="completed")
+    async with w.factory() as db:
+        job = await db.get(BackgroundJob, run.job_id)
+    assert job.status == "completed" and job.completed_at is not None
+
+    sid2, _ = await started(w)
+    run2 = await run_of(w, sid2)
+    await dws.update_run(w.factory, w.ta, run2.conversation_id, status="failed")
+    async with w.factory() as db:
+        assert (await db.get(BackgroundJob, run2.job_id)).status == "failed"
+
+
 async def test_queued_submission_counts_as_active(w):
     sid, cid = await started(w)
     c = w.engine.of(cid)
@@ -649,6 +715,9 @@ async def test_full_state_for_an_engine_session_matches_the_row_and_lists_the_wo
     assert body["runtime"] == "engine"
     assert body["conversation_id"] == cid and body["plan"]["title"] == "Vendor study"
     assert body["engine_phase"] == "plan" or body["engine_phase"] == "research"
+    # the intake context a returning page restores a pending plan or question from
+    assert body["query"] == run.query and body["project_id"] == str(run.project_id)
+    assert body["enriched_query"] == run.enriched_query and body["awaiting_input"] is None
     assert [f["path"] for f in body["workspace_files"]] == ["report.md"]
     assert body["artifacts"] == [{"filename": "r.pdf", "size": 3}]
     assert body["todos"] == [{"text": "pricing of vendor A", "status": "completed"},

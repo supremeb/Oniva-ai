@@ -363,15 +363,21 @@ async def plan(body, db: AsyncSession, user_id, tenant_id) -> dict:
     except EngineError as e:
         raise _engine_http_error(e) from None
     key = f"dw:{run.id}:plan:{_sha(text)}"
-    first = await _ask(engine, ids, text, key)
 
     async def repair(message: str) -> str:
         return await _ask(engine, ids, message, f"{key}:repair:{_sha(message)}")
 
+    # A plan that fails ends its session: the answer under this key is stored, so asking again would only replay
+    # the failure, and a run left "running" would shadow the retry when the chat looks up its run. Retry opens a
+    # new session.
     try:
-        result = await edw.plan_with_repair(first, repair)
+        result = await edw.plan_with_repair(await _ask(engine, ids, text, key), repair)
     except edw.PlanInvalid as e:
+        await dws.update_run(factory, tenant_id, run.conversation_id, status="failed")
         raise HTTPException(status_code=422, detail={"message": "The plan could not be parsed", "text": e.text, "error": e.error}) from None
+    except HTTPException:
+        await dws.update_run(factory, tenant_id, run.conversation_id, status="failed")
+        raise
     raw = result.model_dump()
     await dws.update_run(factory, tenant_id, run.conversation_id, plan=raw, phase="plan",
                          enriched_query=body.enriched_query)
@@ -588,6 +594,11 @@ async def full_state(db: AsyncSession, run: dws.RunSnapshot, user_id: Any) -> di
         "session_id": str(run.id),
         "conversation_id": str(run.conversation_id),
         "engine_phase": run.phase,
+        # What a page that left and came back needs to restore an intake that is still waiting on the user.
+        "query": run.query,
+        "enriched_query": run.enriched_query,
+        "project_id": str(run.project_id),
+        "awaiting_input": run.awaiting_input,
         "plan": run.plan,
         "todos": todos_of(run),
         "workspace_files": await list_workspace(run.tenant_id, str(run.id)),

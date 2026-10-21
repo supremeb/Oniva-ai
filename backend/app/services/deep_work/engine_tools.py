@@ -331,7 +331,10 @@ async def dw_save_learnings(ctx: SkillContext, worker_id: str, learnings: List[D
     entry, worker = found
 
     parsed: List[Learning] = []
+    repaired = 0
     for i, item in enumerate(learnings or []):
+        item, fixed = _repair_learning(item)
+        repaired += fixed
         try:
             parsed.append(Learning.model_validate({"sub_query": worker["sub_query"], **item}))
         except (ValidationError, TypeError) as exc:
@@ -361,9 +364,49 @@ async def dw_save_learnings(ctx: SkillContext, worker_id: str, learnings: List[D
         "source_count": len({l.source_url for l in parsed if l.source_url}),
         "workers_still_open": remaining,
     }
+    notes = []
     if details:
-        payload["note"] = f"Only the first {cap} learnings were kept."
+        notes.append(f"Only the first {cap} learnings were kept.")
+    if repaired:
+        payload["repaired"] = repaired
+        notes.append(f"{repaired} learning(s) were saved after shortening overlong text or defaulting a missing confidence.")
+    if notes:
+        payload["note"] = " ".join(notes)
     return _ok(payload, files, **details)
+
+
+# Field limits of ``Learning``: text past them is shortened instead of failing the whole save.
+_TEXT_LIMITS = (("fact", 800), ("quote", 500), ("source_title", 200))
+_CONFIDENCE_WORDS = {"high": 0.9, "medium": 0.6, "moderate": 0.6, "low": 0.3}
+
+
+def _repair_learning(item: Any) -> tuple:
+    """Fix what a model gets mechanically wrong in a learning: overlong text and a missing or worded confidence.
+
+    A whole save fails on one invalid learning (nothing is partially saved), so these must not cost the worker
+    every finding it made. Anything else that is wrong (no source URL, a confidence out of range) still fails.
+    Returns the item and whether it was changed.
+    """
+    if not isinstance(item, dict):
+        return item, 0
+    out = dict(item)
+    for field, limit in _TEXT_LIMITS:
+        value = out.get(field)
+        if isinstance(value, str) and len(value) > limit:
+            out[field] = value[: limit - 1].rstrip() + "\u2026"
+    confidence = out.get("confidence")
+    if confidence is None:
+        out["confidence"] = 0.5
+    elif isinstance(confidence, str):
+        word = confidence.strip().lower()
+        if word in _CONFIDENCE_WORDS:
+            out["confidence"] = _CONFIDENCE_WORDS[word]
+        else:
+            try:
+                out["confidence"] = float(word)
+            except ValueError:
+                pass
+    return out, int(out != item)
 
 
 @skill(

@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { QueryClientContext } from '@tanstack/react-query';
+import { updateEngineConversation } from '@/lib/api/conversation-union';
 import { GenerativeO } from '@/components/ui/GenerativeO';
 import { ChatError } from './shared';
 import { ArtifactModal } from './shared/ArtifactModal';
@@ -85,6 +87,8 @@ function writeConversationToUrl(id: string) {
  */
 export function EngineChat({ projectId, initialConversationId = null, client: clientProp, watcherOptions, costFetcher }: EngineChatProps) {
     const router = useRouter();
+    // Optional: the sidebar list refreshes when present (a Deep Work start creates a chat the list must show).
+    const queryClient = useContext(QueryClientContext);
     const client = useMemo(() => clientProp ?? new EngineConversationClient(), [clientProp]);
     const [conversationId, setConversationId] = useState<string | null>(initialConversationId);
     const conv = useEngineConversation(conversationId, { client, watcher: watcherOptions });
@@ -144,6 +148,9 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         void getEngineFullState(initialConversationId)
             .then((fs) => {
                 if (cancelled || !isEngineRuntimeSession(fs) || useEngineSessionStore.getState().session) return;
+                if (fs.query) setDeepWorkQuery(fs.query);
+                // Still in the intake (questions or a plan waiting on the user): restore that card, not the run card.
+                if (useDeepWorkStore.getState().restoreEngineIntake(fs, initialConversationId, projectId)) return;
                 useEngineSessionStore.getState().setSession({
                     sessionId: fs.session_id,
                     conversationId: fs.conversation_id,
@@ -157,7 +164,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         return () => {
             cancelled = true;
         };
-    }, [deepWorkRuntime, initialConversationId]);
+    }, [deepWorkRuntime, initialConversationId, projectId]);
     // Leaving the chat drops the card so it never shows up in another conversation.
     useEffect(
         () => () => {
@@ -238,14 +245,15 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
         [submit, markAccepted]
     );
 
-    // First send creates the conversation; submit once its watcher exists.
+    // First send creates the conversation; submit once its watcher exists. The sidebar lists the new chat once the
+    // first message (which titles it) is accepted.
     useEffect(() => {
         if (conversationId && firstText.current !== null) {
             const text = firstText.current;
             firstText.current = null;
-            void doSubmit(text);
+            void doSubmit(text).finally(() => void queryClient?.invalidateQueries({ queryKey: ['chat-sessions'] }));
         }
-    }, [conversationId, doSubmit]);
+    }, [conversationId, doSubmit, queryClient]);
 
     // Create the conversation; the first-send effect above submits `text` once the watcher exists.
     const startConversation = useCallback(
@@ -307,7 +315,26 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
                         return;
                     }
                 }
-                void startIntake(text, conversationId ?? dwChatKey.current, sources.activeKnowledgeBaseIds, sources.connectorIds, targetProjectId);
+                // A Deep Work started from a new chat gets a real chat conversation first: it is what the sidebar lists,
+                // what `?c=` rejoins after navigating away, and the chat id the run is bound to.
+                let chatId = conversationId;
+                if (!chatId) {
+                    try {
+                        const created = await client.create(targetProjectId, toSelections(sources));
+                        chatId = created.conversationId;
+                        writeConversationToUrl(chatId);
+                        setConversationId(chatId);
+                        const title = text.slice(0, 80);
+                        // Best effort: a failed rename leaves "New conversation"; it never undoes the chat.
+                        void Promise.resolve()
+                            .then(() => updateEngineConversation(created.conversationId, { title }))
+                            .catch(() => {})
+                            .finally(() => void queryClient?.invalidateQueries({ queryKey: ['chat-sessions'] }));
+                    } catch {
+                        chatId = dwChatKey.current;
+                    }
+                }
+                void startIntake(text, chatId, sources.activeKnowledgeBaseIds, sources.connectorIds, targetProjectId);
                 return;
             }
             if (!conversationId) {
@@ -319,7 +346,7 @@ export function EngineChat({ projectId, initialConversationId = null, client: cl
             const whenBusy = running ? (mode === 'steer' ? 'steer' : 'followUp') : undefined;
             await doSubmit(text, whenBusy);
         },
-        [input, creating, conversationId, startConversation, draftKey, running, doSubmit, deepWorkRuntime, deepWorkOn, startIntake, projectId, ensureProject, sources.activeKnowledgeBaseIds, sources.connectorIds]
+        [input, creating, conversationId, startConversation, draftKey, running, doSubmit, deepWorkRuntime, deepWorkOn, startIntake, projectId, ensureProject, client, sources, queryClient]
     );
 
     const handleStop = useCallback(() => {

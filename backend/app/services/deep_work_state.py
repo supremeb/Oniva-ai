@@ -234,6 +234,8 @@ async def update_run(
             return RunSnapshot.of(row)
         _advance(row, phase=phase, round=round, status=status, plan=plan, enriched_query=enriched_query,
                  reflection=reflection, artifact=artifact)
+        if row.status in TERMINAL_STATUSES:
+            await _settle_job(db, row)
         await db.flush()
         snap = RunSnapshot.of(row)
     if snap.status in TERMINAL_STATUSES:
@@ -305,11 +307,22 @@ async def run_lock(factory: SessionFactory, tenant_id: Any, conversation_id: Any
         was_terminal = row.status in TERMINAL_STATUSES
         locked = LockedRun(row)
         yield locked
-        await db.flush()
         if not was_terminal and row.status in TERMINAL_STATUSES:
             ended = row.status
+            await _settle_job(db, row)
+        await db.flush()
     if ended is not None:
         await _close_run_approvals(factory, tenant_id, conversation_id, ended)
+
+
+async def _settle_job(db, row: DeepWorkRun) -> None:
+    """The run's background job ends with the run (same transaction): a completed Deep Work left it ``running``."""
+    if row.job_id is None:
+        return
+    job = await db.get(BackgroundJob, row.job_id)
+    if job is not None and job.status in ("pending", "running"):
+        job.status = row.status
+        job.completed_at = _now()
 
 
 async def _mutate(

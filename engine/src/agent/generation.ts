@@ -102,7 +102,21 @@ export type GenerationInput = {
   submissionId: string;
   /** 0 for the run's first request. */
   round: number;
+  /**
+   * How many replies of this run in a row stopped at the output token limit without a tool call. The next
+   * request asks the model to continue; past {@link MAX_TRUNCATION_CONTINUES} the cut-off reply answers the run.
+   */
+  truncations?: number;
 };
+
+/** Cut-off replies a run continues after before it takes the cut-off reply as its answer. */
+export const MAX_TRUNCATION_CONTINUES = 2;
+
+/** Sent (not stored) with the request after a reply stopped at the output token limit. */
+export const TRUNCATION_NOTICE =
+  "Your previous reply was cut off at the output token limit before it was complete, so it was not delivered. " +
+  "Continue the task. Keep reasoning short, and if you are writing a long document or a large tool argument, " +
+  "produce it in smaller parts (for example one section per tool call).";
 
 type RoundCall = { id: string; name: string; taskId: string | null };
 
@@ -261,7 +275,11 @@ export function generationTaskDefinition(
       }
     }
 
-    let input: ModelInput = { messages: built.messages };
+    const messages =
+      (task.input.truncations ?? 0) > 0
+        ? [...built.messages, { role: "user" as const, content: TRUNCATION_NOTICE }]
+        : built.messages;
+    let input: ModelInput = { messages };
     if (specs.length > 0) input.tools = specs;
     if (agent.thinking !== null) input.thinking = agent.thinking;
     input = await deps.hooks.beforeRequest({ conversation, agent, runId, round, input }, task.id);
@@ -349,7 +367,13 @@ export function generationTaskDefinition(
     return rt.commit(async (tx, ops) => {
       const sub = await tx.getSubmission(submissionId);
       const inbox = await Inbox.load(tx, conversationId);
-      const entryId = appendAssistant(tx, task, message, terminal.usage);
+      const truncations = task.input.truncations ?? 0;
+      const cutOff =
+        calls.length === 0 &&
+        message.stopReason === "max_tokens" &&
+        truncations < MAX_TRUNCATION_CONTINUES;
+      // A cut-off reply is kept as partial: the next request sees its text (if any), never an empty turn.
+      const entryId = appendAssistant(tx, task, message, terminal.usage, cutOff);
       recordUsage(
         await tx.doc(usageDoc, conversationId),
         message.provider,
@@ -357,6 +381,21 @@ export function generationTaskDefinition(
         terminal.usage,
       );
       await clearLive(tx, conversationId, task.id);
+
+      if (cutOff) {
+        // Cut off at the output limit: not an answer. Continue the run; the next request asks to finish.
+        const nextTask = ops.spawn(def, {
+          input: { runId, submissionId, round: round + 1, truncations: truncations + 1 },
+          parentTaskId: null,
+        });
+        inbox.advance(runId, nextTask.id);
+        inbox.placeSteers(runId, nextTask.id);
+        if (sub && (sub.status === "active" || sub.status === "pending")) {
+          const { seq: _seq, ...rec } = sub;
+          tx.replaceSubmission({ ...rec, taskId: nextTask.id });
+        }
+        return done({ outcome: "continued", next: nextTask.id } satisfies GenerationValue);
+      }
 
       if (calls.length === 0) {
         const answer = { entryId, text: assistantText(message), terminated: false };

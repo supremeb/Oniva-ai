@@ -9,9 +9,11 @@
  * - Prompt caching: one breakpoint on the system prompt, one on the last
  *   stable (user/assistant) message, so each turn reads the previous prefix.
  */
+
 import Anthropic, { APIConnectionError, APIError, APIUserAbortError } from "@anthropic-ai/sdk";
 import type { Context } from "../core/context.js";
 import type { JsonObject } from "../core/json.js";
+import { modelFetch } from "./http.js";
 import { abortMessage, MessageBuilder, modelError } from "./stream.js";
 import type {
   Message,
@@ -113,7 +115,7 @@ export class AnthropicProvider implements ModelProvider {
     if (this.#options.baseURL !== undefined) clientOptions.baseURL = this.#options.baseURL;
     clientOptions.maxRetries = this.#options.maxRetries ?? DEFAULT_ANTHROPIC_MAX_RETRIES;
     if (this.#options.timeoutMs !== undefined) clientOptions.timeout = this.#options.timeoutMs;
-    if (this.#options.fetch !== undefined) clientOptions.fetch = this.#options.fetch;
+    clientOptions.fetch = this.#options.fetch ?? (modelFetch as ClientOptions["fetch"]);
     const client = new Anthropic(clientOptions);
 
     // Anthropic block index -> neutral block index (unsupported blocks are skipped).

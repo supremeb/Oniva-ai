@@ -202,6 +202,9 @@ class Settings(BaseSettings):
     ENABLE_DEEP_WORK: bool = True                 # Master toggle for autonomous execution
     DEEP_WORK_MAX_DURATION_SEC: int = 1800        # Budget: max time (30 min)
     DEEP_WORK_MAX_LEARNINGS_PER_WORKER: int = 30  # Max learnings before worker stops
+    # Output budget per model request of a Deep Work run (orchestrator and workers). Reasoning models spend
+    # part of it thinking; the 8192 chat default leaves too little for synthesising a report.
+    DEEP_WORK_MAX_OUTPUT_TOKENS: int = 16384
 
     # ========================================
     # Intelligent Routing (Phase B1)

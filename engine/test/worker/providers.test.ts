@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { Context } from "../../src/core/context.js";
 import { BackendPolicyClient } from "../../src/worker/backend-policy.js";
@@ -38,14 +40,19 @@ describe("defaultModelRegistry", () => {
   });
 
   it("honours ENGINE_OPENROUTER_BASE_URL", async () => {
+    // A real server: model calls go through the adapters' own connection pool, not the global fetch.
     const urls: string[] = [];
-    const real = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request) => {
-      urls.push(String(url));
-      return new Response("{}", { status: 400 });
-    }) as typeof fetch;
+    const server = createServer((req, res) => {
+      urls.push(req.url ?? "");
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end("{}");
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as AddressInfo).port;
     try {
-      const models = defaultModelRegistry({ ENGINE_OPENROUTER_BASE_URL: "http://127.0.0.1:1/api" });
+      const models = defaultModelRegistry({
+        ENGINE_OPENROUTER_BASE_URL: `http://127.0.0.1:${port}/api`,
+      });
       const stream = models.stream(Context.background(), {
         provider: "openrouter",
         model: "m",
@@ -55,8 +62,8 @@ describe("defaultModelRegistry", () => {
       });
       await stream.result();
     } finally {
-      globalThis.fetch = real;
+      await new Promise<void>((r) => server.close(() => r()));
     }
-    expect(urls).toEqual(["http://127.0.0.1:1/api/chat/completions"]);
+    expect(urls).toEqual(["/api/chat/completions"]);
   });
 });

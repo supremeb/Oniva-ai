@@ -220,6 +220,9 @@ describe('default project for a first message', () => {
         });
 
         await waitFor(() => expect(mockClarifyEngine).toHaveBeenCalledWith(expect.objectContaining({ query: 'battery market', projectId: 'personal' })));
-        expect(client.create).not.toHaveBeenCalled();
+        // The Deep Work start creates its chat conversation (in the resolved project) but sends no chat turn.
+        expect(client.create).toHaveBeenCalledTimes(1);
+        expect(client.create).toHaveBeenCalledWith('personal', expect.anything());
+        expect(client.submit).not.toHaveBeenCalled();
     });
 });

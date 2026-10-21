@@ -19,6 +19,7 @@
 import type { Context } from "../core/context.js";
 import type { JsonObject } from "../core/json.js";
 import { isContextOverflowMessage } from "./anthropic.js";
+import { modelFetch } from "./http.js";
 import {
   type AttemptMeta,
   describeError,
@@ -48,7 +49,7 @@ export interface OpenAICompatibleProviderOptions {
   baseURL: string;
   /** Sent on every request (e.g. OpenRouter's `HTTP-Referer` and `X-Title`). */
   headers?: Record<string, string>;
-  /** Custom fetch (tests inject recorded SSE here). Default: global fetch. */
+  /** Custom fetch (tests inject recorded SSE here). Default: the model connection pool (`http.ts`). */
   fetch?: FetchLike;
   /** Which models take `cache_control` breakpoints. Default: none. */
   cacheControl?: (model: string) => boolean;
@@ -183,7 +184,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
 
     try {
-      const doFetch: FetchLike = this.#options.fetch ?? fetch;
+      const doFetch: FetchLike = this.#options.fetch ?? modelFetch;
       const res = await doFetch(`${this.#options.baseURL.replace(/\/+$/, "")}/chat/completions`, {
         method: "POST",
         headers: {
