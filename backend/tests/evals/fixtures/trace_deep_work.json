@@ -1,0 +1,911 @@
+{
+  "conversationId": "conv-root",
+  "entries": [
+    {
+      "id": "e001",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "system",
+      "payload": {
+        "text": "You orchestrate research."
+      },
+      "createdAt": 1760000001000
+    },
+    {
+      "id": "e002",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "user",
+      "payload": {
+        "submissionId": "s1",
+        "content": "Research topic X"
+      },
+      "createdAt": 1760000002000
+    },
+    {
+      "id": "e003",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "assistant",
+      "payload": {
+        "runId": "r1",
+        "round": 1,
+        "usage": {
+          "inputTokens": 1000,
+          "outputTokens": 200,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 500,
+          "cost": {
+            "input": 0.005,
+            "output": 0.003,
+            "cacheRead": 0.001,
+            "cacheWrite": 0.001,
+            "total": 0.01
+          }
+        },
+        "message": {
+          "role": "assistant",
+          "provider": "fake",
+          "model": "fake-1",
+          "blocks": [
+            {
+              "type": "tool_call",
+              "id": "tc1",
+              "name": "dw_set_plan",
+              "arguments": {
+                "plan": [
+                  "a",
+                  "b"
+                ]
+              }
+            },
+            {
+              "type": "tool_call",
+              "id": "tc2",
+              "name": "research_worker",
+              "arguments": {
+                "prompt": "a"
+              }
+            },
+            {
+              "type": "tool_call",
+              "id": "tc3",
+              "name": "research_worker",
+              "arguments": {
+                "prompt": "b"
+              }
+            }
+          ],
+          "stopReason": "tool_use"
+        }
+      },
+      "createdAt": 1760000003000
+    },
+    {
+      "id": "e004",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "tool_result",
+      "payload": {
+        "runId": "r1",
+        "toolCallId": "tc1",
+        "toolName": "dw_set_plan",
+        "status": "ok",
+        "content": "ok",
+        "isError": false,
+        "details": {},
+        "terminate": false,
+        "attempts": 1
+      },
+      "createdAt": 1760000004000
+    },
+    {
+      "id": "e005",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "tool_result",
+      "payload": {
+        "runId": "r1",
+        "toolCallId": "tc2",
+        "toolName": "research_worker",
+        "status": "ok",
+        "content": "learned a",
+        "isError": false,
+        "details": {
+          "conversationId": "conv-w1"
+        },
+        "terminate": false,
+        "attempts": 1
+      },
+      "createdAt": 1760000005000
+    },
+    {
+      "id": "e006",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "tool_result",
+      "payload": {
+        "runId": "r1",
+        "toolCallId": "tc3",
+        "toolName": "research_worker",
+        "status": "ok",
+        "content": "learned b",
+        "isError": false,
+        "details": {
+          "conversationId": "conv-w2"
+        },
+        "terminate": false,
+        "attempts": 1
+      },
+      "createdAt": 1760000006000
+    },
+    {
+      "id": "e007",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "assistant",
+      "payload": {
+        "runId": "r1",
+        "round": 2,
+        "usage": {
+          "inputTokens": 1800,
+          "outputTokens": 100,
+          "cacheReadTokens": 500,
+          "cacheWriteTokens": 0,
+          "cost": {
+            "input": 0.006,
+            "output": 0.0036,
+            "cacheRead": 0.0012000000000000001,
+            "cacheWrite": 0.0012000000000000001,
+            "total": 0.012
+          }
+        },
+        "message": {
+          "role": "assistant",
+          "provider": "fake",
+          "model": "fake-1",
+          "blocks": [
+            {
+              "type": "tool_call",
+              "id": "tc4",
+              "name": "reflector",
+              "arguments": {
+                "prompt": "round 1"
+              }
+            }
+          ],
+          "stopReason": "tool_use"
+        }
+      },
+      "createdAt": 1760000007000
+    },
+    {
+      "id": "e008",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "tool_result",
+      "payload": {
+        "runId": "r1",
+        "toolCallId": "tc4",
+        "toolName": "reflector",
+        "status": "ok",
+        "content": "score 0.9",
+        "isError": false,
+        "details": {
+          "conversationId": "conv-ref"
+        },
+        "terminate": false,
+        "attempts": 1
+      },
+      "createdAt": 1760000008000
+    },
+    {
+      "id": "e009",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "assistant",
+      "payload": {
+        "runId": "r1",
+        "round": 3,
+        "usage": {
+          "inputTokens": 2000,
+          "outputTokens": 300,
+          "cacheReadTokens": 1500,
+          "cacheWriteTokens": 0,
+          "cost": {
+            "input": 0.0075,
+            "output": 0.0045,
+            "cacheRead": 0.0015,
+            "cacheWrite": 0.0015,
+            "total": 0.015
+          }
+        },
+        "message": {
+          "role": "assistant",
+          "provider": "fake",
+          "model": "fake-1",
+          "blocks": [
+            {
+              "type": "tool_call",
+              "id": "tc5",
+              "name": "dw_finalize",
+              "arguments": {
+                "report": "done"
+              }
+            }
+          ],
+          "stopReason": "tool_use"
+        }
+      },
+      "createdAt": 1760000009000
+    },
+    {
+      "id": "e010",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "tool_result",
+      "payload": {
+        "runId": "r1",
+        "toolCallId": "tc5",
+        "toolName": "dw_finalize",
+        "status": "ok",
+        "content": "ok",
+        "isError": false,
+        "details": {},
+        "terminate": false,
+        "attempts": 1
+      },
+      "createdAt": 1760000010000
+    },
+    {
+      "id": "e011",
+      "conversationId": "conv-root",
+      "taskId": "t",
+      "kind": "assistant",
+      "payload": {
+        "runId": "r1",
+        "round": 4,
+        "usage": {
+          "inputTokens": 2100,
+          "outputTokens": 50,
+          "cacheReadTokens": 1800,
+          "cacheWriteTokens": 0,
+          "cost": {
+            "input": 0.0055,
+            "output": 0.0032999999999999995,
+            "cacheRead": 0.0011,
+            "cacheWrite": 0.0011,
+            "total": 0.011
+          }
+        },
+        "message": {
+          "role": "assistant",
+          "provider": "fake",
+          "model": "fake-1",
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Final answer."
+            }
+          ],
+          "stopReason": "end_turn"
+        }
+      },
+      "createdAt": 1760000011000
+    }
+  ],
+  "children": {
+    "conv-w1": {
+      "parentToolTaskId": "tt2",
+      "role": "research_worker",
+      "parentConversationId": "conv-root",
+      "entries": [
+        {
+          "id": "e012",
+          "conversationId": "conv-w1",
+          "taskId": "t",
+          "kind": "user",
+          "payload": {
+            "submissionId": "s",
+            "content": "a"
+          },
+          "createdAt": 1760000012000
+        },
+        {
+          "id": "e013",
+          "conversationId": "conv-w1",
+          "taskId": "t",
+          "kind": "assistant",
+          "payload": {
+            "runId": "r1",
+            "round": 1,
+            "usage": {
+              "inputTokens": 500,
+              "outputTokens": 40,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 200,
+              "cost": {
+                "input": 0.002,
+                "output": 0.0012,
+                "cacheRead": 0.0004,
+                "cacheWrite": 0.0004,
+                "total": 0.004
+              }
+            },
+            "message": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": [
+                {
+                  "type": "tool_call",
+                  "id": "w1",
+                  "name": "web_search",
+                  "arguments": {
+                    "query": "a"
+                  }
+                }
+              ],
+              "stopReason": "tool_use"
+            }
+          },
+          "createdAt": 1760000013000
+        },
+        {
+          "id": "e014",
+          "conversationId": "conv-w1",
+          "taskId": "t",
+          "kind": "tool_result",
+          "payload": {
+            "runId": "r1",
+            "toolCallId": "w1",
+            "toolName": "web_search",
+            "status": "ok",
+            "content": "results",
+            "isError": false,
+            "details": {},
+            "terminate": false,
+            "attempts": 1
+          },
+          "createdAt": 1760000014000
+        },
+        {
+          "id": "e015",
+          "conversationId": "conv-w1",
+          "taskId": "t",
+          "kind": "assistant",
+          "payload": {
+            "runId": "r1",
+            "round": 2,
+            "usage": {
+              "inputTokens": 700,
+              "outputTokens": 40,
+              "cacheReadTokens": 400,
+              "cacheWriteTokens": 0,
+              "cost": {
+                "input": 0.0015,
+                "output": 0.0009,
+                "cacheRead": 0.00030000000000000003,
+                "cacheWrite": 0.00030000000000000003,
+                "total": 0.003
+              }
+            },
+            "message": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": [
+                {
+                  "type": "tool_call",
+                  "id": "w2",
+                  "name": "dw_save_learning",
+                  "arguments": {
+                    "learning": "a"
+                  }
+                }
+              ],
+              "stopReason": "tool_use"
+            }
+          },
+          "createdAt": 1760000015000
+        },
+        {
+          "id": "e016",
+          "conversationId": "conv-w1",
+          "taskId": "t",
+          "kind": "tool_result",
+          "payload": {
+            "runId": "r1",
+            "toolCallId": "w2",
+            "toolName": "dw_save_learning",
+            "status": "ok",
+            "content": "saved",
+            "isError": false,
+            "details": {},
+            "terminate": false,
+            "attempts": 1
+          },
+          "createdAt": 1760000016000
+        },
+        {
+          "id": "e017",
+          "conversationId": "conv-w1",
+          "taskId": "t",
+          "kind": "assistant",
+          "payload": {
+            "runId": "r1",
+            "round": 3,
+            "usage": {
+              "inputTokens": 300,
+              "outputTokens": 20,
+              "cacheReadTokens": 200,
+              "cacheWriteTokens": 0,
+              "cost": {
+                "input": 0.001,
+                "output": 0.0006,
+                "cacheRead": 0.0002,
+                "cacheWrite": 0.0002,
+                "total": 0.002
+              }
+            },
+            "message": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": [
+                {
+                  "type": "text",
+                  "text": "done"
+                }
+              ],
+              "stopReason": "end_turn"
+            }
+          },
+          "createdAt": 1760000017000
+        }
+      ],
+      "usage": {
+        "requests": 3,
+        "total": {
+          "requests": 3,
+          "inputTokens": 1500,
+          "outputTokens": 100,
+          "cacheReadTokens": 800,
+          "cacheWriteTokens": 200,
+          "costUsd": 0.009
+        },
+        "byModel": {
+          "fake/fake-1": {
+            "requests": 3,
+            "inputTokens": 1500,
+            "outputTokens": 100,
+            "cacheReadTokens": 800,
+            "cacheWriteTokens": 200,
+            "costUsd": 0.009
+          }
+        },
+        "byPurpose": {
+          "generation": {
+            "requests": 3,
+            "inputTokens": 1500,
+            "outputTokens": 100,
+            "cacheReadTokens": 800,
+            "cacheWriteTokens": 200,
+            "costUsd": 0.009
+          }
+        }
+      },
+      "agent": {
+        "depth": 1,
+        "tools": [
+          "web_search",
+          "dw_save_learning"
+        ],
+        "model": "fake-1",
+        "metadata": {
+          "role": "research_worker"
+        }
+      }
+    },
+    "conv-w2": {
+      "parentToolTaskId": "tt3",
+      "role": "research_worker",
+      "parentConversationId": "conv-root",
+      "entries": [
+        {
+          "id": "e018",
+          "conversationId": "conv-w2",
+          "taskId": "t",
+          "kind": "user",
+          "payload": {
+            "submissionId": "s",
+            "content": "b"
+          },
+          "createdAt": 1760000018000
+        },
+        {
+          "id": "e019",
+          "conversationId": "conv-w2",
+          "taskId": "t",
+          "kind": "assistant",
+          "payload": {
+            "runId": "r1",
+            "round": 1,
+            "usage": {
+              "inputTokens": 500,
+              "outputTokens": 40,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 200,
+              "cost": {
+                "input": 0.002,
+                "output": 0.0012,
+                "cacheRead": 0.0004,
+                "cacheWrite": 0.0004,
+                "total": 0.004
+              }
+            },
+            "message": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": [
+                {
+                  "type": "tool_call",
+                  "id": "w1",
+                  "name": "web_search",
+                  "arguments": {
+                    "query": "b"
+                  }
+                }
+              ],
+              "stopReason": "tool_use"
+            }
+          },
+          "createdAt": 1760000019000
+        },
+        {
+          "id": "e020",
+          "conversationId": "conv-w2",
+          "taskId": "t",
+          "kind": "tool_result",
+          "payload": {
+            "runId": "r1",
+            "toolCallId": "w1",
+            "toolName": "web_search",
+            "status": "ok",
+            "content": "results",
+            "isError": false,
+            "details": {},
+            "terminate": false,
+            "attempts": 1
+          },
+          "createdAt": 1760000020000
+        },
+        {
+          "id": "e021",
+          "conversationId": "conv-w2",
+          "taskId": "t",
+          "kind": "assistant",
+          "payload": {
+            "runId": "r1",
+            "round": 2,
+            "usage": {
+              "inputTokens": 700,
+              "outputTokens": 40,
+              "cacheReadTokens": 400,
+              "cacheWriteTokens": 0,
+              "cost": {
+                "input": 0.0015,
+                "output": 0.0009,
+                "cacheRead": 0.00030000000000000003,
+                "cacheWrite": 0.00030000000000000003,
+                "total": 0.003
+              }
+            },
+            "message": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": [
+                {
+                  "type": "tool_call",
+                  "id": "w2",
+                  "name": "dw_save_learning",
+                  "arguments": {
+                    "learning": "b"
+                  }
+                }
+              ],
+              "stopReason": "tool_use"
+            }
+          },
+          "createdAt": 1760000021000
+        },
+        {
+          "id": "e022",
+          "conversationId": "conv-w2",
+          "taskId": "t",
+          "kind": "tool_result",
+          "payload": {
+            "runId": "r1",
+            "toolCallId": "w2",
+            "toolName": "dw_save_learning",
+            "status": "ok",
+            "content": "saved",
+            "isError": false,
+            "details": {},
+            "terminate": false,
+            "attempts": 1
+          },
+          "createdAt": 1760000022000
+        },
+        {
+          "id": "e023",
+          "conversationId": "conv-w2",
+          "taskId": "t",
+          "kind": "assistant",
+          "payload": {
+            "runId": "r1",
+            "round": 3,
+            "usage": {
+              "inputTokens": 300,
+              "outputTokens": 20,
+              "cacheReadTokens": 200,
+              "cacheWriteTokens": 0,
+              "cost": {
+                "input": 0.001,
+                "output": 0.0006,
+                "cacheRead": 0.0002,
+                "cacheWrite": 0.0002,
+                "total": 0.002
+              }
+            },
+            "message": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": [
+                {
+                  "type": "text",
+                  "text": "done"
+                }
+              ],
+              "stopReason": "end_turn"
+            }
+          },
+          "createdAt": 1760000023000
+        }
+      ],
+      "usage": {
+        "requests": 3,
+        "total": {
+          "requests": 3,
+          "inputTokens": 1500,
+          "outputTokens": 100,
+          "cacheReadTokens": 800,
+          "cacheWriteTokens": 200,
+          "costUsd": 0.009
+        },
+        "byModel": {
+          "fake/fake-1": {
+            "requests": 3,
+            "inputTokens": 1500,
+            "outputTokens": 100,
+            "cacheReadTokens": 800,
+            "cacheWriteTokens": 200,
+            "costUsd": 0.009
+          }
+        },
+        "byPurpose": {
+          "generation": {
+            "requests": 3,
+            "inputTokens": 1500,
+            "outputTokens": 100,
+            "cacheReadTokens": 800,
+            "cacheWriteTokens": 200,
+            "costUsd": 0.009
+          }
+        }
+      },
+      "agent": {
+        "depth": 1,
+        "tools": [
+          "web_search",
+          "dw_save_learning"
+        ],
+        "model": "fake-1",
+        "metadata": {
+          "role": "research_worker"
+        }
+      }
+    },
+    "conv-ref": {
+      "parentToolTaskId": "tt4",
+      "role": "reflector",
+      "parentConversationId": "conv-root",
+      "entries": [
+        {
+          "id": "e024",
+          "conversationId": "conv-ref",
+          "taskId": "t",
+          "kind": "user",
+          "payload": {
+            "submissionId": "s",
+            "content": "reflect"
+          },
+          "createdAt": 1760000024000
+        },
+        {
+          "id": "e025",
+          "conversationId": "conv-ref",
+          "taskId": "t",
+          "kind": "assistant",
+          "payload": {
+            "runId": "r1",
+            "round": 1,
+            "usage": {
+              "inputTokens": 900,
+              "outputTokens": 60,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 300,
+              "cost": {
+                "input": 0.0025,
+                "output": 0.0015,
+                "cacheRead": 0.0005,
+                "cacheWrite": 0.0005,
+                "total": 0.005
+              }
+            },
+            "message": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": [
+                {
+                  "type": "tool_call",
+                  "id": "r1",
+                  "name": "dw_record_reflection",
+                  "arguments": {
+                    "score": 0.9
+                  }
+                }
+              ],
+              "stopReason": "tool_use"
+            }
+          },
+          "createdAt": 1760000025000
+        },
+        {
+          "id": "e026",
+          "conversationId": "conv-ref",
+          "taskId": "t",
+          "kind": "tool_result",
+          "payload": {
+            "runId": "r1",
+            "toolCallId": "r1",
+            "toolName": "dw_record_reflection",
+            "status": "ok",
+            "content": "ok",
+            "isError": false,
+            "details": {},
+            "terminate": false,
+            "attempts": 1
+          },
+          "createdAt": 1760000026000
+        },
+        {
+          "id": "e027",
+          "conversationId": "conv-ref",
+          "taskId": "t",
+          "kind": "assistant",
+          "payload": {
+            "runId": "r1",
+            "round": 2,
+            "usage": {
+              "inputTokens": 400,
+              "outputTokens": 30,
+              "cacheReadTokens": 300,
+              "cacheWriteTokens": 0,
+              "cost": {
+                "input": 0.001,
+                "output": 0.0006,
+                "cacheRead": 0.0002,
+                "cacheWrite": 0.0002,
+                "total": 0.002
+              }
+            },
+            "message": {
+              "role": "assistant",
+              "provider": "fake",
+              "model": "fake-1",
+              "blocks": [
+                {
+                  "type": "text",
+                  "text": "{\"score\":0.9}"
+                }
+              ],
+              "stopReason": "end_turn"
+            }
+          },
+          "createdAt": 1760000027000
+        }
+      ],
+      "usage": {
+        "requests": 2,
+        "total": {
+          "requests": 2,
+          "inputTokens": 1300,
+          "outputTokens": 90,
+          "cacheReadTokens": 300,
+          "cacheWriteTokens": 300,
+          "costUsd": 0.007
+        },
+        "byModel": {
+          "fake/fake-1": {
+            "requests": 2,
+            "inputTokens": 1300,
+            "outputTokens": 90,
+            "cacheReadTokens": 300,
+            "cacheWriteTokens": 300,
+            "costUsd": 0.007
+          }
+        },
+        "byPurpose": {
+          "generation": {
+            "requests": 2,
+            "inputTokens": 1300,
+            "outputTokens": 90,
+            "cacheReadTokens": 300,
+            "cacheWriteTokens": 300,
+            "costUsd": 0.007
+          }
+        }
+      },
+      "agent": {
+        "depth": 1,
+        "tools": [
+          "web_search",
+          "dw_save_learning"
+        ],
+        "model": "fake-1",
+        "metadata": {
+          "role": "reflector"
+        }
+      }
+    }
+  },
+  "usage": {
+    "requests": 4,
+    "inputTokens": 6900,
+    "outputTokens": 650,
+    "cacheReadTokens": 3800,
+    "cacheWriteTokens": 500,
+    "costUsd": 0.048
+  },
+  "taint": {
+    "tainted": true,
+    "total": 2,
+    "sources": [
+      {
+        "kind": "tool_result",
+        "name": "web_search",
+        "ref": "w1",
+        "at": 1760000009000
+      }
+    ]
+  },
+  "compactions": [],
+  "agent": {
+    "depth": 0,
+    "tools": [
+      "dw_set_plan",
+      "research_worker",
+      "reflector",
+      "dw_finalize"
+    ],
+    "model": "fake-1",
+    "metadata": {}
+  },
+  "truncated": false,
+  "nextCursor": null
+}
