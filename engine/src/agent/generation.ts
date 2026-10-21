@@ -77,6 +77,13 @@ import {
   type RunErrorPayload,
   toEntryPayload,
 } from "./context-builder.js";
+import {
+  applyClearing,
+  type ContextState,
+  clearingEnabled,
+  contextDoc,
+  planClearing,
+} from "./context-clearing.js";
 import { Inbox } from "./inbox.js";
 import { liveDoc, ProgressWriter, toolOutputDoc } from "./progress.js";
 import { type AgentConfig, systemPayload } from "./prompt.js";
@@ -243,6 +250,25 @@ export function generationTaskDefinition(
       });
       entries = await listAllEntries(deps.session, conversationId);
       built = buildContext(entries);
+    }
+
+    // Tier 1: advance the clearing watermark when due, before the context is
+    // built. A rerun after a crash finds the advance committed and plans nothing.
+    if (clearingEnabled(settings)) {
+      let cleared = await deps.session.document(contextDoc, conversationId);
+      const plan = planClearing(entries, settings, estimateContextTokens(entries).tokens, cleared);
+      if (plan !== null) {
+        const next: ContextState = {
+          clearedThroughEntryId: plan.watermark,
+          clearedTokens: cleared.clearedTokens + plan.freedTokens,
+        };
+        await rt.write(async (tx) => {
+          (await tx.doc(contextDoc, conversationId)).set(next);
+        });
+        cleared = next;
+      }
+      const options = applyClearing(settings, cleared);
+      if (options.watermark != null) built = buildContext(entries, options);
     }
 
     if (settings.enabled && !compacted) {

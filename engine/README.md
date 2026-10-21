@@ -142,7 +142,16 @@ The native `ask_user` tool (`askUserTool`, flagged `internal` and `humanInput`) 
 | `structuredSummary` | `false` | use the sectioned summary prompt |
 | `archiveSummarized` | `false` | save summarized history to the offload store |
 
-The last seven fields are validated and stored only; they take effect as the offload, clearing and summary units land.
+`offloadTokens`, `structuredSummary` and `archiveSummarized` are validated and stored only; they take effect as the offload and summary units land. The clearing fields are live (below).
+
+### Tier 1: view-time clearing
+
+With `clearTriggerTokens > 0`, stale tool results are replaced by a fixed stub in the context the model sees. Stored entries are never changed, and tool calls keep their results (pairing stays valid).
+
+- **Watermark.** The conversation document `agent.context` holds `{ clearedThroughEntryId, clearedTokens }` (also in the watch view as `context`). `buildContext` stubs every `tool_result` at or before the watermark, except tools in `excludeTools`.
+- **Advance.** The generation `request` phase advances the watermark when the context estimate is at or above `clearTriggerTokens` and the results that would newly be cleared (in context, older than the newest `keepToolResults`, not excluded) total at least `clearAtLeastTokens`. It writes the advance before building the context, only moves it forward, and a rerun after a crash plans nothing twice. Between advances the cleared prefix is byte-stable, which keeps the provider's prefix cache.
+- **Stub.** `[cleared: <tool> result, ~<n> tokens. Re-run the tool.]`; when the result carries `details.offloaded.path` the stub ends `Re-run the tool, or read <path> if it was saved.]`.
+- **Off.** With `clearTriggerTokens` 0 the watermark is ignored and results are verbatim (a one-time cache miss when switching); the stored watermark is kept, and turning clearing back on resumes from it.
 
 ## Running a worker
 

@@ -31,6 +31,7 @@ import type {
 } from "../models/types.js";
 import type { EntryRecord } from "../storage/types.js";
 import type { ToolResultApproval } from "./approvals.js";
+import { clearStub } from "./context-clearing.js";
 import type { SystemPayload } from "./prompt.js";
 
 export const ENTRY_KINDS = Object.freeze({
@@ -164,7 +165,33 @@ export interface BuiltContext {
 
 export const SUMMARY_PREFIX = "Summary of the earlier conversation:\n\n";
 
-export function buildContext(entries: readonly EntryRecord[]): BuiltContext {
+/** Options of {@link buildContext}. Absent or empty: the context is built verbatim. */
+export interface BuildContextOptions {
+  /**
+   * Tier 1 clearing: the id of the newest `tool_result` entry whose content is
+   * replaced by a stub (`context-clearing.ts`). Results of `excludeTools` stay
+   * verbatim. An id that is not in `entries` clears nothing.
+   */
+  watermark?: string | null;
+  excludeTools?: readonly string[];
+}
+
+/**
+ * Index of the first entry of the context body: after the newest compaction
+ * (`head`), the entry it keeps verbatim from, else the one after it.
+ */
+export function contextBodyStart(entries: readonly EntryRecord[], head: number): number {
+  if (head < 0) return 0;
+  const c = payloadOf(entries[head] as EntryRecord, ENTRY_KINDS.compaction);
+  const keptAt =
+    c.firstKeptEntryId === null ? -1 : entries.findIndex((e) => e.id === c.firstKeptEntryId);
+  return keptAt >= 0 && keptAt < head ? keptAt : head + 1;
+}
+
+export function buildContext(
+  entries: readonly EntryRecord[],
+  options: BuildContextOptions = {},
+): BuiltContext {
   let system: SystemPayload | null = null;
   let head = -1;
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -184,17 +211,18 @@ export function buildContext(entries: readonly EntryRecord[]): BuiltContext {
     const compaction = entries[head] as EntryRecord;
     const c = payloadOf(compaction, ENTRY_KINDS.compaction);
     messages.push({ role: "user", content: SUMMARY_PREFIX + c.summary });
-    const keptAt =
-      c.firstKeptEntryId === null ? -1 : entries.findIndex((e) => e.id === c.firstKeptEntryId);
-    body = keptAt >= 0 && keptAt < head ? entries.slice(keptAt) : entries.slice(head + 1);
+    body = entries.slice(contextBodyStart(entries, head));
   }
+  const watermarkAt =
+    options.watermark == null ? -1 : body.findIndex((e) => e.id === options.watermark);
+  const excluded = new Set(options.excludeTools ?? []);
 
   let open: Map<string, string> = new Map(); // tool call id -> name, awaiting results
   const closeOpen = () => {
     for (const [id, name] of open) messages.push(abortedResult(id, name));
     open = new Map();
   };
-  for (const e of body) {
+  for (const [i, e] of body.entries()) {
     switch (e.kind) {
       case ENTRY_KINDS.user: {
         closeOpen();
@@ -215,7 +243,11 @@ export function buildContext(entries: readonly EntryRecord[]): BuiltContext {
         const p = payloadOf(e, ENTRY_KINDS.toolResult);
         if (!open.has(p.toolCallId)) break; // orphan (its call was compacted away)
         open.delete(p.toolCallId);
-        messages.push(toolResultMessage(p));
+        messages.push(
+          i <= watermarkAt && !excluded.has(p.toolName)
+            ? clearedToolResultMessage(p)
+            : toolResultMessage(p),
+        );
         break;
       }
       default:
@@ -245,6 +277,11 @@ export function toolResultMessage(p: ToolResultPayload): ToolResultMessage {
     content: p.content,
     isError: p.isError,
   };
+}
+
+/** A tool result as the model sees it once Tier 1 clearing has reached it. */
+function clearedToolResultMessage(p: ToolResultPayload): ToolResultMessage {
+  return { ...toolResultMessage(p), content: clearStub(p) };
 }
 
 function abortedResult(toolCallId: string, toolName: string): ToolResultMessage {
