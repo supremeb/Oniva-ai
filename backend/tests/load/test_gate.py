@@ -97,3 +97,46 @@ def test_profile_overrides_and_outputs(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "r.json").read_text())["gate"]["passed"] is False
     assert (tmp_path / "r.md").read_text() == "summary p\n"
     drv.write_outputs(result)  # no paths: nothing written
+
+
+# --- the opt-in production-like backend (ONIVA_E2E_BACKEND_DB / ONIVA_E2E_BACKEND_WORKERS) -----------------
+
+
+def test_backend_mode_defaults_to_the_single_sqlite_process(monkeypatch):
+    from tests.e2e.harness import backend_mode
+
+    monkeypatch.delenv("ONIVA_E2E_BACKEND_DB", raising=False)
+    monkeypatch.delenv("ONIVA_E2E_BACKEND_WORKERS", raising=False)
+    assert backend_mode() == (False, 1)
+
+
+def test_backend_mode_reads_postgres_and_workers(monkeypatch):
+    from tests.e2e.harness import backend_mode
+
+    monkeypatch.setenv("ONIVA_E2E_BACKEND_DB", "postgres")
+    monkeypatch.setenv("ONIVA_E2E_BACKEND_WORKERS", "4")
+    assert backend_mode() == (True, 4)
+
+
+@pytest.mark.parametrize("db,workers", [("mysql", "1"), ("sqlite", "3"), ("postgres", "0")])
+def test_backend_mode_rejects_nonsense(monkeypatch, db, workers):
+    from tests.e2e.harness import backend_mode
+
+    monkeypatch.setenv("ONIVA_E2E_BACKEND_DB", db)
+    monkeypatch.setenv("ONIVA_E2E_BACKEND_WORKERS", workers)
+    with pytest.raises(ValueError):
+        backend_mode()
+
+
+def test_info_ready_waits_for_every_worker(tmp_path):
+    from tests.e2e.harness import _info_ready
+
+    info = tmp_path / "info.json"
+    assert not _info_ready(info, 0)
+    info.write_text("{}")
+    assert _info_ready(info, 0)  # SQLite mode: the file alone
+    assert not _info_ready(info, 2)
+    (tmp_path / "info.json.101").write_text("ready")
+    assert not _info_ready(info, 2)
+    (tmp_path / "info.json.102").write_text("ready")
+    assert _info_ready(info, 2)

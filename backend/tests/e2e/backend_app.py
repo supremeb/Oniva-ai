@@ -17,6 +17,12 @@ It mounts the Fleet routes (``/api/v1/background-jobs``, ``/api/v1/fleet``) with
 Fleet, bootstraps the run-handler registry (the ``/internal/runs/finished`` push is already part of the internal
 router) and runs the run reconciler. The seeded Fleet agent delivers to ``/e2e/webhook`` on this backend.
 
+Opt-in production-like mode (``E2E_BACKEND_DB=postgres``, set by the harness from ``ONIVA_E2E_BACKEND_DB``): the
+app's own database wiring is used unchanged (``DATABASE_URL`` as the non-bypass ``oniva_app`` role, RLS tenant
+context, ``oniva_system`` for system sessions, real row locks), the schema comes from alembic (run by the harness),
+the SQLite-only seams below are skipped, and ``E2E_WORKERS`` (default 1) uvicorn worker processes serve the port, the
+way production's gunicorn does. Only auth (a fixed identity) and the fakes stay replaced.
+
 Config comes from the environment: E2E_PORT, E2E_DB, E2E_INFO (json written when ready),
 E2E_EFFECTS, E2E_GATE, E2E_TENANT_ID, E2E_USER_ID, E2E_PROJECT_ID, E2E_AGENT_ID, E2E_DW_DIR, ENGINE_*.
 ``E2E_SEED=0`` starts a second backend process on the same database without seeding it.
@@ -37,7 +43,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.core.database as dbmod
 
-dbmod.set_tenant_context = AsyncMock()  # SQLite has no RLS settings
+if os.environ.get("E2E_BACKEND_DB") != "postgres":
+    dbmod.set_tenant_context = AsyncMock()  # SQLite has no RLS settings
 
 from app.agents.skills.registry import Skill, _registry  # noqa: E402
 from app.api.v1.engine_conversations import mount_engine_conversations  # noqa: E402
@@ -67,26 +74,37 @@ E = os.environ
 PORT, DB, INFO = int(E["E2E_PORT"]), E["E2E_DB"], E["E2E_INFO"]
 EFFECTS, GATE = Path(E["E2E_EFFECTS"]), Path(E["E2E_GATE"])
 SEED = E.get("E2E_SEED", "1") == "1"
+PG = E.get("E2E_BACKEND_DB") == "postgres"
+WORKERS = int(E.get("E2E_WORKERS") or 1)
 DW = dw_fakes.Files(Path(E["E2E_DW_DIR"]))
 TENANT, USER, PROJECT, AGENT = (uuid.UUID(E[k]) for k in (
     "E2E_TENANT_ID", "E2E_USER_ID", "E2E_PROJECT_ID", "E2E_AGENT_ID"))
 
-engine = create_async_engine(f"sqlite+aiosqlite:///{DB}", connect_args={"timeout": 30})
-maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-LLMProvider.__table__.c.models.default = None
-
-# The signed audit chain runs for real here; SQLite has no ARRAY, so the log's array columns are JSON.
 from sqlalchemy import JSON  # noqa: E402
 from sqlalchemy.dialects.postgresql import ARRAY  # noqa: E402
 from app.models.compliance_audit_log import ComplianceAuditLog  # noqa: E402
 
-for _col in ComplianceAuditLog.__table__.c:
-    if isinstance(_col.type, ARRAY):
-        _col.type = JSON()
+if PG:
+    # The schema owner: seeds the tenant, users and agent (the seed rows predate any tenant context). Request
+    # paths never use it; they run on the app's own engines (oniva_app / oniva_system).
+    engine = create_async_engine(E["E2E_PG_OWNER_URL"])
+else:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{DB}", connect_args={"timeout": 30})
+    LLMProvider.__table__.c.models.default = None
+    # The signed audit chain runs for real here; SQLite has no ARRAY, so the log's array columns are JSON.
+    for _col in ComplianceAuditLog.__table__.c:
+        if isinstance(_col.type, ARRAY):
+            _col.type = JSON()
+maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @asynccontextmanager
-async def factory():
+async def factory(tenant_id=None):
+    """A session for the e2e's own endpoints. SQLite: a plain session. Postgres: tenant-scoped, as ``get_db_for_tenant``."""
+    if PG:
+        async with dbmod.get_db_for_tenant(str(tenant_id or TENANT)) as s:
+            yield s
+        return
     async with maker() as s:
         try:
             yield s
@@ -96,8 +114,10 @@ async def factory():
             raise
 
 
-async def request_db():
-    async with factory() as s:
+async def request_db(request: Request):
+    # Postgres: the tenant of the (fixed) identity the request acts as, so RLS applies like in production.
+    tenant = uuid.UUID(_identity(request).tenant_id) if PG else None
+    async with factory(tenant) as s:
         yield s
 
 
@@ -126,8 +146,9 @@ TOOL_SPECS["e2e_fleet_hold"] = ToolSpec(side_effect="write", idempotent=False, t
 
 @asynccontextmanager
 async def lifespan(_app):
-    async with engine.begin() as c:
-        await c.run_sync(Base.metadata.create_all)
+    if not PG:  # Postgres: alembic ran in the harness
+        async with engine.begin() as c:
+            await c.run_sync(Base.metadata.create_all)
     await tools.ensure_skills_loaded()
     dw_fakes.install(DW)  # after the real skills are loaded: web_search, E2B, tokens, Redis
     dw_fakes.install_approval_fakes(DW)  # the sandbox behind execute_python, an offline browse_url
@@ -135,11 +156,17 @@ async def lifespan(_app):
 
     replay.install_from_env()
     run_handlers.bootstrap()  # the fleet start / settle hooks, as main.py does
-    _serialize_fleet_settle()
-    reconciler = RunReconciler(factory, settings, engine_factory=get_engine_client)
+    if not PG:
+        _serialize_fleet_settle()
+    # Postgres: system-role sessions across tenants and the advisory lock, so one worker's reconciler leads per pass.
+    reconciler = RunReconciler(dbmod.get_system_session if PG else factory, settings, engine_factory=get_engine_client)
     reconciler.start()
     try:
-        await _seed()
+        if PG:  # seeded once by the parent process (main); each worker only announces itself
+            Path(f"{INFO}.{os.getpid()}").write_text("ready")
+            Path(INFO).write_text(json.dumps({"ready": True}))
+        else:
+            await _seed()
         yield
     finally:
         await reconciler.stop()
@@ -242,8 +269,9 @@ assert mount_engine_conversations(app, settings)
 
 app.dependency_overrides[get_db] = request_db
 app.dependency_overrides[get_db_streaming] = request_db
-app.dependency_overrides[get_system_db] = request_db
-app.dependency_overrides[get_session_factory] = lambda: factory
+if not PG:  # Postgres: the real system sessions (oniva_system) and the real internal session factory
+    app.dependency_overrides[get_system_db] = request_db
+    app.dependency_overrides[get_session_factory] = lambda: factory
 app.dependency_overrides[get_current_user] = _identity
 app.dependency_overrides[get_current_user_id] = lambda: USER
 app.dependency_overrides[get_current_tenant_id] = lambda: TENANT
@@ -292,8 +320,9 @@ async def tenant_session(_tenant_id):
             yield s
 
 
-_deep_work_engine.get_db_for_tenant = tenant_session
-_dw_tools.get_db_for_tenant = tenant_session
+if not PG:
+    _deep_work_engine.get_db_for_tenant = tenant_session
+    _dw_tools.get_db_for_tenant = tenant_session
 app.include_router(_deep_work.router, prefix="/api/v1", tags=["deep-work"])
 
 import app.services.engine_deep_work_agent as _dw_agent  # noqa: E402
@@ -319,7 +348,8 @@ from app.api.v1 import background_jobs as _background_jobs  # noqa: E402
 from app.api.v1 import fleet as _fleet  # noqa: E402
 
 # Each Fleet session is short and sequential; no process-wide lock (a nested session would deadlock on it).
-_fleet_engine.get_db_for_tenant = lambda _tenant_id: factory()
+if not PG:
+    _fleet_engine.get_db_for_tenant = lambda _tenant_id: factory()
 
 _build_fleet_config = _fleet_engine.build_fleet_agent_config
 
@@ -346,7 +376,8 @@ async def _webhook(payload: dict):
 # ``requires_approval`` tools open their own session (the execution guard, ``needs_db`` tools): this database.
 import app.internal_api.execution as _execution  # noqa: E402
 
-_execution._session_factory = lambda: maker
+if not PG:
+    _execution._session_factory = lambda: maker
 
 @app.exception_handler(Exception)
 async def _unhandled(request: Request, exc: Exception):
@@ -407,9 +438,10 @@ from app.core.database import get_db_no_tenant  # noqa: E402
 from app.models.workflow import Workflow  # noqa: E402
 
 # A tenant session is a plain session on this database (Postgres RLS has no SQLite counterpart).
-_wer.get_db_for_tenant = lambda _tenant_id: factory()
-app.dependency_overrides[_workflow_nodes.get_tenant_session_factory] = lambda: (lambda _tenant_id: factory())
-app.dependency_overrides[get_db_no_tenant] = request_db
+if not PG:
+    _wer.get_db_for_tenant = lambda _tenant_id: factory()
+    app.dependency_overrides[_workflow_nodes.get_tenant_session_factory] = lambda: (lambda _tenant_id: factory())
+    app.dependency_overrides[get_db_no_tenant] = request_db
 # A sync run answers 202 {execution_id} instead of holding the request for two minutes.
 _wer.SYNC_WAIT_S, _wer.POLL_INTERVAL_S = 2.0, 0.2
 
@@ -423,7 +455,8 @@ async def _serialized_record_trace(*args, **kwargs):
         await _record_trace(*args, **kwargs)
 
 
-_workflow_nodes.record_trace = _serialized_record_trace
+if not PG:
+    _workflow_nodes.record_trace = _serialized_record_trace
 
 app.include_router(_workflows.router, prefix="/api/v1/workflows", tags=["workflows"])
 app.include_router(_schedules.router, prefix="/api/v1/schedules", tags=["schedules"])
@@ -492,4 +525,11 @@ async def _projects():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
+    if PG:
+        if SEED:
+            asyncio.run(_seed())  # once, before any worker serves
+            Path(INFO).unlink(missing_ok=True)  # readiness is announced by the workers' lifespans
+        # Production runs gunicorn -w N with uvicorn workers; uvicorn's own multi-process supervisor is the same model.
+        uvicorn.run("tests.e2e.backend_app:app", host="127.0.0.1", port=PORT, log_level="warning", workers=WORKERS)
+    else:
+        uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
