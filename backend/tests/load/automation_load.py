@@ -44,6 +44,7 @@ from tests.e2e.test_fleet_engine_recovery import start_job
 from tests.e2e.workflow_helpers import advance_clock, run_workflow
 from tests.load import fakes
 from tests.load.gate import evaluate_gate, percentile
+from tests.load.probe import ChatProbe
 
 TERMINAL = ("completed", "failed", "cancelled", "canceled", "timed_out", "error")
 
@@ -87,33 +88,14 @@ def first_token_ms(w, timeout: float = 60.0) -> float:
     raise AssertionError("chat stream ended without the answer")
 
 
-class ChatLoad:
-    """A steady chat load: one turn at a time, one every ``interval`` seconds, until stopped."""
+def make_chat_measure(arg: dict):
+    """Runs in the probe process: a ``() -> first-token ms`` callable over the unchanged ``first_token_ms`` path.
 
-    def __init__(self, w, interval: float):
-        self.w, self.interval = w, interval
-        self.samples: list[tuple[float, float]] = []  # (monotonic start, first-token ms)
-        self.errors: list[str] = []
-        self.submitted = 0
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def _run(self):
-        while not self._stop.is_set():
-            started = time.monotonic()
-            try:
-                self.submitted += 1
-                self.samples.append((started, first_token_ms(self.w)))
-            except Exception as e:  # noqa: BLE001 - recorded; the gate fails on any chat error (a dropped turn would hide a stall)
-                self.errors.append(repr(e)[:200])
-            self._stop.wait(max(0.0, self.interval - (time.monotonic() - started)))
-
-    def start(self):
-        self._thread.start()
-
-    def stop(self):
-        self._stop.set()
-        self._thread.join(timeout=90)
+    The probe needs only the backend URL and the project id, so it takes plain data rather than the World."""
+    from types import SimpleNamespace
+    w = SimpleNamespace(backend_url=arg["backend_url"], project=arg["project"],
+                        backend=SimpleNamespace(tail=lambda: "(backend log is in the parent process)"))
+    return lambda: first_token_ms(w)
 
 
 class Sampler:
@@ -243,12 +225,21 @@ def run_profile(w, profile: Profile, worker) -> dict:
     sampler.start()
     t_begin = time.monotonic()
 
+    # The chat probe runs in its own process: the starter threads below share this interpreter's GIL, and a probe
+    # here would time the load generator's contention along with the stack.
+    probe = ChatProbe(make_chat_measure, {"backend_url": w.backend_url, "project": str(w.project)})
+    try:
+        return _run_phases(w, profile, probe, sampler, workflow_id, t_begin)
+    finally:
+        probe.close()
+
+
+def _run_phases(w, profile: Profile, probe: ChatProbe, sampler: Sampler, workflow_id, t_begin) -> dict:
     # 1. chat alone
-    baseline = [first_token_ms(w) for _ in range(profile.baseline_chat_samples)]
+    baseline = probe.baseline(profile.baseline_chat_samples)
 
     # 2. chat under automation load
-    chat = ChatLoad(w, profile.chat_interval_s)
-    chat.start()
+    probe.start_load(profile.chat_interval_s)
     execution_ids: list[str] = []
     job_ids: list[str] = []
     start_errors: list[str] = []
@@ -282,7 +273,7 @@ def run_profile(w, profile: Profile, worker) -> dict:
     drain_done = time.monotonic()
     drain_lag_s = drain_done - last_advance
     loaded_window_s = drain_done - t_load
-    chat.stop()
+    chat = probe.stop_load()
     # only turns that started while automation was still running count as loaded; later ones ran on an idle engine
     loaded = [ms for t0, ms in chat.samples if t0 < drain_done]
     sampler.stop()

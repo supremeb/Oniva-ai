@@ -140,3 +140,105 @@ def test_info_ready_waits_for_every_worker(tmp_path):
     assert not _info_ready(info, 2)
     (tmp_path / "info.json.102").write_text("ready")
     assert _info_ready(info, 2)
+
+
+# --- the chat probe in its own process (tests/load/probe.py) -------------------------------------------------
+
+
+def _fake_measure(arg):
+    """Runs in the probe process: returns a measure that yields 1.0, 2.0, ... (or raises/dies after a count)."""
+    import os
+    import time
+
+    state = {"n": 0}
+
+    def measure() -> float:
+        state["n"] += 1
+        if arg.get("fail_after") is not None and state["n"] > arg["fail_after"]:
+            raise RuntimeError("boom")
+        if arg.get("die_after") is not None and state["n"] > arg["die_after"]:
+            os._exit(3)
+        time.sleep(arg.get("sleep", 0))
+        return float(os.getpid()) if arg.get("pid") else float(state["n"])
+
+    return measure
+
+
+def test_probe_runs_in_another_process_and_returns_baseline_samples():
+    import os
+
+    from tests.load.probe import ChatProbe
+
+    with ChatProbe(_fake_measure, {"pid": True}) as p:
+        got = p.baseline(3)
+    assert len(got) == 3 and got[0] == got[1] == got[2] != float(os.getpid())  # one child, not this process
+
+
+def test_probe_baseline_keeps_the_requested_sample_count_and_order():
+    from tests.load.probe import ChatProbe
+
+    with ChatProbe(_fake_measure, {}) as p:
+        assert p.baseline(5) == [1.0, 2.0, 3.0, 4.0, 5.0]
+
+
+def test_probe_loaded_phase_samples_on_the_interval_with_monotonic_starts():
+    import time
+
+    from tests.load.probe import ChatProbe
+
+    with ChatProbe(_fake_measure, {"sleep": 0.01}) as p:
+        t0 = time.monotonic()
+        p.start_load(0.05)
+        time.sleep(0.5)
+        r = p.stop_load()
+        t1 = time.monotonic()
+    assert r.errors == [] and r.submitted == len(r.samples) >= 5
+    starts = [s for s, _ in r.samples]
+    assert starts == sorted(starts) and t0 <= starts[0] and starts[-1] <= t1  # the parent's clock bounds the child's
+    assert all(b - a >= 0.04 for a, b in zip(starts, starts[1:]))  # the schedule: one turn per interval
+    assert [ms for _, ms in r.samples] == [float(i) for i in range(1, len(r.samples) + 1)]
+
+
+def test_probe_loaded_errors_are_collected_not_raised():
+    import time
+
+    from tests.load.probe import ChatProbe
+
+    with ChatProbe(_fake_measure, {"fail_after": 2}) as p:
+        p.start_load(0.01)
+        time.sleep(0.3)
+        r = p.stop_load()
+    assert len(r.samples) == 2 and r.errors and "boom" in r.errors[0] and r.submitted == len(r.samples) + len(r.errors)
+
+
+def test_probe_baseline_failure_is_raised_in_the_parent():
+    from tests.load.probe import ChatProbe
+
+    with ChatProbe(_fake_measure, {"fail_after": 1}) as p:
+        with pytest.raises(RuntimeError, match="boom"):
+            p.baseline(3)
+
+
+def test_probe_child_death_is_reported_not_hung():
+    from tests.load.probe import ChatProbe
+
+    with ChatProbe(_fake_measure, {"die_after": 0}, reply_timeout=30) as p:
+        with pytest.raises(RuntimeError, match="died|closed"):
+            p.baseline(1)
+
+
+def test_probe_close_stops_the_child():
+    from tests.load.probe import ChatProbe
+
+    p = ChatProbe(_fake_measure, {})
+    proc = p._proc
+    p.close()
+    assert not proc.is_alive()
+
+
+def test_driver_hands_the_probe_plain_picklable_data():
+    import pickle
+
+    from tests.load import automation_load as drv
+
+    pickle.dumps((drv.make_chat_measure, {"backend_url": "http://x", "project": "p"}))
