@@ -302,7 +302,7 @@ def _run_phases(w, profile: Profile, probe: ChatProbe, sampler: Sampler, workflo
         "workload": {"workflow_runs": len(execution_ids), "nodes_per_run": fakes.WORKFLOW_NODES,
                      "fleet_runs": len(job_ids), "start_errors": start_errors,
                      "chat_baseline_samples": len(baseline), "chat_loaded_samples": len(loaded),
-                     "engine_shards": getattr(w, "shards", 1), "chat_errors": len(chat.errors), "chat_error_samples": chat.errors[:5], "http_calls_started": started, "http_calls_done": done,
+                     "engine_shards": getattr(w, "shards", 1), "backend_internal_workers": getattr(w, "internal_workers", 0), "chat_errors": len(chat.errors), "chat_error_samples": chat.errors[:5], "http_calls_started": started, "http_calls_done": done,
                      "wall_s": round(time.monotonic() - t_begin, 1), "loaded_window_s": round(loaded_window_s, 1)},
         "chat_first_token": {"baseline": stats(baseline), "loaded": stats(loaded),
                              "p95_regression": None if gate.chat_p95_regression is None
@@ -341,7 +341,9 @@ def format_report(result: dict) -> str:
         f"- hardware: {json.dumps(result['hardware'])}",
         f"- workload: {result['workload']['workflow_runs']} workflow runs x {result['workload']['nodes_per_run']} nodes, "
         f"{result['workload']['fleet_runs']} Fleet runs, {result['workload']['wall_s']} s wall, "
-        f"{result['workload'].get('engine_shards', 1)} engine shard(s)",
+        f"{result['workload'].get('engine_shards', 1)} engine shard(s)"
+        + (f", internal backend pool of {result['workload']['backend_internal_workers']}"
+           if result['workload'].get('backend_internal_workers') else ""),
         f"- chat first token, baseline: p50 {c['baseline']['p50_ms']} ms, p95 {c['baseline']['p95_ms']} ms (n={c['baseline']['n']})",
         f"- chat first token, loaded: p50 {c['loaded']['p50_ms']} ms, p95 {c['loaded']['p95_ms']} ms (n={c['loaded']['n']}), "
         f"p95 regression {'n/a' if reg is None else f'{reg:+.1%}'} (limit +20%)",

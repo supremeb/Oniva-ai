@@ -213,6 +213,26 @@ def engine_shards() -> int:
     return n
 
 
+def internal_pool_workers(shards: int | None = None, pg: bool | None = None) -> int:
+    """Worker processes of the separate internal backend pool, from the opt-in ``ONIVA_E2E_BACKEND_INTERNAL_WORKERS``.
+
+    0 (default, unset) = one pool: the browser API, the interactive engine and the background engine all use the
+    main backend port. N >= 1 starts a second pool of N uvicorn workers on its own port (same code, same database)
+    that only the BACKGROUND engine shard calls (``/internal/tools|workflows|models|runs``), so interactive traffic
+    keeps the main pool to itself. Needs the Postgres backend and ``ONIVA_E2E_ENGINE_SHARDS=2`` (without a
+    background shard there is no background traffic to separate).
+    """
+    n = int(os.environ.get("ONIVA_E2E_BACKEND_INTERNAL_WORKERS") or 0)
+    if n < 0:
+        raise ValueError("ONIVA_E2E_BACKEND_INTERNAL_WORKERS must be >= 0")
+    if n:
+        if (engine_shards() if shards is None else shards) != 2:
+            raise ValueError("ONIVA_E2E_BACKEND_INTERNAL_WORKERS needs ONIVA_E2E_ENGINE_SHARDS=2")
+        if not (backend_mode()[0] if pg is None else pg):
+            raise ValueError("ONIVA_E2E_BACKEND_INTERNAL_WORKERS needs ONIVA_E2E_BACKEND_DB=postgres")
+    return n
+
+
 def _migrate_backend_db(pg: dict, auth: str, backend_db: str) -> dict:
     """Create the backend database, run ``alembic upgrade head`` as the schema owner, give the app roles passwords.
 
@@ -370,6 +390,23 @@ def stack(extra_env: dict | None = None, worker_command: list | None = None, wor
             return second
 
         w.start_second_backend = start_second_backend
+        # The optional internal pool: a second set of backend workers that only the background engine shard calls.
+        w.internal_workers = internal_pool_workers(w.shards, w.backend_pg)
+        w.internal_url = w.backend_url
+        if w.internal_workers:
+            iport, iinfo = free_port(), tmp / "info-internal.json"
+            pool = Proc([sys.executable, "-m", "tests.e2e.backend_app"],
+                        {**env, "E2E_PORT": str(iport), "E2E_INFO": str(iinfo), "E2E_SEED": "0",
+                         "E2E_WORKERS": str(w.internal_workers)}, BACKEND, tmp / "backend-internal.log")
+            procs.append(pool)
+            w.internal_url = f"http://127.0.0.1:{iport}"
+
+            def internal_ready():
+                assert pool.p.poll() is None, pool.tail()
+                return _info_ready(iinfo, w.internal_workers) and httpx.get(
+                    f"{w.internal_url}/internal/ping", headers={"Authorization": f"Bearer {GATEWAY_TOKEN}"}
+                ).status_code == 200
+            wait_for(internal_ready, "the internal backend pool", 120)
         w.worker_n = 0
         w.worker_env = {**base, "ENGINE_PORT": str(w.engine_port), "ENGINE_HOST": "127.0.0.1",
                         "DATABASE_URL": w.pg_url, "ENGINE_SESSION_ID": SESSION,
@@ -385,6 +422,9 @@ def stack(extra_env: dict | None = None, worker_command: list | None = None, wor
             w.bg_worker_env = {**w.worker_env, "ENGINE_PORT": str(w.bg_engine_port),
                                "ENGINE_SESSION_ID": BACKGROUND_SESSION, "ENGINE_SESSION_ROLE": "background"}
             w.bg_worker_env.update({k: v for k, v in (worker_env or {}).items() if k != "ENGINE_SESSION_ROLE"})
+            if w.internal_workers:  # the background shard's backend calls go to the internal pool
+                w.bg_worker_env.update({k: w.internal_url for k in (
+                    "ENGINE_GATEWAY_URL", "ENGINE_POLICY_URL", "ENGINE_WORKFLOW_BACKEND_URL")})
         w.worker_command = worker_command or ["npm", "run", "--silent", "worker:test"]
         w.procs = procs
         w.start_worker = lambda n: _start_worker(w, n)
