@@ -350,13 +350,21 @@ proper runner and its result is recorded here. The gate answers one question: ca
 one engine session without hurting chat?
 
 **Trigger it**: GitHub, Actions, "load-gate", "Run workflow" (`.github/workflows/load-gate.yml`, manual only, not in
-CI). It boots the same stack as the e2e `engine-smoke` job (Postgres 16, one backend, one engine worker).
+CI). It boots the same stack as the e2e `engine-smoke` job (Postgres 16 with pgvector, one engine worker), with the
+backend run production-like by default: schema from `alembic upgrade head`, the app connecting as the non-bypass
+`oniva_app` role (system sessions as `oniva_system`, RLS on), and `backend_workers` uvicorn worker processes on one port
+(production: gunicorn `-w 4`, `Dockerfile.prod`). `backend_db` = `sqlite` restores the old single-process SQLite backend.
 Inputs: `profile` (`full` = 200 workflow runs of 10 nodes + 20 Fleet runs, 60 baseline chat samples, at least 60 loaded
 chat samples; `smoke` = 5 + 1), `runner` (a GitHub-hosted label, default `ubuntu-latest`; use a larger-runner label
 for a realistic number), and optional overrides `workflow_runs`, `fleet_runs`, `baseline_samples`,
 `min_loaded_samples`, `chat_interval_s`, `start_threads`, `drain_timeout_s` (blank keeps the profile default).
 For U29 evidence leave every override blank: an overridden run is named `<profile>+custom` and does not count.
-Locally: `cd backend && ONIVA_E2E=1 uv run python -m tests.load.automation_load --profile full --json-out r.json`.
+Locally: `cd backend && ONIVA_E2E=1 uv run python -m tests.load.automation_load --profile full --json-out r.json`
+(SQLite backend). Production-like locally: add `ONIVA_E2E_BACKEND_DB=postgres ONIVA_E2E_BACKEND_WORKERS=4` and a Postgres
+with pgvector (`ONIVA_E2E_PG_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres`, e.g. a throwaway
+`pgvector/pgvector:pg16` container; the harness creates and drops its own databases but sets passwords on the
+cluster-wide `oniva_app` / `oniva_system` roles, so never point it at a shared dev cluster).
+Both env vars are opt-in for any e2e test; unset, the stack is unchanged.
 
 **Passing** (the job is green and the summary says PASS), all of:
 
@@ -383,6 +391,10 @@ take, `ENGINE_TASK_CONCURRENCY`; Fleet and workflow runs are started `background
 tool manifest per chat submission. The driver lifts the Fleet agent's `timeout_seconds` because it advances the engine
 clock 31 s per drain iteration, which would otherwise exhaust a 600 s Fleet deadline (`the run deadline has passed`).
 A failed run's reason is listed under the summary.
+
+Multi-worker notes (Postgres backend): the run reconciler is leader-only through `pg_try_advisory_lock`, tool and
+workflow-node idempotency, approvals and trace recording rely on row locks, and the per-process caches (`_manifest_cache`,
+`_decisions`, `_applied`, `_approval_gates`) are only caches. Nothing else in the e2e path is process-local.
 
 **Recorded result**: none yet.
 

@@ -1,7 +1,9 @@
 name: load-gate
 
 # U36 automation load gate, run on demand (never on push or PR: the full profile takes a while and wants a
-# dedicated runner). Same stack as the e2e `engine-smoke` job: Postgres 16 service, Node 22 engine, uv backend.
+# dedicated runner). Same stack as the e2e `engine-smoke` job (Postgres 16 service with pgvector, Node 22 engine, uv
+# backend), but the backend runs production-like by default: alembic-migrated Postgres, the app connecting as the
+# non-bypass `oniva_app` role, N uvicorn worker processes (`backend_db` / `backend_workers`).
 # Blocks the U29 flip until a full-profile run passes; see DEPLOYMENT.md, "Load gate (U36)".
 on:
   workflow_dispatch:
@@ -15,6 +17,15 @@ on:
         description: "GitHub-hosted runner label, e.g. ubuntu-latest, ubuntu-24.04, or a larger runner label your org has"
         type: string
         default: ubuntu-latest
+      backend_db:
+        description: "Backend database: postgres = production-like (alembic schema, oniva_app role with RLS, several worker processes); sqlite = the e2e default (one process)"
+        type: choice
+        options: [postgres, sqlite]
+        default: postgres
+      backend_workers:
+        description: "Backend worker processes (postgres only); size for the runner, e.g. 2 on 4 CPUs"
+        type: string
+        default: "2"
       workflow_runs:
         description: "Override the profile's workflow run count (blank = profile default)"
         type: string
@@ -53,7 +64,7 @@ jobs:
     timeout-minutes: 120
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -89,6 +100,8 @@ jobs:
         env:
           # Inputs go through env, never interpolated into the script.
           IN_PROFILE: ${{ inputs.profile }}
+          IN_BACKEND_DB: ${{ inputs.backend_db }}
+          IN_BACKEND_WORKERS: ${{ inputs.backend_workers }}
           IN_WORKFLOW_RUNS: ${{ inputs.workflow_runs }}
           IN_FLEET_RUNS: ${{ inputs.fleet_runs }}
           IN_BASELINE: ${{ inputs.baseline_samples }}
@@ -98,6 +111,10 @@ jobs:
           IN_DRAIN_TIMEOUT: ${{ inputs.drain_timeout_s }}
         run: |
           set -o pipefail
+          export ONIVA_E2E_BACKEND_DB="${IN_BACKEND_DB:-postgres}"
+          export ONIVA_E2E_BACKEND_WORKERS="${IN_BACKEND_WORKERS:-2}"
+          # The workers option only applies to the Postgres backend.
+          [ "$ONIVA_E2E_BACKEND_DB" = postgres ] || unset ONIVA_E2E_BACKEND_WORKERS
           mkdir -p "$RUNNER_TEMP/load-gate"
           args=(--profile "$IN_PROFILE"
                 --json-out "$RUNNER_TEMP/load-gate/result.json"
