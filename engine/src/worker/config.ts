@@ -24,6 +24,8 @@
  * | `ENGINE_MODEL_IDLE_TIMEOUT_MS` | `120000` | abort an OpenRouter attempt silent for this long between data events (retryable, partial kept) |
  * | `ENGINE_MAX_TOKENS` | `8192` | reply token budget per request |
  * | `ENGINE_PROGRESS_INTERVAL_MS` | `100` | progress commit throttle (KTD11) |
+ * | `ENGINE_TASK_CONCURRENCY` | `16` | most task handlers running at once on this worker |
+ * | `ENGINE_INTERACTIVE_RESERVE` | concurrency / 8 | slots only interactive (chat) tasks may take; background work (workflow and Fleet runs) stops at concurrency minus this |
  * | `ENGINE_SUBAGENT_TOOL` | none | register a subagent tool under this name |
  * | `ENGINE_SUBAGENT_TOOLS` | none | comma-separated subagent tool names to register (with `ENGINE_SUBAGENT_TOOL`, deduplicated) |
  * | `ENGINE_SHUTDOWN_TIMEOUT_MS` | `10000` | bound on closing the engine at shutdown |
@@ -42,6 +44,7 @@ import { DEFAULT_PROGRESS_INTERVAL_MS } from "../agent/progress.js";
 import { DEFAULT_QUESTION_TTL_MS } from "../agent/questions.js";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_ANTHROPIC_SUMMARY_MODEL } from "../models/anthropic.js";
 import { DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_IDLE_TIMEOUT_MS } from "../models/retry.js";
+import { DEFAULT_TASK_CONCURRENCY } from "../tasks/runtime.js";
 import { DEFAULT_POLICY_TIMEOUT_MS, DEFAULT_RETRY_MS } from "./backend-policy.js";
 
 export type WorkerEnv = Readonly<Record<string, string | undefined>>;
@@ -78,6 +81,10 @@ export interface WorkerConfig {
   modelIdleTimeoutMs: number;
   maxTokens: number;
   progressIntervalMs: number;
+  /** Most task handlers running at once (`ENGINE_TASK_CONCURRENCY`). */
+  taskConcurrency: number;
+  /** Slots held back from background work (`ENGINE_INTERACTIVE_RESERVE`); null: an eighth of the concurrency. */
+  interactiveReserve: number | null;
   subagentTool: string | null;
   /** Every subagent tool to register: `ENGINE_SUBAGENT_TOOL` then `ENGINE_SUBAGENT_TOOLS`, deduplicated. */
   subagentTools: string[];
@@ -245,6 +252,11 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
       DEFAULT_PROGRESS_INTERVAL_MS,
       0,
     ),
+    taskConcurrency: integer(env, "ENGINE_TASK_CONCURRENCY", DEFAULT_TASK_CONCURRENCY, 1),
+    interactiveReserve:
+      text(env, "ENGINE_INTERACTIVE_RESERVE") === null
+        ? null
+        : integer(env, "ENGINE_INTERACTIVE_RESERVE", 0, 0),
     subagentTool: text(env, "ENGINE_SUBAGENT_TOOL"),
     subagentTools: subagentTools(env),
     shutdownTimeoutMs: integer(env, "ENGINE_SHUTDOWN_TIMEOUT_MS", DEFAULT_SHUTDOWN_TIMEOUT_MS, 1),

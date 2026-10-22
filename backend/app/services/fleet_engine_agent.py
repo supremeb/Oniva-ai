@@ -177,6 +177,7 @@ def build_fleet_agent_config(
         "maxRounds": max_rounds,
         "deadlineMs": int(now_ms) + duration_sec * 1000,
         "metadata": {"notify": "backend", "runKind": "fleet", "jobId": str(job_id)},
+        "lane": "background",  # scheduled behind interactive chat turns (engine task lanes)
     }
     model = getattr(agent, "model", None)
     if model:

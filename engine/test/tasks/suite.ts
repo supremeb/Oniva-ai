@@ -581,6 +581,120 @@ export function defineTaskRuntimeSuite(backend: Backend): void {
       await w.crash();
     });
 
+    describe("lanes", () => {
+      type Deferred = ReturnType<typeof deferred<void>>;
+      /** A kind whose handlers start in `log` and finish when `gates[name]` resolves. */
+      const gated = (
+        kind: string,
+        lane: "interactive" | "background",
+        log: string[],
+        gates: Map<string, Deferred>,
+      ) =>
+        defineTask<{ name: string }, null>({
+          kind,
+          lane,
+          phases: {
+            start: async (task, rt) => {
+              log.push(task.input.name);
+              const gate = deferred();
+              gates.set(task.input.name, gate);
+              await gate.promise;
+              return rt.commit(() => done(null));
+            },
+          },
+        });
+      const settle = () => new Promise((r) => setTimeout(r, 60));
+      /** Finish every handler, including the ones that start as others finish. */
+      const releaseAll = async (gates: Map<string, Deferred>, rounds = 10) => {
+        for (let i = 0; i < rounds; i++) {
+          for (const g of gates.values()) g.resolve();
+          await settle();
+        }
+      };
+
+      it("starts a queued interactive task ahead of older background tasks", async () => {
+        await setup();
+        const log: string[] = [];
+        const gates = new Map<string, Deferred>();
+        const bg = gated("bg", "background", log, gates);
+        const chat = gated("chat", "interactive", log, gates);
+        const w = await fx.open([bg, chat], { concurrency: 2, interactiveReserve: 0 });
+        const spawn = (def: typeof bg, name: string) =>
+          w.runtime.spawn(def, { conversationId: fx.conversationId, input: { name } });
+        await spawn(bg, "bg1");
+        await spawn(bg, "bg2");
+        await spawn(bg, "bg3");
+        const c = await spawn(chat, "chat1");
+        await settle();
+        expect(log).toEqual(["bg1", "bg2"]);
+        gates.get("bg1")?.resolve();
+        await settle();
+        expect(log).toEqual(["bg1", "bg2", "chat1"]);
+        await releaseAll(gates);
+        await w.runtime.waitForTask(c.id);
+        expect(log).toEqual(["bg1", "bg2", "chat1", "bg3"]);
+        await w.crash();
+      });
+
+      it("keeps `interactiveReserve` slots free of background work", async () => {
+        await setup();
+        const log: string[] = [];
+        const gates = new Map<string, Deferred>();
+        const bg = gated("bg", "background", log, gates);
+        const chat = gated("chat", "interactive", log, gates);
+        const w = await fx.open([bg, chat], { concurrency: 4, interactiveReserve: 2 });
+        const spawn = (def: typeof bg, name: string) =>
+          w.runtime.spawn(def, { conversationId: fx.conversationId, input: { name } });
+        for (let i = 1; i <= 6; i++) await spawn(bg, `bg${i}`);
+        await settle();
+        expect(log).toEqual(["bg1", "bg2"]); // background stops at concurrency - reserve
+        await spawn(chat, "chat1");
+        await spawn(chat, "chat2");
+        await settle();
+        expect(log).toEqual(["bg1", "bg2", "chat1", "chat2"]); // started at once, no slot had to free up
+        await releaseAll(gates);
+        expect(log).toHaveLength(8); // nothing starves: the background queue drains
+        await w.runtime.waitForIdle();
+        await w.crash();
+      });
+
+      it("takes the lane from a function of the task and its run's root", async () => {
+        await setup();
+        const log: string[] = [];
+        const gates = new Map<string, Deferred>();
+        const lane = defineTask<{ name: string; lane?: "background" }, null>({
+          kind: "lane",
+          lane: (task) =>
+            (task.input as { lane?: string } | null)?.lane === "background"
+              ? "background"
+              : "interactive",
+          phases: {
+            start: async (task, rt) => {
+              log.push(task.input.name);
+              const gate = deferred();
+              gates.set(task.input.name, gate);
+              await gate.promise;
+              return rt.commit(() => done(null));
+            },
+          },
+        });
+        const w = await fx.open([lane], { concurrency: 2, interactiveReserve: 1 });
+        const spawn = (name: string, l?: "background") =>
+          w.runtime.spawn(lane, {
+            conversationId: fx.conversationId,
+            input: l ? { name, lane: l } : { name },
+          });
+        await spawn("a", "background");
+        await spawn("b", "background");
+        await spawn("c");
+        await settle();
+        expect(log).toEqual(["a", "c"]);
+        await releaseAll(gates);
+        expect(log).toEqual(["a", "c", "b"]);
+        await w.crash();
+      });
+    });
+
     it("cancels running handlers when the lease signal aborts, and commits nothing more", async () => {
       await setup();
       const stopped = deferred<unknown>();

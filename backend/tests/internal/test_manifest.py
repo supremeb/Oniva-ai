@@ -230,3 +230,40 @@ def test_manifest_carries_untrusted_output(manifest_json):
     assert tools["browse_url"]["untrustedOutput"] is True
     assert tools["write_file"]["untrustedOutput"] is False
     assert all(isinstance(t["untrustedOutput"], bool) for t in manifest_json)
+
+
+# ---- load: the manifest is built once, not per chat turn ----------------------------------------
+
+def test_build_manifest_reads_skill_files_once_and_rebuilds_when_the_registry_changes(monkeypatch):
+    """Every chat submission asks for the manifest's tool names; parsing every SKILL.md and introspecting every
+    handler per submission held the backend's event loop long enough to starve concurrent chat turns under
+    automation load (U36). The result is cached against the loaded skills."""
+    from app.internal_api import tools as tools_module
+
+    reads = {"n": 0}
+    real = tools_module._explicit_timeouts
+
+    def counting():
+        reads["n"] += 1
+        return real()
+
+    monkeypatch.setattr(tools_module, "_explicit_timeouts", counting)
+    tools_module._cached_timeouts.cache_clear()
+    tools_module._manifest_cache.clear()
+    first = build_manifest()
+    assert build_manifest() == first and build_manifest() == first
+    assert reads["n"] == 1
+
+    # A skill added to (or removed from) the registry is a different manifest.
+    async def handler(x: int) -> dict:
+        """Args:
+            x: a number"""
+        return {"x": x}
+
+    monkeypatch.setitem(skills_registry._registry, "zz_cache_probe",
+                        Skill(name="zz_cache_probe", description="probe", category="t", handler=handler))
+    monkeypatch.setitem(TOOL_SPECS, "zz_cache_probe", tool_specs.ToolSpec(side_effect="none", idempotent=True))
+    assert "zz_cache_probe" in {t.name for t in build_manifest()}
+    monkeypatch.delitem(skills_registry._registry, "zz_cache_probe")
+    assert "zz_cache_probe" not in {t.name for t in build_manifest()}
+    tools_module._cached_timeouts.cache_clear()

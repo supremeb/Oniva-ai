@@ -343,6 +343,18 @@ export interface TaskViewInfo {
 }
 
 /**
+ * Which share of the worker a task competes for. `interactive` work (a person is waiting on a chat turn) is
+ * started ahead of `background` work (workflow runs, Fleet runs) and has slots background work cannot take, so a
+ * flood of automation cannot queue a chat turn behind it.
+ */
+export type Lane = "interactive" | "background";
+
+/** A kind's lane: fixed, or worked out from the task (e.g. from the run it belongs to; `get` reads any task). */
+export type LaneOf =
+  | Lane
+  | ((task: TaskRecord, get: (id: string) => TaskRecord | undefined) => Lane);
+
+/**
  * A task kind. `TaskDefinition` without type arguments accepts any definition.
  */
 export interface TaskDefinition<I = never, C = never> {
@@ -360,6 +372,8 @@ export interface TaskDefinition<I = never, C = never> {
    * these details. Kinds without it stay out of the view.
    */
   readonly view?: (task: TaskState<I, C>) => TaskViewInfo;
+  /** The scheduling lane of this kind's tasks. Defaults to `interactive`. */
+  readonly lane?: LaneOf;
 }
 
 export interface TaskDefinitionInput<I, C> {
@@ -369,6 +383,7 @@ export interface TaskDefinitionInput<I, C> {
   initialPhase?: string;
   onAbort?: AbortHandler<I, C>;
   view?: (task: TaskState<I, C>) => TaskViewInfo;
+  lane?: LaneOf;
 }
 
 export function defineTask<I, C>(input: TaskDefinitionInput<I, C>): TaskDefinition<I, C> {
@@ -390,6 +405,7 @@ export function defineTask<I, C>(input: TaskDefinitionInput<I, C>): TaskDefiniti
     initialPhase,
     ...(input.onAbort ? { onAbort: input.onAbort } : {}),
     ...(input.view ? { view: input.view } : {}),
+    ...(input.lane ? { lane: input.lane } : {}),
   });
 }
 

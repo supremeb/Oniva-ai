@@ -794,6 +794,7 @@ export function createWorkflowRunTask(deps: WorkflowRunDeps): TaskDefinition<
 
   const def = defineTask<WorkflowRunInput, WorkflowRunCheckpoint | null>({
     kind: WORKFLOW_RUN_KIND,
+    lane: "background",
     phases: { start, [PHASE_JOIN]: join, [PHASE_FAN]: fan, [PHASE_FINALIZE]: finalize },
     initialPhase: "start",
     onAbort: async (task, scope, ctx) => {

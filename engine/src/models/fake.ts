@@ -24,7 +24,14 @@ export type FakeStep =
   /** Wait on the injected clock (abortable). */
   | { type: "delay"; ms: number }
   /** Fail here; blocks emitted so far become the partial message. */
-  | { type: "error"; kind: ModelErrorKind; message?: string; status?: number };
+  | {
+      type: "error";
+      kind: ModelErrorKind;
+      message?: string;
+      status?: number;
+      /** Tokens already spent when the stream failed (providers bill a cut-off reply). */
+      usage?: Partial<Usage>;
+    };
 
 export interface FakeResponse {
   steps: FakeStep[];
@@ -132,6 +139,7 @@ export class FakeProvider implements ModelProvider {
           break;
         case "error": {
           const extra = step.status === undefined ? {} : { status: step.status };
+          if (step.usage) b.setUsage(step.usage);
           yield b.fail(modelError(step.kind, step.message ?? `fake ${step.kind}`, extra));
           return;
         }

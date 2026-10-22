@@ -21,9 +21,10 @@ import type { TextContent } from "../models/types.js";
 import { type DocDraft, defineDoc } from "../session/documents.js";
 import type { Transaction } from "../session/transaction.js";
 import type { SubmissionRecord, TaskRecord } from "../storage/types.js";
-import type { TaskDefinition, TaskOps } from "../tasks/define.js";
+import type { Lane, TaskDefinition, TaskOps } from "../tasks/define.js";
 import { ENTRY_KINDS, toEntryPayload, type UserPayload } from "./context-builder.js";
 import type { GenerationCheckpoint, GenerationInput } from "./generation.js";
+import { agentConfigDoc } from "./prompt.js";
 import {
   type SubmissionAnswer,
   type SubmissionUnanswered,
@@ -91,12 +92,13 @@ export function startRun(
   conversationId: string,
   submissionId: string,
   runId: string = tx.mintId("task"),
+  lane: Lane = "interactive",
 ): TaskRecord {
   return ops.spawn(generation, {
     id: runId,
     conversationId,
     parentTaskId: null,
-    input: { runId, submissionId, round: 0 },
+    input: { runId, submissionId, round: 0, ...(lane === "background" ? { lane } : {}) },
   });
 }
 
@@ -129,10 +131,13 @@ export class Inbox {
     readonly conversationId: string,
     readonly draft: DocDraft<InboxState>,
     readonly subs: Map<string, SubmissionRecord>,
+    /** The conversation's scheduling lane, for the runs this inbox starts. */
+    readonly lane: Lane = "interactive",
   ) {}
 
   static async load(tx: Transaction, conversationId: string): Promise<Inbox> {
     const draft = await tx.doc(inboxDoc, conversationId);
+    const lane = (await tx.doc(agentConfigDoc, conversationId)).value.lane;
     const subs = new Map<string, SubmissionRecord>();
     const ids = [
       ...draft.value.queue.map((q) => q.submissionId),
@@ -142,7 +147,7 @@ export class Inbox {
       const sub = await tx.getSubmission(id);
       if (sub) subs.set(id, sub);
     }
-    return new Inbox(tx, conversationId, draft, subs);
+    return new Inbox(tx, conversationId, draft, subs, lane);
   }
 
   get queued(): number {
@@ -199,7 +204,7 @@ export class Inbox {
       const runId = this.tx.mintId("task");
       appendUserEntry(this.tx, this.conversationId, sub.id, storedContent(sub), sub.requestId);
       this.#update(sub, { status: "active", taskId: runId });
-      startRun(this.tx, ops, generation, this.conversationId, sub.id, runId);
+      startRun(this.tx, ops, generation, this.conversationId, sub.id, runId, this.lane);
       return sub.id;
     }
     return null;

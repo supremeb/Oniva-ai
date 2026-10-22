@@ -36,6 +36,7 @@ def test_defaults_when_constraints_absent():
     assert out.config["maxRounds"] == fea.DEFAULT_MAX_TOOL_CALLS == 50
     assert out.config["deadlineMs"] == NOW + fea.DEFAULT_MAX_DURATION_SEC * 1000
     assert out.config["metadata"] == {"notify": "backend", "runKind": "fleet", "jobId": "job-1"}
+    assert out.config["lane"] == "background"  # automation never queues ahead of a chat turn
 
 
 def test_skill_missing_from_manifest_warns_not_fails():
@@ -49,7 +50,7 @@ def test_config_has_no_secrets():
     text = str(out.config).lower()
     assert "api_key" not in text and "secret" not in text
     assert not re.search(r"sk-[a-z0-9]{8,}", text)
-    assert set(out.config) <= {"systemPrompt", "tools", "model", "tier", "maxRounds", "deadlineMs", "metadata"}
+    assert set(out.config) <= {"systemPrompt", "tools", "model", "tier", "maxRounds", "deadlineMs", "metadata", "lane"}
 
 
 def test_prompt_includes_connector_summary_and_tool_note():

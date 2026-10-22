@@ -55,6 +55,7 @@ import {
   payloadOf,
   toEntryPayload,
 } from "./context-builder.js";
+import { runLane } from "./lane.js";
 import {
   type CompactionOverrides,
   type CompactionSettings,
@@ -496,6 +497,7 @@ export function compactionTaskDefinition(
   resolveCompactionSettings(defaults); // validate early
   const def = defineTask<CompactionInput, null>({
     kind: COMPACTION_TASK_KIND,
+    lane: runLane,
     phases: { summarize: (task, rt, ctx) => summarize(task, rt, ctx) },
     onAbort: async (task, scope) => {
       await scope.commit(async (tx) => {

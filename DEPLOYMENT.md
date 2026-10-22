@@ -376,6 +376,14 @@ per-commit latency or reconciler lag directly).
 
 **For U29**: paste the summary (numbers, hardware, date, PASS) into this section, with the run URL, in the U29 PR.
 
+**What the numbers mean** (first red run, 2026-10-22, 4-CPU runner): worker CPU alone does not show saturation, because the
+backend, Postgres and the driver share the runner. Chat is protected in two places: the engine schedules chat ahead of
+automation (task lanes: `agent.lane` / task kind `lane`, `ENGINE_INTERACTIVE_RESERVE` slots that background work cannot
+take, `ENGINE_TASK_CONCURRENCY`; Fleet and workflow runs are started `background`), and the backend no longer rebuilds the
+tool manifest per chat submission. The driver lifts the Fleet agent's `timeout_seconds` because it advances the engine
+clock 31 s per drain iteration, which would otherwise exhaust a 600 s Fleet deadline (`the run deadline has passed`).
+A failed run's reason is listed under the summary.
+
 **Recorded result**: none yet.
 
 **`/internal` is never public.** nginx answers 404 for `/internal` (`nginx/nginx.conf`), the k8s ingress
