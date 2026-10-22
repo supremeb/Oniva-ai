@@ -1170,6 +1170,50 @@ describe("UsageReporter outbox", () => {
     expect(await outbox.claimPending(0)).toEqual([]);
   });
 
+  it("reports the spend of a reply that failed mid-stream (a failed run is still billed)", async () => {
+    const gw = await start();
+    const outbox = new MemoryStorageProvider();
+    const rep = reporter(gw, outbox);
+    const fx = await memoryBackend.fixture();
+    const policy = workerHostPolicy({
+      modelDefaults: {
+        provider: "fake",
+        model: "m",
+        summaryModel: "m",
+        maxTokens: 10,
+        apiKey: () => "k",
+      },
+      gateway: null,
+      approvalTtlMs: null,
+      clock: fx.clock,
+      backend: client(gw),
+    });
+    fx.provider.enqueue({
+      steps: [
+        { type: "text", text: "par" },
+        {
+          type: "error",
+          kind: "provider",
+          message: "stream cut",
+          usage: { inputTokens: 50, outputTokens: 7 },
+        },
+      ],
+    });
+    const w = await fx.open({ policy, hooks: rep.hooks });
+    const conv = await w.harness.createConversation({
+      tenantId: "t1",
+      projectId: "p1",
+      agent: { systemPrompt: "s", tools: [] },
+    });
+    const settled = await (await conv.submit({ text: "hi" })).wait();
+    expect(settled.status).toBe("unanswered");
+    await rep.flush();
+    await w.crash();
+    expect(gw.usage).toHaveLength(1);
+    expect(JSON.stringify(gw.usage[0])).toContain("50");
+    expect(await outbox.claimPending(0)).toEqual([]);
+  });
+
   it("keeps a row when the backend is down for the budget, then flushes it exactly once", async () => {
     const gw = await start();
     gw.failUsage(503);

@@ -190,6 +190,7 @@ async function main(): Promise<number> {
   const worker = await startWorker({
     pool,
     sessionId: config.sessionId,
+    role: config.sessionRole,
     serviceToken: config.serviceToken,
     port: config.port,
     host: config.host,
@@ -237,7 +238,11 @@ async function main(): Promise<number> {
     steerWorker: config.steerWorker,
     completeTask: config.completeTask,
     clock,
-    settings: { progressIntervalMs: config.progressIntervalMs },
+    settings: {
+      progressIntervalMs: config.progressIntervalMs,
+      concurrency: config.taskConcurrency,
+      interactiveReserve: config.interactiveReserve,
+    },
     wrapStorage: (provider) => timedStorage(provider, samples),
     intercept,
     log,

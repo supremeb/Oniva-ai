@@ -24,6 +24,7 @@ GATEWAY_TOKEN = "g" * 12 + "Gateway-Token-0123456789-abcdefXYZ"
 SERVICE_TOKEN = "e" * 12 + "Engine-Svc-Token-0123456789-abcdXY"
 SECRET_KEY = "Zk3vN8qLw1RtYb6HdPx9CfUe2MaS5JoG7iVn4TlKq0A"
 SESSION = "e2e-session"
+BACKGROUND_SESSION = "e2e-session-bg"
 AUTH = {"Authorization": "Bearer e2e-user-jwt"}
 
 READ_TOKENS = (777, 33)    # round 1 (tool call)
@@ -181,6 +182,75 @@ class World:
     pass
 
 
+def backend_mode() -> tuple[bool, int]:
+    """(postgres?, workers) from the opt-in env: ``ONIVA_E2E_BACKEND_DB=postgres``, ``ONIVA_E2E_BACKEND_WORKERS=N``.
+
+    Default (unset) is the original stack: one backend process on a SQLite file. The Postgres mode runs the backend
+    the way production does: alembic-migrated schema, the app connecting as the non-bypass ``oniva_app`` role (system
+    sessions as ``oniva_system``), N worker processes on one port. Workers apply to the Postgres mode only.
+    """
+    kind = os.environ.get("ONIVA_E2E_BACKEND_DB", "sqlite").strip().lower() or "sqlite"
+    if kind not in ("sqlite", "postgres"):
+        raise ValueError(f"ONIVA_E2E_BACKEND_DB must be sqlite or postgres, got {kind!r}")
+    workers = int(os.environ.get("ONIVA_E2E_BACKEND_WORKERS") or 1)
+    if workers < 1:
+        raise ValueError("ONIVA_E2E_BACKEND_WORKERS must be >= 1")
+    if workers > 1 and kind != "postgres":
+        raise ValueError("ONIVA_E2E_BACKEND_WORKERS > 1 needs ONIVA_E2E_BACKEND_DB=postgres (SQLite serves one process)")
+    return kind == "postgres", workers
+
+
+def engine_shards() -> int:
+    """Engine workers from the opt-in env ``ONIVA_E2E_ENGINE_SHARDS``: 1 (default, one worker serves everything) or 2.
+
+    With 2 the stack runs an interactive worker (``ENGINE_SESSION_ROLE=interactive``, session ``SESSION``: chat, Deep
+    Work) and a background worker (role ``background``, session ``BACKGROUND_SESSION``: workflow, Fleet, batch runs),
+    and the backend routes by run kind (``ENGINE_BACKGROUND_URL`` / ``ENGINE_BACKGROUND_SESSION_ID``).
+    """
+    n = int(os.environ.get("ONIVA_E2E_ENGINE_SHARDS") or 1)
+    if n not in (1, 2):
+        raise ValueError("ONIVA_E2E_ENGINE_SHARDS must be 1 or 2")
+    return n
+
+
+def _migrate_backend_db(pg: dict, auth: str, backend_db: str) -> dict:
+    """Create the backend database, run ``alembic upgrade head`` as the schema owner, give the app roles passwords.
+
+    Returns the three URLs the backend needs. The roles ``oniva_app`` / ``oniva_system`` are cluster-wide and get
+    a fresh random password, so point this at a throwaway or CI cluster, never at a shared development one.
+    """
+    import psycopg2
+    conn = psycopg2.connect(dbname="postgres", **pg)
+    conn.autocommit = True
+    conn.cursor().execute(f"CREATE DATABASE {backend_db}")
+    conn.close()
+    hostport = f"{pg['host']}:{pg['port']}"
+    owner = f"postgresql+asyncpg://{auth}@{hostport}/{backend_db}"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("ENGINE_", "DATABASE_URL"))}
+    env.update(PYTHONPATH=str(BACKEND), ONIVA_ENV_FILE="", DATABASE_URL=owner, MIGRATION_DATABASE_URL=owner,
+               SECRET_KEY=SECRET_KEY)
+    done = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], env=env, cwd=BACKEND,
+                          capture_output=True, text=True)
+    if done.returncode != 0:
+        raise RuntimeError(f"alembic upgrade head failed (the Postgres needs the pgvector extension):\n"
+                           f"{done.stdout[-1500:]}\n{done.stderr[-3000:]}")
+    app_pw, system_pw = uuid.uuid4().hex, uuid.uuid4().hex
+    conn = psycopg2.connect(dbname=backend_db, **pg)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute(f"ALTER ROLE oniva_app PASSWORD '{app_pw}'")
+    cur.execute(f"ALTER ROLE oniva_system PASSWORD '{system_pw}'")
+    conn.close()
+    return {"owner": owner, "app": f"postgresql+asyncpg://oniva_app:{app_pw}@{hostport}/{backend_db}",
+            "system": f"postgresql+asyncpg://oniva_system:{system_pw}@{hostport}/{backend_db}",
+            "owner_psycopg": f"postgresql://{auth}@{hostport}/{backend_db}"}
+
+
+def _info_ready(info: Path, workers: int) -> bool:
+    """The backend announced itself: ``info`` exists, and (Postgres mode) every worker wrote ``info.<pid>``."""
+    return info.exists() and (workers == 0 or len(list(info.parent.glob(info.name + ".*"))) >= workers)
+
+
 @contextlib.contextmanager
 def stack(extra_env: dict | None = None, worker_command: list | None = None, worker_env: dict | None = None):
     """Boot the Postgres + backend + (no worker yet) stack; yield a World; tear everything down.
@@ -235,7 +305,21 @@ def stack(extra_env: dict | None = None, worker_command: list | None = None, wor
         (w.dw_dir / "sessions").mkdir(parents=True)
         w.dw = Files(w.dw_dir)
         w.pg_url = pg_url
+        w.backend_pg, w.backend_workers = backend_mode()
+        w.backend_db_name = f"backend_e2e_{uuid.uuid4().hex[:8]}"
+        pg_env: dict = {}
+        if w.backend_pg:
+            urls = _migrate_backend_db(pg, auth, w.backend_db_name)
+            w.backend_owner_dsn = urls["owner_psycopg"]
+            pg_env = {"E2E_BACKEND_DB": "postgres", "E2E_WORKERS": str(w.backend_workers),
+                      "E2E_PG_OWNER_URL": urls["owner"], "DATABASE_URL": urls["app"],
+                      "SYSTEM_DATABASE_URL": urls["system"], "MIGRATION_DATABASE_URL": urls["owner"]}
         w.engine_url = f"http://127.0.0.1:{w.engine_port}"
+        w.shards = engine_shards()
+        w.bg_engine_port = free_port() if w.shards == 2 else None
+        w.bg_engine_url = f"http://127.0.0.1:{w.bg_engine_port}" if w.shards == 2 else None
+        shard_env = ({"ENGINE_BACKGROUND_URL": w.bg_engine_url, "ENGINE_BACKGROUND_SESSION_ID": BACKGROUND_SESSION}
+                     if w.shards == 2 else {})
         w.backend_url = f"http://127.0.0.1:{w.backend_port}"
 
         base = {k: v for k, v in os.environ.items() if not k.startswith(("ENGINE_", "DATABASE_URL"))}
@@ -256,16 +340,16 @@ def stack(extra_env: dict | None = None, worker_command: list | None = None, wor
                "ENABLE_SANDBOX": "true", "E2B_API_KEY": "e2b-FAKE-e2e", "SANDBOX_PROXY_URL": "http://proxy.invalid",
                "TAVILY_API_KEY": "tvly-FAKE-e2e", "SESSION_BASE_PATH": str(w.dw_dir / "sessions"), "ENGINE_GATEWAY_TOKEN": GATEWAY_TOKEN,
                "ENGINE_SERVICE_TOKEN": SERVICE_TOKEN, "ENGINE_URL": w.engine_url, "ENGINE_SESSION_ID": SESSION,
-               **(extra_env or {})}
+               **pg_env, **shard_env, **(extra_env or {})}
         backend = Proc([sys.executable, "-m", "tests.e2e.backend_app"], env, BACKEND, tmp / "backend.log")
         procs.append(backend)
         w.backend = backend
 
         def backend_ready():
             assert backend.p.poll() is None, backend.tail()
-            return info.exists() and httpx.get(f"{w.backend_url}/internal/ping", headers={
-                "Authorization": f"Bearer {GATEWAY_TOKEN}"}).status_code == 200
-        wait_for(backend_ready, "the backend", 90)
+            return _info_ready(info, w.backend_workers if w.backend_pg else 0) and httpx.get(
+                f"{w.backend_url}/internal/ping", headers={"Authorization": f"Bearer {GATEWAY_TOKEN}"}).status_code == 200
+        wait_for(backend_ready, "the backend", 120 if w.backend_pg else 90)
 
         w.backend_env = env
 
@@ -273,14 +357,14 @@ def stack(extra_env: dict | None = None, worker_command: list | None = None, wor
             """A second backend process on the same database and engine: no state shared except the stores."""
             port, info2 = free_port(), tmp / "info2.json"
             second = Proc([sys.executable, "-m", "tests.e2e.backend_app"],
-                          {**env, "E2E_PORT": str(port), "E2E_INFO": str(info2), "E2E_SEED": "0"},
+                          {**env, "E2E_PORT": str(port), "E2E_INFO": str(info2), "E2E_SEED": "0", "E2E_WORKERS": "1"},
                           BACKEND, tmp / "backend2.log")
             procs.append(second)
             second.url = f"http://127.0.0.1:{port}"
 
             def ready():
                 assert second.p.poll() is None, second.tail()
-                return info2.exists() and httpx.get(f"{second.url}/internal/ping", headers={
+                return _info_ready(info2, 1 if w.backend_pg else 0) and httpx.get(f"{second.url}/internal/ping", headers={
                     "Authorization": f"Bearer {GATEWAY_TOKEN}"}).status_code == 200
             wait_for(ready, "the second backend", 90)
             return second
@@ -296,6 +380,11 @@ def stack(extra_env: dict | None = None, worker_command: list | None = None, wor
                         "ENGINE_PROGRESS_INTERVAL_MS": "50",
                         "ENGINE_SUBAGENT_TOOLS": "research_worker,reflector,output_agent,verifier",
                         **(worker_env or {})}
+        if w.shards == 2:
+            w.worker_env["ENGINE_SESSION_ROLE"] = "interactive"
+            w.bg_worker_env = {**w.worker_env, "ENGINE_PORT": str(w.bg_engine_port),
+                               "ENGINE_SESSION_ID": BACKGROUND_SESSION, "ENGINE_SESSION_ROLE": "background"}
+            w.bg_worker_env.update({k: v for k, v in (worker_env or {}).items() if k != "ENGINE_SESSION_ROLE"})
         w.worker_command = worker_command or ["npm", "run", "--silent", "worker:test"]
         w.procs = procs
         w.start_worker = lambda n: _start_worker(w, n)
@@ -308,6 +397,14 @@ def stack(extra_env: dict | None = None, worker_command: list | None = None, wor
                 c = psycopg2.connect(dbname="postgres", **pg)
                 c.autocommit = True
                 c.cursor().execute(f"DROP DATABASE IF EXISTS {engine_db} WITH (FORCE)")
+                c.close()
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                pass
+        if external and getattr(w, "backend_pg", False):
+            try:
+                c = psycopg2.connect(dbname="postgres", **pg)
+                c.autocommit = True
+                c.cursor().execute(f"DROP DATABASE IF EXISTS {w.backend_db_name} WITH (FORCE)")
                 c.close()
             except Exception:  # noqa: BLE001 - best-effort cleanup
                 pass
@@ -332,6 +429,17 @@ def _start_worker(w: World, n: int) -> Proc:
         r = httpx.get(f"{w.engine_url}/v1/health", timeout=2)
         return r.status_code == 200 and r.json().get("owner") is True
     wait_for(owner, "the worker to own the session lease", 90)
+    worker.shard_procs = []
+    if w.shards == 2:  # the background shard: its own process, session, lease and commit line
+        bg = Proc(w.worker_command, w.bg_worker_env, ENGINE, w.tmp / f"worker{n}-bg.log")
+        w.procs.append(bg)
+        worker.shard_procs.append(bg)
+
+        def bg_owner():
+            assert bg.p.poll() is None, bg.tail()
+            r = httpx.get(f"{w.bg_engine_url}/v1/health", timeout=2)
+            return r.status_code == 200 and r.json().get("owner") is True
+        wait_for(bg_owner, "the background worker to own its session lease", 90)
     return worker
 
 
@@ -346,13 +454,34 @@ def restart_backend(w: World) -> Proc:
 
     def ready():
         assert backend.p.poll() is None, backend.tail()
-        return info.exists() and httpx.get(f"{w.backend_url}/internal/ping", headers={
-            "Authorization": f"Bearer {GATEWAY_TOKEN}"}).status_code == 200
-    wait_for(ready, "the restarted backend", 90)
+        return _info_ready(info, w.backend_workers if w.backend_pg else 0) and httpx.get(
+            f"{w.backend_url}/internal/ping", headers={"Authorization": f"Bearer {GATEWAY_TOKEN}"}).status_code == 200
+    wait_for(ready, "the restarted backend", 120 if w.backend_pg else 90)
     return backend
 
 
+def _pg_query(w: World, query: str, args, fetch: bool):
+    import re
+    import psycopg2
+    hexid = re.compile(r"[0-9a-f]{32}")
+    dashed = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    # The tests were written against SQLite, which stores uuids as 32 hex chars: speak that to the callers.
+    args = tuple(str(uuid.UUID(a)) if isinstance(a, str) and hexid.fullmatch(a) else a for a in args)
+    con = psycopg2.connect(w.backend_owner_dsn)  # the schema owner: reads past RLS, like the SQLite file did
+    try:
+        with con, con.cursor() as cur:
+            cur.execute(query.replace("?", "%s"), args)
+            if not fetch:
+                return cur.rowcount
+            return [tuple(v.replace("-", "") if isinstance(v, str) and dashed.fullmatch(v) else v for v in row)
+                    for row in cur.fetchall()]
+    finally:
+        con.close()
+
+
 def sql_write(w: World, query: str, *args) -> int:
+    if getattr(w, "backend_pg", False):
+        return _pg_query(w, query, args, False)
     con = sqlite3.connect(w.db, timeout=30)
     try:
         cur = con.execute(query, args)
@@ -374,6 +503,8 @@ def as_user(name: str) -> dict:
 
 
 def sql(w: World, query: str, *args):
+    if getattr(w, "backend_pg", False):
+        return _pg_query(w, query, args, True)
     con = sqlite3.connect(w.db, timeout=10)
     try:
         return con.execute(query, args).fetchall()

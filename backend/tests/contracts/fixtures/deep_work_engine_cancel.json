@@ -227,7 +227,8 @@
           },
           "maxRounds": 40,
           "deadlineMs": 1000600000,
-          "cacheTtl": "1h"
+          "cacheTtl": "1h",
+          "lane": "interactive"
         },
         "context": {
           "clearedThroughEntryId": null,
@@ -491,7 +492,8 @@
           },
           "maxRounds": 40,
           "deadlineMs": 1000600000,
-          "cacheTtl": "1h"
+          "cacheTtl": "1h",
+          "lane": "interactive"
         },
         "context": {
           "clearedThroughEntryId": null,
@@ -610,7 +612,8 @@
           },
           "maxRounds": 40,
           "deadlineMs": 1000600000,
-          "cacheTtl": "1h"
+          "cacheTtl": "1h",
+          "lane": "interactive"
         },
         "context": {
           "clearedThroughEntryId": null,

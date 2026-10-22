@@ -1,0 +1,153 @@
+name: load-gate
+
+# U36 automation load gate, run on demand (never on push or PR: the full profile takes a while and wants a
+# dedicated runner). Same stack as the e2e `engine-smoke` job (Postgres 16 service with pgvector, Node 22 engine, uv
+# backend), but the backend runs production-like by default: alembic-migrated Postgres, the app connecting as the
+# non-bypass `oniva_app` role, N uvicorn worker processes (`backend_db` / `backend_workers`).
+# Blocks the U29 flip until a full-profile run passes; see DEPLOYMENT.md, "Load gate (U36)".
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Profile: full = 200 workflow runs + 20 Fleet runs (the U29 evidence); smoke = 5 + 1"
+        type: choice
+        options: [full, smoke]
+        default: full
+      runner:
+        description: "GitHub-hosted runner label, e.g. ubuntu-latest, ubuntu-24.04, or a larger runner label your org has"
+        type: string
+        default: ubuntu-latest
+      backend_db:
+        description: "Backend database: postgres = production-like (alembic schema, oniva_app role with RLS, several worker processes); sqlite = the e2e default (one process)"
+        type: choice
+        options: [postgres, sqlite]
+        default: postgres
+      backend_workers:
+        description: "Backend worker processes (postgres only); size for the runner, e.g. 2 on 4 CPUs"
+        type: string
+        default: "2"
+      engine_shards:
+        description: "Engine workers: 1 = one worker serves chat and automation (default); 2 = sharded, an interactive worker (chat, Deep Work) and a background worker (workflow, Fleet, batch runs), each with its own session, lease and commit line"
+        type: choice
+        options: ["1", "2"]
+        default: "1"
+      workflow_runs:
+        description: "Override the profile's workflow run count (blank = profile default)"
+        type: string
+        default: ""
+      fleet_runs:
+        description: "Override the profile's Fleet run count (blank = profile default)"
+        type: string
+        default: ""
+      baseline_samples:
+        description: "Override chat samples measured with no load (blank = profile default)"
+        type: string
+        default: ""
+      min_loaded_samples:
+        description: "Override loaded chat samples the gate requires (blank = profile default)"
+        type: string
+        default: ""
+      chat_interval_s:
+        description: "Override seconds between chat turns (blank = profile default)"
+        type: string
+        default: ""
+      start_threads:
+        description: "Override concurrent run starters (blank = profile default)"
+        type: string
+        default: ""
+      drain_timeout_s:
+        description: "Override seconds allowed for runs to drain (blank = profile default)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  load-gate:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ONIVA_E2E: "1"
+      ONIVA_E2E_PG_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci
+        working-directory: engine
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+        working-directory: backend
+      - name: Run the load gate
+        working-directory: backend
+        env:
+          # Inputs go through env, never interpolated into the script.
+          IN_PROFILE: ${{ inputs.profile }}
+          IN_BACKEND_DB: ${{ inputs.backend_db }}
+          IN_BACKEND_WORKERS: ${{ inputs.backend_workers }}
+          IN_ENGINE_SHARDS: ${{ inputs.engine_shards }}
+          IN_WORKFLOW_RUNS: ${{ inputs.workflow_runs }}
+          IN_FLEET_RUNS: ${{ inputs.fleet_runs }}
+          IN_BASELINE: ${{ inputs.baseline_samples }}
+          IN_MIN_LOADED: ${{ inputs.min_loaded_samples }}
+          IN_CHAT_INTERVAL: ${{ inputs.chat_interval_s }}
+          IN_START_THREADS: ${{ inputs.start_threads }}
+          IN_DRAIN_TIMEOUT: ${{ inputs.drain_timeout_s }}
+        run: |
+          set -o pipefail
+          export ONIVA_E2E_BACKEND_DB="${IN_BACKEND_DB:-postgres}"
+          export ONIVA_E2E_BACKEND_WORKERS="${IN_BACKEND_WORKERS:-2}"
+          export ONIVA_E2E_ENGINE_SHARDS="${IN_ENGINE_SHARDS:-1}"
+          # The workers option only applies to the Postgres backend.
+          [ "$ONIVA_E2E_BACKEND_DB" = postgres ] || unset ONIVA_E2E_BACKEND_WORKERS
+          mkdir -p "$RUNNER_TEMP/load-gate"
+          args=(--profile "$IN_PROFILE"
+                --json-out "$RUNNER_TEMP/load-gate/result.json"
+                --markdown-out "$RUNNER_TEMP/load-gate/summary.md")
+          [ -n "$IN_WORKFLOW_RUNS" ] && args+=(--workflow-runs "$IN_WORKFLOW_RUNS")
+          [ -n "$IN_FLEET_RUNS" ] && args+=(--fleet-runs "$IN_FLEET_RUNS")
+          [ -n "$IN_BASELINE" ] && args+=(--baseline-samples "$IN_BASELINE")
+          [ -n "$IN_MIN_LOADED" ] && args+=(--min-loaded-samples "$IN_MIN_LOADED")
+          [ -n "$IN_CHAT_INTERVAL" ] && args+=(--chat-interval "$IN_CHAT_INTERVAL")
+          [ -n "$IN_START_THREADS" ] && args+=(--start-threads "$IN_START_THREADS")
+          [ -n "$IN_DRAIN_TIMEOUT" ] && args+=(--drain-timeout "$IN_DRAIN_TIMEOUT")
+          # psutil is not a project dependency; --with adds it for this run only (worker CPU/memory sampling).
+          # The driver exits 1 when the gate fails, which fails this step (and the job).
+          uv run --frozen --with psutil python -m tests.load.automation_load "${args[@]}" \
+            2>&1 | tee "$RUNNER_TEMP/load-gate/console.log"
+      - name: Write step summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/load-gate/summary.md" ]; then
+            cat "$RUNNER_TEMP/load-gate/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### U36 load gate: no result written (the run crashed before the gate; see the console log artifact)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-gate-${{ inputs.profile }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/load-gate
+          if-no-files-found: warn

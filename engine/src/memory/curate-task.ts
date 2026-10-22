@@ -238,6 +238,7 @@ export function createMemoryCurateTask(
         systemPrompt: llm.system,
         tools: [],
         depth: parentAgent.depth + 1,
+        lane: "background",
         metadata: {
           ...parentAgent.metadata,
           purpose: MEMORY_CURATE_PURPOSE,
@@ -268,7 +269,7 @@ export function createMemoryCurateTask(
         taskId: runId,
       });
       appendUserEntry(tx, child.id, submissionId, llm.prompt, requestId);
-      startRun(tx, ops, generation, child.id, submissionId, runId);
+      startRun(tx, ops, generation, child.id, submissionId, runId, agent.lane);
       return waiting({
         on: [runId],
         phase: PHASE_REFLECT,
@@ -412,6 +413,7 @@ export function createMemoryCurateTask(
 
   const def = defineTask<MemoryCurateInput, MemoryCurateCheckpoint | null>({
     kind: MEMORY_CURATE_KIND,
+    lane: "background",
     phases: { [PHASE_PREPARE]: prepare, [PHASE_REFLECT]: reflect, [PHASE_APPLY]: apply },
     initialPhase: PHASE_PREPARE,
     ...(deps.onAbort ? { onAbort: deps.onAbort } : {}),

@@ -83,11 +83,17 @@ export interface AgentSettings {
   progressIntervalMs: number;
   /** Most task handlers running at once. */
   concurrency: number;
+  /**
+   * Handler slots only interactive (chat) tasks may take; background work (workflow and Fleet runs) stops at
+   * `concurrency - interactiveReserve`. Null: an eighth of `concurrency` (2 of 16, none under 4).
+   */
+  interactiveReserve: number | null;
 }
 
 export const DEFAULT_AGENT_SETTINGS: Readonly<AgentSettings> = Object.freeze({
   progressIntervalMs: DEFAULT_PROGRESS_INTERVAL_MS,
   concurrency: 16,
+  interactiveReserve: null,
 });
 
 export interface HarnessOptions {
@@ -312,6 +318,9 @@ export class Harness implements AgentCore {
         tasks: [generation, toolTask, compaction, ...(options.tasks ?? [])],
         clock,
         concurrency: settings.concurrency,
+        ...(settings.interactiveReserve === null
+          ? {}
+          : { interactiveReserve: settings.interactiveReserve }),
         ...(options.signal ? { signal: options.signal } : {}),
         onError: (err, info) =>
           report(err, { during: info.during, ...(info.taskId ? { taskId: info.taskId } : {}) }),

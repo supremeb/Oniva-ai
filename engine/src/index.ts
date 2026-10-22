@@ -38,6 +38,7 @@ export * from "./models/types.js";
 export * from "./models/usage.js";
 export * from "./server/auth.js";
 export * from "./server/http.js";
+export * from "./server/role.js";
 export * from "./server/routes.js";
 export * from "./session/documents.js";
 export * from "./session/publish.js";

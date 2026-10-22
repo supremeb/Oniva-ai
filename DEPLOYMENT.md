@@ -343,6 +343,75 @@ ON CONFLICT DO NOTHING;
 A request over the quota is denied `quota_exceeded` and the run fails fast with a readable reason;
 no model key is ever returned for a denied request.
 
+### Load gate (U36): required before the U29 flip
+
+Fleet and workflows stay default-off until one full-profile run of the automation load gate has passed on a
+proper runner and its result is recorded here. The gate answers one question: can automation runs and chat share
+one engine session without hurting chat?
+
+**Trigger it**: GitHub, Actions, "load-gate", "Run workflow" (`.github/workflows/load-gate.yml`, manual only, not in
+CI). It boots the same stack as the e2e `engine-smoke` job (Postgres 16 with pgvector, one engine worker), with the
+backend run production-like by default: schema from `alembic upgrade head`, the app connecting as the non-bypass
+`oniva_app` role (system sessions as `oniva_system`, RLS on), and `backend_workers` uvicorn worker processes on one port
+(production: gunicorn `-w 4`, `Dockerfile.prod`). `backend_db` = `sqlite` restores the old single-process SQLite backend.
+Inputs: `engine_shards` (`1` = one engine worker, the default; `2` = sharded, see "Engine sharding" below), `profile` (`full` = 200 workflow runs of 10 nodes + 20 Fleet runs, 60 baseline chat samples, at least 60 loaded
+chat samples; `smoke` = 5 + 1), `runner` (a GitHub-hosted label, default `ubuntu-latest`; use a larger-runner label
+for a realistic number), and optional overrides `workflow_runs`, `fleet_runs`, `baseline_samples`,
+`min_loaded_samples`, `chat_interval_s`, `start_threads`, `drain_timeout_s` (blank keeps the profile default).
+For U29 evidence leave every override blank: an overridden run is named `<profile>+custom` and does not count.
+Locally: `cd backend && ONIVA_E2E=1 uv run python -m tests.load.automation_load --profile full --json-out r.json`
+(SQLite backend). Production-like locally: add `ONIVA_E2E_BACKEND_DB=postgres ONIVA_E2E_BACKEND_WORKERS=4` and a Postgres
+with pgvector (`ONIVA_E2E_PG_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres`, e.g. a throwaway
+`pgvector/pgvector:pg16` container; the harness creates and drops its own databases but sets passwords on the
+cluster-wide `oniva_app` / `oniva_system` roles, so never point it at a shared dev cluster).
+Both env vars are opt-in for any e2e test; unset, the stack is unchanged.
+
+**Passing** (the job is green and the summary says PASS), all of:
+
+- chat first-token p95 under load regressed by no more than 20% against the no-load baseline;
+- no run left non-terminal after the drain, and no run failed or cancelled;
+- no chat turn errored or timed out, and at least `min_loaded_samples` chat turns ran while automation was active;
+- the counting HTTP target saw exactly one started and one finished call per workflow run;
+- usage ledger rows equal the model requests made.
+
+Any failed condition fails the job and is listed in the summary. A failed gate means: stop, open the sharding
+follow-up (per-tenant or per-kind sessions through `session_for`) and ship it before U29.
+
+**Outputs**: the markdown summary on the run page (`$GITHUB_STEP_SUMMARY`) and an artifact `load-gate-<profile>-<run id>`
+with `result.json` (full numbers: first-token p50/p95, commit-gap p50/p95/p99, worker CPU and memory, outbox depth,
+drain lag, ledger), `summary.md` and `console.log`. Commit-gap and drain lag are proxies (the stack cannot observe
+per-commit latency or reconciler lag directly).
+
+**For U29**: paste the summary (numbers, hardware, date, PASS) into this section, with the run URL, in the U29 PR.
+
+**What the numbers mean** (first red run, 2026-10-22, 4-CPU runner): worker CPU alone does not show saturation, because the
+backend, Postgres and the driver share the runner. Chat is protected in two places: the engine schedules chat ahead of
+automation (task lanes: `agent.lane` / task kind `lane`, `ENGINE_INTERACTIVE_RESERVE` slots that background work cannot
+take, `ENGINE_TASK_CONCURRENCY`; Fleet and workflow runs are started `background`), and the backend no longer rebuilds the
+tool manifest per chat submission. The driver lifts the Fleet agent's `timeout_seconds` because it advances the engine
+clock 31 s per drain iteration, which would otherwise exhaust a 600 s Fleet deadline (`the run deadline has passed`).
+A failed run's reason is listed under the summary.
+
+Multi-worker notes (Postgres backend): the run reconciler is leader-only through `pg_try_advisory_lock`, tool and
+workflow-node idempotency, approvals and trace recording rely on row locks, and the per-process caches (`_manifest_cache`,
+`_decisions`, `_applied`, `_approval_gates`) are only caches. Nothing else in the e2e path is process-local.
+
+**Engine sharding** (the follow-up this gate asked for). Measured on the failing gate (12-CPU Mac, Postgres, 2 backend
+workers, single engine session): the session's serialized commit line was 90-100% occupied under load (about 130
+commits/s, 5 ms each), so a chat turn's roughly six sequential commits each waited a median 30-50 ms (p95 80-160 ms) for
+its turn behind automation commits. Event-loop lag (p99 about 8 ms, utilization 50%) and the Postgres pool (no wait) were
+not the cause. One worker serves one session, so the fix is a second session: set `ENGINE_SESSION_ROLE=interactive` on
+the worker for the chat session and `ENGINE_SESSION_ROLE=background` on a second worker with its own
+`ENGINE_SESSION_ID`, then give the backend `ENGINE_BACKGROUND_URL` and `ENGINE_BACKGROUND_SESSION_ID` (both or neither;
+the id must differ from `ENGINE_SESSION_ID`). Workflow, Fleet and batch runs are then created on the background worker
+(`EngineDirectory.session_for`), everything else stays on the first. Nothing changes unless configured. A conversation is
+bound to one session when it is created (`engine_conversations.session_id`) and every later call uses that binding, so
+turning sharding on or off never moves an existing conversation; roles refuse a lane they do not serve (`409
+wrong_session_role`) and ids are unique across sessions in storage, so no conversation is owned by two workers. Each
+session keeps its own lease, fence token and crash recovery. Locally: `ONIVA_E2E_ENGINE_SHARDS=2`.
+
+**Recorded result**: none yet.
+
 **`/internal` is never public.** nginx answers 404 for `/internal` (`nginx/nginx.conf`), the k8s ingress
 carries the same rule as a server snippet and has no route for it, the engine Service is a ClusterIP,
 and a NetworkPolicy admits only API pods to the engine. The engine reaches `oniva-api:8000` /

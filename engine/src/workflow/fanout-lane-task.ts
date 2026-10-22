@@ -276,6 +276,7 @@ export function createWorkflowFanoutLaneTask(): TaskDefinition<
 
   return defineTask<WorkflowFanoutLaneInput, FanoutLaneCheckpoint | null>({
     kind: WORKFLOW_FANOUT_LANE_KIND,
+    lane: "background",
     initialPhase: PHASE_SPAWN,
     phases: { [PHASE_SPAWN]: spawn, [PHASE_COLLECT]: collect },
     view: (task) => ({

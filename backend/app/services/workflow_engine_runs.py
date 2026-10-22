@@ -130,7 +130,9 @@ def _failure_code(exc: EngineError) -> str:
 
 def _agent_tag(execution_id: Any) -> dict:
     # The worker's run-finished push fires only for conversations tagged notify=backend (U5).
-    return {"metadata": {"notify": "backend", "runKind": "workflow", "executionId": str(execution_id)}}
+    # lane=background: a workflow run (and its model nodes) never queues ahead of an interactive chat turn.
+    return {"metadata": {"notify": "backend", "runKind": "workflow", "executionId": str(execution_id)},
+            "lane": "background"}
 
 
 async def _compile(db, tenant_id: Any, spec: dict, workflow_id: Any) -> dict:

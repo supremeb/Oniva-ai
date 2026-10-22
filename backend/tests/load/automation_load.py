@@ -24,6 +24,7 @@ Run for real: ``cd backend && ONIVA_E2E=1 PATH=/opt/homebrew/bin:$PATH uv run py
 --profile full`` (a throwaway Postgres, the backend and one engine worker are booted, as in the e2e suite).
 """
 import argparse
+import dataclasses
 import datetime
 import json
 import platform
@@ -32,6 +33,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 
@@ -119,6 +121,7 @@ class Sampler:
 
     def __init__(self, w, worker):
         self.w, self.pid = w, worker.p.pid
+        self.extra_pids = [s.p.pid for s in getattr(worker, "shard_procs", [])]  # the background shard
         self.cpu: list[float] = []
         self.rss_mb: list[float] = []
         self.outbox: list[int] = []
@@ -127,17 +130,21 @@ class Sampler:
         self._procs: dict = {}
 
     def worker_usage(self) -> tuple[float, float]:
+        """CPU % and RSS MB summed over every engine worker (one, or the interactive and background shards)."""
+        pids = [self.pid, *self.extra_pids]
         try:
             import psutil
-            root = self._procs.setdefault(self.pid, psutil.Process(self.pid))
-            procs = [root]
-            for child in root.children(recursive=True):
-                procs.append(self._procs.setdefault(child.pid, child))  # cached: cpu_percent needs the prior call
+            procs = []
+            for pid in pids:
+                root = self._procs.setdefault(pid, psutil.Process(pid))
+                procs.append(root)
+                for child in root.children(recursive=True):
+                    procs.append(self._procs.setdefault(child.pid, child))  # cached: cpu_percent needs the prior call
             return (sum(p.cpu_percent(interval=None) for p in procs),
                     sum(p.memory_info().rss for p in procs) / 1e6)
         except ImportError:
             out = subprocess.run(["ps", "-axo", "pgid=,pcpu=,rss="], capture_output=True, text=True).stdout
-            rows = [line.split() for line in out.splitlines() if line.split()[:1] == [str(self.pid)]]
+            rows = [line.split() for line in out.splitlines() if line.split()[:1] and line.split()[0] in map(str, pids)]
             return sum(float(r[1]) for r in rows), sum(float(r[2]) for r in rows) / 1024.0
         except Exception:  # noqa: BLE001 - the worker may have just exited
             return 0.0, 0.0
@@ -181,15 +188,21 @@ def commit_cadence_ms(w) -> dict:
         con = psycopg2.connect(w.pg_url)
         try:
             with con.cursor() as cur:
-                cur.execute("SELECT EXTRACT(EPOCH FROM committed_at) FROM engine_commits ORDER BY seq")
-                ts = [float(r[0]) for r in cur.fetchall()]
+                cur.execute("SELECT session_id, EXTRACT(EPOCH FROM committed_at) FROM engine_commits "
+                            "ORDER BY session_id, seq")
+                rows = [(r[0], float(r[1])) for r in cur.fetchall()]
         finally:
             con.close()
     except Exception:  # noqa: BLE001
         return {"observable": False}
-    gaps = [(b - a) * 1000.0 for a, b in zip(ts, ts[1:])]
+    # Each session has its own commit line (seq): the gap is measured within a session, never across shards.
+    per_session: dict = {}
+    for sid, t in rows:
+        per_session.setdefault(sid, []).append(t)
+    gaps = [(b - a) * 1000.0 for ts_ in per_session.values() for a, b in zip(ts_, ts_[1:])]
+    ts = sorted(t for _, t in rows)
     span = (ts[-1] - ts[0]) if len(ts) > 1 else 0.0
-    return {"observable": True, "kind": "inter-commit gap (cadence proxy, not per-commit latency)",
+    return {"observable": True, "sessions": {sid: len(v) for sid, v in sorted(per_session.items())}, "kind": "inter-commit gap (cadence proxy, not per-commit latency)",
             "commits": len(ts), "commits_per_s": round(len(ts) / span, 2) if span > 0 else None,
             "p50_ms": round(percentile(gaps, 50), 2), "p95_ms": round(percentile(gaps, 95), 2),
             "p99_ms": round(percentile(gaps, 99), 2)}
@@ -210,8 +223,21 @@ def _non_terminal(w, execution_ids: list[str], job_ids: list[str]) -> tuple[int,
     return (sum(1 for s in statuses if s not in TERMINAL), sum(1 for s in statuses if s in TERMINAL and s != "completed"))
 
 
+def failure_reasons(w, execution_ids: list[str], job_ids: list[str]) -> list[str]:
+    """Why runs ended other than completed: ``kind id status: error`` (first 10), so a red gate says what broke."""
+    out: list[str] = []
+    for kind, table, ids in (("workflow", "workflow_executions", execution_ids), ("fleet", "background_jobs", job_ids)):
+        rows = {r[0]: r[1:] for r in sql(w, f"SELECT id, status, error FROM {table}")}
+        for i in ids:
+            status, error = rows.get(i.replace("-", ""), (None, None))
+            if status != "completed":
+                out.append(f"{kind} {i} {status}: {str(error)[:160]}")
+    return out[:10]
+
+
 def run_profile(w, profile: Profile, worker) -> dict:
     fakes.open_all_gates(w)
+    fakes.unbound_fleet_budget(w)
     workflow_id = fakes.load_workflow(w)
     sampler = Sampler(w, worker)
     sampler.start()
@@ -285,7 +311,7 @@ def run_profile(w, profile: Profile, worker) -> dict:
         "workload": {"workflow_runs": len(execution_ids), "nodes_per_run": fakes.WORKFLOW_NODES,
                      "fleet_runs": len(job_ids), "start_errors": start_errors,
                      "chat_baseline_samples": len(baseline), "chat_loaded_samples": len(loaded),
-                     "chat_errors": len(chat.errors), "chat_error_samples": chat.errors[:5], "http_calls_started": started, "http_calls_done": done,
+                     "engine_shards": getattr(w, "shards", 1), "chat_errors": len(chat.errors), "chat_error_samples": chat.errors[:5], "http_calls_started": started, "http_calls_done": done,
                      "wall_s": round(time.monotonic() - t_begin, 1), "loaded_window_s": round(loaded_window_s, 1)},
         "chat_first_token": {"baseline": stats(baseline), "loaded": stats(loaded),
                              "p95_regression": None if gate.chat_p95_regression is None
@@ -296,7 +322,8 @@ def run_profile(w, profile: Profile, worker) -> dict:
                    "rss_mb_max": round(max(sampler.rss_mb, default=0.0), 1)},
         "outbox_depth": {"max": max(sampler.outbox, default=None), "end": pg_scalar(w, "SELECT count(*) FROM engine_usage_outbox")},
         "reconciler_lag": {"observable": False, "drain_lag_s_proxy": round(drain_lag_s, 1)},
-        "after_drain": {"non_terminal_runs": non_terminal, "failed_runs": failed, "start_errors": len(start_errors)},
+        "after_drain": {"non_terminal_runs": non_terminal, "failed_runs": failed, "start_errors": len(start_errors),
+                        "failure_reasons": failure_reasons(w, execution_ids, job_ids) if failed or non_terminal else []},
         "ledger": {"rows": ledger_rows, "model_requests": expected},
         "gate": {"passed": gate.passed, "reasons": gate.reasons, "max_regression": 0.20},
     }
@@ -322,7 +349,8 @@ def format_report(result: dict) -> str:
         "",
         f"- hardware: {json.dumps(result['hardware'])}",
         f"- workload: {result['workload']['workflow_runs']} workflow runs x {result['workload']['nodes_per_run']} nodes, "
-        f"{result['workload']['fleet_runs']} Fleet runs, {result['workload']['wall_s']} s wall",
+        f"{result['workload']['fleet_runs']} Fleet runs, {result['workload']['wall_s']} s wall, "
+        f"{result['workload'].get('engine_shards', 1)} engine shard(s)",
         f"- chat first token, baseline: p50 {c['baseline']['p50_ms']} ms, p95 {c['baseline']['p95_ms']} ms (n={c['baseline']['n']})",
         f"- chat first token, loaded: p50 {c['loaded']['p50_ms']} ms, p95 {c['loaded']['p95_ms']} ms (n={c['loaded']['n']}), "
         f"p95 regression {'n/a' if reg is None else f'{reg:+.1%}'} (limit +20%)",
@@ -334,6 +362,7 @@ def format_report(result: dict) -> str:
         f"- reconciler lag: not directly observable; drain lag proxy {result['reconciler_lag']['drain_lag_s_proxy']} s",
         f"- non-terminal runs after drain: {result['after_drain']['non_terminal_runs']} "
         f"(failed: {result['after_drain']['failed_runs']}, start errors: {result['after_drain']['start_errors']})",
+        *[f"  - {r}" for r in result["after_drain"].get("failure_reasons", [])],
         f"- ledger rows {result['ledger']['rows']} vs model requests {result['ledger']['model_requests']}",
         f"- gate: {verdict}" + ("" if result["gate"]["passed"] else " - " + "; ".join(result["gate"]["reasons"])),
     ]
@@ -353,12 +382,43 @@ def run_on_stack(profile_name: str) -> dict:
         return run_profile(w, PROFILES[profile_name], w.start_worker(1))
 
 
-def main() -> int:
+def profile_with_overrides(base: Profile, **overrides) -> Profile:
+    """``base`` with the non-None overrides applied (the CI workflow's knobs); the pass criteria are not an override."""
+    changes = {k: v for k, v in overrides.items() if v is not None}
+    name = f"{base.name}+custom" if changes else base.name
+    return dataclasses.replace(base, name=name, **changes)
+
+
+def write_outputs(result: dict, json_path: str | None = None, markdown_path: str | None = None) -> None:
+    """Machine-readable result and the markdown summary (for ``$GITHUB_STEP_SUMMARY``), written only when asked."""
+    if json_path:
+        Path(json_path).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    if markdown_path:
+        Path(markdown_path).write_text(format_report(result) + "\n")
+
+
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--profile", choices=sorted(PROFILES), default="smoke")
-    args = ap.parse_args()
-    result = run_on_stack(args.profile)
+    ap.add_argument("--workflow-runs", type=int, help="override the profile's workflow run count")
+    ap.add_argument("--fleet-runs", type=int, help="override the profile's Fleet run count")
+    ap.add_argument("--baseline-samples", type=int, dest="baseline_chat_samples", help="chat samples with no load")
+    ap.add_argument("--min-loaded-samples", type=int, dest="min_loaded_chat_samples",
+                    help="loaded chat samples the gate requires")
+    ap.add_argument("--chat-interval", type=float, dest="chat_interval_s", help="seconds between chat turns")
+    ap.add_argument("--start-threads", type=int, help="concurrent run starters")
+    ap.add_argument("--drain-timeout", type=float, dest="drain_timeout_s", help="seconds allowed to drain")
+    ap.add_argument("--json-out", help="write the result as JSON to this path")
+    ap.add_argument("--markdown-out", help="write the markdown summary to this path")
+    args = ap.parse_args(argv)
+    profile = profile_with_overrides(
+        PROFILES[args.profile], workflow_runs=args.workflow_runs, fleet_runs=args.fleet_runs,
+        baseline_chat_samples=args.baseline_chat_samples, min_loaded_chat_samples=args.min_loaded_chat_samples,
+        chat_interval_s=args.chat_interval_s, start_threads=args.start_threads, drain_timeout_s=args.drain_timeout_s)
+    with stack() as w:
+        result = run_profile(w, profile, w.start_worker(1))
     print_report(result)
+    write_outputs(result, args.json_out, args.markdown_out)
     return 0 if result["gate"]["passed"] else 1
 
 

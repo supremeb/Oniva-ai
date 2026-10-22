@@ -52,6 +52,7 @@ async function main(): Promise<number> {
   const worker = await startWorker({
     pool,
     sessionId: config.sessionId,
+    role: config.sessionRole,
     serviceToken: config.serviceToken,
     port: config.port,
     host: config.host,
@@ -86,7 +87,11 @@ async function main(): Promise<number> {
     subagentTools: config.subagentTools,
     steerWorker: config.steerWorker,
     completeTask: config.completeTask,
-    settings: { progressIntervalMs: config.progressIntervalMs },
+    settings: {
+      progressIntervalMs: config.progressIntervalMs,
+      concurrency: config.taskConcurrency,
+      interactiveReserve: config.interactiveReserve,
+    },
     redact: maskSecrets,
     closeTimeoutMs: config.shutdownTimeoutMs,
     log,

@@ -199,6 +199,69 @@ export function defineTraceSuite(backend: AgentBackend): void {
       await w.crash();
     });
 
+    it("never shows a settled submission without its final entries, whenever a commit lands mid-read", async () => {
+      // Fire the run's final commit after the k-th storage read of the trace.
+      for (let k = 1; k <= 12; k++) {
+        const fx = await backend.fixture();
+        let release: () => void = () => {};
+        const gate = new Promise<void>((r) => {
+          release = r;
+        });
+        const hold = defineTool({
+          name: "hold",
+          description: "Waits for the test",
+          parameters: z.object({}),
+          replay: "safe",
+          execute: async () => {
+            await gate;
+            return { content: "released" };
+          },
+        });
+        fx.provider.enqueue(fakeToolCall("hold", {}, { id: "h1" }), fakeText("final answer"));
+        const w = await fx.open({ tools: [hold] });
+        const conv = await w.harness.createConversation({
+          tenantId: "t1",
+          projectId: "p1",
+          agent: { systemPrompt: "s", tools: ["hold"] },
+        });
+        const sub = await conv.submit({ text: "go" });
+        await new Promise((r) => setTimeout(r, 50));
+
+        let reads = 0;
+        const real = w.harness.session;
+        const reader = new Proxy(real.reader, {
+          get(target, prop, recv) {
+            const fn = Reflect.get(target, prop, recv);
+            if (typeof fn !== "function") return fn;
+            return async (...args: unknown[]) => {
+              const out = await fn.apply(target, args);
+              if (++reads === k) {
+                release();
+                await sub.wait();
+              }
+              return out;
+            };
+          },
+        });
+        const session = new Proxy(real, {
+          get(target, prop) {
+            if (prop === "reader") return reader;
+            const v = Reflect.get(target, prop, target);
+            return typeof v === "function" ? v.bind(target) : v;
+          },
+        });
+        const trace = await buildTrace(session, conv.id);
+        release();
+        await sub.wait();
+        const settled = trace.submissions.some((s) => s.status === "done");
+        const answered = trace.entries.some(
+          (e) => e.kind === "assistant" && JSON.stringify(e.payload).includes("final answer"),
+        );
+        if (settled) expect(answered, `commit after read ${k}`).toBe(true);
+        await w.crash();
+      }
+    });
+
     it("rejects an unknown conversation and a malformed cursor", async () => {
       const fx = await backend.fixture();
       const w = await fx.open({});

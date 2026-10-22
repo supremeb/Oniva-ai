@@ -159,7 +159,8 @@
       "compaction": null,
       "maxRounds": null,
       "deadlineMs": null,
-      "cacheTtl": null
+      "cacheTtl": null,
+      "lane": "interactive"
     },
     "context": {
       "clearedThroughEntryId": null,
@@ -399,7 +400,8 @@
       "compaction": null,
       "maxRounds": null,
       "deadlineMs": null,
-      "cacheTtl": null
+      "cacheTtl": null,
+      "lane": "interactive"
     },
     "context": {
       "clearedThroughEntryId": null,
@@ -622,7 +624,8 @@
       "compaction": null,
       "maxRounds": null,
       "deadlineMs": null,
-      "cacheTtl": null
+      "cacheTtl": null,
+      "lane": "interactive"
     },
     "context": {
       "clearedThroughEntryId": null,

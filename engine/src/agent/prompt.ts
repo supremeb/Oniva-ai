@@ -90,6 +90,11 @@ const agentConfigSchema = z.object({
    * the provider default (5 minutes).
    */
   cacheTtl: z.enum(["5m", "1h"]).nullable().default(null),
+  /**
+   * Scheduling lane of this conversation's runs: `background` for automation (Fleet, workflow model nodes), which
+   * never queues ahead of an `interactive` chat turn. Inherited by subagent and workflow-node children.
+   */
+  lane: z.enum(["interactive", "background"]).default("interactive"),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
@@ -128,6 +133,7 @@ export const agentConfigDoc = defineDoc<AgentConfig>({
     maxRounds: null,
     deadlineMs: null,
     cacheTtl: null,
+    lane: "interactive",
   },
   schema: agentConfigSchema,
 });
