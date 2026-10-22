@@ -14,6 +14,9 @@
  * again with it continues exactly where the page stopped. The tree and its
  * order are recomputed on every call, so a cursor names a position in the
  * stable order (conversation index, entry cursor), not a snapshot.
+ *
+ * Consistency: submissions are read first and entries after, so a response
+ * never shows a settled submission without the entries that settled it.
  */
 
 import { type CompactionPayload, ENTRY_KINDS } from "../agent/context-builder.js";
@@ -251,6 +254,13 @@ export async function buildTrace(
   const nodes = await conversationNodes(session, rootId);
   if (start.c >= nodes.length) throw new InvalidTraceCursor();
 
+  // Submissions are read before any entry. A run commits its final entry and
+  // its settled status together, and storage offers no multi-read snapshot, so
+  // reading in this order means a submission shown as settled always has its
+  // entries in the response (entries may be newer than the statuses, never older).
+  const submissionsBy = new Map<string, TraceSubmission[]>();
+  for (const node of nodes) submissionsBy.set(node.id, await submissionsOf(session, node.id));
+
   const reader = session.reader;
   const entriesBy = new Map<string, EntryRecord[]>();
   const compactions: TraceCompaction[] = [];
@@ -305,7 +315,7 @@ export async function buildTrace(
       role: node.role,
       parentConversationId: node.parentConversationId,
       entries,
-      submissions: await submissionsOf(session, node.id),
+      submissions: submissionsBy.get(node.id) ?? [],
       usage: await session.document(usageDoc, node.id),
       agent: agentOf(await session.document(agentConfigDoc, node.id)),
     };
@@ -314,7 +324,7 @@ export async function buildTrace(
   return {
     conversationId: rootId,
     entries: entriesBy.get(rootId) ?? [],
-    submissions: await submissionsOf(session, rootId),
+    submissions: submissionsBy.get(rootId) ?? [],
     children,
     usage: rootUsage.total,
     taint: await session.document(taintDoc, rootId),
