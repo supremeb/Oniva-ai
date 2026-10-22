@@ -151,6 +151,8 @@ async def test_dw_driver_waits_for_open_submissions_before_reading_the_trace(mon
     pages = [
         {"entries": [1], "submissions": [{"status": "active"}]},
         {"entries": [1, 2], "submissions": [{"status": "active"}]},
+        # all settled, but the entries were read just before the closing message committed (entries are read first)
+        {"entries": [1, 2], "submissions": [{"status": "done"}]},
         {"entries": [1, 2, 3], "submissions": [{"status": "done"}]},
     ]
     seen = []
@@ -166,7 +168,7 @@ async def test_dw_driver_waits_for_open_submissions_before_reading_the_trace(mon
     monkeypatch.setattr(deep_work.asyncio, "sleep", no_sleep)
     ctx = SimpleNamespace(api=None, remaining=lambda: 100.0)
     assert (await deep_work.fetch_settled_trace(ctx, "c"))["entries"] == [1, 2, 3]
-    assert len(seen) == 3
+    assert len(seen) == 4
     seen.clear()  # a timed-out run is read once, as it is
     assert (await deep_work.fetch_settled_trace(ctx, "c", wait=False))["entries"] == [1]
     assert len(seen) == 1

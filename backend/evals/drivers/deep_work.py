@@ -124,11 +124,19 @@ async def fetch_settled_trace(ctx: DriverContext, conversation_id: str, *, wait:
     repeated runs differ in shape. So wait (bounded) until no submission is pending or active.
     """
     deadline = time.monotonic() + (SETTLE_S if wait else 0.0)
+    # The trace route reads entries first and submissions after, in separate reads (engine/src/watch/trace.ts
+    # buildTrace). A fetch that shows every submission settled may still hold entries read just before the final
+    # assistant message committed. So only a fetch that follows a fetch which already showed everything settled is
+    # complete: its entries were read after the submissions had closed.
+    seen_settled = False
     while True:
         raw = await fetch_trace(ctx.api, conversation_id, raw=True)
         open_ = [x for x in raw.get("submissions") or [] if x.get("status") in OPEN_SUBMISSION]
-        if not open_ or time.monotonic() >= deadline or ctx.remaining() <= 0:
+        if seen_settled or time.monotonic() >= deadline or ctx.remaining() <= 0:
             return raw
+        if not open_:
+            seen_settled = True
+            continue
         await asyncio.sleep(POLL_S)
 
 
