@@ -228,14 +228,14 @@ def engine_fleet_enabled(tenant: Tenant, settings=None) -> bool:
     """Engine Fleet runs: Deep Work semantics plus the engine capability gate (KTD16)."""
     s = settings if settings is not None else get_settings()
     return (_engine_tenant_flag(tenant, ENGINE_FLEET_FLAG, s.ENABLE_ENGINE_FLEET, s)
-            and engine_has_capability(s, FLEET_TASK_KINDS))
+            and engine_has_capability(s, FLEET_TASK_KINDS, background=True))
 
 
 def engine_workflows_enabled(tenant: Tenant, settings=None) -> bool:
     """Engine workflow runs: Deep Work semantics plus the engine capability gate (KTD16)."""
     s = settings if settings is not None else get_settings()
     return (_engine_tenant_flag(tenant, ENGINE_WORKFLOWS_FLAG, s.ENABLE_ENGINE_WORKFLOWS, s)
-            and engine_has_capability(s, WORKFLOW_TASK_KINDS))
+            and engine_has_capability(s, WORKFLOW_TASK_KINDS, background=True))
 
 
 def get_tenant_features(tenant: Tenant) -> dict[str, bool]:

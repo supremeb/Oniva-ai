@@ -41,6 +41,7 @@ import {
 } from "../watch/stream.js";
 import { UnknownConversation } from "../watch/view.js";
 import { bearerMatches, bindingMatches, headerValue, ONIVA_HEADERS } from "./auth.js";
+import type { SessionRole } from "./role.js";
 import { HttpError, matchRoute, type RouteContext } from "./routes.js";
 
 export interface EngineServerOptions {
@@ -51,6 +52,8 @@ export interface EngineServerOptions {
   ownerId: string;
   /** The bearer token the backend presents. */
   serviceToken: string;
+  /** The role of the session this worker serves. Default `all`. */
+  role?: SessionRole;
   /** Overrides of the harness limits; the server uses `maxRequestBodyBytes`. */
   limits?: Partial<EngineLimits>;
   /** Whether this worker owns the session now. Default: the session is open. */
@@ -285,6 +288,7 @@ export function createEngineServer(options: EngineServerOptions): EngineServer {
       url,
       params,
       ownerId,
+      role: options.role ?? "all",
       async readJson() {
         const raw = await readBody(req, limits.maxRequestBodyBytes);
         if (raw.length === 0) return {};

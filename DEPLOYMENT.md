@@ -354,7 +354,7 @@ CI). It boots the same stack as the e2e `engine-smoke` job (Postgres 16 with pgv
 backend run production-like by default: schema from `alembic upgrade head`, the app connecting as the non-bypass
 `oniva_app` role (system sessions as `oniva_system`, RLS on), and `backend_workers` uvicorn worker processes on one port
 (production: gunicorn `-w 4`, `Dockerfile.prod`). `backend_db` = `sqlite` restores the old single-process SQLite backend.
-Inputs: `profile` (`full` = 200 workflow runs of 10 nodes + 20 Fleet runs, 60 baseline chat samples, at least 60 loaded
+Inputs: `engine_shards` (`1` = one engine worker, the default; `2` = sharded, see "Engine sharding" below), `profile` (`full` = 200 workflow runs of 10 nodes + 20 Fleet runs, 60 baseline chat samples, at least 60 loaded
 chat samples; `smoke` = 5 + 1), `runner` (a GitHub-hosted label, default `ubuntu-latest`; use a larger-runner label
 for a realistic number), and optional overrides `workflow_runs`, `fleet_runs`, `baseline_samples`,
 `min_loaded_samples`, `chat_interval_s`, `start_threads`, `drain_timeout_s` (blank keeps the profile default).
@@ -395,6 +395,20 @@ A failed run's reason is listed under the summary.
 Multi-worker notes (Postgres backend): the run reconciler is leader-only through `pg_try_advisory_lock`, tool and
 workflow-node idempotency, approvals and trace recording rely on row locks, and the per-process caches (`_manifest_cache`,
 `_decisions`, `_applied`, `_approval_gates`) are only caches. Nothing else in the e2e path is process-local.
+
+**Engine sharding** (the follow-up this gate asked for). Measured on the failing gate (12-CPU Mac, Postgres, 2 backend
+workers, single engine session): the session's serialized commit line was 90-100% occupied under load (about 130
+commits/s, 5 ms each), so a chat turn's roughly six sequential commits each waited a median 30-50 ms (p95 80-160 ms) for
+its turn behind automation commits. Event-loop lag (p99 about 8 ms, utilization 50%) and the Postgres pool (no wait) were
+not the cause. One worker serves one session, so the fix is a second session: set `ENGINE_SESSION_ROLE=interactive` on
+the worker for the chat session and `ENGINE_SESSION_ROLE=background` on a second worker with its own
+`ENGINE_SESSION_ID`, then give the backend `ENGINE_BACKGROUND_URL` and `ENGINE_BACKGROUND_SESSION_ID` (both or neither;
+the id must differ from `ENGINE_SESSION_ID`). Workflow, Fleet and batch runs are then created on the background worker
+(`EngineDirectory.session_for`), everything else stays on the first. Nothing changes unless configured. A conversation is
+bound to one session when it is created (`engine_conversations.session_id`) and every later call uses that binding, so
+turning sharding on or off never moves an existing conversation; roles refuse a lane they do not serve (`409
+wrong_session_role`) and ids are unique across sessions in storage, so no conversation is owned by two workers. Each
+session keeps its own lease, fence token and crash recovery. Locally: `ONIVA_E2E_ENGINE_SHARDS=2`.
 
 **Recorded result**: none yet.
 

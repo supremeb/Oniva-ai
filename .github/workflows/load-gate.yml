@@ -26,6 +26,11 @@ on:
         description: "Backend worker processes (postgres only); size for the runner, e.g. 2 on 4 CPUs"
         type: string
         default: "2"
+      engine_shards:
+        description: "Engine workers: 1 = one worker serves chat and automation (default); 2 = sharded, an interactive worker (chat, Deep Work) and a background worker (workflow, Fleet, batch runs), each with its own session, lease and commit line"
+        type: choice
+        options: ["1", "2"]
+        default: "1"
       workflow_runs:
         description: "Override the profile's workflow run count (blank = profile default)"
         type: string
@@ -102,6 +107,7 @@ jobs:
           IN_PROFILE: ${{ inputs.profile }}
           IN_BACKEND_DB: ${{ inputs.backend_db }}
           IN_BACKEND_WORKERS: ${{ inputs.backend_workers }}
+          IN_ENGINE_SHARDS: ${{ inputs.engine_shards }}
           IN_WORKFLOW_RUNS: ${{ inputs.workflow_runs }}
           IN_FLEET_RUNS: ${{ inputs.fleet_runs }}
           IN_BASELINE: ${{ inputs.baseline_samples }}
@@ -113,6 +119,7 @@ jobs:
           set -o pipefail
           export ONIVA_E2E_BACKEND_DB="${IN_BACKEND_DB:-postgres}"
           export ONIVA_E2E_BACKEND_WORKERS="${IN_BACKEND_WORKERS:-2}"
+          export ONIVA_E2E_ENGINE_SHARDS="${IN_ENGINE_SHARDS:-1}"
           # The workers option only applies to the Postgres backend.
           [ "$ONIVA_E2E_BACKEND_DB" = postgres ] || unset ONIVA_E2E_BACKEND_WORKERS
           mkdir -p "$RUNNER_TEMP/load-gate"

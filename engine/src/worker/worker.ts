@@ -42,6 +42,7 @@ import { errorText, NotOwner } from "../core/errors.js";
 import type { ModelRegistry } from "../models/stream.js";
 import { bearerMatches, headerValue } from "../server/auth.js";
 import { createEngineServer, type EngineServer } from "../server/http.js";
+import type { SessionRole } from "../server/role.js";
 import { matchRoute } from "../server/routes.js";
 import type { Redact } from "../session/transaction.js";
 import { defaultOwnerId, LeaseKeeper, PostgresLeases } from "../storage/postgres/lease.js";
@@ -99,6 +100,8 @@ export interface WorkerOptions {
   /** Pool on the engine schema; the caller owns (and ends) it. */
   pool: Pool;
   sessionId: string;
+  /** What this session is for (sharding). Default `all`; `interactive` registers no workflow task kinds. */
+  role?: SessionRole;
   serviceToken: string;
   port?: number;
   host?: string;
@@ -273,6 +276,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
   const clock = options.clock ?? realClock;
   const ownerId = options.ownerId ?? defaultOwnerId();
   const { sessionId, serviceToken, pool } = options;
+  const role: SessionRole = options.role ?? "all";
   const retryMs = options.leaseRetryMs ?? Math.max(1, Math.floor(options.leaseTtlMs / 3));
   const closeTimeoutMs = options.closeTimeoutMs ?? DEFAULT_CLOSE_TIMEOUT_MS;
   if (options.migrate !== false) await migrate(pool);
@@ -335,7 +339,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
     const url = new URL(req.url ?? "/", "http://worker.invalid");
     const match = matchRoute(req.method ?? "GET", url.pathname);
     if (match && "route" in match && !match.route.auth) {
-      sendJson(res, 200, { status: state, sessionId, ownerId, owner: false });
+      sendJson(res, 200, { status: state, sessionId, ownerId, owner: false, role });
       return;
     }
     if (!bearerMatches(headerValue(req, "authorization") ?? undefined, serviceToken)) {
@@ -371,7 +375,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
   });
   const host = address.family === "IPv6" ? `[${address.address}]` : address.address;
   const url = `http://${host}:${address.port}`;
-  log("listening", { url, port: address.port, ownerId, sessionId });
+  log("listening", { url, port: address.port, ownerId, sessionId, role });
 
   /** Run one shutdown step within `ms`, logging a failure or timeout. */
   async function step(what: string, work: Promise<unknown> | undefined, ms: number): Promise<void> {
@@ -469,7 +473,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       ].map((name) => createSubagentTool({ name })),
     ];
     const tasks: TaskDefinition[] = [...(options.hostTasks ?? [])];
-    if (options.workflow) {
+    if (options.workflow && role !== "interactive") {
       tasks.push(
         ...createWorkflowTasks(
           createNodeGateway({
@@ -529,6 +533,7 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
       sessionId,
       ownerId,
       serviceToken,
+      role,
       isOwner: () => k.state === "held",
       currentOwner,
       onError: (err) => log("http_error", { error: logErrorText(err) }),

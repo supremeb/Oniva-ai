@@ -347,3 +347,24 @@ describe("workflow backend (U35)", () => {
     );
   });
 });
+
+describe("ENGINE_SESSION_ROLE", () => {
+  it("defaults to all, so an unconfigured worker is unrestricted", () => {
+    expect(workerConfigFromEnv(BASE).sessionRole).toBe("all");
+  });
+
+  it("accepts interactive and background", () => {
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_SESSION_ROLE: "interactive" }).sessionRole).toBe(
+      "interactive",
+    );
+    expect(workerConfigFromEnv({ ...BASE, ENGINE_SESSION_ROLE: "background" }).sessionRole).toBe(
+      "background",
+    );
+  });
+
+  it("rejects anything else", () => {
+    expect(() => workerConfigFromEnv({ ...BASE, ENGINE_SESSION_ROLE: "batch" })).toThrow(
+      WorkerConfigError,
+    );
+  });
+});
