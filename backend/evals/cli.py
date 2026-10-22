@@ -7,6 +7,7 @@
     compare  diff a stored result against a baseline (KTD5); exits 1 on a regression; `--promote` saves a baseline
     promote-baseline  write baselines/<suite>-<mode>.json from a results run (refuses failed trials / existing files)
     gate-b   read a `run --suite long_session` report (one task per context-tier arm) against the Gate B criteria
+    gate-d   read a `run --suite memory` report (red team, preference probes, repeat tasks and their control) against Gate D
 
 `run --suite long_session` runs every long-session task in each arm (`off`, `offload+clear`, `full`); `--tiers T` runs
 any selection with one tier instead (for example the regression suite with the tiers on).
@@ -29,7 +30,7 @@ from pathlib import Path
 
 from datetime import UTC, datetime
 
-from . import arms, gate_b
+from . import arms, gate_b, gate_d
 from . import calibrate as cal
 from . import report as rpt
 from . import web_record
@@ -64,12 +65,17 @@ def _select(args: argparse.Namespace) -> list[Task]:
     return tasks
 
 
-def estimate_cost(tasks: Sequence[Task], k: int, previous: dict | None, tiers: str | None = None) -> tuple[float, int]:
+def estimate_cost(
+    tasks: Sequence[Task], k: int, previous: dict | None, tiers: str | None = None, memory: str | None = None
+) -> tuple[float, int]:
     """(USD, tasks with no figure): per-trial cost from a previous report, else the task's own budget cap.
 
-    Long sessions count once per arm (`--tiers` pins one), as the runner will run them.
+    Long sessions count once per tier arm (`--tiers` pins one) and repeat tasks once per memory arm (`--memory` pins
+    one), as the runner will run them.
     """
     total, unknown = 0.0, 0
+    if memory:  # pinned before expanding, as the runner does: a pinned repeat task runs once
+        tasks = [arms.with_memory(t, memory) for t in tasks]
     expanded = [arms.with_tiers(t, tiers, suffix=False) for t in tasks] if tiers else arms.expand_arms(tasks)
     for t in expanded:
         prev = (previous or {}).get("tasks", {}).get(t.id)
@@ -131,8 +137,9 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     results_dir = Path(args.results_dir)
     if args.dry_run:  # no gates, no stack, no engine call: estimate only
         previous = baseline or _latest_result(results_dir)
-        est, unknown = estimate_cost(tasks, args.k, previous, args.tiers)
-        planned = [arms.with_tiers(t, args.tiers) for t in tasks] if args.tiers else arms.expand_arms(tasks)
+        est, unknown = estimate_cost(tasks, args.k, previous, args.tiers, args.memory)
+        pinned = [arms.with_memory(t, args.memory) for t in tasks] if args.memory else tasks
+        planned = [arms.with_tiers(t, args.tiers) for t in pinned] if args.tiers else arms.expand_arms(pinned)
         print(f"dry run: {len(planned)} task(s) x k={args.k} in {mode} mode: " + ", ".join(t.id for t in planned))
         print(f"estimated cost: ${est:.4f}" + (f" ({unknown} task(s) with no figure)" if unknown else ""))
         return 0
@@ -148,6 +155,7 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
                 timeout_s=args.timeout,
                 judges=False if args.no_judges else None,
                 **({"tiers": args.tiers} if args.tiers else {}),
+                **({"memory": args.memory} if args.memory else {}),
                 **({"arm": arm} if arm != "baseline" else {}),  # baseline is the stack's own default
             )
         )
@@ -176,6 +184,9 @@ def cmd_run(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     verdicts = gate_b.evaluate(report)
     if verdicts:  # a long-session run measured the tier arms: show the Gate B reading (`gate-b` is the exit-coded form)
         print(gate_b.render_markdown(report, verdicts))
+    if gate_d.has_memory_tasks(report):  # a memory run: show the Gate D reading (`gate-d` is the exit-coded form)
+        criteria = gate_d.evaluate(report)
+        print(gate_d.render(report, criteria) + "\n\n" + gate_d.result_line(report, criteria))
 
     if args.push_braintrust:
         from .braintrust_push import push_report
@@ -233,6 +244,16 @@ def cmd_gate_b(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     if any(v.decision == gate_b.PASS for v in verdicts):
         return 0
     return 3 if all(v.decision == "incomplete" for v in verdicts) else 1
+
+
+def cmd_gate_d(args: argparse.Namespace, env: Mapping[str, str]) -> int:
+    """Gate D over a memory report: `evals.gate_d` with the same arguments (exit 0 no failure, 1 a criterion failed)."""
+    argv = [args.report]
+    if args.regression_baseline:
+        argv += ["--regression-baseline", args.regression_baseline, "--regression-memory", args.regression_memory or ""]
+    if args.require_all:
+        argv.append("--require-all")
+    return gate_d.main(argv)
 
 
 def cmd_report(args: argparse.Namespace, env: Mapping[str, str]) -> int:
@@ -371,6 +392,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="run every selected task with this ENGINE_CONTEXT_TIERS value (default: long_session tasks run once per arm)",
     )
+    run.add_argument(
+        "--memory",
+        choices=arms.MEMORY_ARMS,
+        default=None,
+        help="run every selected task with this project-memory arm (default: repeat tasks run once per arm, others as declared)",
+    )
     run.set_defaults(func=cmd_run)
 
     gb = sub.add_parser("gate-b", help="read a long_session report against the Gate B criteria (exit 0 pass, 1 fail, 3 incomplete)")
@@ -384,6 +411,13 @@ def build_parser() -> argparse.ArgumentParser:
     gb.add_argument("--promote", action="store_true", help="on a live pass, record baselines/phaseB-<date>.json")
     gb.add_argument("--baselines-dir", default=str(DEFAULT_BASELINES_DIR))
     gb.set_defaults(func=cmd_gate_b)
+
+    gd = sub.add_parser("gate-d", help="read a `run --suite memory` report against the Gate D criteria (exit 1 on a failure)")
+    gd.add_argument("report", help="a report written by `run --suite memory`")
+    gd.add_argument("--regression-baseline", help="regression-suite report, memory off")
+    gd.add_argument("--regression-memory", help="regression-suite report from `run --suite regression --memory manual`")
+    gd.add_argument("--require-all", action="store_true", help="also exit 1 when a criterion could not be measured")
+    gd.set_defaults(func=cmd_gate_d)
 
     rep = sub.add_parser("report", help="render a stored result as markdown")
     rep.add_argument("path")

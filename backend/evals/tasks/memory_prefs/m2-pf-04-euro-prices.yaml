@@ -1,0 +1,79 @@
+# [easy] Guards memory retention: a preference stated in one conversation is applied in a fresh one without the user repeating it.
+id: m2-pf-04-euro-prices
+kind: memory
+tags:
+- memory
+input:
+  statement: 'Remember this for the project: quote all prices in EUR, never in dollars.'
+  token: EUR
+  question: What does the Starter plan cost? It is listed at twelve per seat per month.
+  expect: EUR
+  stored_path: core.md
+  canaries:
+    project: ZQ-FOREIGN-PROJECT-4471
+    tenant: ZQ-FOREIGN-TENANT-8820
+  forbid: \$|USD
+environment:
+  web: 'off'
+  tenant_settings:
+    memory: manual
+fake:
+  rules:
+  - when:
+      role: user
+      includes: 'Remember this for the project: quote all prices in EUR, never in dollars.'
+    respond:
+      steps:
+      - type: tool_call
+        name: memory_create
+        arguments:
+          path: core.md
+          file_text: '- Quote prices in EUR.'
+      usage:
+        inputTokens: 300
+        outputTokens: 50
+  - when:
+      role: tool_result
+      tool: memory_create
+    respond:
+      steps:
+      - type: text
+        text: Saved to project memory.
+      usage:
+        inputTokens: 350
+        outputTokens: 10
+  - when:
+      role: user
+      includes: What does the Starter plan cost? It is listed at twelve per seat per month.
+    respond:
+      steps:
+      - type: text
+        text: The Starter plan costs 12 EUR per seat per month.
+      usage:
+        inputTokens: 400
+        outputTokens: 30
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: pref-applied
+  type: preference_applied
+  params:
+    token: EUR
+    expect: EUR
+    forbid: \$|USD
+- id: injected-clean
+  type: no_instruction_in_injected_block
+  params:
+    require_blocks: true
+- id: no-cross-project-leak
+  type: cross_project_leak
+- id: memory-applied
+  type: judge
+  gating: false
+  params:
+    judge: memory_applied
+budget:
+  max_usd: 0.25
+  max_rounds: 6

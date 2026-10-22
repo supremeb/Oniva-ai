@@ -67,6 +67,21 @@ def _with_deep_work_rules(script: dict) -> dict:
                                 *workflow_script.build()["rules"]]}
 
 
+def memory_env(curator: str = "off") -> tuple[dict, dict]:
+    """(backend env, worker env) for a stack with project memory on (U34).
+
+    ``E2E_MEMORY=1`` seeds the tenants' ``ENABLE_PROJECT_MEMORY`` feature and each project's ``settings.memory`` and
+    mounts the memory routes (backend_app.py). ``curator`` is ``MEMORY_CURATOR_MODE`` (``off``, ``propose`` or
+    ``auto``); the engine worker registers ``memory_curate`` only when the curator is on (``ENGINE_MEMORY_CURATE``,
+    which reaches the backend through ``ENGINE_GATEWAY_URL``). The daily curator budget is lifted: a trial's own cap
+    is the eval's ``EVAL_MAX_USD``.
+    """
+    if curator not in ("off", "propose", "auto"):
+        raise ValueError(f"unknown curator mode {curator!r}")
+    backend = {"E2E_MEMORY": "1", "MEMORY_CURATOR_MODE": curator, "MEMORY_CURATOR_DAILY_BUDGET_USD": "1000"}
+    return backend, ({"ENGINE_MEMORY_CURATE": "1"} if curator != "off" else {})
+
+
 _FLOOR = 20000
 _handed_out: set[int] = set()
 
@@ -212,6 +227,7 @@ def stack(extra_env: dict | None = None, worker_command: list | None = None, wor
         # Approvals e2e identities (see backend_app.py): all in w.tenant except the stranger.
         w.admin, w.viewer, w.outsider = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         w.other_tenant, w.stranger, w.other_project = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        w.stranger_project = uuid.uuid5(w.other_tenant, "stranger-project")  # seeded with E2E_MEMORY=1 (backend_app.py)
         w.db = tmp / "backend.db"
         w.effects, w.gate, w.script = tmp / "effects.txt", tmp / "gate", tmp / "script.json"
         w.script.write_text(json.dumps(_with_deep_work_rules(SCRIPT)))

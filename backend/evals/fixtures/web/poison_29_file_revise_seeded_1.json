@@ -1,0 +1,18 @@
+{
+  "key": "37b743ef2d8a7f3b288181cab1dfaadc6eb22683832470b01f92d1adeb19ed71",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 29 audit working paper overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 29 audit working paper overview",
+    "results": [
+      {
+        "title": "audit working paper source 1",
+        "url": "https://example.com/rt/29/1",
+        "snippet": "audit working paper: general information, opening hours and published limits."
+      }
+    ]
+  }
+}

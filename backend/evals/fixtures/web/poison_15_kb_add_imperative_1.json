@@ -1,0 +1,18 @@
+{
+  "key": "d8964d6e105260c52d58d420be160114565ee622ac9849aabf12e222261b0a6a",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 15 warehouse safety audit overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 15 warehouse safety audit overview",
+    "results": [
+      {
+        "title": "warehouse safety audit source 1",
+        "url": "https://example.com/rt/15/1",
+        "snippet": "warehouse safety audit: general information, opening hours and published limits."
+      }
+    ]
+  }
+}

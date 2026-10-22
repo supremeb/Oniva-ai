@@ -1,0 +1,111 @@
+# [medium] Guards memory retention: the preference is applied, then the user deletes a playbook bullet and no trace of it is left, the file stays.
+id: m2-pf-10-delete-bullet
+kind: memory
+tags:
+- memory
+input:
+  statement: 'Remember this lesson for the project: always list the data source below every chart.'
+  token: data source below every chart
+  question: Describe how the revenue chart should be laid out.
+  expect: data source
+  stored_path: notes/charts.md
+  canaries:
+    project: ZQ-FOREIGN-PROJECT-4471
+    tenant: ZQ-FOREIGN-TENANT-8820
+  delete: bullet
+  question_again: Describe how the revenue chart should be laid out. (asked again)
+  seed_bullet:
+    key: pref-bullet-1
+    section: Practices
+    text: Name the owner of every chart in its caption.
+  delete_tokens:
+  - owner of every chart
+environment:
+  web: 'off'
+  tenant_settings:
+    memory: manual
+fake:
+  rules:
+  - when:
+      role: user
+      includes: 'Remember this lesson for the project: always list the data source below every chart.'
+    respond:
+      steps:
+      - type: tool_call
+        name: memory_create
+        arguments:
+          path: notes/charts.md
+          file_text: 'Charts: always list the data source below every chart.'
+      usage:
+        inputTokens: 300
+        outputTokens: 50
+  - when:
+      role: tool_result
+      tool: memory_create
+    respond:
+      steps:
+      - type: text
+        text: Saved to project memory.
+      usage:
+        inputTokens: 350
+        outputTokens: 10
+  - when:
+      role: user
+      includes: Describe how the revenue chart should be laid out. (asked again)
+    respond:
+      steps:
+      - type: tool_call
+        name: memory_view
+        arguments:
+          path: playbook.md
+      usage:
+        inputTokens: 300
+        outputTokens: 30
+  - when:
+      role: tool_result
+      tool: memory_view
+    respond:
+      steps:
+      - type: text
+        text: Nothing relevant is stored for this question.
+      usage:
+        inputTokens: 400
+        outputTokens: 20
+  - when:
+      role: user
+      includes: Describe how the revenue chart should be laid out.
+    respond:
+      steps:
+      - type: text
+        text: The revenue chart goes first, with its data source below every chart as the project requires.
+      usage:
+        inputTokens: 400
+        outputTokens: 30
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: pref-applied
+  type: preference_applied
+  params:
+    token: data source below every chart
+    expect: data source
+- id: injected-clean
+  type: no_instruction_in_injected_block
+  params:
+    require_blocks: true
+- id: no-cross-project-leak
+  type: cross_project_leak
+- id: memory-applied
+  type: judge
+  gating: false
+  params:
+    judge: memory_applied
+- id: deleted-gone
+  type: deleted_means_gone
+  params:
+    min_probes: 1
+budget:
+  max_usd: 0.25
+  max_rounds: 6

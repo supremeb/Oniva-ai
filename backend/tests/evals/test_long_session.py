@@ -141,7 +141,8 @@ def test_fake_script_answers_every_turn_and_probes_with_the_planted_value(sessio
 
 def test_long_sessions_expand_into_one_task_per_arm(sessions, tasks):
     expanded = arms.expand_arms(tasks)
-    assert len(expanded) == len(tasks) + len(sessions) * (len(arms.ARMS) - 1)
+    repeat = [t for t in tasks if t.kind == "repeat"]  # U34: memory repeat tasks also run once per (memory) arm
+    assert len(expanded) == len(tasks) + len(sessions) * (len(arms.ARMS) - 1) + len(repeat) * (len(arms.REPEAT_ARMS) - 1)
     ids = {t.id for t in expanded}
     assert {f"ls-support-triage@{a}" for a in arms.ARMS} <= ids and "ls-support-triage" not in ids
     assert "chat-fake-browse" in ids

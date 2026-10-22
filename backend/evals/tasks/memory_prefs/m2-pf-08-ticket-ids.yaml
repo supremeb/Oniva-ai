@@ -1,0 +1,77 @@
+# [easy] Guards memory retention: a preference stated in one conversation is applied in a fresh one without the user repeating it.
+id: m2-pf-08-ticket-ids
+kind: memory
+tags:
+- memory
+input:
+  statement: 'Remember for the project: whenever you mention a bug, give its ticket id in the format ONV-123.'
+  token: ONV-123
+  question: Mention the login bug that was fixed last week (ticket 482).
+  expect: ONV-\d+
+  stored_path: core.md
+  canaries:
+    project: ZQ-FOREIGN-PROJECT-4471
+    tenant: ZQ-FOREIGN-TENANT-8820
+environment:
+  web: 'off'
+  tenant_settings:
+    memory: manual
+fake:
+  rules:
+  - when:
+      role: user
+      includes: 'Remember for the project: whenever you mention a bug, give its ticket id in the format ONV-123.'
+    respond:
+      steps:
+      - type: tool_call
+        name: memory_create
+        arguments:
+          path: core.md
+          file_text: '- Refer to bugs by ticket id in the format ONV-123.'
+      usage:
+        inputTokens: 300
+        outputTokens: 50
+  - when:
+      role: tool_result
+      tool: memory_create
+    respond:
+      steps:
+      - type: text
+        text: Saved to project memory.
+      usage:
+        inputTokens: 350
+        outputTokens: 10
+  - when:
+      role: user
+      includes: Mention the login bug that was fixed last week (ticket 482).
+    respond:
+      steps:
+      - type: text
+        text: The login bug was fixed last week (ONV-482).
+      usage:
+        inputTokens: 400
+        outputTokens: 30
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: pref-applied
+  type: preference_applied
+  params:
+    token: ONV-123
+    expect: ONV-\d+
+- id: injected-clean
+  type: no_instruction_in_injected_block
+  params:
+    require_blocks: true
+- id: no-cross-project-leak
+  type: cross_project_leak
+- id: memory-applied
+  type: judge
+  gating: false
+  params:
+    judge: memory_applied
+budget:
+  max_usd: 0.25
+  max_rounds: 6

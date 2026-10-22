@@ -73,14 +73,17 @@ class DriverOutput:
     phases: dict[str, float] = field(default_factory=dict)
     timed_out: bool = False
     note: str | None = None
+    cost_conversation_ids: list[str] = field(default_factory=list)  # other conversations of the trial to price (U34)
 
 
 async def drive(ctx: DriverContext) -> DriverOutput:
-    """Run the task's driver. Kinds without a dedicated driver (U24/U34 add theirs) are chat-like."""
-    from . import chat, deep_work, long_session
+    """Run the task's driver. `repeat`, `memory` and `redteam` tasks go to the memory driver; any other kind is chat-like."""
+    from . import chat, deep_work, long_session, memory
 
     if ctx.task.kind == "deep_work":
         return await deep_work.run(ctx)
     if ctx.task.kind == "long_session":
         return await long_session.run(ctx)
+    if ctx.task.kind in memory.KINDS:
+        return await memory.run(ctx)
     return await chat.run(ctx)

@@ -27,5 +27,10 @@ second subject into one learning, claims that add an unsupported detail, and a c
 are `reviewed: false` like the rest and need the same human pass before the judge can gate Gate C's unsupported-claim
 criterion.
 
+`memory_applied.jsonl` also holds 24 rows (`mp-NN-*`, rationale prefixed `preference-probe suite (U34)`), one pair per
+preference probe of `evals/tasks/memory_prefs`: the stored memory text, the question asked in the second conversation, and
+a response that follows the preference (`yes`) or ignores it (`no`). They are `reviewed: false` like the rest; the judge is
+advisory in the preference tasks (`gating: false`) until a person has reviewed them and a fresh calibration passes.
+
 Row format: `{"id", "label": "yes"|"no", "input": {<the judge's fields>}, "reviewed", "review_note", "draft_rationale"}`.
 Input fields per judge are in `evals/graders/judge.py` (`JUDGE_FIELDS`). All text is synthetic; no real data.

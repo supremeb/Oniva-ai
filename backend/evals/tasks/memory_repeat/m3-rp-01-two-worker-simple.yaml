@@ -1,0 +1,98 @@
+# [hard] Guards the memory lift: two worker simple is run 5 times in a row in one project; with memory on (the curator proposes, a reviewer approves) the last run should score above the first, and the no-memory control arm should not.
+id: m3-rp-01-two-worker-simple
+kind: repeat
+tags:
+- memory
+- repeat
+input:
+  runs: 5
+  query: Compare the battery life and charging speed of the Veltra Orbit and Norrin Pulse smartwatches
+  plan:
+    title: DWPLAN_TS_DW_TWO_WORKER_SIMPLE
+    sub_queries:
+    - worker_id: ts-w1
+      sub_query: veltra orbit smartwatch battery life and charging speed
+      tools:
+      - web_search
+    - worker_id: ts-w2
+      sub_query: norrin pulse smartwatch battery life and charging speed
+      tools:
+      - web_search
+    deliverable: null
+  reviewer: approve_unflagged
+  score_graders:
+  - id: no-failed-workers
+    type: no_failed_workers
+  - id: citations-map
+    type: citation_map
+  - id: learnings-sourced
+    type: learning_sources
+  - id: urls-resolve
+    type: url_resolves
+  - id: tools-ok
+    type: tool_error_rate
+    params:
+      max_rate: 0.0
+  - id: rounds
+    type: rounds
+    params:
+      max: 5
+  canaries:
+    project: ZQ-FOREIGN-PROJECT-4471
+    tenant: ZQ-FOREIGN-TENANT-8820
+environment:
+  web: replay
+fake:
+  findings_md: The Orbit runs about nine days per charge and recharges in roughly seventy minutes [1][2]. The Pulse is rated
+    for five days and recharges in about forty-five minutes [3][4].
+  curator:
+    deltas:
+    - op: add
+      section: Research
+      text: Name each source's figure next to its claim.
+    - op: add
+      section: Research
+      text: Put the comparison in the first section.
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: workers-ok
+  type: no_failed_workers
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: lift
+  type: score_lift
+  gating: false
+  params:
+    min_lift: 0.05
+- id: curated
+  type: memory_curated
+- id: no-tainted-active
+  type: no_active_write_from_tainted_run
+- id: injected-clean
+  type: no_instruction_in_injected_block
+  params:
+    require_blocks: true
+- id: no-cross-project-leak
+  type: cross_project_leak
+- id: overhead
+  type: memory_overhead
+  params:
+    max_block_share: 0.05
+    max_curator_share: 0.1
+- id: budget
+  type: budget
+  params:
+    max_usd: 4.0
+    max_rounds: 12
+budget:
+  max_usd: 4.0
+  max_rounds: 12
