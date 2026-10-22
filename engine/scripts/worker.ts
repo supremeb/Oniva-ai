@@ -49,6 +49,7 @@ async function main(): Promise<number> {
   const worker = await startWorker({
     pool,
     sessionId: config.sessionId,
+    role: config.sessionRole,
     serviceToken: config.serviceToken,
     port: config.port,
     host: config.host,

@@ -7,6 +7,7 @@
  * | `ENGINE_DB_SCHEMA` | connection default | schema (`search_path`) holding the engine tables |
  * | `ENGINE_SESSION_ID` | required | the one session this worker serves |
  * | `ENGINE_SERVICE_TOKEN` | required | bearer token the backend presents |
+ * | `ENGINE_SESSION_ROLE` | `all` | `all`, `interactive` or `background`: which lane of work this worker's session serves (sharding). `interactive` registers no workflow task kinds and refuses background-lane conversations (`409 wrong_session_role`); `background` refuses interactive ones. Unset: no restriction |
  * | `ENGINE_PORT` / `ENGINE_HOST` | `8080` / `0.0.0.0` | HTTP listen address |
  * | `ENGINE_OWNER_ID` | host:pid:uuid | lease owner id (unique per process) |
  * | `ENGINE_LEASE_TTL_MS` | `15000` | lease time-to-live; heartbeats every ttl/3 |
@@ -44,6 +45,7 @@ import { DEFAULT_PROGRESS_INTERVAL_MS } from "../agent/progress.js";
 import { DEFAULT_QUESTION_TTL_MS } from "../agent/questions.js";
 import { DEFAULT_ANTHROPIC_MODEL, DEFAULT_ANTHROPIC_SUMMARY_MODEL } from "../models/anthropic.js";
 import { DEFAULT_FIRST_BYTE_TIMEOUT_MS, DEFAULT_IDLE_TIMEOUT_MS } from "../models/retry.js";
+import { SESSION_ROLES, type SessionRole } from "../server/role.js";
 import { DEFAULT_TASK_CONCURRENCY } from "../tasks/runtime.js";
 import { DEFAULT_POLICY_TIMEOUT_MS, DEFAULT_RETRY_MS } from "./backend-policy.js";
 
@@ -53,6 +55,8 @@ export interface WorkerConfig {
   databaseUrl: string;
   dbSchema: string | null;
   sessionId: string;
+  /** `ENGINE_SESSION_ROLE`; `all` when unset. */
+  sessionRole: SessionRole;
   serviceToken: string;
   port: number;
   host: string;
@@ -199,6 +203,12 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
       Math.max(1, Math.min(statementTimeoutMs + 1_000, leaseTtlMs - 1)),
     ),
   };
+  const roleText = text(env, "ENGINE_SESSION_ROLE") ?? "all";
+  if (!(SESSION_ROLES as readonly string[]).includes(roleText)) {
+    throw new WorkerConfigError(
+      `ENGINE_SESSION_ROLE must be one of ${SESSION_ROLES.join(", ")}, got ${JSON.stringify(roleText)}`,
+    );
+  }
   const policyMode = text(env, "ENGINE_POLICY");
   if (policyMode !== null && policyMode !== "local" && policyMode !== "backend") {
     throw new WorkerConfigError(
@@ -221,6 +231,7 @@ export function workerConfigFromEnv(env: WorkerEnv = process.env): WorkerConfig 
     databaseUrl: required(env, "DATABASE_URL"),
     dbSchema: schema,
     sessionId: required(env, "ENGINE_SESSION_ID"),
+    sessionRole: roleText as SessionRole,
     serviceToken: required(env, "ENGINE_SERVICE_TOKEN"),
     port: integer(env, "ENGINE_PORT", 8080, 0),
     host: text(env, "ENGINE_HOST") ?? "0.0.0.0",

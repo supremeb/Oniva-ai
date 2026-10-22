@@ -363,6 +363,11 @@ class Settings(BaseSettings):
     ENGINE_URL: str = ""
     PUBLIC_API_URL: str = ""  # public base URL of this API, used in webhook trigger URLs (default: request base URL)
     ENGINE_SESSION_ID: str = ""
+    # Optional second engine shard for automation (workflow, Fleet, batch runs). Both empty: one shard
+    # serves everything (the default). When set, ``ENGINE_URL`` / ``ENGINE_SESSION_ID`` keep serving
+    # interactive work (chat, Deep Work) and these serve the background run kinds.
+    ENGINE_BACKGROUND_URL: str = ""
+    ENGINE_BACKGROUND_SESSION_ID: str = ""
     ENGINE_SERVICE_TOKEN: Optional[str] = None
     ENGINE_GATEWAY_TOKEN: Optional[str] = None
     ENGINE_GATEWAY_TOKEN_PREVIOUS: Optional[str] = None  # accepted during rotation
@@ -410,6 +415,17 @@ class Settings(BaseSettings):
         values = list(present.values())
         if len(set(values)) != len(values):
             raise ValueError("ENGINE_GATEWAY_TOKEN, ENGINE_GATEWAY_TOKEN_PREVIOUS and ENGINE_SERVICE_TOKEN must differ from each other")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_engine_shards(self) -> "Settings":
+        if bool(self.ENGINE_BACKGROUND_URL) != bool(self.ENGINE_BACKGROUND_SESSION_ID):
+            raise ValueError("ENGINE_BACKGROUND_URL and ENGINE_BACKGROUND_SESSION_ID must be set together")
+        if (self.ENGINE_BACKGROUND_SESSION_ID
+                and self.ENGINE_BACKGROUND_SESSION_ID == self.ENGINE_SESSION_ID):
+            raise ValueError(
+                "ENGINE_BACKGROUND_SESSION_ID must differ from ENGINE_SESSION_ID "
+                "(one conversation must never be served by two workers)")
         return self
 
     @property
@@ -567,6 +583,14 @@ class Settings(BaseSettings):
             errors.append(
                 "ENGINE_URL must use https in production (or set INTERNAL_ALLOW_PLAINTEXT=true "
                 "for a trusted private network)."
+            )
+
+        # 7. The background shard's URL must be https too.
+        if (self.ENGINE_BACKGROUND_URL and not self.INTERNAL_ALLOW_PLAINTEXT
+                and not self.ENGINE_BACKGROUND_URL.lower().startswith("https://")):
+            errors.append(
+                "ENGINE_BACKGROUND_URL must use https in production (or set "
+                "INTERNAL_ALLOW_PLAINTEXT=true for a trusted private network)."
             )
 
         # If any errors, crash the application with clear instructions

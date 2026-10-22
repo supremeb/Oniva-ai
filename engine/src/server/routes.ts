@@ -58,6 +58,7 @@ import { SignalRejected, type TaskDefinition } from "../tasks/define.js";
 import type { WatchHub } from "../watch/stream.js";
 import { buildTrace, InvalidTraceCursor } from "../watch/trace.js";
 import { bindingMatches, headerValue, ONIVA_HEADERS, type TenantBinding } from "./auth.js";
+import { roleAllowsLane, type SessionRole } from "./role.js";
 
 /** The engine API version reported by `GET /v1/health` (KTD16). */
 export const ENGINE_API_VERSION = 1;
@@ -83,6 +84,8 @@ export interface RouteContext {
   readonly url: URL;
   readonly params: Readonly<Record<string, string>>;
   readonly ownerId: string;
+  /** The role of this worker's session (`all` unless sharded). */
+  readonly role: SessionRole;
   /** The request body as a JSON object (`{}` when empty). 413 / 400 on failure. */
   readJson(): Promise<JsonObject>;
   /** The caller's tenant and project headers (400 when missing). */
@@ -106,6 +109,20 @@ export interface Route {
 }
 
 const bad = (reason: string): HttpError => new HttpError(400, "bad_request", reason);
+
+/** 409 `wrong_session_role` when this session's role does not take conversations in the agent's lane (default `interactive`). */
+function assertLane(ctx: RouteContext, agent: unknown): void {
+  const raw = (agent as { lane?: unknown } | undefined | null)?.lane;
+  const lane = raw === "background" ? "background" : "interactive";
+  if (!roleAllowsLane(ctx.role, lane)) {
+    throw new HttpError(
+      409,
+      "wrong_session_role",
+      `this session serves ${ctx.role} work, not ${lane}`,
+      { role: ctx.role },
+    );
+  }
+}
 
 function optionalString(body: JsonObject, key: string): string | undefined {
   const value = body[key];
@@ -235,6 +252,7 @@ export const ROUTES: readonly Route[] = Object.freeze([
           ownerId: ctx.ownerId,
           owner: await ctx.isOwner(),
           apiVersion: ENGINE_API_VERSION,
+          role: ctx.role,
           taskKinds: [...ctx.harness.runtime.registry.kinds()].sort(),
         },
       };
@@ -256,6 +274,7 @@ export const ROUTES: readonly Route[] = Object.freeze([
       ) {
         throw bad("agent must be an object");
       }
+      assertLane(ctx, agent);
       let conversationId: string;
       try {
         const conv = await ctx.harness.createConversation({
@@ -324,6 +343,7 @@ export const ROUTES: readonly Route[] = Object.freeze([
       const conv = await ctx.conversation();
       const parsed = parseAgentConfigInput(body);
       if (!parsed.ok) throw bad(parsed.reason);
+      if (parsed.value.lane !== undefined) assertLane(ctx, parsed.value);
       const agent = await ctx.harness.conversation(conv.id).configure(parsed.value);
       return {
         status: 200,
@@ -413,6 +433,7 @@ export const ROUTES: readonly Route[] = Object.freeze([
       ) {
         throw bad("agent must be an object");
       }
+      assertLane(ctx, agent);
 
       // The caller's id makes the start idempotent: a repeat returns the existing run.
       const existing = await ctx.harness.session.reader.getConversation(id);

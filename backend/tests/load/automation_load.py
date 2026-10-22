@@ -121,6 +121,7 @@ class Sampler:
 
     def __init__(self, w, worker):
         self.w, self.pid = w, worker.p.pid
+        self.extra_pids = [s.p.pid for s in getattr(worker, "shard_procs", [])]  # the background shard
         self.cpu: list[float] = []
         self.rss_mb: list[float] = []
         self.outbox: list[int] = []
@@ -129,17 +130,21 @@ class Sampler:
         self._procs: dict = {}
 
     def worker_usage(self) -> tuple[float, float]:
+        """CPU % and RSS MB summed over every engine worker (one, or the interactive and background shards)."""
+        pids = [self.pid, *self.extra_pids]
         try:
             import psutil
-            root = self._procs.setdefault(self.pid, psutil.Process(self.pid))
-            procs = [root]
-            for child in root.children(recursive=True):
-                procs.append(self._procs.setdefault(child.pid, child))  # cached: cpu_percent needs the prior call
+            procs = []
+            for pid in pids:
+                root = self._procs.setdefault(pid, psutil.Process(pid))
+                procs.append(root)
+                for child in root.children(recursive=True):
+                    procs.append(self._procs.setdefault(child.pid, child))  # cached: cpu_percent needs the prior call
             return (sum(p.cpu_percent(interval=None) for p in procs),
                     sum(p.memory_info().rss for p in procs) / 1e6)
         except ImportError:
             out = subprocess.run(["ps", "-axo", "pgid=,pcpu=,rss="], capture_output=True, text=True).stdout
-            rows = [line.split() for line in out.splitlines() if line.split()[:1] == [str(self.pid)]]
+            rows = [line.split() for line in out.splitlines() if line.split()[:1] and line.split()[0] in map(str, pids)]
             return sum(float(r[1]) for r in rows), sum(float(r[2]) for r in rows) / 1024.0
         except Exception:  # noqa: BLE001 - the worker may have just exited
             return 0.0, 0.0
@@ -183,15 +188,21 @@ def commit_cadence_ms(w) -> dict:
         con = psycopg2.connect(w.pg_url)
         try:
             with con.cursor() as cur:
-                cur.execute("SELECT EXTRACT(EPOCH FROM committed_at) FROM engine_commits ORDER BY seq")
-                ts = [float(r[0]) for r in cur.fetchall()]
+                cur.execute("SELECT session_id, EXTRACT(EPOCH FROM committed_at) FROM engine_commits "
+                            "ORDER BY session_id, seq")
+                rows = [(r[0], float(r[1])) for r in cur.fetchall()]
         finally:
             con.close()
     except Exception:  # noqa: BLE001
         return {"observable": False}
-    gaps = [(b - a) * 1000.0 for a, b in zip(ts, ts[1:])]
+    # Each session has its own commit line (seq): the gap is measured within a session, never across shards.
+    per_session: dict = {}
+    for sid, t in rows:
+        per_session.setdefault(sid, []).append(t)
+    gaps = [(b - a) * 1000.0 for ts_ in per_session.values() for a, b in zip(ts_, ts_[1:])]
+    ts = sorted(t for _, t in rows)
     span = (ts[-1] - ts[0]) if len(ts) > 1 else 0.0
-    return {"observable": True, "kind": "inter-commit gap (cadence proxy, not per-commit latency)",
+    return {"observable": True, "sessions": {sid: len(v) for sid, v in sorted(per_session.items())}, "kind": "inter-commit gap (cadence proxy, not per-commit latency)",
             "commits": len(ts), "commits_per_s": round(len(ts) / span, 2) if span > 0 else None,
             "p50_ms": round(percentile(gaps, 50), 2), "p95_ms": round(percentile(gaps, 95), 2),
             "p99_ms": round(percentile(gaps, 99), 2)}
@@ -300,7 +311,7 @@ def run_profile(w, profile: Profile, worker) -> dict:
         "workload": {"workflow_runs": len(execution_ids), "nodes_per_run": fakes.WORKFLOW_NODES,
                      "fleet_runs": len(job_ids), "start_errors": start_errors,
                      "chat_baseline_samples": len(baseline), "chat_loaded_samples": len(loaded),
-                     "chat_errors": len(chat.errors), "chat_error_samples": chat.errors[:5], "http_calls_started": started, "http_calls_done": done,
+                     "engine_shards": getattr(w, "shards", 1), "chat_errors": len(chat.errors), "chat_error_samples": chat.errors[:5], "http_calls_started": started, "http_calls_done": done,
                      "wall_s": round(time.monotonic() - t_begin, 1), "loaded_window_s": round(loaded_window_s, 1)},
         "chat_first_token": {"baseline": stats(baseline), "loaded": stats(loaded),
                              "p95_regression": None if gate.chat_p95_regression is None
@@ -338,7 +349,8 @@ def format_report(result: dict) -> str:
         "",
         f"- hardware: {json.dumps(result['hardware'])}",
         f"- workload: {result['workload']['workflow_runs']} workflow runs x {result['workload']['nodes_per_run']} nodes, "
-        f"{result['workload']['fleet_runs']} Fleet runs, {result['workload']['wall_s']} s wall",
+        f"{result['workload']['fleet_runs']} Fleet runs, {result['workload']['wall_s']} s wall, "
+        f"{result['workload'].get('engine_shards', 1)} engine shard(s)",
         f"- chat first token, baseline: p50 {c['baseline']['p50_ms']} ms, p95 {c['baseline']['p95_ms']} ms (n={c['baseline']['n']})",
         f"- chat first token, loaded: p50 {c['loaded']['p50_ms']} ms, p95 {c['loaded']['p95_ms']} ms (n={c['loaded']['n']}), "
         f"p95 regression {'n/a' if reg is None else f'{reg:+.1%}'} (limit +20%)",

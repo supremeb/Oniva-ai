@@ -63,13 +63,20 @@ def _cached_caps(url: str) -> tuple[bool, Optional[dict]]:
     return False, None
 
 
-def engine_has_capability(settings: Settings, kinds: tuple[str, ...] = ()) -> bool:
+def background_engine_url(settings: Settings) -> str:
+    """The engine origin that runs automation: the background shard when configured, else ``ENGINE_URL``."""
+    return ((settings.ENGINE_BACKGROUND_URL if settings.ENGINE_BACKGROUND_SESSION_ID else "")
+            or settings.ENGINE_URL or "").rstrip("/")
+
+
+def engine_has_capability(settings: Settings, kinds: tuple[str, ...] = (), *, background: bool = False) -> bool:
     """True when the engine's cached /v1/health shows ``REQUIRED_API_VERSION`` and every ``kinds``.
 
     Sync (the flag helpers are): one short-timeout probe on a miss, cached 60 s (10 s on failure).
-    An unreachable engine or a missing field reads as capability absent.
+    An unreachable engine or a missing field reads as capability absent. ``background`` probes the
+    automation shard (the same engine unless ``ENGINE_BACKGROUND_URL`` is set).
     """
-    url = (settings.ENGINE_URL or "").rstrip("/")
+    url = background_engine_url(settings) if background else (settings.ENGINE_URL or "").rstrip("/")
     if not url:
         return False
     fresh, caps = _cached_caps(url)
@@ -91,9 +98,12 @@ async def warm_engine_capability(settings: Optional[Settings] = None) -> None:
     Async request paths call this before the sync flag helpers; those then read the cache.
     """
     settings = settings if settings is not None else get_settings()
-    url = (settings.ENGINE_URL or "").rstrip("/")
-    if url and not _cached_caps(url)[0]:
-        await asyncio.to_thread(engine_has_capability, settings)
+    for background in (False, True):
+        url = background_engine_url(settings) if background else (settings.ENGINE_URL or "").rstrip("/")
+        if url and not _cached_caps(url)[0]:
+            await asyncio.to_thread(lambda b=background: engine_has_capability(settings, background=b))
+        if not settings.ENGINE_BACKGROUND_SESSION_ID:
+            break
 
 
 def run_start_body(kind: str, conversation_id: Any, run_input: Any, *, agent: Optional[dict] = None) -> dict:

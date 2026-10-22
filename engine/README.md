@@ -198,6 +198,17 @@ be deployed.
 - **Clocks.** Engine logic (deadlines, approval expiry, throttling) uses the
   injected `Clock`; leases use the database clock only.
 
+## Sharding (optional)
+
+A session has one serialized commit line, so chat and a burst of automation runs in the same session queue behind each
+other. To keep them apart run two workers over the same database, each with its own `ENGINE_SESSION_ID`:
+`ENGINE_SESSION_ROLE=interactive` (chat, Deep Work; no workflow task kinds) and `ENGINE_SESSION_ROLE=background`
+(workflow, Fleet, batch runs). The backend picks the session once, when it creates a conversation
+(`ENGINE_BACKGROUND_URL` / `ENGINE_BACKGROUND_SESSION_ID`, `EngineDirectory.session_for`). Leases, fencing and recovery
+are per session and unchanged; conversation and task ids are unique across sessions, so a conversation has one owner.
+A worker refuses a conversation or run whose lane its role does not serve (`409 wrong_session_role`), and
+`GET /v1/health` reports `role`. Unset, the role is `all` and nothing changes.
+
 ## Tool gateway contract
 
 The full contract is specified by the fake gateway's TSDoc in
