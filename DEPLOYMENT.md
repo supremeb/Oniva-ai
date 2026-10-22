@@ -343,6 +343,41 @@ ON CONFLICT DO NOTHING;
 A request over the quota is denied `quota_exceeded` and the run fails fast with a readable reason;
 no model key is ever returned for a denied request.
 
+### Load gate (U36): required before the U29 flip
+
+Fleet and workflows stay default-off until one full-profile run of the automation load gate has passed on a
+proper runner and its result is recorded here. The gate answers one question: can automation runs and chat share
+one engine session without hurting chat?
+
+**Trigger it**: GitHub, Actions, "load-gate", "Run workflow" (`.github/workflows/load-gate.yml`, manual only, not in
+CI). It boots the same stack as the e2e `engine-smoke` job (Postgres 16, one backend, one engine worker).
+Inputs: `profile` (`full` = 200 workflow runs of 10 nodes + 20 Fleet runs, 60 baseline chat samples, at least 60 loaded
+chat samples; `smoke` = 5 + 1), `runner` (a GitHub-hosted label, default `ubuntu-latest`; use a larger-runner label
+for a realistic number), and optional overrides `workflow_runs`, `fleet_runs`, `baseline_samples`,
+`min_loaded_samples`, `chat_interval_s`, `start_threads`, `drain_timeout_s` (blank keeps the profile default).
+For U29 evidence leave every override blank: an overridden run is named `<profile>+custom` and does not count.
+Locally: `cd backend && ONIVA_E2E=1 uv run python -m tests.load.automation_load --profile full --json-out r.json`.
+
+**Passing** (the job is green and the summary says PASS), all of:
+
+- chat first-token p95 under load regressed by no more than 20% against the no-load baseline;
+- no run left non-terminal after the drain, and no run failed or cancelled;
+- no chat turn errored or timed out, and at least `min_loaded_samples` chat turns ran while automation was active;
+- the counting HTTP target saw exactly one started and one finished call per workflow run;
+- usage ledger rows equal the model requests made.
+
+Any failed condition fails the job and is listed in the summary. A failed gate means: stop, open the sharding
+follow-up (per-tenant or per-kind sessions through `session_for`) and ship it before U29.
+
+**Outputs**: the markdown summary on the run page (`$GITHUB_STEP_SUMMARY`) and an artifact `load-gate-<profile>-<run id>`
+with `result.json` (full numbers: first-token p50/p95, commit-gap p50/p95/p99, worker CPU and memory, outbox depth,
+drain lag, ledger), `summary.md` and `console.log`. Commit-gap and drain lag are proxies (the stack cannot observe
+per-commit latency or reconciler lag directly).
+
+**For U29**: paste the summary (numbers, hardware, date, PASS) into this section, with the run URL, in the U29 PR.
+
+**Recorded result**: none yet.
+
 **`/internal` is never public.** nginx answers 404 for `/internal` (`nginx/nginx.conf`), the k8s ingress
 carries the same rule as a server snippet and has no route for it, the engine Service is a ClusterIP,
 and a NetworkPolicy admits only API pods to the engine. The engine reaches `oniva-api:8000` /

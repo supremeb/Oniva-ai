@@ -24,6 +24,7 @@ Run for real: ``cd backend && ONIVA_E2E=1 PATH=/opt/homebrew/bin:$PATH uv run py
 --profile full`` (a throwaway Postgres, the backend and one engine worker are booted, as in the e2e suite).
 """
 import argparse
+import dataclasses
 import datetime
 import json
 import platform
@@ -32,6 +33,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 
@@ -353,12 +355,43 @@ def run_on_stack(profile_name: str) -> dict:
         return run_profile(w, PROFILES[profile_name], w.start_worker(1))
 
 
-def main() -> int:
+def profile_with_overrides(base: Profile, **overrides) -> Profile:
+    """``base`` with the non-None overrides applied (the CI workflow's knobs); the pass criteria are not an override."""
+    changes = {k: v for k, v in overrides.items() if v is not None}
+    name = f"{base.name}+custom" if changes else base.name
+    return dataclasses.replace(base, name=name, **changes)
+
+
+def write_outputs(result: dict, json_path: str | None = None, markdown_path: str | None = None) -> None:
+    """Machine-readable result and the markdown summary (for ``$GITHUB_STEP_SUMMARY``), written only when asked."""
+    if json_path:
+        Path(json_path).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    if markdown_path:
+        Path(markdown_path).write_text(format_report(result) + "\n")
+
+
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--profile", choices=sorted(PROFILES), default="smoke")
-    args = ap.parse_args()
-    result = run_on_stack(args.profile)
+    ap.add_argument("--workflow-runs", type=int, help="override the profile's workflow run count")
+    ap.add_argument("--fleet-runs", type=int, help="override the profile's Fleet run count")
+    ap.add_argument("--baseline-samples", type=int, dest="baseline_chat_samples", help="chat samples with no load")
+    ap.add_argument("--min-loaded-samples", type=int, dest="min_loaded_chat_samples",
+                    help="loaded chat samples the gate requires")
+    ap.add_argument("--chat-interval", type=float, dest="chat_interval_s", help="seconds between chat turns")
+    ap.add_argument("--start-threads", type=int, help="concurrent run starters")
+    ap.add_argument("--drain-timeout", type=float, dest="drain_timeout_s", help="seconds allowed to drain")
+    ap.add_argument("--json-out", help="write the result as JSON to this path")
+    ap.add_argument("--markdown-out", help="write the markdown summary to this path")
+    args = ap.parse_args(argv)
+    profile = profile_with_overrides(
+        PROFILES[args.profile], workflow_runs=args.workflow_runs, fleet_runs=args.fleet_runs,
+        baseline_chat_samples=args.baseline_chat_samples, min_loaded_chat_samples=args.min_loaded_chat_samples,
+        chat_interval_s=args.chat_interval_s, start_threads=args.start_threads, drain_timeout_s=args.drain_timeout_s)
+    with stack() as w:
+        result = run_profile(w, profile, w.start_worker(1))
     print_report(result)
+    write_outputs(result, args.json_out, args.markdown_out)
     return 0 if result["gate"]["passed"] else 1
 
 
