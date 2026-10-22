@@ -80,7 +80,11 @@ async function main(): Promise<number> {
     questionTtlMs: config.questionTtlMs,
     subagentTool: config.subagentTool,
     subagentTools: config.subagentTools,
-    settings: { progressIntervalMs: config.progressIntervalMs },
+    settings: {
+      progressIntervalMs: config.progressIntervalMs,
+      concurrency: config.taskConcurrency,
+      interactiveReserve: config.interactiveReserve,
+    },
     redact: maskSecrets,
     closeTimeoutMs: config.shutdownTimeoutMs,
     log,

@@ -78,6 +78,7 @@ import {
   toEntryPayload,
 } from "./context-builder.js";
 import { Inbox } from "./inbox.js";
+import { runLane } from "./lane.js";
 import { liveDoc, ProgressWriter, toolOutputDoc } from "./progress.js";
 import { type AgentConfig, systemPayload } from "./prompt.js";
 import { settleSubmission } from "./submission.js";
@@ -107,6 +108,8 @@ export type GenerationInput = {
    * request asks the model to continue; past {@link MAX_TRUNCATION_CONTINUES} the cut-off reply answers the run.
    */
   truncations?: number;
+  /** Set on a run's first task when the run is background work (see ./lane.ts); later tasks find it via `runId`. */
+  lane?: "background";
 };
 
 /** Cut-off replies a run continues after before it takes the cut-off reply as its answer. */
@@ -193,6 +196,7 @@ export function generationTaskDefinition(
     GenerationCheckpoint
   >({
     kind: GENERATION_TASK_KIND,
+    lane: runLane,
     phases: {
       request: (task, rt, ctx) => request(task, rt, ctx),
       after_tools: (task, rt) => afterTools(task, rt),
@@ -342,7 +346,21 @@ export function generationTaskDefinition(
         partial.provider === ""
           ? null
           : { provider: partial.provider, model: partial.model, usage: terminal.usage };
-      if (error.kind === "context_overflow" && settings.enabled && !overflowRetried) {
+      const retriesOverflow =
+        error.kind === "context_overflow" && settings.enabled && !overflowRetried;
+      const u = terminal.usage;
+      if (
+        spend &&
+        !retriesOverflow &&
+        u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens > 0
+      ) {
+        // A reply cut off by an error was still billed: report it like a finished one (the run fails, the spend stays).
+        await deps.hooks.afterResponse(
+          { conversation, agent, runId, round, message: partial, usage: u },
+          task.id,
+        );
+      }
+      if (retriesOverflow) {
         // One compaction, then one retry of this request.
         return rt.commit(async (tx, ops) => {
           if (spend) await recordSpend(tx, conversationId, spend);

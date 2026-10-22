@@ -121,7 +121,7 @@ def new_execution(batch: WorkflowBatch, user_id: Any) -> WorkflowExecution:
 
 
 def _tag(batch_id: Any) -> dict:
-    return {"metadata": {"notify": "backend", "runKind": KIND, "batchId": str(batch_id)}}
+    return {"metadata": {"notify": "backend", "runKind": KIND, "batchId": str(batch_id)}, "lane": "background"}
 
 
 async def is_engine_batch(db, batch_id: Any) -> bool:

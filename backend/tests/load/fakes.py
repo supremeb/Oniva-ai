@@ -9,8 +9,10 @@
 What is added here: the 10-node workflow, the arithmetic for how many model requests a run profile makes, and the
 gates that must be open so nothing in the scripts blocks.
 """
+import json
+
 from tests.e2e import fleet_script, workflow_script
-from tests.e2e.harness import STEER_ANSWER
+from tests.e2e.harness import STEER_ANSWER, sql_write
 from tests.e2e.workflow_helpers import dones, edge, http_node, node, save_workflow, starts
 
 HTTP_TAG = "load"
@@ -50,6 +52,18 @@ def open_all_gates(w) -> None:
     (w.dw_dir / "gate-all").write_text("open")
     w.dw.gate.write_text("open")
     w.gate.write_text("open")
+
+
+def unbound_fleet_budget(w) -> None:
+    """Give the Fleet agent a run budget the driver cannot exhaust.
+
+    A Fleet run has a wall-clock deadline (``resource_constraints.timeout_seconds``, 600 s for the e2e agent) that
+    the engine checks against its clock before every model request. The driver advances that clock 31 s every
+    couple of seconds to release the workflow ``wait`` nodes, so a Fleet run queued behind the workflow runs for
+    ~20 drain iterations used to fail with ``the run deadline has passed`` on a slow runner. That is the driver's
+    accelerated time, not load: the budget is lifted here, and a Fleet run that fails is a real failure."""
+    sql_write(w, "UPDATE custom_agents SET resource_constraints = ? WHERE id = ?",
+              json.dumps({"max_tool_calls": 12, "timeout_seconds": 10 * 365 * 86400}), str(w.agent).replace("-", ""))
 
 
 def expected_model_requests(workflow_runs: int, fleet_runs: int, chat_requests: int) -> int:

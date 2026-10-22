@@ -159,7 +159,8 @@
       "compaction": null,
       "maxRounds": null,
       "deadlineMs": null,
-      "cacheTtl": null
+      "cacheTtl": null,
+      "lane": "interactive"
     },
     "toolOutput": {},
     "compaction": {
@@ -395,7 +396,8 @@
       "compaction": null,
       "maxRounds": null,
       "deadlineMs": null,
-      "cacheTtl": null
+      "cacheTtl": null,
+      "lane": "interactive"
     },
     "toolOutput": {},
     "compaction": {
@@ -614,7 +616,8 @@
       "compaction": null,
       "maxRounds": null,
       "deadlineMs": null,
-      "cacheTtl": null
+      "cacheTtl": null,
+      "lane": "interactive"
     },
     "toolOutput": {},
     "compaction": {

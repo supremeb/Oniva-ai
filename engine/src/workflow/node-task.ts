@@ -380,7 +380,7 @@ function spawnChild(
       taskId: runId,
     });
     appendUserEntry(tx, child.id, submissionId, llm.prompt, `node:${task.id}`);
-    startRun(tx, ops, generation, child.id, submissionId, runId);
+    startRun(tx, ops, generation, child.id, submissionId, runId, agent.lane);
     return waiting({
       on: [runId],
       phase: "awaitChild",
@@ -681,6 +681,7 @@ export function createWorkflowNodeTask(
 
   return defineTask<WorkflowNodeInput, WorkflowNodeCheckpoint | null>({
     kind: WORKFLOW_NODE_KIND,
+    lane: "background",
     phases: {
       prepare,
       awaitChild,

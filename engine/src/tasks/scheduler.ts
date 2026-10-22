@@ -41,6 +41,7 @@ import {
   getSignal,
   InvalidTransition,
   isTransition,
+  type Lane,
   OUTCOME_KEY,
   RuntimeStopped,
   type SpawnOptions,
@@ -272,6 +273,8 @@ export interface SchedulerOptions {
   registry: TaskRegistry;
   clock: Clock;
   concurrency: number;
+  /** Slots held back for `interactive` tasks (already clamped below `concurrency`). */
+  interactiveReserve: number;
   report: TaskErrorReporter;
   api: TaskRuntimeApi;
 }
@@ -284,6 +287,7 @@ export class Scheduler {
   readonly #registry: TaskRegistry;
   readonly #clock: Clock;
   readonly #concurrency: number;
+  readonly #interactiveReserve: number;
   readonly #report: TaskErrorReporter;
   readonly #api: TaskRuntimeApi;
   readonly #root: Context;
@@ -309,6 +313,7 @@ export class Scheduler {
     this.#registry = options.registry;
     this.#clock = options.clock;
     this.#concurrency = options.concurrency;
+    this.#interactiveReserve = options.interactiveReserve;
     this.#report = options.report;
     this.#api = options.api;
     this.#root = Context.background(options.clock);
@@ -466,16 +471,33 @@ export class Scheduler {
           w.put({ ...t, status: "terminal", outcome });
         }
       }
+      // Interactive tasks first (each lane in creation order); background ones only below
+      // `concurrency - interactiveReserve` running, so a queue of automation never holds a chat turn back.
       const ids: string[] = [];
       let slots = this.#concurrency - this.#invocations.size;
-      for (const t of live()) {
-        if (slots <= 0) break;
-        if (t.status !== "pending" || abortReason(t) !== null || this.#invocations.has(t.id)) {
-          continue;
+      if (slots > 0) {
+        const interactive: TaskRecord[] = [];
+        const background: TaskRecord[] = [];
+        for (const t of live()) {
+          if (t.status !== "pending" || abortReason(t) !== null || this.#invocations.has(t.id)) {
+            continue;
+          }
+          (this.#laneOf(t, w) === "background" ? background : interactive).push(t);
         }
-        w.put({ ...t, status: "running" });
-        ids.push(t.id);
-        slots--;
+        for (const t of interactive) {
+          if (slots <= 0) break;
+          w.put({ ...t, status: "running" });
+          ids.push(t.id);
+          slots--;
+        }
+        let room = this.#concurrency - this.#interactiveReserve - this.#backgroundRunning(w);
+        for (const t of background) {
+          if (slots <= 0 || room <= 0) break;
+          w.put({ ...t, status: "running" });
+          ids.push(t.id);
+          slots--;
+          room--;
+        }
       }
       return ids;
     });
@@ -486,6 +508,23 @@ export class Scheduler {
       if (abortReady(this.#index, t)) void this.#finishAbort(t.id);
     }
     this.#armTimers();
+  }
+
+  /** The lane `t` competes in: its kind's `lane` (default interactive). */
+  #laneOf(t: TaskRecord, lookup: TaskLookup): Lane {
+    const lane = this.#registry.get(t.kind)?.lane;
+    if (lane === undefined) return "interactive";
+    return typeof lane === "function" ? lane(t, (id) => lookup.get(id)) : lane;
+  }
+
+  /** Handlers running now that are background work. */
+  #backgroundRunning(lookup: TaskLookup): number {
+    let n = 0;
+    for (const id of this.#invocations.keys()) {
+      const t = lookup.get(id);
+      if (t && this.#laneOf(t, lookup) === "background") n++;
+    }
+    return n;
   }
 
   #armTimers(): void {

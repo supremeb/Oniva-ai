@@ -75,9 +75,32 @@ def _explicit_timeouts() -> Dict[str, int]:
     return out
 
 
+# The manifest is derived from the loaded skills only, so it is cached against them: building it parses every SKILL.md
+# and introspects every handler, which every chat submission used to repeat on the event loop (U36 load gate).
+_manifest_cache: Dict[tuple, List[ManifestTool]] = {}
+
+
+def _manifest_key() -> tuple:
+    entries = []
+    for name in loaded_skill_names():
+        skill = _registry[name]
+        entries.append((name, id(skill), id(skill.handler), skill.description, repr(spec_for(name)),
+                        bool(getattr(_manifests.get(name), "mock", False))))
+    return tuple(entries)
+
+
 def build_manifest() -> List[ManifestTool]:
     """Manifest entries for every loaded, declared-for-export skill, sorted by name."""
-    timeouts = _explicit_timeouts()
+    key = _manifest_key()
+    cached = _manifest_cache.get(key)
+    if cached is None:
+        _manifest_cache.clear()  # only the current registry state is worth keeping
+        cached = _manifest_cache[key] = _build_manifest()
+    return list(cached)
+
+
+def _build_manifest() -> List[ManifestTool]:
+    timeouts = _cached_timeouts()
     tools: List[ManifestTool] = []
     for name in loaded_skill_names():
         skill = _registry[name]

@@ -212,8 +212,21 @@ def _non_terminal(w, execution_ids: list[str], job_ids: list[str]) -> tuple[int,
     return (sum(1 for s in statuses if s not in TERMINAL), sum(1 for s in statuses if s in TERMINAL and s != "completed"))
 
 
+def failure_reasons(w, execution_ids: list[str], job_ids: list[str]) -> list[str]:
+    """Why runs ended other than completed: ``kind id status: error`` (first 10), so a red gate says what broke."""
+    out: list[str] = []
+    for kind, table, ids in (("workflow", "workflow_executions", execution_ids), ("fleet", "background_jobs", job_ids)):
+        rows = {r[0]: r[1:] for r in sql(w, f"SELECT id, status, error FROM {table}")}
+        for i in ids:
+            status, error = rows.get(i.replace("-", ""), (None, None))
+            if status != "completed":
+                out.append(f"{kind} {i} {status}: {str(error)[:160]}")
+    return out[:10]
+
+
 def run_profile(w, profile: Profile, worker) -> dict:
     fakes.open_all_gates(w)
+    fakes.unbound_fleet_budget(w)
     workflow_id = fakes.load_workflow(w)
     sampler = Sampler(w, worker)
     sampler.start()
@@ -298,7 +311,8 @@ def run_profile(w, profile: Profile, worker) -> dict:
                    "rss_mb_max": round(max(sampler.rss_mb, default=0.0), 1)},
         "outbox_depth": {"max": max(sampler.outbox, default=None), "end": pg_scalar(w, "SELECT count(*) FROM engine_usage_outbox")},
         "reconciler_lag": {"observable": False, "drain_lag_s_proxy": round(drain_lag_s, 1)},
-        "after_drain": {"non_terminal_runs": non_terminal, "failed_runs": failed, "start_errors": len(start_errors)},
+        "after_drain": {"non_terminal_runs": non_terminal, "failed_runs": failed, "start_errors": len(start_errors),
+                        "failure_reasons": failure_reasons(w, execution_ids, job_ids) if failed or non_terminal else []},
         "ledger": {"rows": ledger_rows, "model_requests": expected},
         "gate": {"passed": gate.passed, "reasons": gate.reasons, "max_regression": 0.20},
     }
@@ -336,6 +350,7 @@ def format_report(result: dict) -> str:
         f"- reconciler lag: not directly observable; drain lag proxy {result['reconciler_lag']['drain_lag_s_proxy']} s",
         f"- non-terminal runs after drain: {result['after_drain']['non_terminal_runs']} "
         f"(failed: {result['after_drain']['failed_runs']}, start errors: {result['after_drain']['start_errors']})",
+        *[f"  - {r}" for r in result["after_drain"].get("failure_reasons", [])],
         f"- ledger rows {result['ledger']['rows']} vs model requests {result['ledger']['model_requests']}",
         f"- gate: {verdict}" + ("" if result["gate"]["passed"] else " - " + "; ".join(result["gate"]["reasons"])),
     ]

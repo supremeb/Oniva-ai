@@ -39,6 +39,11 @@ export type { TaskErrorContext, TaskErrorReporter } from "./scheduler.js";
 
 export const DEFAULT_TASK_CONCURRENCY = 16;
 
+/** An eighth of the slots (2 of 16), none when there are fewer than 4. */
+export function defaultInteractiveReserve(concurrency: number): number {
+  return concurrency < 4 ? 0 : Math.floor(concurrency / 8);
+}
+
 export interface TaskRuntimeOptions {
   /** Task definitions (every kind stored in the session should be registered). */
   tasks: Iterable<TaskDefinition> | TaskRegistry;
@@ -46,6 +51,11 @@ export interface TaskRuntimeOptions {
   clock?: Clock;
   /** Most handlers running at once. Defaults to {@link DEFAULT_TASK_CONCURRENCY}. */
   concurrency?: number;
+  /**
+   * Handler slots only `interactive` tasks may take (background tasks stop at `concurrency - interactiveReserve`).
+   * Defaults to {@link defaultInteractiveReserve}; always leaves at least one slot to background work.
+   */
+  interactiveReserve?: number;
   /** Stops the runtime when aborted (for example `LeaseKeeper.signal`). */
   signal?: AbortSignal;
   /** Receives errors that do not fail a task: late handler throws, `onAbort` throws, scheduler failures. */
@@ -94,6 +104,13 @@ export class TaskRuntime implements TaskRuntimeApi {
       registry: this.registry,
       clock: options.clock ?? realClock,
       concurrency,
+      interactiveReserve: Math.max(
+        0,
+        Math.min(
+          options.interactiveReserve ?? defaultInteractiveReserve(concurrency),
+          concurrency - 1,
+        ),
+      ),
       report: options.onError ?? (() => {}),
       api: this,
     });

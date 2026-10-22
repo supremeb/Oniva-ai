@@ -190,7 +190,7 @@ export class Conversation {
       if (taintRoot !== null) {
         await markTainted(tx, taintRoot, { kind: "input", name: "input", ref: submissionId });
       }
-      startRun(tx, ops, this.core.generation, this.id, submissionId, runId);
+      startRun(tx, ops, this.core.generation, this.id, submissionId, runId, inbox.lane);
       return submissionId;
     });
     return new Submission(this.core, id);

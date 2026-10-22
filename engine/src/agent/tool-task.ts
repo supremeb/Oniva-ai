@@ -88,6 +88,7 @@ import {
   toEntryPayload,
 } from "./context-builder.js";
 import { type AgentErrorReporter, type HookRunner, isToolResult } from "./hooks.js";
+import { runLane } from "./lane.js";
 import { authorize, type HostPolicy } from "./policy.js";
 import {
   appendOutput,
@@ -463,6 +464,7 @@ export function toolTaskDefinition(
 
   return defineTask<ToolTaskInput, ToolTaskCheckpoint>({
     kind: TOOL_TASK_KIND,
+    lane: runLane,
     phases: {
       start: async (task, rt) => {
         const pending = task.input.after.filter((id) => rt.task(id)?.status !== "terminal");

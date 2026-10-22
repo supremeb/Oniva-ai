@@ -34,6 +34,7 @@ export class WorkflowGateError extends Error {
 export function createWorkflowGateTask(): TaskDefinition<WorkflowGateInput, null> {
   return defineTask<WorkflowGateInput, null>({
     kind: WORKFLOW_GATE_KIND,
+    lane: "background",
     initialPhase: "watch",
     phases: {
       watch: async (task, rt) =>

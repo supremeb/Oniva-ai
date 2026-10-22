@@ -227,7 +227,11 @@ async function main(): Promise<number> {
     subagentTool: config.subagentTool,
     subagentTools: config.subagentTools,
     clock,
-    settings: { progressIntervalMs: config.progressIntervalMs },
+    settings: {
+      progressIntervalMs: config.progressIntervalMs,
+      concurrency: config.taskConcurrency,
+      interactiveReserve: config.interactiveReserve,
+    },
     wrapStorage: (provider) => timedStorage(provider, samples),
     intercept,
     log,
