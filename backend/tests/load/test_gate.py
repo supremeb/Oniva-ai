@@ -80,3 +80,20 @@ def test_gate_fails_on_too_few_loaded_samples():
     r = gate(100.0, 100.0, 0, 50, 50, loaded_samples=59)
     assert not r.passed and any("loaded chat sample" in x for x in r.reasons)
     assert gate(100.0, 100.0, 0, 50, 50, loaded_samples=60).passed
+
+
+def test_profile_overrides_and_outputs(tmp_path, monkeypatch):
+    from tests.load import automation_load as drv
+
+    monkeypatch.setattr(drv, "format_report", lambda r: f"summary {r['profile']}")
+    base = drv.PROFILES["smoke"]
+    assert drv.profile_with_overrides(base) == base
+    custom = drv.profile_with_overrides(base, workflow_runs=2, fleet_runs=None, chat_interval_s=0.1)
+    assert (custom.workflow_runs, custom.fleet_runs, custom.chat_interval_s) == (2, base.fleet_runs, 0.1)
+    assert custom.name == "smoke+custom"
+    result = {"profile": "p", "gate": {"passed": False, "reasons": ["x"]}}
+    drv.write_outputs(result, str(tmp_path / "r.json"), str(tmp_path / "r.md"))
+    import json
+    assert json.loads((tmp_path / "r.json").read_text())["gate"]["passed"] is False
+    assert (tmp_path / "r.md").read_text() == "summary p\n"
+    drv.write_outputs(result)  # no paths: nothing written
