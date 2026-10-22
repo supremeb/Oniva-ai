@@ -56,6 +56,9 @@ test('@recovery worker killed mid-tool: banner, then the run completes in the sa
   await expect(banner(page)).toHaveAttribute('data-connection', 'reconnecting');
 
   await control('/open-gate'); // the backend-side write finishes without the dead caller
+  // Wait for the write itself (deterministic, bounded) before the worker returns: the continuation can only
+  // see a stored outcome, so a missing effect here means the write never ran, not that it is late.
+  await expect.poll(async () => (await effects()).length - before, { timeout: 30_000, message: 'the held write runs once the gate opens' }).toBe(1);
   await control('/start-worker');
   await expect(log(page).getByText(ANSWER)).toBeVisible({ timeout: 120_000 });
   await expect(banner(page)).toHaveCount(0);
@@ -65,6 +68,7 @@ test('@recovery worker killed mid-tool: banner, then the run completes in the sa
   await expect(log(page).getByText(ANSWER)).toHaveCount(1);
   await expect(log(page).getByText('RUN_CHAT_WRITE please')).toHaveCount(1);
   expect(submissions).toHaveLength(1);
+  // The run has settled: the effect count is final. A re-run of the write after the restart would make it 2.
   expect((await effects()).length - before).toBe(1);
 });
 

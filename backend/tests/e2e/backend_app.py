@@ -135,7 +135,9 @@ async def e2e_write(ctx, note: str = "x"):
 
 
 _registry["e2e_write"] = Skill(name="e2e_write", description="e2e write", category="test", handler=e2e_write)
-TOOL_SPECS["e2e_write"] = ToolSpec(side_effect="write", idempotent=False, timeout_ms=60_000)
+# A long timeout: the browser specs hold this write open across a worker kill and restart, and a slow runner must
+# not time the held write out (a timeout cancels the effect, which then never happens).
+TOOL_SPECS["e2e_write"] = ToolSpec(side_effect="write", idempotent=False, timeout_ms=170_000)
 # The same gated write under another name, for Deep Work workers (the chat script owns e2e_write's results).
 _registry["e2e_hold"] = Skill(name="e2e_hold", description="e2e held write", category="test", handler=e2e_write)
 # A workspace write: the orchestrator reads the web first, and an outside-world write after that would need approval.
