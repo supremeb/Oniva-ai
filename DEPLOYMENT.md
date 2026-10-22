@@ -410,6 +410,26 @@ turning sharding on or off never moves an existing conversation; roles refuse a 
 wrong_session_role`) and ids are unique across sessions in storage, so no conversation is owned by two workers. Each
 session keeps its own lease, fence token and crash recovery. Locally: `ONIVA_E2E_ENGINE_SHARDS=2`.
 
+**Separate internal backend pool** (recommended topology once engine sharding is on). Sharding removed the engine's
+commit line as the bottleneck, but the backend is then the shared resource: the background engine shard's
+`/internal/tools`, `/internal/workflows`, `/internal/models` and `/internal/runs` calls (workflow node prepare calls ran
+p50 ~80 ms / p95 200-350 ms under the gate) are served by the same worker processes as the browser API and chat's own
+`/internal` calls, so chat's backend hops queue behind automation. Give automation its own processes: run a second pool
+of the same backend image, same code, same Postgres and same env (`ENGINE_*` tokens included), and point only the
+BACKGROUND engine worker at it with `ENGINE_GATEWAY_URL`, `ENGINE_POLICY_URL` and `ENGINE_WORKFLOW_BACKEND_URL` (all
+three; `ENGINE_MEMORY_BACKEND_URL` too if set). The interactive worker, the browser API and the backend's own calls to
+the engines stay on the main pool. Nothing in the backend needs configuring: the backend is already multi-process-safe
+(the run reconciler and memory sweep are leader-only through `pg_try_advisory_lock`, so each pool simply contends for
+the same lock; idempotency, approvals and trace recording use row locks; `_manifest_cache`, `_decisions`, `_applied`,
+`_approval_gates`, `_caps_cache` and the TTL caches are caches only; there is no in-process pub/sub, watchers read the
+engine). In Kubernetes that is a second Deployment (same image and ConfigMap/Secrets, e.g. `oniva-api-internal`), a second
+ClusterIP Service in front of it, and the background engine Deployment's three URLs set to that Service; the ingress
+and the existing `/internal` block stay as they are, and the NetworkPolicy must admit the background engine to the new
+pods. The repo's `k8s/` manifests do not deploy the background shard yet, so they are unchanged. Locally and in the gate:
+`ONIVA_E2E_BACKEND_INTERNAL_WORKERS=N` (needs `ONIVA_E2E_BACKEND_DB=postgres` and `ONIVA_E2E_ENGINE_SHARDS=2`) starts that
+pool on its own port for the background shard; load-gate input `backend_internal_workers` (default `0` = off). The chat
+probe and the browser API keep using the main port.
+
 **Recorded result**: none yet.
 
 **`/internal` is never public.** nginx answers 404 for `/internal` (`nginx/nginx.conf`), the k8s ingress

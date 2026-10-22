@@ -128,6 +128,29 @@ def test_backend_mode_rejects_nonsense(monkeypatch, db, workers):
         backend_mode()
 
 
+def test_internal_pool_is_off_by_default(monkeypatch):
+    from tests.e2e.harness import internal_pool_workers
+
+    monkeypatch.delenv("ONIVA_E2E_BACKEND_INTERNAL_WORKERS", raising=False)
+    assert internal_pool_workers(shards=1, pg=False) == 0
+
+
+def test_internal_pool_reads_workers(monkeypatch):
+    from tests.e2e.harness import internal_pool_workers
+
+    monkeypatch.setenv("ONIVA_E2E_BACKEND_INTERNAL_WORKERS", "2")
+    assert internal_pool_workers(shards=2, pg=True) == 2
+
+
+@pytest.mark.parametrize("n,shards,pg", [("-1", 2, True), ("2", 1, True), ("2", 2, False)])
+def test_internal_pool_rejects_nonsense(monkeypatch, n, shards, pg):
+    from tests.e2e.harness import internal_pool_workers
+
+    monkeypatch.setenv("ONIVA_E2E_BACKEND_INTERNAL_WORKERS", n)
+    with pytest.raises(ValueError):
+        internal_pool_workers(shards=shards, pg=pg)
+
+
 def test_info_ready_waits_for_every_worker(tmp_path):
     from tests.e2e.harness import _info_ready
 

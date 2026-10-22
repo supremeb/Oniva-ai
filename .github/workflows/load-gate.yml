@@ -31,6 +31,10 @@ on:
         type: choice
         options: ["1", "2"]
         default: "1"
+      backend_internal_workers:
+        description: "Workers of a separate backend pool that only the background engine shard calls (needs postgres and engine_shards 2); 0 = one pool for everything (default)"
+        type: string
+        default: "0"
       workflow_runs:
         description: "Override the profile's workflow run count (blank = profile default)"
         type: string
@@ -108,6 +112,7 @@ jobs:
           IN_BACKEND_DB: ${{ inputs.backend_db }}
           IN_BACKEND_WORKERS: ${{ inputs.backend_workers }}
           IN_ENGINE_SHARDS: ${{ inputs.engine_shards }}
+          IN_INTERNAL_WORKERS: ${{ inputs.backend_internal_workers }}
           IN_WORKFLOW_RUNS: ${{ inputs.workflow_runs }}
           IN_FLEET_RUNS: ${{ inputs.fleet_runs }}
           IN_BASELINE: ${{ inputs.baseline_samples }}
@@ -120,8 +125,9 @@ jobs:
           export ONIVA_E2E_BACKEND_DB="${IN_BACKEND_DB:-postgres}"
           export ONIVA_E2E_BACKEND_WORKERS="${IN_BACKEND_WORKERS:-2}"
           export ONIVA_E2E_ENGINE_SHARDS="${IN_ENGINE_SHARDS:-1}"
+          export ONIVA_E2E_BACKEND_INTERNAL_WORKERS="${IN_INTERNAL_WORKERS:-0}"
           # The workers option only applies to the Postgres backend.
-          [ "$ONIVA_E2E_BACKEND_DB" = postgres ] || unset ONIVA_E2E_BACKEND_WORKERS
+          [ "$ONIVA_E2E_BACKEND_DB" = postgres ] || unset ONIVA_E2E_BACKEND_WORKERS ONIVA_E2E_BACKEND_INTERNAL_WORKERS
           mkdir -p "$RUNNER_TEMP/load-gate"
           args=(--profile "$IN_PROFILE"
                 --json-out "$RUNNER_TEMP/load-gate/result.json"
