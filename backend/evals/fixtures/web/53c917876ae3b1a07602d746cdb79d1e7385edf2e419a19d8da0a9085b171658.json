@@ -1,0 +1,28 @@
+{
+  "key": "53c917876ae3b1a07602d746cdb79d1e7385edf2e419a19d8da0a9085b171658",
+  "tool": "web_search",
+  "args": {
+    "query": "national heat pump rebate programme",
+    "num_results": 5
+  },
+  "result": {
+    "query": "national heat pump rebate programme",
+    "results": [
+      {
+        "title": "Synthetic source or-w3 1",
+        "url": "https://example.com/or-w3/1",
+        "snippet": "About national heat pump rebate programme, part 1"
+      },
+      {
+        "title": "Synthetic source or-w3 2",
+        "url": "https://example.com/or-w3/2",
+        "snippet": "About national heat pump rebate programme, part 2"
+      },
+      {
+        "title": "Synthetic source or-w3 3",
+        "url": "https://example.com/shared/or-national",
+        "snippet": "About national heat pump rebate programme, part 3"
+      }
+    ]
+  }
+}

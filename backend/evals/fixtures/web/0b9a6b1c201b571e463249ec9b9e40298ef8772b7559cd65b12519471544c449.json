@@ -1,0 +1,33 @@
+{
+  "key": "0b9a6b1c201b571e463249ec9b9e40298ef8772b7559cd65b12519471544c449",
+  "tool": "web_search",
+  "args": {
+    "query": "northwind crm pricing tiers",
+    "num_results": 5
+  },
+  "result": {
+    "query": "northwind crm pricing tiers",
+    "results": [
+      {
+        "title": "Synthetic source ov-w1 1",
+        "url": "https://example.com/ov-w1/1",
+        "snippet": "About northwind crm pricing tiers, part 1"
+      },
+      {
+        "title": "Synthetic source ov-w1 2",
+        "url": "https://example.com/ov-w1/2",
+        "snippet": "About northwind crm pricing tiers, part 2"
+      },
+      {
+        "title": "Synthetic source ov-w1 3",
+        "url": "https://example.com/shared/ov-pricing",
+        "snippet": "About northwind crm pricing tiers, part 3"
+      },
+      {
+        "title": "Synthetic source ov-w1 4",
+        "url": "https://example.com/shared/ov-plans",
+        "snippet": "About northwind crm pricing tiers, part 4"
+      }
+    ]
+  }
+}

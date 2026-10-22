@@ -1,0 +1,33 @@
+{
+  "key": "4e2982df8e61eb41ff2cac2718aa85f21d9252c875c99599a359e8920a25f66a",
+  "tool": "web_search",
+  "args": {
+    "query": "northwind crm plan comparison",
+    "num_results": 5
+  },
+  "result": {
+    "query": "northwind crm plan comparison",
+    "results": [
+      {
+        "title": "Synthetic source ov-w3 1",
+        "url": "https://example.com/ov-w3/1",
+        "snippet": "About northwind crm plan comparison, part 1"
+      },
+      {
+        "title": "Synthetic source ov-w3 2",
+        "url": "https://example.com/ov-w3/2",
+        "snippet": "About northwind crm plan comparison, part 2"
+      },
+      {
+        "title": "Synthetic source ov-w3 3",
+        "url": "https://example.com/shared/ov-pricing",
+        "snippet": "About northwind crm plan comparison, part 3"
+      },
+      {
+        "title": "Synthetic source ov-w3 4",
+        "url": "https://example.com/shared/ov-plans",
+        "snippet": "About northwind crm plan comparison, part 4"
+      }
+    ]
+  }
+}

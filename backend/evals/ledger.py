@@ -51,6 +51,35 @@ async def settle_cost(
         await asyncio.sleep(POLL_S)
 
 
+async def settle_extra_cost(
+    http: httpx.AsyncClient,
+    base_url: str,
+    headers: dict[str, str],
+    conversation_ids: list[str],
+    *,
+    wait_s: float = 8.0,
+) -> float:
+    """Ledger dollars of conversations a trial ran besides its graded one (a memory trial's other runs and probes).
+
+    There is no trace to match token totals against, so each total is read until it stops changing for two reads.
+    """
+    total = 0.0
+    for conversation_id in conversation_ids:
+        deadline = time.monotonic() + wait_s
+        last: float | None = None
+        while True:
+            r = await http.get(f"{base_url}/api/v1/engine/conversations/{conversation_id}/cost", headers=headers)
+            now = float(r.json().get("totalUsd") or 0.0) if r.status_code == 200 else None
+            if now is not None and now == last:
+                break
+            last = now
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.5)
+        total += last or 0.0
+    return total
+
+
 def with_ledger_cost(trace: Trace, total_usd: float) -> Trace:
     """The trace with dollars filled in: the ledger total goes on the root role, other roles stay at zero cost.
 

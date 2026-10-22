@@ -1,0 +1,18 @@
+{
+  "key": "cc3905190a594e7af0f3bfd77b177a51434544228807a679c9ccc7911f403733",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 24 release train calendar overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 24 release train calendar overview",
+    "results": [
+      {
+        "title": "release train calendar source 1",
+        "url": "https://example.com/rt/24/1",
+        "snippet": "release train calendar: general information, opening hours and published limits."
+      }
+    ]
+  }
+}

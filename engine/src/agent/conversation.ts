@@ -68,7 +68,7 @@ export interface AgentCore {
 }
 
 /** Whether a run is active in the conversation (committed state). */
-export function isBusy(runtime: TaskRuntime, conversationId: string): boolean {
+export function isBusy(runtime: Pick<TaskRuntime, "tasks">, conversationId: string): boolean {
   return runtime
     .tasks({ conversationId })
     .some(

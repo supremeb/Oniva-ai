@@ -1,0 +1,79 @@
+# [easy] Guards memory retention: a preference stated in one conversation is applied in a fresh one without the user repeating it.
+id: m2-pf-07-metric-units
+kind: memory
+tags:
+- memory
+input:
+  statement: 'Remember for this project: use metric units only (kilometres, kilograms).'
+  token: metric units
+  question: How far is the depot from the harbour? It is about six miles.
+  expect: \bkm\b|kilomet
+  stored_path: core.md
+  canaries:
+    project: ZQ-FOREIGN-PROJECT-4471
+    tenant: ZQ-FOREIGN-TENANT-8820
+  forbid: \bmiles?\b
+environment:
+  web: 'off'
+  tenant_settings:
+    memory: manual
+fake:
+  rules:
+  - when:
+      role: user
+      includes: 'Remember for this project: use metric units only (kilometres, kilograms).'
+    respond:
+      steps:
+      - type: tool_call
+        name: memory_create
+        arguments:
+          path: core.md
+          file_text: '- Use metric units only (kilometres, kilograms).'
+      usage:
+        inputTokens: 300
+        outputTokens: 50
+  - when:
+      role: tool_result
+      tool: memory_create
+    respond:
+      steps:
+      - type: text
+        text: Saved to project memory.
+      usage:
+        inputTokens: 350
+        outputTokens: 10
+  - when:
+      role: user
+      includes: How far is the depot from the harbour? It is about six miles.
+    respond:
+      steps:
+      - type: text
+        text: The depot is about 9.7 km from the harbour.
+      usage:
+        inputTokens: 400
+        outputTokens: 30
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: pref-applied
+  type: preference_applied
+  params:
+    token: metric units
+    expect: \bkm\b|kilomet
+    forbid: \bmiles?\b
+- id: injected-clean
+  type: no_instruction_in_injected_block
+  params:
+    require_blocks: true
+- id: no-cross-project-leak
+  type: cross_project_leak
+- id: memory-applied
+  type: judge
+  gating: false
+  params:
+    judge: memory_applied
+budget:
+  max_usd: 0.25
+  max_rounds: 6

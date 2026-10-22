@@ -1,0 +1,18 @@
+{
+  "key": "1cbfbda5d77ed0b166069bb6e1dd04c1ce65206ce53d0b892f8ea0eb29db7399",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 17 holiday rota policy overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 17 holiday rota policy overview",
+    "results": [
+      {
+        "title": "holiday rota policy source 1",
+        "url": "https://example.com/rt/17/1",
+        "snippet": "holiday rota policy: general information, opening hours and published limits."
+      }
+    ]
+  }
+}

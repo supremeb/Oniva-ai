@@ -1,0 +1,89 @@
+# [hard] Guards context bloat and early-fact loss in a 100-turn support triage session: a policy fact and two ids are
+# given in the first turns, thirty-odd datasheet pages are read in between (a quarter of them above the offload
+# threshold), and the facts must still be answered correctly after the tiers have offloaded and cleared the pages.
+# Not tagged regression: a long session takes minutes even in fake mode.
+id: ls-support-triage
+kind: long_session
+tags:
+- long_session
+input:
+  turns: 100
+  probe_at: [0.5, 0.8, 1.0]
+  page_tokens: 3000
+  oversize_every: 4
+  oversize_tokens: 12000
+  chat_every: 5
+  recap_every: 12
+  facts:
+  - id: sla
+    kind: fact
+    statement: The enterprise tier's first-response SLA is 4 hours.
+    question: What is the enterprise tier's first-response SLA?
+    expect: ["4 hours", "four hours"]
+  - id: escalation
+    kind: fact
+    statement: Escalations go to the on-call lead, Priya Nair.
+    question: Who receives escalations?
+    expect: ["Priya Nair"]
+  - id: billing-ticket
+    kind: id
+    statement: The reference ticket for the billing outage is TKT-48213.
+    question: What is the reference ticket for the billing outage?
+    expect: ["TKT-48213"]
+  - id: harlow-order
+    kind: id
+    statement: Harlow Freight's open order number is ORD-77190-K.
+    question: What is Harlow Freight's open order number?
+    expect: ["ORD-77190-K"]
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake: {}
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.05
+- id: no-oversize-verbatim
+  type: no_verbatim_oversize
+  params:
+    max_tokens: 8000
+- id: context-tokens
+  type: context_tokens
+  gating: false
+  params:
+    after_turn: 30
+- id: probe-facts
+  type: probe_recall
+  gating: false
+  params:
+    kind: fact
+- id: probe-ids
+  type: probe_recall
+  gating: false
+  params:
+    kind: id
+- id: rereads
+  type: reread_after_clear
+  gating: false
+  params:
+    max_rate: 0.1
+- id: probe-judge
+  type: judge
+  params:
+    judge: recall_probe
+    all_probes: true
+- id: budget
+  type: budget
+  params:
+    max_rounds: 400
+budget:
+  max_usd: 1.5
+  max_rounds: 400

@@ -33,12 +33,16 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import type { Pool } from "pg";
 import { askUserTool } from "../agent/ask-user-tool.js";
+import { COMPLETE_TASK_TOOL, createCompleteTaskTool } from "../agent/complete-task.js";
 import { type AgentSettings, Harness } from "../agent/harness.js";
 import type { AgentHooks } from "../agent/hooks.js";
 import type { HostPolicy } from "../agent/policy.js";
+import { createSteerWorkerTool, STEER_WORKER_TOOL } from "../agent/steer-worker-tool.js";
 import { createSubagentTool } from "../agent/subagents.js";
 import { type Clock, realClock } from "../core/clock.js";
 import { errorText, NotOwner } from "../core/errors.js";
+import { createMemoryGateway } from "../memory/gateway.js";
+import { createMemoryTasks } from "../memory/tasks.js";
 import type { ModelRegistry } from "../models/stream.js";
 import { bearerMatches, headerValue } from "../server/auth.js";
 import { createEngineServer, type EngineServer } from "../server/http.js";
@@ -50,7 +54,12 @@ import { migrate } from "../storage/postgres/migrate.js";
 import { PostgresStorageProvider } from "../storage/postgres/storage.js";
 import type { StorageProvider } from "../storage/types.js";
 import type { TaskDefinition } from "../tasks/define.js";
-import { createGatewayTools, type GatewayToolset } from "../tools/gateway.js";
+import {
+  createGatewayTools,
+  createOffloadStore,
+  type GatewayClientOptions,
+  type GatewayToolset,
+} from "../tools/gateway.js";
 import type { ToolDefinition } from "../tools/registry.js";
 import { createNodeGateway } from "../workflow/node-gateway.js";
 import { createWorkflowTasks } from "../workflow/tasks.js";
@@ -96,6 +105,15 @@ export interface WorkerWorkflowOptions {
   fetch?: typeof fetch;
 }
 
+/** The backend serving the memory curator gateway (U30). */
+export interface WorkerMemoryOptions {
+  baseUrl: string;
+  serviceToken: string;
+  /** Retry budget for a transient gateway failure (`ENGINE_POLICY_RETRY_MS`). Default 60 s. */
+  retryMs?: number;
+  fetch?: typeof fetch;
+}
+
 export interface WorkerOptions {
   /** Pool on the engine schema; the caller owns (and ends) it. */
   pool: Pool;
@@ -129,6 +147,10 @@ export interface WorkerOptions {
   subagentTool?: string | null;
   /** Register a subagent tool under each of these names (with `subagentTool`, deduplicated). */
   subagentTools?: readonly string[];
+  /** Register the `steer_worker` tool (U21). Off by default: the tool list is unchanged without it. */
+  steerWorker?: boolean;
+  /** Register the `complete_task` tool (U19). Off by default; it acts only in conversations with an output schema. */
+  completeTask?: boolean;
   // biome-ignore lint/suspicious/noExplicitAny: tools with any argument type
   tools?: ToolDefinition<any>[];
   /** Host task kinds registered after the harness's built-ins (KTD3). */
@@ -139,6 +161,11 @@ export interface WorkerOptions {
    * a rejected token fences the worker like a rejected tool call does.
    */
   workflow?: WorkerWorkflowOptions | null;
+  /**
+   * Register the `memory_curate` task kind (U30). Off by default: the task kinds
+   * and `/v1/health` `taskKinds` are unchanged without it.
+   */
+  memory?: WorkerMemoryOptions | null;
   /** Engine clock (approval expiry, deadlines, throttling). Leases use the database clock. */
   clock?: Clock;
   settings?: Partial<AgentSettings>;
@@ -442,20 +469,28 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
     else onFailed(reason);
   }
 
-  async function loadGateway(k: LeaseKeeper): Promise<GatewayToolset | null> {
-    if (!options.gateway) return null;
-    return createGatewayTools({
-      baseUrl: options.gateway.baseUrl,
-      serviceToken: options.gateway.serviceToken,
+  /** The gateway client options for a lease: the tools and the Tier 0 offload store share them. */
+  function gatewayClientOptions(
+    k: LeaseKeeper,
+    gateway: WorkerGatewayOptions,
+  ): GatewayClientOptions {
+    return {
+      baseUrl: gateway.baseUrl,
+      serviceToken: gateway.serviceToken,
       fence: k.fence,
       sessionId,
       signal: k.signal,
-      ...(options.gateway.fetch ? { fetch: options.gateway.fetch } : {}),
+      ...(gateway.fetch ? { fetch: gateway.fetch } : {}),
       onFenceRejected: (rejection) => {
         log("fence_rejected", { tool: rejection.tool, token: String(rejection.token) });
         k.fenceNow("the tool gateway rejected this worker's fence token");
       },
-    });
+    };
+  }
+
+  async function loadGateway(k: LeaseKeeper): Promise<GatewayToolset | null> {
+    if (!options.gateway) return null;
+    return createGatewayTools(gatewayClientOptions(k, options.gateway));
   }
 
   async function serve(k: LeaseKeeper, gateway: GatewayToolset | null): Promise<void> {
@@ -471,6 +506,13 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
           ...(options.subagentTools ?? []),
         ]),
       ].map((name) => createSubagentTool({ name })),
+      // Opt-in engine-phase tools; a caller-supplied tool of the same name wins.
+      ...(options.steerWorker && !supplied.some((t) => t.name === STEER_WORKER_TOOL)
+        ? [createSteerWorkerTool()]
+        : []),
+      ...(options.completeTask && !supplied.some((t) => t.name === COMPLETE_TASK_TOOL)
+        ? [createCompleteTaskTool()]
+        : []),
     ];
     const tasks: TaskDefinition[] = [...(options.hostTasks ?? [])];
     if (options.workflow && role !== "interactive") {
@@ -489,6 +531,27 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
             onFenceRejected: (rejection) => {
               log("fence_rejected", { tool: "workflow", token: String(rejection.token) });
               k.fenceNow("the workflow node gateway rejected this worker's fence token");
+            },
+          }),
+        ),
+      );
+    }
+    if (options.memory) {
+      tasks.push(
+        ...createMemoryTasks(
+          createMemoryGateway({
+            baseUrl: options.memory.baseUrl,
+            serviceToken: options.memory.serviceToken,
+            fence: k.fence,
+            sessionId,
+            clock,
+            ...(options.memory.retryMs === undefined
+              ? {}
+              : { retry: { budgetMs: options.memory.retryMs } }),
+            ...(options.memory.fetch ? { fetch: options.memory.fetch } : {}),
+            onFenceRejected: (rejection) => {
+              log("fence_rejected", { tool: "memory", token: String(rejection.token) });
+              k.fenceNow("the memory gateway rejected this worker's fence token");
             },
           }),
         ),
@@ -523,6 +586,10 @@ export async function startWorker(options: WorkerOptions): Promise<WorkerHandle>
           }
         : {}),
       ...(runNotifier ? { onSettled: runNotifier.listener } : {}),
+      // Tier 0 (R11): with a gateway, a conversation whose settings turn offload on can use it.
+      ...(gateway && options.gateway
+        ? { offload: createOffloadStore(gatewayClientOptions(k, options.gateway)) }
+        : {}),
       onError: (err, info) => log("engine_error", { ...info, error: logErrorText(err) }),
     });
     harness = h;

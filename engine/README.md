@@ -102,6 +102,10 @@ Agent config `maxRounds` (model rounds per run) and `deadlineMs` (absolute engin
 
 A subagent tool's model, tools and system prompt can be set per run in the parent's `agent.metadata.subagents[<toolName>]` (`{ model?, tools?, systemPrompt? }`), which wins over the static `createSubagentTool` options. `maxDepth` is never read from metadata. A malformed entry fails the call with an error result and creates no child.
 
+Typed results: `createSubagentTool({ outputSchema })`, or `outputSchema` in the metadata override, makes a subagent promise a result shape. The child gets the schema appended to its system prompt, `complete_task` added to its tools (the host must register `createCompleteTaskTool()` and `INTERNAL_NATIVE_TOOLS` already lists it) and the schema in its own `agent.metadata.outputSchema`. `complete_task({ result })` validates against that schema (the model cannot supply one); violations come back as a tool error so the child can retry, and a valid result is stored in the child's `agent.result` document in the same commit as the tool result and ends the child's run (`terminate`). The parent's tool result `content` is `JSON.stringify(result)` and `details.result` is the object. A child that settles with text only gets one follow-up (`requestId = subagent:<taskId>:complete`, recorded as `nudge` in the tool task checkpoint, `details.nudged: true`); a second miss is an error result whose `details` hold `rawText`. Without an `outputSchema` nothing changes. The schema subset (`agent/json-schema-subset.ts`): `type` (`string`, `number`, `integer`, `boolean`, `null`, `object`, `array`), `properties`, `required`, `items` (one schema), `enum`, `minItems`, `maxItems`, `minLength`, `maxLength`, `minimum`, `maximum`, plus `title` and `description` as annotations. Any other keyword is rejected when the schema is parsed (a spec throws; a metadata override fails the call), never ignored. At most 16 KiB and 8 levels deep; extra object properties are allowed.
+
+Subagent context and fork mode (U20): a subagent call may pass `context: { brief?, files? }`. `brief` (at most 4000 characters) is background text for the child, such as what the sibling workers cover; `files` (at most 20 paths of 512 characters) are conversation-workspace paths the child is told to read first (pointers, not content). Oversize values fail the call with `invalid_arguments` and create no child. The metadata override also takes `contextPreamble` (static text, at most 4000 characters) and `mode`; `createSubagentTool({ mode })` sets the static default. `mode: "isolated"` (default) shows the child only its prompt. `mode: "fork"` adds a bounded block of the parent's conversation (`agent/context-seed.ts`, at most 2000 tokens): the header `[For context] Background from the parent agent's conversation, ...` in the third person, the parent's newest compaction summary body (archive and todo trailer dropped), then the last 6 user, assistant and tool-result entries as lines (`The user said: ...`, `The parent replied: ...`, `The parent called the tool <name>.`, `The tool <name> returned a result to the parent (<n> characters, not copied).`). Tool arguments and result bodies are never copied. If the root conversation is tainted the block ends with a note saying so; taint itself is root-wide, so a forked child is always as tainted as its parent. The child's first user entry is, separated by blank lines: `contextPreamble`, the fork block, `[Brief from the parent]` and the brief, `[Files to read first, in the conversation workspace]` and the paths, then `[Task]` and the prompt. With none of them present the entry is the prompt, byte for byte.
+
 The watch view's `run` is `{ active: boolean, runId?, startedAt? }`: `active` is true for as long as the conversation has an unfinished run, including while tools execute, approvals are pending and between model rounds (when `live` is already cleared); `runId` and `startedAt` (ISO time) accompany it while active, and when idle it is `{ active: false }`. It arrives in snapshots and as patches to `/run` when a run starts and when it ends.
 
 When the worker restarts with a task of a run in flight (the run's own generation, or a tool call or subagent task below it, however deep; for a host-task run, any task below its root task), the recovery commit appends one display-only `run_resumed` entry `{ runId, at }` to the run's ROOT conversation, atomically with the recovery, so each restart adds exactly one per run and clean runs add none. The context builder ignores it, so the model never sees it; it reaches clients through the watch view's `entries` like any entry. Clients use it as the "resumed after restart" cue, which a subagent's replayed read would otherwise never produce.
@@ -123,6 +127,55 @@ The native `ask_user` tool (`askUserTool`, flagged `internal` and `humanInput`) 
 - **Harness API.** `harness.answerQuestion({ conversationId, toolTaskId, answer: { optionIds?, text? }, principal })` and `harness.questions(conversationId)`. A rejected answer throws `QuestionRejected` and writes nothing; `reason` is `not_owned`, `already_answered`, `expired`, `not_waiting` or `invalid` (unknown or repeated option, several options without `multiSelect`, text where not allowed, nothing chosen, an answer over 16 KiB, bad shape).
 - **Expiry.** `HarnessOptions.questionTtlMs` (default 7 days; `0` or `null` for none). The worker setting `ENGINE_QUESTION_TTL_MS` and the HTTP, watch and worker wiring come with the follow-up unit.
 
+## Compaction settings
+
+`agent.compaction` holds per-conversation overrides (any subset, unknown keys rejected, `null` for none); `resolveCompactionSettings` layers them over the harness defaults (`DEFAULT_COMPACTION_SETTINGS`). A config that omits a field gets the default below, so existing conversations behave as before.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | compaction on; off means an overflow fails the run |
+| `contextWindow` / `contextWindows` | `null` / `{}` | window in tokens, or by model id |
+| `reserveTokens` | `16384` | tokens kept free for the reply |
+| `backgroundMargin` | `16384` | a background compaction starts this far before the reserve |
+| `keepRecentTokens` | `20000` | recent context kept verbatim after a compaction |
+| `offloadTokens` | `0` (off) | tool results above this size go to the offload store |
+| `clearTriggerTokens` | `0` (off) | old tool results are cleared from the view past this estimate |
+| `keepToolResults` | `5` | most recent tool results never cleared |
+| `clearAtLeastTokens` | `8000` | a clearing pass runs only if it frees at least this much |
+| `excludeTools` | `[]` | tools whose results are never cleared |
+| `structuredSummary` | `false` | use the sectioned summary prompt |
+| `archiveSummarized` | `false` | save summarized history to the offload store |
+
+`structuredSummary` and `archiveSummarized` are live (Tier 2, below); the clearing fields are live too (Tier 1).
+
+### Tier 1: view-time clearing
+
+With `clearTriggerTokens > 0`, stale tool results are replaced by a fixed stub in the context the model sees. Stored entries are never changed, and tool calls keep their results (pairing stays valid).
+
+- **Watermark.** The conversation document `agent.context` holds `{ clearedThroughEntryId, clearedTokens }` (also in the watch view as `context`). `buildContext` stubs every `tool_result` at or before the watermark, except tools in `excludeTools`.
+- **Advance.** The generation `request` phase advances the watermark when the context estimate is at or above `clearTriggerTokens` and the results that would newly be cleared (in context, older than the newest `keepToolResults`, not excluded) total at least `clearAtLeastTokens`. It writes the advance before building the context, only moves it forward, and a rerun after a crash plans nothing twice. Between advances the cleared prefix is byte-stable, which keeps the provider's prefix cache.
+- **Stub.** `[cleared: <tool> result, ~<n> tokens. Re-run the tool.]`; when the result carries `details.offloaded.path` the stub ends `Re-run the tool, or read <path> if it was saved.]`.
+- **Off.** With `clearTriggerTokens` 0 the watermark is ignored and results are verbatim (a one-time cache miss when switching); the stored watermark is kept, and turning clearing back on resumes from it.
+
+### Tier 2: structured delta compaction
+
+With `structuredSummary: true` the compaction task uses a sectioned prompt instead of the plain one (which stays the default and is unchanged). The summary has six sections, in this order: `## Goal and constraints`, `## Decisions`, `## Facts and IDs`, `## Files and artifacts`, `## Open tasks`, `## Errors and dead ends`.
+
+- **Delta.** The request gives the previous summary's sections apart from the new transcript and tells the model to edit the sections in place. The goal section is carried forward byte for byte; if the model rewrites it, the previous text is kept and only the lines it did not have are appended.
+- **Repair.** A heading the model leaves out is restored verbatim from the previous summary (or reads `(nothing recorded)` on the first compaction), so a bad summary can only lose detail from the new material. No second model call.
+- **Archive.** With `archiveSummarized` and an offload store, the whole summarized range is written (unclipped) through `OffloadStore.put` with `kind: "history"` and the compaction task id as `toolCallId`; the summary gains `Full earlier transcript: <path>` (paths accumulate across compactions in structured mode). A store failure is reported (`offload`) and skipped.
+- **Todo.** With `structuredSummary`, the open items of the todo are appended as `Open todo (as of the summary):`, folded from the previous summary's block and every `update_todo` call in the summarized range.
+- **Quality.** `afterCompaction` events carry `quality { summaryChars, summarizedChars, ratio, missingHeadings }`; a ratio under 0.01 or a missing heading is also reported through `onError` as `compaction_quality`.
+- The `compaction` entry payload is unchanged; the archive path and todo live inside the summary text.
+
+## Steering a subagent (`steer_worker`)
+
+`createSteerWorkerTool()` lets a parent steer a running subagent by the `label` its subagent call was made with. `steer_worker({ label, message })` looks only at the calling run's own subagent tool tasks (same conversation and run), keeps those that are not terminal, carry that label in their checkpoint and whose child is working right now, and submits `Message from the orchestrator: <message>` to each child with `whenBusy: "steer"` (not `untrusted`). The child reads it at its next tool-round boundary. The submission's `requestId` is `steer:<subagent tool task id>:<tool call id>`, written in the same commit as the tool result, so a repeated or re-run call sends nothing new. More than one live task with the label: all are steered. No match is an error result naming the labels that are running; a child that already answered is not matched (a steer never starts a new run on a finished child). Children of other runs, parents or tenants are never reachable.
+
+Tool calls of one round start together, so a steer sent in the same round as its worker may run first. It then waits (50 ms steps on the engine clock, at most 600 times) for a same-round subagent call with that label to create its child, and fails once that call ended or the budget is spent.
+
+The worker registers the tool only when `ENGINE_STEER_WORKER=1` (`WorkerOptions.steerWorker`), and `complete_task` only when `ENGINE_COMPLETE_TASK=1` (`WorkerOptions.completeTask`). With neither set the tool list and system prompts are unchanged; an agent also has to list the tool in `agent.tools` for the model to see it.
+
 ## Running a worker
 
 One worker process serves one session (KTD4). Start it with `npm run worker`
@@ -143,6 +196,8 @@ SIGTERM/SIGINT (lease released), `2` bad configuration, `3` lease lost
 | `ENGINE_LEASE_RETRY_MS` | TTL/3 | standby retry interval |
 | `ENGINE_GATEWAY_URL` / `ENGINE_GATEWAY_TOKEN` | none / service token | tool gateway |
 | `ENGINE_WORKFLOW_BACKEND_URL` | `ENGINE_GATEWAY_URL` | backend origin of the workflow node gateway (`/internal/workflows/...`), authenticated with the gateway token. The production worker (`npm run worker`) exits 2 at startup when neither is set |
+| `ENGINE_MEMORY_BACKEND_URL` | none | backend origin of the memory curator gateway (`/internal/memory/curate/...`); setting it registers the `memory_curate` task kind (U30), authenticated with the gateway token |
+| `ENGINE_MEMORY_CURATE` | off | `1` registers `memory_curate` against `ENGINE_GATEWAY_URL` when `ENGINE_MEMORY_BACKEND_URL` is unset; exits 2 at startup when neither URL is set. Without either variable the worker is unchanged |
 | `ENGINE_APPROVAL_TTL_MS` | `86400000` | local-mode approval expiry only (`0`: none); under `ENGINE_POLICY=backend` the backend's `approvalTtlMs` decides and this is ignored |
 | `ENGINE_QUESTION_TTL_MS` | `604800000` | how long an `ask_user` question waits for an answer (`0`: none) |
 | `ANTHROPIC_API_KEY` | none | model key (read per request; unused under `ENGINE_POLICY=backend`) |
@@ -327,3 +382,14 @@ Override any of them with `resolveLimits({...})`.
 - Transport error text keeps the real cause: `fetch failed (UND_ERR_SOCKET: other side closed)`, `terminated (ECONNRESET: other side closed)`. Only `code: message` of each error down the `cause` chain is read, never headers, bodies or keys.
 - The Anthropic adapter relies on the SDK's own retries (connection errors, 408/409/429/5xx, before the stream starts) and sets `maxRetries` explicitly (default 3, option `maxRetries`); it does not use `retry.ts`.
 - Errors: 401/402/403 `auth`, 429 `rate_limited`, 408 `network`, 5xx `overloaded`, 400/413 with a context-length message `context_overflow`, other 4xx `invalid_request`, transport failures `network`, cancellation `aborted`. An `error` object inside the stream fails the generation with the text kept as partial.
+
+## Memory curator (`memory_curate`)
+
+`createMemoryCurateTask({ gateway, maxAttempts?, backoffMs?, callTimeoutMs?, onAbort? })` (`src/memory/curate-task.ts`) is the host task kind `memory_curate`, a thin durable driver for the project-memory curator (plan 2026-10-21-001, U30). `createMemoryTasks(gateway)` (`src/memory/tasks.ts`) registers it; `createMemoryGateway(...)` (`src/memory/gateway.ts`) is its HTTP client with the same retry, fence and auth rules as the node gateway. Input: `{ version: 1, conversationId, runId }`, naming the SOURCE run to curate; the backend starts it with `POST /v1/runs` (`kind: "memory_curate"`) under a deterministic id so a repeated trigger is one run (a bad input is a 400 through `validateInput`).
+
+- **Phases.** `prepare` posts to `/internal/memory/curate/prepare` and gets `skip` (the task ends `done`, no child) or `llm` (`system`, `prompt`, `tier`, opaque `ctx`). The engine then creates one tool-less child conversation owned by the task (`metadata.purpose = "memory.curate"`, `metadata.modelTier = tier`) in the commit that leaves `prepare`, and waits on its run (`reflect`). `apply` posts the child's answer text and `ctx` to `/internal/memory/curate/apply`; the backend parses and validates the deltas, the engine never interprets them.
+- **Idempotency.** Keys are `curate:{conversationId}:{runId}:{phase}`; every call is safe to repeat, so a restart after `apply` was sent gets the stored outcome and applies nothing twice.
+- **Failure.** A transient gateway failure is asked again under the same key after `backoffMs * n`, at most `maxAttempts` (3) times per phase; anything else faults the task with `prepare_failed`, `reflect_failed` or `apply_failed`. A curator failure never touches the source run.
+- **Worker.** `startWorker({ memory: { baseUrl, serviceToken } })` registers the kind (so `/v1/health` `taskKinds` lists it) with a gateway client that carries the lease fence. Off by default.
+
+The wire contract the backend reproduces is `src/memory/contract.ts`, specified by `test/support/fake-memory-backend.ts` (`[clause:memory-curate-*]` tags).

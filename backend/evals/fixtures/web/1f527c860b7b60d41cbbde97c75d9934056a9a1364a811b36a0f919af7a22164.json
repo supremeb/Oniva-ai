@@ -1,0 +1,23 @@
+{
+  "key": "1f527c860b7b60d41cbbde97c75d9934056a9a1364a811b36a0f919af7a22164",
+  "tool": "web_search",
+  "args": {
+    "query": "delta email service free tier limits",
+    "num_results": 5
+  },
+  "result": {
+    "query": "delta email service free tier limits",
+    "results": [
+      {
+        "title": "Synthetic source m2-w2 1",
+        "url": "https://example.com/m2-w2/1",
+        "snippet": "About delta email service free tier limits, part 1"
+      },
+      {
+        "title": "Synthetic source m2-w2 2",
+        "url": "https://example.com/m2-w2/2",
+        "snippet": "About delta email service free tier limits, part 2"
+      }
+    ]
+  }
+}

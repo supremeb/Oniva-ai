@@ -59,6 +59,7 @@ import {
 } from "./generation.js";
 import { type AgentErrorReporter, type AgentHooks, HookRunner } from "./hooks.js";
 import { Inbox } from "./inbox.js";
+import type { OffloadStore } from "./offload.js";
 import type { HostPolicy } from "./policy.js";
 import { DEFAULT_PROGRESS_INTERVAL_MS } from "./progress.js";
 import {
@@ -124,6 +125,11 @@ export interface HarnessOptions {
   questionTtlMs?: number | null;
   /** Harness-level compaction settings; a conversation's `agent.compaction` overrides them. */
   compaction?: CompactionOverrides;
+  /**
+   * Where Tier 0 offloads big tool results (`offload.ts`). Without one nothing
+   * is offloaded, whatever `offloadTokens` says.
+   */
+  offload?: OffloadStore;
   /** Registered like {@link Harness.onSettled}, before the harness settles submissions left over from a previous process. */
   onSettled?: SettledListener;
 }
@@ -282,6 +288,8 @@ export class Harness implements AgentCore {
       progressIntervalMs: settings.progressIntervalMs,
       report,
       freshIntents: new Set(),
+      offload: options.offload,
+      compactionDefaults: options.compaction,
       questionTtlMs:
         options.questionTtlMs === undefined
           ? DEFAULT_QUESTION_TTL_MS

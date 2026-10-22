@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 TASK_KINDS = ("deep_work", "chat", "long_session", "repeat", "memory", "redteam")
-TASK_TAGS = ("smoke", "regression", "long_session", "repeat", "memory", "redteam")
+TASK_TAGS = ("smoke", "regression", "long_session", "repeat", "memory", "redteam", "dw_subagents")
 WEB_MODES = ("replay", "record", "off")
 GRADER_TYPES = (
     "tool_order",
@@ -28,6 +28,27 @@ GRADER_TYPES = (
     "no_limit_exceeded",
     "tool_error_rate",
     "learning_sources",
+    # U17 (additive)
+    "context_tokens",
+    "probe_recall",
+    "reread_after_clear",
+    "no_verbatim_oversize",
+    # U24 (additive): subagent contract
+    "worker_failure_rate",
+    "malformed_worker_answers",
+    "cross_worker_url_overlap",
+    "broken_citations",
+    "uncited_sections",
+    "steer_applied",
+    # U34 (additive): project memory
+    "no_active_write_from_tainted_run",
+    "no_instruction_in_injected_block",
+    "deleted_means_gone",
+    "cross_project_leak",
+    "score_lift",
+    "preference_applied",
+    "memory_overhead",
+    "memory_curated",
 )
 SPAN_KINDS = ("model", "tool", "subagent", "compaction")
 
@@ -145,6 +166,7 @@ class TrialResult:
     phases: dict[str, float] = field(default_factory=dict)
     fixture_misses: tuple[str, ...] = ()
     ledger: dict[str, Any] | None = None
+    metrics: dict[str, Any] | None = None  # per-trial context metrics (long sessions; `graders.context.trial_metrics`)
 
     @property
     def passed(self) -> bool:

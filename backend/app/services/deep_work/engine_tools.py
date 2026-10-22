@@ -12,6 +12,7 @@ conversation (worker, reflector) made the call.
 import json
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,6 +25,7 @@ from app.core.database import get_db_for_tenant
 from app.internal_api.execution import ToolOutcome
 from app.services import deep_work_state as dws
 from app.services import session_storage as _session_storage
+from app.services.feature_flags import context_tiers_for
 from app.services.deep_work.models import Learning
 from app.services.deep_work.synthesis import build_sources_section, select_learnings
 
@@ -180,6 +182,22 @@ def _render_todo(run: dws.RunSnapshot) -> str:
     return "\n".join(lines) + "\n"
 
 
+async def _recitation_on(factory: dws.SessionFactory, tenant_id: Any) -> bool:
+    """Whether results repeat the todo (recitation, U16): only when the tenant's context tiers are on.
+
+    Any failure means off, so the result stays exactly what it was before U16.
+    """
+    try:
+        from app.models.tenant import Tenant
+
+        async with factory() as db:
+            tenant = await db.get(Tenant, tenant_id if hasattr(tenant_id, "hex") else uuid.UUID(str(tenant_id)))
+        return context_tiers_for(tenant) != "off"
+    except Exception:
+        logger.warning("context tier lookup failed; not repeating the todo", exc_info=True)
+        return False
+
+
 def _status_line(run: dws.RunSnapshot) -> str:
     """One short line of plan progress, returned by state-changing tools so it stays in recent context (recitation)."""
     latest = _latest_round(run)
@@ -256,6 +274,19 @@ def lint_citations(sections: List[Tuple[str, str]], source_count: int) -> Tuple[
         elif not cited and len(body) >= UNCITED_MIN_CHARS:
             uncited.append(heading)
     return invalid, uncited
+
+
+def citation_warnings(invalid: Dict[str, List[int]], uncited: List[str], source_count: int) -> List[str]:
+    """Readable lint messages (U22): one per section citing beyond the listed sources, then one for uncited sections.
+
+    Deterministic and section-named, so the orchestrator (and the verifier step) can act on them. Out-of-range
+    citations still block ``dw_finalize`` as before; the messages ride along in the error ``details``.
+    """
+    out = [f"Section {h!r} cites {', '.join(f'[{n}]' for n in bad)} but only {source_count} source(s) are listed."
+           for h, bad in invalid.items()]
+    if uncited:
+        out.append(f"Section(s) with factual content but no [N] citation: {', '.join(uncited)}.")
+    return out
 
 
 # --- tools --------------------------------------------------------------------
@@ -421,6 +452,8 @@ async def dw_save_learnings(ctx: SkillContext, worker_id: str, learnings: List[D
         notes.append(f"{repaired} learning(s) were saved after shortening overlong text or defaulting a missing confidence.")
     if notes:
         payload["note"] = " ".join(notes)
+    if await _recitation_on(factory, tenant_id):
+        payload["todo"] = _render_todo(run)  # recitation: keeps the plan in recent context
     return _ok(payload, files, **details)
 
 
@@ -521,10 +554,11 @@ async def dw_record_reflection(
     if (refusal := _refusal(run)) is not None:
         return refusal
     can_continue = bool(should_continue) and round < cap + 1
-    return _ok(
-        {"round": round, "recorded": True, "next": "dw_start_round" if can_continue else "synthesis",
-         "workers_still_open": _open_workers(_round_entry(run, round) or {}), "status": _status_line(run)},
-    )
+    payload = {"round": round, "recorded": True, "next": "dw_start_round" if can_continue else "synthesis",
+               "workers_still_open": _open_workers(_round_entry(run, round) or {}), "status": _status_line(run)}
+    if await _recitation_on(factory, tenant_id):
+        payload["todo"] = _render_todo(run)  # recitation: keeps the plan in recent context
+    return _ok(payload)
 
 
 @skill(
@@ -645,6 +679,7 @@ async def dw_finalize(ctx: SkillContext, failed_workers: Optional[List[str]] = N
                 f"Citations out of range. The Sources section lists {source_count} source(s); valid citations are {valid}. "
                 f"Fix these sections with dw_write_section, then call dw_finalize again. {named}.",
                 "invalid_citations", sections=list(invalid), source_count=source_count,
+                warnings=citation_warnings(invalid, uncited, source_count),
             )
         body = _render_report(_title(run), sections).rstrip()
         report = body + "\n" + build_sources_section(learnings) + "\n"
@@ -653,8 +688,8 @@ async def dw_finalize(ctx: SkillContext, failed_workers: Optional[List[str]] = N
         artifacts = locked.run.artifacts
     await _teardown_sandbox(run.id, "output_agent")  # U5: nothing outlives the run
     payload: Dict[str, Any] = {"report_length": len(report), "artifacts": artifacts}
-    if uncited:
-        payload["warnings"] = [f"Section(s) with factual content but no [N] citation: {', '.join(uncited)}."]
+    if warnings := citation_warnings({}, uncited, 0):
+        payload["warnings"] = warnings
     return _ok(payload, [path])
 
 

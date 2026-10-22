@@ -1,0 +1,76 @@
+# [hard] Guards the answer contract under repeated drift: of three workers one answers in prose and one returns a JSON object without the required counts. Every malformed answer must be turned into a typed result by the follow-up.
+id: dws-malformed-two-workers
+kind: deep_work
+tags:
+- dw_subagents
+input:
+  query: Compare the free tiers of the Cobalt, Delta and Ember email services
+  plan:
+    title: DWPLAN_M2_DWS_MALFORMED_TWO_WORKERS
+    sub_queries:
+    - worker_id: m2-w1
+      sub_query: cobalt email service free tier limits
+      tools:
+      - web_search
+    - worker_id: m2-w2
+      sub_query: delta email service free tier limits
+      tools:
+      - web_search
+    - worker_id: m2-w3
+      sub_query: ember email service free tier limits
+      tools:
+      - web_search
+    deliverable: null
+environment:
+  web: replay
+fake:
+  findings_md: Cobalt caps the free tier at 500 messages a day [1][2], Delta at 300 [3][4] and Ember at 1000 [5][6].
+  scenario:
+    prose:
+      m2-w2: prose
+      m2-w3: partial
+    nudge: complete
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tool-order
+  type: tool_order
+- id: workers-ok
+  type: worker_failure_rate
+  gating: true
+  params:
+    max_rate: 0.0
+- id: malformed
+  type: malformed_worker_answers
+  params:
+    max: 0
+- id: citations-map
+  type: citation_map
+- id: learnings-sourced
+  type: learning_sources
+- id: urls-resolve
+  type: url_resolves
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.0
+- id: budget
+  type: budget
+  params:
+    max_usd: 1.5
+    max_rounds: 12
+- id: claims-supported
+  type: judge
+  params:
+    judge: claim_supported
+- id: no-unsourced-facts
+  type: judge
+  params:
+    judge: no_unsourced_facts
+budget:
+  max_usd: 1.5
+  max_rounds: 12

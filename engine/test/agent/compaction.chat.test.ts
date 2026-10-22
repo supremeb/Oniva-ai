@@ -5,6 +5,7 @@
  * posted to the usage ledger with purpose `compaction`.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { STRUCTURED_COMPACTION_PROMPT, STRUCTURED_HEADINGS } from "../../src/agent/compaction.js";
 import { SUMMARY_PREFIX } from "../../src/agent/context-builder.js";
 import { fakeText } from "../../src/models/fake.js";
 import { BackendPolicyClient, UsageReporter } from "../../src/worker/backend-policy.js";
@@ -115,6 +116,61 @@ describe("chat compaction through the backend policy", () => {
     });
     expect(compaction.requestId).toMatch(/^[^:]+:\d+:compaction:\S+$/);
     expect(new Set(rows.map((r) => r.requestId)).size).toBe(3);
+    await w.crash();
+  });
+
+  it("with structuredSummary the backend-policy compaction uses the sectioned prompt", async () => {
+    const gw = await FakeGateway.start([]);
+    gateways.push(gw);
+    const fx = await memoryBackend.fixture();
+    const policy = workerHostPolicy({
+      modelDefaults: {
+        provider: "fake",
+        model: "m",
+        summaryModel: "m",
+        maxTokens: 10,
+        apiKey: () => "k",
+      },
+      gateway: null,
+      approvalTtlMs: null,
+      clock: fx.clock,
+      backend: new BackendPolicyClient({
+        baseUrl: gw.baseUrl,
+        serviceToken: gw.serviceToken,
+        supportedProviders: () => ["fake"],
+      }),
+    });
+    gw.scriptPolicy(
+      { ok: true, model: "fake-chat", apiKey: "sk-1" },
+      { ok: true, model: "fake-low", apiKey: "sk-2" },
+      { ok: true, model: "fake-chat", apiKey: "sk-3" },
+    );
+    const summary = STRUCTURED_HEADINGS.map((h) => `## ${h}\n${h} body`).join("\n\n");
+    fx.provider.enqueue(fakeText("first answer", { usage: { inputTokens: 950, outputTokens: 1 } }));
+    fx.provider.enqueue(fakeText(summary, { usage: { inputTokens: 40, outputTokens: 7 } }));
+    fx.provider.enqueue(fakeText("second answer"));
+
+    const w = await fx.open({ policy });
+    const conv = await w.harness.createConversation({
+      tenantId: "t1",
+      projectId: "p1",
+      agent: {
+        systemPrompt: "sys",
+        tools: [],
+        compaction: { ...COMPACTION, structuredSummary: true },
+      },
+    });
+    await (await conv.submit({ text: "question one" })).wait();
+    expect((await (await conv.submit({ text: "question two" })).wait()).status).toBe("done");
+
+    expect(fx.provider.requests[1]?.messages[0]).toEqual({
+      role: "system",
+      text: STRUCTURED_COMPACTION_PROMPT,
+    });
+    expect(fx.provider.requests[2]?.messages[1]).toEqual({
+      role: "user",
+      content: `${SUMMARY_PREFIX}${summary}`,
+    });
     await w.crash();
   });
 });

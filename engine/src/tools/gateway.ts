@@ -47,10 +47,20 @@
  *   backoff, honoring `Retry-After` on 429/503, within the tool's deadline.
  * A cancelled call (the caller's signal) rejects with the signal's reason.
  *
+ * Tier 0 offload (U12): {@link createOffloadStore} builds an `OffloadStore`
+ * over the same plumbing. `put` posts `{ tenantId, projectId, conversationId,
+ * engineConversationId, runId, toolCallId, toolName, text }` to
+ * `POST /internal/workspace/offload` with `Idempotency-Key: runId:toolCallId`
+ * and the fence headers, and reads `{ path, bytes }` back. The route is
+ * idempotent, so every failure that is an outage (network, 408, 429, 5xx) is
+ * retried within `timeoutMs`; a definitive answer (413, 400, ...) throws at
+ * once, a rejected fence throws `LeaseLost`.
+ *
  * The contract is specified by the fake gateway in
  * `test/support/fake-gateway.ts`.
  */
 import { z } from "zod";
+import type { OffloadPutRequest, OffloadPutResult, OffloadStore } from "../agent/offload.js";
 import { type Clock, realClock } from "../core/clock.js";
 import { errorText, LeaseLost } from "../core/errors.js";
 import type { JsonObject, JsonValue } from "../core/json.js";
@@ -149,6 +159,7 @@ const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_RETRY_AFTER_MS = 60_000;
 /** Budget for the one reconcile after a write timed out. */
 const TIMEOUT_RECONCILE_MS = 5_000;
+const DEFAULT_OFFLOAD_TIMEOUT_MS = 20_000;
 const UNKNOWN_OUTCOME = " It may have taken effect; check before calling again.";
 
 /** Load the manifest and build the gateway's tools. */
@@ -169,6 +180,18 @@ export async function createGatewayTools(options: GatewayClientOptions): Promise
       await http.manifest(signal);
     },
   };
+}
+
+export interface OffloadClientOptions extends GatewayClientOptions {
+  /** Budget for one `put`, retries included. Default 20000. */
+  timeoutMs?: number;
+}
+
+/** An {@link OffloadStore} backed by the gateway's `POST /internal/workspace/offload`. */
+export function createOffloadStore(options: OffloadClientOptions): OffloadStore {
+  const http = new GatewayHttp(options);
+  const timeoutMs = options.timeoutMs ?? DEFAULT_OFFLOAD_TIMEOUT_MS;
+  return { put: (request) => http.offload(request, timeoutMs) };
 }
 
 /** `replay` for a manifest entry. */
@@ -256,6 +279,66 @@ class GatewayHttp {
         throw new Error(`gateway manifest load failed: ${whyFailed(res, this.#maxResponseBytes)}`);
       }
       await this.#backoff(attempt, signal, undefined, retryAfterOf(res));
+    }
+  }
+
+  /** Store a tool result out of context (see {@link createOffloadStore}). */
+  async offload(request: OffloadPutRequest, timeoutMs: number): Promise<OffloadPutResult> {
+    const url = `${this.#base}/internal/workspace/offload`;
+    const { conversation } = request;
+    const body = JSON.stringify({
+      tenantId: conversation.tenantId,
+      projectId: conversation.projectId,
+      ...backendConversationIds(conversation),
+      runId: request.runId,
+      toolCallId: request.toolCallId,
+      toolName: request.toolName,
+      text: request.text,
+      // Only sent for an archive, so a tool-result put is byte-identical to before.
+      ...(request.kind === "history" ? { kind: "history" } : {}),
+    });
+    const idempotencyKey = `${request.runId}:${request.toolCallId}`;
+    const deadline = this.#clock.monotonic() + timeoutMs;
+    const timedOut = () =>
+      new Error(`offload of ${idempotencyKey} timed out after ${timeoutMs} ms`);
+    for (let attempt = 1; ; attempt++) {
+      const token = this.#token();
+      let res: Attempt;
+      try {
+        res = await this.#send(
+          url,
+          {
+            method: "POST",
+            headers: {
+              ...this.#headers(idempotencyKey, token),
+              "content-type": "application/json",
+            },
+            body,
+          },
+          request.signal,
+          deadline - this.#clock.monotonic(),
+        );
+      } catch (err) {
+        if (err instanceof Timeout) throw timedOut();
+        throw err;
+      }
+      if (res.kind === "response" && res.status === 200) {
+        const out = parseOffloadResult(res.body);
+        if (!out) throw new Error(`offload ${idempotencyKey}: the gateway sent an invalid result`);
+        return out;
+      }
+      this.#throwIfFenceRejected(res, token, { idempotencyKey });
+      if (!isRetryableAttempt(res) || attempt >= this.#retry.attempts) {
+        throw new Error(
+          `offload ${idempotencyKey} failed: ${whyFailed(res, this.#maxResponseBytes)}`,
+        );
+      }
+      try {
+        await this.#backoff(attempt, request.signal, deadline, retryAfterOf(res));
+      } catch (err) {
+        if (err instanceof Timeout) throw timedOut();
+        throw err;
+      }
     }
   }
 
@@ -650,6 +733,15 @@ function messageOf(body: JsonValue | null): string {
     if (typeof body.error === "string") return body.error;
   }
   return "";
+}
+
+/** `{ path, bytes }` from the offload route, or null when it is malformed. */
+function parseOffloadResult(body: JsonValue | null): OffloadPutResult | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const { path, bytes } = body;
+  if (typeof path !== "string" || path.length === 0) return null;
+  if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) return null;
+  return { path, bytes };
 }
 
 /** A gateway outcome as a tool result, or null when it is malformed. */

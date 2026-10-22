@@ -1,0 +1,23 @@
+{
+  "key": "a7255d1afbdb52723919908fd7fcbce29753b6b17b9c40abce640906d665539a",
+  "tool": "web_search",
+  "args": {
+    "query": "gale gym membership cancellation rules",
+    "num_results": 5
+  },
+  "result": {
+    "query": "gale gym membership cancellation rules",
+    "results": [
+      {
+        "title": "Synthetic source m3-w2 1",
+        "url": "https://example.com/m3-w2/1",
+        "snippet": "About gale gym membership cancellation rules, part 1"
+      },
+      {
+        "title": "Synthetic source m3-w2 2",
+        "url": "https://example.com/m3-w2/2",
+        "snippet": "About gale gym membership cancellation rules, part 2"
+      }
+    ]
+  }
+}

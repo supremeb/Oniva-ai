@@ -1,0 +1,23 @@
+{
+  "key": "fd5ce06b0df2a95c319b7220f880911d16d7dcf3e52dbd537d1fa4194372d052",
+  "tool": "web_search",
+  "args": {
+    "query": "cobalt email service free tier limits",
+    "num_results": 5
+  },
+  "result": {
+    "query": "cobalt email service free tier limits",
+    "results": [
+      {
+        "title": "Synthetic source m2-w1 1",
+        "url": "https://example.com/m2-w1/1",
+        "snippet": "About cobalt email service free tier limits, part 1"
+      },
+      {
+        "title": "Synthetic source m2-w1 2",
+        "url": "https://example.com/m2-w1/2",
+        "snippet": "About cobalt email service free tier limits, part 2"
+      }
+    ]
+  }
+}

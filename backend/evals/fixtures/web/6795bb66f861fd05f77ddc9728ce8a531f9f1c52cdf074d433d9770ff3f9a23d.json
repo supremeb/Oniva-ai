@@ -1,0 +1,23 @@
+{
+  "key": "6795bb66f861fd05f77ddc9728ce8a531f9f1c52cdf074d433d9770ff3f9a23d",
+  "tool": "web_search",
+  "args": {
+    "query": "westmoor community broadband programme rules",
+    "num_results": 5
+  },
+  "result": {
+    "query": "westmoor community broadband programme rules",
+    "results": [
+      {
+        "title": "Synthetic source gr-w2 1",
+        "url": "https://example.com/gr-w2/1",
+        "snippet": "About westmoor community broadband programme rules, part 1"
+      },
+      {
+        "title": "Synthetic source gr-w2 2",
+        "url": "https://example.com/gr-w2/2",
+        "snippet": "About westmoor community broadband programme rules, part 2"
+      }
+    ]
+  }
+}

@@ -1,0 +1,87 @@
+# [medium] Guards the short end of the suite (60 turns): context only crosses the clear trigger late, so this checks
+# that the tiers stay out of the way. A gate, an owner and two ids are stated up front and asked again.
+id: ls-planning-thread
+kind: long_session
+tags:
+- long_session
+input:
+  turns: 60
+  probe_at: [0.6, 1.0]
+  page_tokens: 2500
+  oversize_every: 5
+  oversize_tokens: 10000
+  chat_every: 4
+  recap_every: 10
+  facts:
+  - id: gate
+    kind: fact
+    statement: The launch is gated on the security review.
+    question: What is the launch gated on?
+    expect: ["security review"]
+  - id: owner
+    kind: fact
+    statement: The workstream owner is Tomasz Wrobel.
+    question: Who is the workstream owner?
+    expect: ["Tomasz Wrobel"]
+  - id: ticket
+    kind: id
+    statement: The tracking ticket is JIRA-PLAT-318.
+    question: What is the tracking ticket?
+    expect: ["JIRA-PLAT-318"]
+  - id: build
+    kind: id
+    statement: The release candidate is build 2024.19.
+    question: Which build is the release candidate?
+    expect: ["2024.19"]
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake: {}
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.05
+- id: no-oversize-verbatim
+  type: no_verbatim_oversize
+  params:
+    max_tokens: 8000
+- id: context-tokens
+  type: context_tokens
+  gating: false
+  params:
+    after_turn: 30
+- id: probe-facts
+  type: probe_recall
+  gating: false
+  params:
+    kind: fact
+- id: probe-ids
+  type: probe_recall
+  gating: false
+  params:
+    kind: id
+- id: rereads
+  type: reread_after_clear
+  gating: false
+  params:
+    max_rate: 0.1
+- id: probe-judge
+  type: judge
+  params:
+    judge: recall_probe
+    all_probes: true
+- id: budget
+  type: budget
+  params:
+    max_rounds: 240
+budget:
+  max_usd: 0.75
+  max_rounds: 240

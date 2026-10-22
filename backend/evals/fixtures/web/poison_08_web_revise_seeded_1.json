@@ -1,0 +1,18 @@
+{
+  "key": "d9c65cf5173fba47862b928aace1b08575e1e525259a9f49ed893e37c882d116",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 08 marlow glass recycling overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 08 marlow glass recycling overview",
+    "results": [
+      {
+        "title": "marlow glass recycling source 1",
+        "url": "https://example.com/rt/08/1",
+        "snippet": "marlow glass recycling: general information, opening hours and published limits."
+      }
+    ]
+  }
+}

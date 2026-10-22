@@ -28,8 +28,8 @@ TERMINAL = ("completed", "failed", "cancelled")
 
 
 async def call(ctx: DriverContext, method: str, path: str, **kw: Any) -> Any:
-    r = await ctx.http.request(method, f"{ctx.backend}{BASE}{path}", headers=AUTH, timeout=120, **kw)
-    return r
+    headers = {**AUTH, **kw.pop("headers", {})}
+    return await ctx.http.request(method, f"{ctx.backend}{BASE}{path}", headers=headers, timeout=120, **kw)
 
 
 async def open_session(ctx: DriverContext, query: str) -> tuple[str, str]:
@@ -93,6 +93,25 @@ async def read_report(ctx: DriverContext, session_id: str) -> str | None:
     return r.text if r.status_code == 200 else None
 
 
+STEER_WAIT_S = 120.0
+
+
+async def send_steer(ctx: DriverContext, session_id: str, conversation_id: str, message: str) -> None:
+    """Send a seeded user steer once a worker is running (live mode, `input.steer` as a mapping).
+
+    The message goes through the user's own steer route, as in the browser. Whether the orchestrator turns it into a
+    `steer_worker` call is what the `steer_applied` grader measures; this driver never talks to a worker directly.
+    """
+    deadline = time.monotonic() + STEER_WAIT_S
+    while time.monotonic() < deadline and ctx.remaining() > 0:
+        raw = await fetch_trace(ctx.api, conversation_id, raw=True)
+        if raw.get("children"):
+            break
+        await asyncio.sleep(POLL_S)
+    key = f"eval-steer-{session_id}"
+    await call(ctx, "POST", f"/{session_id}/steer", headers={**AUTH, "Idempotency-Key": key}, json={"text": message, "requestId": key})
+
+
 SETTLE_S = 30.0
 OPEN_SUBMISSION = ("pending", "active")
 
@@ -105,11 +124,19 @@ async def fetch_settled_trace(ctx: DriverContext, conversation_id: str, *, wait:
     repeated runs differ in shape. So wait (bounded) until no submission is pending or active.
     """
     deadline = time.monotonic() + (SETTLE_S if wait else 0.0)
+    # The trace route reads entries first and submissions after, in separate reads (engine/src/watch/trace.ts
+    # buildTrace). A fetch that shows every submission settled may still hold entries read just before the final
+    # assistant message committed. So only a fetch that follows a fetch which already showed everything settled is
+    # complete: its entries were read after the submissions had closed.
+    seen_settled = False
     while True:
         raw = await fetch_trace(ctx.api, conversation_id, raw=True)
         open_ = [x for x in raw.get("submissions") or [] if x.get("status") in OPEN_SUBMISSION]
-        if not open_ or time.monotonic() >= deadline or ctx.remaining() <= 0:
+        if seen_settled or time.monotonic() >= deadline or ctx.remaining() <= 0:
             return raw
+        if not open_:
+            seen_settled = True
+            continue
         await asyncio.sleep(POLL_S)
 
 
@@ -125,11 +152,19 @@ async def run(ctx: DriverContext) -> DriverOutput:
     started = time.monotonic()
     await start(ctx, query, session_id, plan)
     timed_out, status = False, None
+    steer = ctx.task.input.get("steer")
+    steering = None
+    if ctx.ew.mode == "live" and isinstance(steer, dict) and steer.get("message"):
+        steering = asyncio.create_task(send_steer(ctx, session_id, conversation_id, str(steer["message"])))
     try:
         status = await wait_terminal(ctx, conversation_id)
     except TrialTimeout:
         timed_out = True
         await call(ctx, "POST", f"/engine/{session_id}/cancel")
+    finally:
+        if steering is not None:
+            steering.cancel()
+            await asyncio.gather(steering, return_exceptions=True)
     ctx.lap("run", started)
 
     started = time.monotonic()

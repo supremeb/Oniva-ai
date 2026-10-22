@@ -179,6 +179,8 @@ def test_reads_never_need_approval_and_uncertain_writes_are_not_idempotent():
         "write_file", "update_todo", "update_task", "browser_screenshot",
         # Deep Work (U4): each replaces by key (round, worker id, heading) or is a no-op when repeated.
         "dw_start_round", "dw_save_learnings", "dw_record_reflection", "dw_write_section", "dw_finalize",
+        # Project memory (U26): create replaces by path.
+        "memory_create",
     }
 
 

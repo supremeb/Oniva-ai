@@ -112,6 +112,12 @@ FLAG_METADATA: dict[str, FlagMeta] = {
         operator_only=True,
     ),
 
+    "ENABLE_PROJECT_MEMORY": FlagMeta(
+        group="Core",
+        description="Project memory tools and injection (off by default; the project must also enable memory)",
+        operator_only=True,
+    ),
+
     "ENABLE_ENGINE_FLEET": FlagMeta(
         group="Core",
         description="Run Fleet background agents on the engine (needs global flag + ENABLE_ENGINE_API + engine capability)",
@@ -121,6 +127,20 @@ FLAG_METADATA: dict[str, FlagMeta] = {
     "ENABLE_ENGINE_WORKFLOWS": FlagMeta(
         group="Core",
         description="Run workflows on the engine (needs global flag + ENABLE_ENGINE_API + engine capability)",
+        operator_only=True,
+    ),
+
+    "ENABLE_ENGINE_CONTEXT_TIERS": FlagMeta(
+        group="Core",
+        description="Tiered context reduction on the engine (offload, clearing, structured summaries); "
+                    "true turns on every tier for the tenant, false forces it off over ENGINE_CONTEXT_TIERS",
+        operator_only=True,
+    ),
+
+    "ENABLE_ENGINE_SUBAGENT_V2": FlagMeta(
+        group="Core",
+        description="Deep Work subagent contract v2 on the engine (typed worker results, labels, sibling context, "
+                    "steer_worker, verifier); tenant value overrides the global ENABLE_ENGINE_SUBAGENT_V2",
         operator_only=True,
     ),
 
@@ -193,6 +213,51 @@ ENGINE_CHAT_FLAG = "ENABLE_ENGINE_CHAT"
 ENGINE_DEEP_WORK_FLAG = "ENABLE_ENGINE_DEEP_WORK"
 ENGINE_FLEET_FLAG = "ENABLE_ENGINE_FLEET"
 ENGINE_WORKFLOWS_FLAG = "ENABLE_ENGINE_WORKFLOWS"
+ENGINE_CONTEXT_TIERS_FLAG = "ENABLE_ENGINE_CONTEXT_TIERS"
+
+# Values of the global ENGINE_CONTEXT_TIERS setting, weakest to strongest; anything else means "off".
+CONTEXT_TIER_VALUES = ("off", "offload", "offload+clear", "full")
+
+
+def context_tiers_for(tenant: Optional[Tenant], settings=None) -> str:
+    """The context tier a tenant's agent configs are built with (U16, KTD7).
+
+    A tenant value wins whenever the key exists (``True`` = ``full``, ``False`` = ``off``, resolved with
+    ``get_feature``); otherwise the global ``ENGINE_CONTEXT_TIERS`` string applies. A missing tenant (``None``)
+    or an unknown global value means ``off``.
+    """
+    if tenant is not None:
+        raw = ((tenant.settings or {}).get("features") or {}).get(ENGINE_CONTEXT_TIERS_FLAG)
+        if raw is not None:
+            return "full" if get_feature(tenant, ENGINE_CONTEXT_TIERS_FLAG) else "off"
+    s = settings if settings is not None else get_settings()
+    value = str(getattr(s, "ENGINE_CONTEXT_TIERS", "off") or "off")
+    if value not in CONTEXT_TIER_VALUES:
+        logger.warning("ENGINE_CONTEXT_TIERS=%r is not one of %s; using off", value, CONTEXT_TIER_VALUES)
+        return "off"
+    return value
+
+
+ENGINE_SUBAGENT_V2_FLAG = "ENABLE_ENGINE_SUBAGENT_V2"
+SUBAGENT_V2_SWITCHES = ("typed_results", "verifier", "steer_worker", "fork")
+
+
+def subagent_v2_switches(tenant: Optional[Tenant], settings=None) -> frozenset:
+    """The Deep Work contract v2 sub-switches a tenant's execute config is built with (U22).
+
+    Empty when the flag is off (tenant value first, then the global ``ENABLE_ENGINE_SUBAGENT_V2``); when on, the
+    names in ``ENGINE_SUBAGENT_V2_SWITCHES`` (unknown names ignored). A missing tenant uses the global setting.
+    """
+    s = settings if settings is not None else get_settings()
+    on = bool(getattr(s, ENGINE_SUBAGENT_V2_FLAG, False))
+    if tenant is not None:
+        raw = ((tenant.settings or {}).get("features") or {}).get(ENGINE_SUBAGENT_V2_FLAG)
+        if raw is not None:
+            on = bool(raw)
+    if not on:
+        return frozenset()
+    wanted = {n.strip() for n in str(getattr(s, "ENGINE_SUBAGENT_V2_SWITCHES", "") or "").split(",")}
+    return frozenset(n for n in SUBAGENT_V2_SWITCHES if n in wanted)
 
 
 def _engine_tenant_flag(tenant: Tenant, flag: str, global_on: bool, settings) -> bool:

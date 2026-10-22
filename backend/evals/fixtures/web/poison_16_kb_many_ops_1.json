@@ -1,0 +1,18 @@
+{
+  "key": "7ae451570809bc187aa0ae1fedea686498af7a6e68f67f8405e9a105f9ef7fc5",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 16 supplier onboarding steps overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 16 supplier onboarding steps overview",
+    "results": [
+      {
+        "title": "supplier onboarding steps source 1",
+        "url": "https://example.com/rt/16/1",
+        "snippet": "supplier onboarding steps: general information, opening hours and published limits."
+      }
+    ]
+  }
+}

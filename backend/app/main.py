@@ -41,6 +41,7 @@ from app.api.v1 import workspace  # Deep Work Phase 2: Sandbox + Workspace
 from app.api.v1 import wide_research  # Deep Work Phase 3: Wide Research Orchestrator
 from app.api.v1 import deep_work  # Deep Work: Autonomous Execution
 from app.api.v1 import projects  # Project Workspaces
+from app.api.v1 import project_memory as project_memory_api  # Project memory (U32)
 from app.api.v1 import sandbox_proxy  # Sandbox Control Plane (zero-secrets LLM proxy)
 from app.api.v1 import routing_policies  # Model Routing Policies (Deep Work Phase B5)
 from app.api.v1 import workflow_execution  # Workflow Execution SSE (Workflows as Agent Resources)
@@ -130,6 +131,19 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"⚠️ Failed to start run reconciler: {e}")
 
+    # Memory curation sweep (U31): starts the chat curator for idle conversations. Leader-safe (advisory lock);
+    # not started at all while MEMORY_CURATOR_MODE is off (the default), so there is no sweep work.
+    curation_sweep = None
+    if app_settings.ENGINE_URL and app_settings.ENGINE_SERVICE_TOKEN:
+        try:
+            from app.services.memory_curator import CurationSweep, curator_mode
+            if curator_mode(app_settings) != "off":
+                curation_sweep = CurationSweep(SystemSessionLocal, app_settings)
+                curation_sweep.start()
+                print("✅ Memory curation sweep started")
+        except Exception as e:
+            print(f"⚠️ Failed to start memory curation sweep: {e}")
+
     # Start Workflow Scheduler Daemon
     if app_settings.USE_WORKFLOW_SCHEDULER:
         try:
@@ -150,6 +164,11 @@ async def lifespan(app: FastAPI):
             await run_reconciler.stop()
         except Exception as e:
             print(f"⚠️ Failed to stop run reconciler: {e}")
+    if curation_sweep is not None:
+        try:
+            await curation_sweep.stop()
+        except Exception as e:
+            print(f"⚠️ Failed to stop memory curation sweep: {e}")
 
     # Stop Workflow Scheduler Daemon
     if app_settings.USE_WORKFLOW_SCHEDULER:
@@ -399,6 +418,7 @@ app.include_router(routing_policies.router, prefix="/api/v1/routing-policies", t
 
 # Project Workspaces
 app.include_router(projects.router, prefix="/api/v1/projects", tags=["projects"])
+app.include_router(project_memory_api.router, prefix="/api/v1/projects", tags=["project-memory"])
 
 # Sandbox Control Plane: zero-secrets LLM proxy
 app.include_router(sandbox_proxy.router, prefix="/api/v1", tags=["sandbox-proxy"])

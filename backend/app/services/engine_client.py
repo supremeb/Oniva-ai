@@ -249,6 +249,20 @@ class EngineClient:
             "GET", session_id, f"/v1/conversations/{conversation_id}/tasks/{task_id}",
             tenant_id=tenant_id, project_id=project_id)
 
+    async def get_trace(self, session_id, tenant_id, project_id, conversation_id, *,
+                        limit: Optional[int] = None, cursor: Optional[str] = None) -> dict:
+        """One page of ``GET /v1/conversations/:id/trace`` (entries of the conversation and its subagent
+        children, usage, taint, compactions); ``truncated`` + ``nextCursor`` say there is more."""
+        query = []
+        if limit is not None:
+            query.append(f"limit={int(limit)}")
+        if cursor:
+            query.append(f"cursor={cursor}")
+        suffix = ("?" + "&".join(query)) if query else ""
+        return await self._json(
+            "GET", session_id, f"/v1/conversations/{conversation_id}/trace{suffix}",
+            tenant_id=tenant_id, project_id=project_id)
+
     async def capabilities(self) -> Optional[dict]:
         """Cached ``{apiVersion, taskKinds}`` from ``GET /v1/health`` (shares the flag-gate cache)."""
         url = self._directory.url_for(self._directory.default_session_id).rstrip("/")

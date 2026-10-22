@@ -6,7 +6,7 @@
  * for each recorded point; applying the recorded frames must reproduce the last point's view.
  */
 import views from '../__fixtures__/deep_work_views.json';
-import { viewToDeepWork } from '../deepWork';
+import { toRunTree, viewToDeepWork } from '../deepWork';
 import { applyJsonPatch } from '../patch';
 import type { ConversationView, JsonValue } from '../types';
 
@@ -110,5 +110,77 @@ describe('deep work golden views', () => {
     expect(viewToDeepWork(view as unknown as ConversationView)).toEqual(
       viewToDeepWork(points[points.length - 1].view),
     );
+  });
+});
+
+// U23 (plan 2026-10-21-001): contract v2 adds a typed `verifier` subagent before dw_finalize. `success_v2` is the
+// `success` scenario with labelled workers and a verifier call; its shape matches the v2 e2e run
+// (backend/tests/e2e/test_deep_work_v2_e2e.py): content is JSON.stringify(result), details.result the object.
+const verifierResult = (view: ConversationView) =>
+  view.entries.find((e) => e.kind === 'tool_result' && (e.payload as { toolName?: string }).toolName === 'verifier')!
+    .payload as { status: string; content: string; details: unknown };
+
+describe('U23: the verifier step (contract v2)', () => {
+  it('v1 views carry no verifier', () => {
+    for (const name of ['success', 'failure', 'cancel']) {
+      for (const p of fixtures[name].points) expect(viewToDeepWork(p.view).verifier).toBeUndefined();
+    }
+  });
+
+  it('verifying: the verifier is running, is not a worker, and the phase is synthesizing', () => {
+    const s = viewToDeepWork(at('success_v2', 'verifying'));
+    expect(s.verifier).toMatchObject({ status: 'running', verdict: null, callId: 'call_v_0' });
+    expect(s.verifier?.childConversationId).toBeTruthy();
+    expect(s.workers.map((w) => w.worker_id)).toEqual(['w1', 'gap-1']);
+    expect(s.phase).toBe('synthesizing');
+  });
+
+  it('done: the typed verdict is parsed; workers, report and worker tokens are as without a verifier', () => {
+    const v1 = viewToDeepWork(at('success', 'done'));
+    const s = viewToDeepWork(at('success_v2', 'done'));
+    expect(s.status).toBe('completed');
+    expect(s.verifier?.status).toBe('complete');
+    expect(s.verifier?.verdict).toEqual({
+      unsupportedClaims: [{ section: 'Findings', claim: 'Market grew 40% in 2025', reason: 'No learning supports the figure' }],
+      missingCitations: [{ section: 'Gaps closed', claim: 'gap-1 closed.' }],
+      brokenCitations: [],
+      issueCount: 2,
+    });
+    expect(s.workers.map((w) => [w.worker_id, w.status])).toEqual(v1.workers.map((w) => [w.worker_id, w.status]));
+    expect(s.workers).toHaveLength(2);
+    expect(s.report).toBe(v1.report);
+    expect(s.usage.workerTokens).toBe(v1.usage.workerTokens);
+    expect(JSON.stringify(toRunTree(s))).not.toContain('verifier');
+  });
+
+  it('malformed verifier results do not crash', () => {
+    const view = JSON.parse(JSON.stringify(at('success_v2', 'done'))) as ConversationView;
+    const p = verifierResult(view);
+    p.details = { result: 'nope' };
+    p.content = 'not json';
+    expect(viewToDeepWork(view).verifier).toMatchObject({ status: 'complete', verdict: null });
+    p.details = null;
+    p.content = JSON.stringify({
+      unsupported_claims: [{ claim: 7 }, { section: 'S', claim: 'c' }],
+      missing_citations: 'x',
+      broken_citations: [{ section: 'S', citation: '[9]' }],
+    });
+    expect(viewToDeepWork(view).verifier?.verdict).toEqual({
+      unsupportedClaims: [{ section: 'S', claim: 'c' }],
+      missingCitations: [],
+      brokenCitations: [{ section: 'S', citation: '[9]' }],
+      issueCount: 2,
+    });
+  });
+
+  it('a failed verifier is an error on the verifier only', () => {
+    const view = JSON.parse(JSON.stringify(at('success_v2', 'done'))) as ConversationView;
+    const p = verifierResult(view);
+    p.status = 'error';
+    p.content = 'verifier failed';
+    const s = viewToDeepWork(view);
+    expect(s.verifier).toMatchObject({ status: 'error', verdict: null, error: 'verifier failed' });
+    expect(s.workers.every((w) => w.status === 'complete')).toBe(true);
+    expect(s.status).toBe('completed');
   });
 });

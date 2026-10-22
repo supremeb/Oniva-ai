@@ -31,7 +31,7 @@
  */
 import { z } from "zod";
 import type { JsonObject, JsonValue } from "../core/json.js";
-import type { SubmissionRecord } from "../storage/types.js";
+import { type EntryRecord, MAX_PAGE_LIMIT, type SubmissionRecord } from "../storage/types.js";
 import {
   type Committed,
   type TaskDefinition,
@@ -40,14 +40,22 @@ import {
   waiting,
 } from "../tasks/define.js";
 import { defineTool, type ToolDefinition, type ToolResult } from "../tools/registry.js";
+import { agentResultDoc, COMPLETE_TASK_TOOL, metadataOutputSchema } from "./complete-task.js";
 import type { ToolResultStatus } from "./context-builder.js";
+import {
+  CONTEXT_PREAMBLE_MAX_CHARS,
+  composeChildPrompt,
+  contextProblem,
+  renderForkBlock,
+} from "./context-seed.js";
 import {
   GENERATION_TASK_KIND,
   type GenerationCheckpoint,
   type GenerationInput,
 } from "./generation.js";
 import { appendUserEntry, startRun } from "./inbox.js";
-import { type AgentConfig, agentConfigDoc, applyAgentConfig } from "./prompt.js";
+import { outputSchemaInstructions, schemaProblems } from "./json-schema-subset.js";
+import { type AgentConfig, agentConfigDoc, applyAgentConfig, jsonValue } from "./prompt.js";
 import {
   type SubmissionAnswer,
   type SubmissionInputRecord,
@@ -57,6 +65,7 @@ import {
   toSubmissionInput,
   toSubmissionResult,
 } from "./submission.js";
+import { rootConversationId, taintDoc } from "./taint.js";
 import type { AgentDeps, ToolTaskCheckpoint, ToolTaskInput } from "./tool-task.js";
 
 /** The tool task phase that runs a subagent call. */
@@ -76,17 +85,50 @@ export interface SubagentToolOptions {
   systemPrompt?: string;
   /** Deepest child this tool creates; the top-level agent is depth 0. Default 1. */
   maxDepth?: number;
+  /**
+   * A typed result (R16): the child ends by calling `complete_task` with a
+   * value matching this JSON Schema subset (`json-schema-subset.ts`), and the
+   * parent receives the validated payload. Absent: the child answers in text.
+   */
+  outputSchema?: JsonObject;
+  /**
+   * `"isolated"` (default): the child sees only its prompt and any per-call
+   * `context`. `"fork"`: its first entry also holds a bounded narrative of the
+   * parent's conversation (`context-seed.ts`).
+   */
+  mode?: SubagentMode;
 }
+
+export type SubagentMode = "isolated" | "fork";
 
 /** What a subagent tool overrides in the child's configuration, and its depth limit. */
 export interface SubagentSpec {
   model?: string | null;
   tools?: string[];
   systemPrompt?: string;
+  outputSchema?: JsonObject;
+  mode?: SubagentMode;
   maxDepth: number;
 }
 
-export type SubagentArgs = { prompt: string };
+/**
+ * Per-call context (R17): `brief` is text for the child (for example what the
+ * sibling workers cover); `files` are conversation-workspace paths the child is
+ * told to read (pointers, not content).
+ */
+export type SubagentContext = { brief?: string | undefined; files?: string[] | undefined };
+
+export type SubagentArgs = {
+  prompt: string;
+  label?: string | undefined;
+  context?: SubagentContext | undefined;
+};
+
+/** A label names one subagent call so a parent can steer it later (U21). */
+const labelSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9_-]{1,64}$/, "label must be 1-64 characters of A-Z, a-z, 0-9, _ or -");
 
 export interface SubagentToolDefinition extends ToolDefinition<SubagentArgs> {
   readonly subagent: Readonly<SubagentSpec>;
@@ -103,6 +145,12 @@ export type SubagentDetails = {
   status: "done" | "unanswered";
   /** Why the child did not answer (`unanswered` only). */
   reason?: string;
+  /** The validated typed result (a subagent with an `outputSchema`). */
+  result?: JsonValue;
+  /** The child's last plain-text answer when it never called `complete_task`. */
+  rawText?: string;
+  /** The child was asked once to call `complete_task` after answering in text. */
+  nudged?: boolean;
 };
 
 export function createSubagentTool(options: SubagentToolOptions): SubagentToolDefinition {
@@ -113,8 +161,21 @@ export function createSubagentTool(options: SubagentToolOptions): SubagentToolDe
   if (options.tools !== undefined && !options.tools.every((t) => typeof t === "string")) {
     throw new TypeError(`subagent ${options.name}: tools must be tool names`);
   }
+  if (options.outputSchema !== undefined) {
+    const problems = schemaProblems(options.outputSchema);
+    if (problems.length > 0) {
+      throw new TypeError(`subagent ${options.name}: outputSchema: ${problems.join("; ")}`);
+    }
+  }
+  if (options.mode !== undefined && options.mode !== "isolated" && options.mode !== "fork") {
+    throw new TypeError(`subagent ${options.name}: mode must be "isolated" or "fork"`);
+  }
   const spec: SubagentSpec = {
     maxDepth,
+    ...(options.mode === undefined ? {} : { mode: options.mode }),
+    ...(options.outputSchema === undefined
+      ? {}
+      : { outputSchema: structuredClone(options.outputSchema) }),
     ...(options.model === undefined ? {} : { model: options.model }),
     ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
     ...(options.systemPrompt === undefined ? {} : { systemPrompt: options.systemPrompt }),
@@ -126,8 +187,17 @@ export function createSubagentTool(options: SubagentToolOptions): SubagentToolDe
       "Delegate a self-contained task to a subagent and get its final answer.",
     parameters: z.object({
       prompt: z.string().min(1).describe("The task for the subagent, with everything it needs."),
+      label: labelSchema.optional().describe("A short name for this call, for later reference."),
+      context: z
+        .object({ brief: z.string().optional(), files: z.array(z.string()).optional() })
+        .optional()
+        .describe("Optional extra context for the subagent."),
     }),
     internal: true,
+    enginePhase: {
+      phase: SUBAGENT_PHASE,
+      run: (deps, task, rt, w) => subagentPhase(deps, task, rt, w),
+    },
     execute: () => ({
       content: `Subagent tool ${options.name} runs only inside the agent loop.`,
       isError: true,
@@ -150,13 +220,27 @@ export function isSubagentTool(tool: ToolDefinition | undefined): tool is Subage
  * can be overridden; `maxDepth` (and any other key) is ignored, so metadata can
  * never loosen the depth limit.
  */
-const subagentOverrideSchema = z.object({
-  model: z.string().nullable().optional(),
-  tools: z.array(z.string()).optional(),
-  systemPrompt: z.string().optional(),
-});
+let overrideSchemaCache: ReturnType<typeof buildOverrideSchema> | undefined;
+/** Built on first use: `context-seed.ts` and this file import each other through `compaction.ts`. */
+const subagentOverrideSchema = () => (overrideSchemaCache ??= buildOverrideSchema());
 
-export type SubagentOverride = z.infer<typeof subagentOverrideSchema>;
+const buildOverrideSchema = () =>
+  z.object({
+    model: z.string().nullable().optional(),
+    tools: z.array(z.string()).optional(),
+    systemPrompt: z.string().optional(),
+    /** Static text placed first in every child's first entry. */
+    contextPreamble: z.string().max(CONTEXT_PREAMBLE_MAX_CHARS).optional(),
+    mode: z.enum(["isolated", "fork"]).optional(),
+    outputSchema: z
+      .record(z.string(), jsonValue)
+      .superRefine((schema, ctx) => {
+        for (const message of schemaProblems(schema)) ctx.addIssue({ code: "custom", message });
+      })
+      .optional(),
+  });
+
+export type SubagentOverride = z.infer<ReturnType<typeof buildOverrideSchema>>;
 
 /** The override for `toolName` in the parent's metadata: none, valid, or malformed. */
 export function subagentOverride(
@@ -169,7 +253,7 @@ export function subagentOverride(
     return { ok: false, reason: "agent.metadata.subagents must be an object" };
   }
   if (!Object.hasOwn(all, toolName)) return { ok: true, value: null };
-  const parsed = subagentOverrideSchema.safeParse(all[toolName]);
+  const parsed = subagentOverrideSchema().safeParse(all[toolName]);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return {
@@ -192,10 +276,24 @@ export function childAgentConfig(
   const model = override?.model !== undefined ? override.model : spec.model;
   const tools = override?.tools ?? spec.tools;
   const systemPrompt = override?.systemPrompt ?? spec.systemPrompt;
+  const outputSchema = (override?.outputSchema ?? spec.outputSchema) as JsonObject | undefined;
+  if (outputSchema === undefined) {
+    return applyAgentConfig(parent, {
+      ...(model === undefined ? {} : { model }),
+      ...(tools === undefined ? {} : { tools }),
+      ...(systemPrompt === undefined ? {} : { systemPrompt }),
+      depth: parent.depth + 1,
+    });
+  }
+  // A typed result: the child gets `complete_task`, the schema in its prompt
+  // and, for the tool to read, in its own metadata (the model cannot supply it).
+  const childTools = [...(tools ?? parent.tools)];
+  if (!childTools.includes(COMPLETE_TASK_TOOL)) childTools.push(COMPLETE_TASK_TOOL);
   return applyAgentConfig(parent, {
     ...(model === undefined ? {} : { model }),
-    ...(tools === undefined ? {} : { tools }),
-    ...(systemPrompt === undefined ? {} : { systemPrompt }),
+    tools: childTools,
+    systemPrompt: `${systemPrompt ?? parent.systemPrompt}\n\n${outputSchemaInstructions(outputSchema)}`,
+    metadata: { ...parent.metadata, outputSchema },
     depth: parent.depth + 1,
   });
 }
@@ -231,7 +329,15 @@ export async function subagentPhase(
     const parsed = tool.parameters.safeParse(args);
     if (!parsed.success) {
       return fail("invalid_arguments", {
-        content: `Invalid arguments for ${call.name}: a non-empty "prompt" is required.`,
+        content: `Invalid arguments for ${call.name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "arguments"}: ${i.message}`).join("; ")}`,
+        isError: true,
+      });
+    }
+    // Caps live here, not in the schema: the schema is part of the prompt fingerprint.
+    const tooBig = contextProblem(parsed.data.context);
+    if (tooBig !== null) {
+      return fail("invalid_arguments", {
+        content: `Invalid arguments for ${call.name}: ${tooBig}`,
         isError: true,
       });
     }
@@ -240,16 +346,7 @@ export async function subagentPhase(
       | TaskDefinition<GenerationInput, GenerationCheckpoint>
       | undefined;
     if (!generation) throw new Error("the generation task kind is not registered");
-    return spawnChild(
-      task,
-      rt,
-      tool.subagent,
-      parsed.data.prompt,
-      args,
-      generation,
-      deps,
-      writeResult,
-    );
+    return spawnChild(task, rt, tool.subagent, parsed.data, args, generation, deps, writeResult);
   }
   return awaitChild(task, rt, link, writeResult);
 }
@@ -259,13 +356,14 @@ function spawnChild(
   task: State,
   rt: Scope,
   spec: SubagentSpec,
-  prompt: string,
+  call: SubagentArgs,
   args: JsonObject,
   generation: TaskDefinition<GenerationInput, GenerationCheckpoint>,
   deps: Deps,
   writeResult: WriteResult,
 ): Promise<Committed> {
   const maxDepth = Math.min(spec.maxDepth, deps.limits.maxSubagentDepth);
+  const label = call.label;
   return rt.commit(async (tx, ops) => {
     const parent = await tx.getConversation(task.conversationId);
     if (!parent) throw new Error(`unknown conversation ${task.conversationId}`);
@@ -290,6 +388,34 @@ function spawnChild(
           content: `Subagent depth limit reached: ${task.input.call.name} would run at depth ${agent.depth}, the maximum is ${maxDepth}. Do the task without delegating it.`,
           isError: true,
           details: { depth: agent.depth, maxDepth },
+        },
+        0,
+      );
+    }
+    // The first entry: the prompt alone, unless context was asked for. Table
+    // reads come before the commit's first write.
+    const mode = override.value?.mode ?? spec.mode ?? "isolated";
+    let fork: string | null = null;
+    if (mode === "fork") {
+      const entries = await parentEntries(tx, task.conversationId);
+      const root = await rootConversationId(tx, parent);
+      const tainted = (await tx.doc(taintDoc, root)).value.tainted;
+      fork = renderForkBlock(entries, { tainted });
+    }
+    const prompt = composeChildPrompt(call.prompt, {
+      preamble: override.value?.contextPreamble,
+      fork,
+      brief: call.context?.brief,
+      files: call.context?.files,
+    });
+    if (prompt.length > deps.limits.maxEntryBytes / 2) {
+      return writeResult(
+        tx,
+        task,
+        "invalid_arguments",
+        {
+          content: `The subagent's task and context are too large (${prompt.length} characters).`,
+          isError: true,
         },
         0,
       );
@@ -322,9 +448,27 @@ function spawnChild(
     return waiting({
       on: [runId],
       phase: SUBAGENT_PHASE,
-      checkpoint: { arguments: args, subagent: { conversationId: child.id, submissionId } },
+      checkpoint: {
+        arguments: args,
+        subagent: { conversationId: child.id, submissionId },
+        ...(label === undefined ? {} : { label }),
+      },
     });
   });
+}
+
+/** The parent's entries, oldest first (read before the commit's first write). */
+async function parentEntries(
+  tx: Parameters<WriteResult>[0],
+  conversationId: string,
+): Promise<EntryRecord[]> {
+  const out: EntryRecord[] = [];
+  for (let cursor: string | null = null; ; ) {
+    const page = await tx.listEntries(conversationId, { limit: MAX_PAGE_LIMIT, cursor });
+    out.push(...page.items);
+    cursor = page.nextCursor;
+    if (cursor === null) return out;
+  }
 }
 
 /** Steps 2 and 3: follow the child's run until its submission settles, then answer. */
@@ -334,8 +478,9 @@ function awaitChild(
   link: SubagentLink,
   writeResult: WriteResult,
 ): Promise<Committed> {
+  const nudge = task.checkpoint?.nudge ?? null;
   return rt.commit(async (tx, ops) => {
-    const sub = await tx.getSubmission(link.submissionId);
+    const sub = await tx.getSubmission(nudge?.submissionId ?? link.submissionId);
     if (!sub) {
       return writeResult(
         tx,
@@ -345,7 +490,7 @@ function awaitChild(
         0,
       );
     }
-    if (SETTLED.has(sub.status)) return answer(tx, task, link, sub, writeResult);
+    if (SETTLED.has(sub.status)) return answer(tx, ops, rt, task, link, sub, writeResult);
 
     if (sub.status === "active" && sub.taskId !== null) {
       const current = ops.task(sub.taskId);
@@ -368,6 +513,8 @@ function awaitChild(
       settleSubmission(tx, sub, "unanswered", unanswered);
       return answer(
         tx,
+        ops,
+        rt,
         task,
         link,
         { ...sub, status: "unanswered", result: toSubmissionResult(unanswered) },
@@ -394,14 +541,110 @@ function awaitChild(
   });
 }
 
+/** The follow-up asked of a child that answered in text instead of calling `complete_task`. */
+const COMPLETE_NUDGE =
+  "You answered in text, but this task needs a typed result. Call the complete_task tool now with `result` matching the output schema.";
+
 async function answer(
   tx: Parameters<WriteResult>[0],
+  ops: Parameters<Parameters<Scope["commit"]>[0]>[1],
+  rt: Scope,
   task: State,
   link: SubagentLink,
   sub: SubmissionRecord,
   writeResult: WriteResult,
 ) {
-  const depth = (await tx.doc(agentConfigDoc, link.conversationId)).value.depth;
+  const childAgent = (await tx.doc(agentConfigDoc, link.conversationId)).value;
+  const depth = childAgent.depth;
+  const typed = metadataOutputSchema(childAgent.metadata) !== null;
+  const nudged = task.checkpoint?.nudge !== undefined;
+  if (typed) {
+    // The result was committed together with the child's `complete_task`
+    // result, so it is here even if the child's run ended in a crash after it.
+    const stored = (await tx.doc(agentResultDoc, link.conversationId)).value;
+    if (stored !== null) {
+      const details: SubagentDetails = {
+        ...link,
+        depth,
+        status: "done",
+        result: stored.result,
+        ...(nudged ? { nudged: true } : {}),
+      };
+      return writeResult(
+        tx,
+        task,
+        "ok",
+        { content: JSON.stringify(stored.result), details: details as unknown as JsonValue },
+        1,
+      );
+    }
+    if (sub.status === "done") {
+      const a = submissionResult(sub) as SubmissionAnswer | null;
+      const rawText = typeof a?.text === "string" ? a.text : "";
+      if (!nudged) {
+        // One automatic follow-up asking the child to call complete_task.
+        const generation = rt.runtime.registry.get(GENERATION_TASK_KIND) as unknown as
+          | TaskDefinition<GenerationInput, GenerationCheckpoint>
+          | undefined;
+        if (!generation) throw new Error("the generation task kind is not registered");
+        const submissionId = tx.mintId("submission");
+        const runId = tx.mintId("task");
+        const input: SubmissionInputRecord = {
+          content: COMPLETE_NUDGE,
+          type: "input",
+          whenBusy: "followUp",
+          untrusted: false,
+        };
+        tx.createSubmission({
+          id: submissionId,
+          conversationId: link.conversationId,
+          requestId: `subagent:${task.id}:complete`,
+          input: toSubmissionInput(input),
+          status: "active",
+          result: null,
+          taskId: runId,
+        });
+        appendUserEntry(
+          tx,
+          link.conversationId,
+          submissionId,
+          COMPLETE_NUDGE,
+          `subagent:${task.id}:complete`,
+        );
+        startRun(tx, ops, generation, link.conversationId, submissionId, runId, childAgent.lane);
+        return waiting({
+          on: [runId],
+          phase: SUBAGENT_PHASE,
+          checkpoint: {
+            arguments: task.checkpoint?.arguments ?? {},
+            subagent: link,
+            ...(task.checkpoint?.label === undefined ? {} : { label: task.checkpoint.label }),
+            nudge: { submissionId },
+          },
+        });
+      }
+      const details: SubagentDetails = {
+        ...link,
+        depth,
+        status: "unanswered",
+        reason: "no_result",
+        rawText,
+        nudged: true,
+      };
+      return writeResult(
+        tx,
+        task,
+        "error",
+        {
+          content:
+            "The subagent finished without calling complete_task, even after a reminder, so it returned no typed result.",
+          isError: true,
+          details: details as unknown as JsonValue,
+        },
+        1,
+      );
+    }
+  }
   if (sub.status === "done") {
     const a = submissionResult(sub) as SubmissionAnswer | null;
     const details: SubagentDetails = { ...link, depth, status: "done" };

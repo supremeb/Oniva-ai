@@ -162,6 +162,10 @@
       "cacheTtl": null,
       "lane": "interactive"
     },
+    "context": {
+      "clearedThroughEntryId": null,
+      "clearedTokens": 0
+    },
     "toolOutput": {},
     "compaction": {
       "running": false
@@ -399,6 +403,10 @@
       "cacheTtl": null,
       "lane": "interactive"
     },
+    "context": {
+      "clearedThroughEntryId": null,
+      "clearedTokens": 0
+    },
     "toolOutput": {},
     "compaction": {
       "running": false
@@ -618,6 +626,10 @@
       "deadlineMs": null,
       "cacheTtl": null,
       "lane": "interactive"
+    },
+    "context": {
+      "clearedThroughEntryId": null,
+      "clearedTokens": 0
     },
     "toolOutput": {},
     "compaction": {

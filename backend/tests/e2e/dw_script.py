@@ -16,7 +16,7 @@ rules key on strings only that scenario produces. Three scenarios, each a plan o
 Use ``query(name)`` as the user's question; the intake and plan answers are scripted as well.
 """
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 SCENARIOS = {
     "recovery": {"prefix": "rec", "sandbox": False, "hold": "search"},
@@ -159,3 +159,190 @@ def finish_rules() -> List[Dict[str, Any]]:
             _call("dw_write_section", {"heading": "Method", "markdown": "Two parallel workers and one reflection round."})]),
         _rule({"role": "tool_result", "tool": "dw_finalize"}, [_text(FINAL_TEXT)]),
     ]
+
+
+# --- subagent contract scenarios (U24 eval suite) -------------------------------------------------------------------
+#
+# ``subagent_rules`` builds one complete Deep Work script for the eval tasks of ``evals/tasks/dw_subagents``. The scripted
+# model sees only the last message, so the same scenario is written twice: for the baseline arm (``v2=False``: workers
+# end with a JSON text answer, no verifier) and for the v2 arm (``v2=True``: workers end with ``complete_task``, the
+# orchestrator labels its calls and runs the verifier once before ``dw_finalize``). A scenario ``spec`` (all optional):
+#
+#   prose        {worker_id: "prose" | "partial"}   the worker answers in text that is not the summary object
+#   nudge        "complete" (default) | "ignore"    what a v2 worker does when the engine asks it for complete_task
+#   urls         {worker_id: [url, ...]}            sources the worker saves (default example.com/<id>/1 and /2)
+#   urls_v2      {worker_id: [url, ...]}            the same for the v2 arm (workers told to avoid sibling topics)
+#   bait         "broken_index" | "uncited"         a draft the baseline finalizes as is; the v2 verifier flags it
+#   findings_fixed   text that replaces the bad draft
+#   steer        {worker, message, query, keyword}  v2 arm: ``steer_worker`` in the first round's batch
+#   gap          {worker_id, sub_query, urls, urls_v2}   a second round with one more worker
+
+NUDGE_MARKER = "Call the complete_task tool now"
+STEER_MARKER = "Message from the orchestrator"
+SUBAGENT_FINDINGS = "Researched {a} and {b} [1][2]."
+UNCITED_BACKGROUND = (
+    "Background. The market has several vendors with different tiers, discounts and contract terms, and buyers "
+    "usually compare them on price, support and the length of the commitment before they choose, which is why "
+    "the findings above matter."
+)
+
+
+def _urls_for(worker: str, spec: Dict[str, Any], v2: bool) -> List[str]:
+    gap = spec.get("gap") or {}
+    if gap.get("worker_id") == worker:
+        src = (gap.get("urls_v2") if v2 else None) or gap.get("urls") or {}
+    else:
+        src = (spec.get("urls_v2") if v2 else None) or spec.get("urls") or {}
+    return list(src.get(worker) or [f"https://example.com/{worker}/{n}" for n in (1, 2)])
+
+
+def _learning_at(worker: str, url: str, n: int) -> Dict[str, Any]:
+    return {"fact": f"Finding {n} for {worker}", "source_url": url, "confidence": 0.8,
+            "source_title": f"Source {worker}", "source_type": "web", "quote": f"Quote {n} for {worker}"}
+
+
+def _summary(worker: str, urls: List[str], text: Optional[str] = None) -> Dict[str, Any]:
+    return {"summary": text or f"saved {worker}", "learning_count": len(urls), "source_count": len(urls),
+            "top_findings": [f"Finding 1 for {worker}"],
+            "sources": [{"title": f"Source {worker}", "url": u, "type": "web"} for u in urls]}
+
+
+def _end_steps(v2: bool, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [_call("complete_task", {"result": payload})] if v2 else [_text(json.dumps(payload))]
+
+
+def _worker_rules(w: str, q: str, spec: Dict[str, Any], v2: bool) -> List[Dict[str, Any]]:
+    urls = _urls_for(w, spec, v2)
+    save = _call("dw_save_learnings", {"worker_id": w, "learnings": [_learning_at(w, u, n) for n, u in enumerate(urls, 1)]})
+    kind = (spec.get("prose") or {}).get(w)
+    if kind == "prose":
+        ending = [_text(f"Done. I saved the findings for {w} ({len(urls)} sources). Plain-text recap: prices differ by tier.")]
+    elif kind == "partial":
+        ending = [_text(json.dumps({"summary": f"saved {w}", "note": "partial answer, counts omitted"}))]
+    else:
+        ending = _end_steps(v2, _summary(w, urls))
+    return [
+        _rule({"role": "user", "includes": f"WORKER {w}:"}, [_call("web_search", {"query": q})]),
+        _rule({"role": "tool_result", "tool": "web_search", "includes": f'query": "{q}"'}, [save]),
+        _rule({"role": "tool_result", "tool": "dw_save_learnings", "includes": f'"worker_id": "{w}"'}, ending),
+    ]
+
+
+def _steer_rules(spec: Dict[str, Any], v2: bool) -> List[Dict[str, Any]]:
+    """The steered worker searches the new focus when the orchestrator's message reaches it, then saves it."""
+    steer = spec.get("steer") or {}
+    if not v2 or not steer:
+        return []
+    w, q = steer["worker"], steer["query"]
+    urls = _urls_for(w, spec, v2)
+    focus = _learning_at(w, urls[-1], len(urls) + 1)
+    focus["fact"] = f"Focused finding for {w}: {steer.get('keyword', '')}"
+    # a later save replaces the worker's earlier one, so it carries the first learnings too
+    learnings = [_learning_at(w, url, n) for n, url in enumerate(urls, 1)] + [focus]
+    return [
+        _rule({"role": "user", "includes": STEER_MARKER}, [_call("web_search", {"query": q})]),
+        _rule({"role": "tool_result", "tool": "web_search", "includes": f'query": "{q}"'},
+              [_call("dw_save_learnings", {"worker_id": w, "learnings": learnings})]),
+    ]
+
+
+def _reflector_rules(prefix: str, spec: Dict[str, Any], v2: bool) -> List[Dict[str, Any]]:
+    gap = spec.get("gap") or {}
+    rules: List[Dict[str, Any]] = [
+        _rule({"role": "user", "includes": f"REFLECT {prefix} round 2"}, [_call("dw_get_learnings", {})]),
+        _rule({"role": "user", "includes": f"REFLECT {prefix} round 1"}, [_call("dw_get_learnings", {})]),
+    ]
+    if gap:
+        rules.append(_rule({"role": "tool_result", "tool": "dw_get_learnings", "includes": gap["worker_id"]}, [
+            _call("dw_record_reflection", {"round": 2, "score": 90, "gaps": [], "should_continue": False})]))
+    gaps = [gap["sub_query"]] if gap else []
+    rules.append(_rule({"role": "tool_result", "tool": "dw_get_learnings"}, [
+        _call("dw_record_reflection", {"round": 1, "score": 60 if gap else 90, "gaps": gaps, "should_continue": bool(gap)})]))
+    r2 = {"score": 90, "gaps": [], "round": 2, "continuing": False, "note": f"reflected {prefix} r2"}
+    r1 = {"score": 60 if gap else 90, "gaps": gaps, "round": 1, "continuing": bool(gap),
+          "note": f"reflected {prefix} r1" + (" gap" if gap else "")}
+    rules.append(_rule({"role": "tool_result", "tool": "dw_record_reflection", "includes": '"round": 2'}, _end_steps(v2, r2)))
+    rules.append(_rule({"role": "tool_result", "tool": "dw_record_reflection", "includes": '"round": 1'}, _end_steps(v2, r1)))
+    return rules
+
+
+def subagent_rules(plan_title: str, ids: List[str], queries: List[str], prefix: str, *, v2: bool,
+                   spec: Optional[Dict[str, Any]] = None, findings_md: Optional[str] = None) -> List[Dict[str, Any]]:
+    """All rules of one subagent-contract scenario (orchestrator, workers, reflector, verifier) for one arm."""
+    spec = spec or {}
+    gap, steer, bait = spec.get("gap") or {}, spec.get("steer") or {}, spec.get("bait")
+    findings = findings_md or SUBAGENT_FINDINGS.format(a=queries[0], b=queries[-1])
+    fixed = spec.get("findings_fixed") or findings
+    if bait == "broken_index":
+        findings = f"{findings} The vendor also reports a third-party audit [9]."
+
+    def research(workers: List[str], qs: List[str], extra: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [_call("research_worker", {"prompt": f"WORKER {w}: {q}", **({"label": w} if v2 else {})})
+                for w, q in zip(workers, qs)] + extra
+
+    steer_call = [_call("steer_worker", {"label": steer["worker"], "message": steer["message"]})] if v2 and steer else []
+    reflect_r1 = [_call("reflector", {"prompt": f"REFLECT {prefix} round 1"})]
+    rules: List[Dict[str, Any]] = [
+        _rule({"role": "user", "includes": plan_title}, [_call("dw_start_round", {
+            "round": 1, "workers": [{"worker_id": w, "sub_query": q} for w, q in zip(ids, queries)]})]),
+    ]
+    if gap:  # round 2: one more worker, then its own reflection
+        rules += [
+            _rule({"role": "tool_result", "tool": "dw_start_round", "includes": gap["worker_id"]},
+                  research([gap["worker_id"]], [gap["sub_query"]], [])),
+            _rule({"role": "tool_result", "tool": "research_worker", "includes": f"saved {gap['worker_id']}"},
+                  [_call("reflector", {"prompt": f"REFLECT {prefix} round 2"})]),
+            _rule({"role": "tool_result", "tool": "reflector", "includes": "r1 gap"}, [_call("dw_start_round", {
+                "round": 2, "workers": [{"worker_id": gap["worker_id"], "sub_query": gap["sub_query"]}]})]),
+        ]
+    rules += [  # the steer_worker result can be the last one of the round: it also ends the round
+        _rule({"role": "tool_result", "tool": "dw_start_round", "includes": ids[0]}, research(ids, queries, steer_call)),
+        _rule({"role": "tool_result", "tool": "research_worker"}, reflect_r1),
+        _rule({"role": "tool_result", "tool": "steer_worker"}, reflect_r1),
+    ]
+    # --- the report: Findings [, Background], Method, then (v2) the verifier, then finalize ---
+    sections = [("Findings", findings)]
+    if bait == "uncited":
+        sections.append(("Background", UNCITED_BACKGROUND))
+    sections.append(("Method", "Parallel workers, one reflection round and a verification step." if v2
+                     else "Parallel workers and one reflection round."))
+    fix_section, fix_md = ("Background", fixed) if bait == "uncited" else ("Findings", fixed)
+    if bait == "broken_index":  # the baseline learns of the bad index from the blocked finalize
+        rules.append(_rule({"role": "tool_result", "tool": "dw_finalize", "includes": "Citations out of range"},
+                           [_call("dw_write_section", {"heading": fix_section, "markdown": fix_md})]))
+    rules.append(_rule({"role": "tool_result", "tool": "reflector"},
+                       [_call("dw_write_section", {"heading": sections[0][0], "markdown": sections[0][1]})]))
+    rules.append(_rule({"role": "tool_result", "tool": "dw_write_section", "includes": '"replaced": true'},
+                       [_call("dw_finalize", {})]))
+    for i in range(len(sections) - 1, 0, -1):
+        if i == len(sections) - 1:
+            nxt = [_call("verifier", {"prompt": f"VERIFY {prefix} the draft report"})] if v2 else [_call("dw_finalize", {})]
+        else:
+            nxt = [_call("dw_write_section", {"heading": sections[i + 1][0], "markdown": sections[i + 1][1]})]
+        rules.append(_rule({"role": "tool_result", "tool": "dw_write_section", "includes": sections[i][0]}, nxt))
+    rules.append(_rule({"role": "tool_result", "tool": "dw_write_section"},
+                       [_call("dw_write_section", {"heading": sections[1][0], "markdown": sections[1][1]})]))
+    rules.append(_rule({"role": "tool_result", "tool": "dw_finalize"}, [_text(FINAL_TEXT)]))
+    if v2:
+        verdict = {"unsupported_claims": [], "missing_citations": [], "broken_citations": []}
+        if bait == "broken_index":
+            verdict["broken_citations"] = [{"section": "Findings", "citation": "[9]"}]
+        elif bait == "uncited":
+            verdict["missing_citations"] = [{"section": "Background", "claim": "Several vendors with different tiers"}]
+        rules += [
+            _rule({"role": "user", "includes": f"VERIFY {prefix}"}, [_call("dw_get_report", {})]),
+            _rule({"role": "tool_result", "tool": "dw_get_report"}, [_call("complete_task", {"result": verdict})]),
+            _rule({"role": "tool_result", "tool": "verifier", "includes": '"section"'},
+                  [_call("dw_write_section", {"heading": fix_section, "markdown": fix_md})]),
+            _rule({"role": "tool_result", "tool": "verifier"}, [_call("dw_finalize", {})]),
+        ]
+    # --- workers (a steer message first), the engine's complete_task reminder, the reflector ---
+    rules = _steer_rules(spec, v2) + rules
+    for w, q in zip(ids + ([gap["worker_id"]] if gap else []), queries + ([gap["sub_query"]] if gap else [])):
+        rules += _worker_rules(w, q, spec, v2)
+    if v2:
+        done = ([_call("complete_task", {"result": _summary("nudged", [], "completed after the reminder")})]
+                if spec.get("nudge", "complete") == "complete" else [_text("Plain-text recap again: I have nothing more to add.")])
+        rules.append(_rule({"role": "user", "includes": NUDGE_MARKER}, done))
+    rules += _reflector_rules(prefix, spec, v2)
+    return rules

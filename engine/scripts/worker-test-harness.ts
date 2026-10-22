@@ -16,6 +16,8 @@
  *   exiting, as bytes already handed to the kernel would still arrive);
  * - the workflow task kinds are registered against the backend node gateway (`ENGINE_WORKFLOW_BACKEND_URL`,
  *   else `ENGINE_GATEWAY_URL`);
+ * - the `memory_curate` task kind is registered when `ENGINE_MEMORY_BACKEND_URL` is set, or `ENGINE_MEMORY_CURATE=1`
+ *   with `ENGINE_GATEWAY_URL` (as `scripts/worker.ts` does); otherwise it is not;
  * - storage commits are timed for the load scenario.
  *
  * Test-only routes (bearer token required): `GET|POST /v1/test/clock`
@@ -29,6 +31,7 @@ import { bearerMatches, headerValue } from "../src/server/auth.js";
 import type { CommitBatch, SessionStorage, StorageProvider } from "../src/storage/types.js";
 import {
   createWorkerPool,
+  memoryBackendOptions,
   requireWorkflowBackend,
   WorkerConfigError,
   workerConfigFromEnv,
@@ -136,8 +139,10 @@ async function main(): Promise<number> {
     return 2;
   }
   let config: ReturnType<typeof workerConfigFromEnv>;
+  let memory: ReturnType<typeof memoryBackendOptions>;
   try {
     config = workerConfigFromEnv(process.env);
+    memory = memoryBackendOptions(config);
   } catch (err) {
     if (err instanceof WorkerConfigError) {
       process.stderr.write(`engine test harness: ${err.message}\n`);
@@ -223,10 +228,15 @@ async function main(): Promise<number> {
       config.workflowBackendUrl === null
         ? null
         : { ...requireWorkflowBackend(config), fetch: delayedFetch(pauses) },
+    // The `memory_curate` task kind (U30): opt-in through the same env as scripts/worker.ts
+    // (ENGINE_MEMORY_BACKEND_URL, or ENGINE_MEMORY_CURATE=1 with ENGINE_GATEWAY_URL); null (unregistered) otherwise.
+    memory,
     approvalTtlMs: config.approvalTtlMs,
     questionTtlMs: config.questionTtlMs,
     subagentTool: config.subagentTool,
     subagentTools: config.subagentTools,
+    steerWorker: config.steerWorker,
+    completeTask: config.completeTask,
     clock,
     settings: {
       progressIntervalMs: config.progressIntervalMs,

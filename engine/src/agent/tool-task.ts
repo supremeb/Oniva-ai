@@ -81,6 +81,7 @@ import {
   requestApproval,
   resultApproval,
 } from "./approvals.js";
+import { resolveCompactionSettings } from "./compaction.js";
 import {
   ENTRY_KINDS,
   type ToolResultPayload,
@@ -89,6 +90,7 @@ import {
 } from "./context-builder.js";
 import { type AgentErrorReporter, type HookRunner, isToolResult } from "./hooks.js";
 import { runLane } from "./lane.js";
+import { maybeOffload, type OffloadStore } from "./offload.js";
 import { authorize, type HostPolicy } from "./policy.js";
 import {
   appendOutput,
@@ -97,7 +99,7 @@ import {
   toolOutputDoc,
   toolOutputIntervalMs,
 } from "./progress.js";
-import { type AgentConfig, agentConfigDoc } from "./prompt.js";
+import { type AgentConfig, agentConfigDoc, type CompactionOverrides } from "./prompt.js";
 import {
   ANSWER_SIGNAL,
   answerText,
@@ -107,10 +109,13 @@ import {
   questionsDoc,
   requestQuestion,
 } from "./questions.js";
-import { isSubagentTool, SUBAGENT_PHASE, type SubagentLink, subagentPhase } from "./subagents.js";
+import { SUBAGENT_PHASE, type SubagentLink, subagentPhase } from "./subagents.js";
 import { markTainted, rootConversationId, taintOf, taintSummary, toolTaints } from "./taint.js";
 
 export const TOOL_TASK_KIND = "agent.tool";
+
+/** The general phase of a tool with an `enginePhase` handler. */
+export const ENGINE_PHASE = "engine";
 
 /** Everything the agent's task handlers need from the harness. */
 export interface AgentDeps {
@@ -131,6 +136,13 @@ export interface AgentDeps {
   freshIntents: Set<string>;
   /** Expiry of an `ask_user` question in ms after it is asked; null for none. */
   questionTtlMs: number | null;
+  /**
+   * Where Tier 0 puts a large tool result (`offload.ts`). Absent: nothing is
+   * offloaded, whatever the conversation's settings say.
+   */
+  offload?: OffloadStore | undefined;
+  /** Harness-level compaction settings, under a conversation's `agent.compaction`. */
+  compactionDefaults?: CompactionOverrides | undefined;
 }
 
 export type ToolCallInput = {
@@ -152,7 +164,16 @@ export type ToolTaskInput = {
  * The intent: the final, authorized arguments. A subagent call also records
  * its child conversation and submission once it has created them.
  */
-export type ToolTaskCheckpoint = { arguments: JsonObject; subagent?: SubagentLink } | null;
+export type ToolTaskCheckpoint = {
+  arguments: JsonObject;
+  subagent?: SubagentLink;
+  /** A subagent call's optional label (U18), for steering by name. */
+  label?: string;
+  /** A typed-result subagent's one follow-up submission to its child (U19). */
+  nudge?: { submissionId: string };
+  /** `steer_worker`: how many times it waited for a same-round worker to start (U21). */
+  steerWaits?: number;
+} | null;
 
 /** A tool task's `done` value. */
 export type ToolTaskValue = {
@@ -384,6 +405,13 @@ function issuesText(issues: ReadonlyArray<{ path: PropertyKey[]; message: string
   return issues.map((i) => `${i.path.map(String).join(".") || "(root)"}: ${i.message}`).join("; ");
 }
 
+/** What a call that ran needs to offload its result. */
+interface OffloadContext {
+  conversation: ToolConversation;
+  agent: AgentConfig;
+  signal: AbortSignal;
+}
+
 type Scope = TaskScope<ToolTaskCheckpoint>;
 type State = TaskState<ToolTaskInput, ToolTaskCheckpoint>;
 
@@ -393,8 +421,51 @@ const rootOf = (conversation: ToolConversation): string => conversation.rootId ?
 export function toolTaskDefinition(
   deps: AgentDeps,
 ): TaskDefinition<ToolTaskInput, ToolTaskCheckpoint> {
+  /**
+   * Tier 0 (R11): the result to commit. Cap it to the entry limits, then, when
+   * the conversation turns offload on and a store is configured, move a big
+   * one out of context. Runs before the commit, never inside it: the store
+   * call is network I/O.
+   */
+  const settle = async (
+    task: State,
+    result: ToolResult,
+    offload: OffloadContext | undefined,
+  ): Promise<ToolResult> => {
+    const capped = capToolResult(
+      task.input.call,
+      result,
+      deps.limits.maxEntryBytes,
+      deps.limits.maxToolResultTokens,
+    );
+    if (!deps.offload || !offload) return capped;
+    const warn = (err: unknown) =>
+      deps.report(err, {
+        during: "offload",
+        taskId: task.id,
+        conversationId: task.conversationId,
+      });
+    let settings: ReturnType<typeof resolveCompactionSettings>;
+    try {
+      settings = resolveCompactionSettings(deps.compactionDefaults, offload.agent.compaction);
+    } catch (err) {
+      warn(err);
+      return capped;
+    }
+    return maybeOffload({
+      store: deps.offload,
+      settings,
+      conversation: offload.conversation,
+      runId: task.input.runId,
+      call: task.input.call,
+      result: capped,
+      signal: offload.signal,
+      onWarning: warn,
+    });
+  };
+
   /** Commit the result entry and finish. */
-  const finish = (
+  const finish = async (
     task: State,
     rt: Scope,
     status: ToolResultStatus,
@@ -405,9 +476,12 @@ export function toolTaskDefinition(
       prepare?: ((tx: Transaction) => Promise<unknown>) | undefined;
       /** Root conversation to taint when the call ran and its result is untrusted. */
       taintRoot?: string | undefined;
+      /** Set for a call that ran (or whose outcome was reconciled): its result may be offloaded. */
+      offload?: OffloadContext | undefined;
     } = {},
-  ): Promise<Committed> =>
-    rt.commit(async (tx) => {
+  ): Promise<Committed> => {
+    const settled = await settle(task, result, options.offload);
+    return rt.commit(async (tx) => {
       if (options.prepare) await options.prepare(tx);
       if (options.taintRoot !== undefined) {
         await markTainted(tx, options.taintRoot, {
@@ -417,14 +491,9 @@ export function toolTaskDefinition(
         });
       }
       if (options.output) (await tx.doc(toolOutputDoc, task.id)).set(options.output);
-      const capped = capToolResult(
-        task.input.call,
-        result,
-        deps.limits.maxEntryBytes,
-        deps.limits.maxToolResultTokens,
-      );
-      return writeToolResult(tx, task, status, capped, attempts);
+      return writeToolResult(tx, task, status, settled, attempts);
     });
+  };
 
   /**
    * Ask a person (a `humanInput` tool): commit the question together with the
@@ -556,8 +625,9 @@ export function toolTaskDefinition(
             });
           }
           case "allow": {
-            if (isSubagentTool(tool)) {
-              return rt.commit(() => next(SUBAGENT_PHASE, { arguments: args }));
+            if (tool.enginePhase) {
+              const phase = tool.enginePhase.phase;
+              return rt.commit(() => next(phase, { arguments: args }));
             }
             if (tool.humanInput) return askQuestion(task, rt, args);
             const intent = await rt.commit(() => next("execute", { arguments: args }));
@@ -609,8 +679,9 @@ export function toolTaskDefinition(
         }
         const approvedArgs = task.checkpoint?.arguments ?? {};
         const approvedTool = deps.tools.get(task.input.call.name);
-        if (isSubagentTool(approvedTool)) {
-          return rt.commit(() => next(SUBAGENT_PHASE, { arguments: approvedArgs }));
+        if (approvedTool?.enginePhase) {
+          const phase = approvedTool.enginePhase.phase;
+          return rt.commit(() => next(phase, { arguments: approvedArgs }));
         }
         if (approvedTool?.humanInput) return askQuestion(task, rt, approvedArgs);
         const intent = await rt.commit(() => next("execute", { arguments: approvedArgs }));
@@ -683,7 +754,7 @@ export function toolTaskDefinition(
         let attempt = 1;
         if (!fresh) {
           if (tool.replay !== "safe")
-            return recover(task, rt, ctx, tool, parsed.data, conversation, stored);
+            return recover(task, rt, ctx, tool, parsed.data, conversation, agent, stored);
           attempt = stored.attempt + 1;
           await rt.write(async (tx) => {
             (await tx.doc(toolOutputDoc, task.id)).set({
@@ -698,7 +769,8 @@ export function toolTaskDefinition(
         return run(task, rt, ctx, tool, parsed.data, args, conversation, agent, attempt);
       },
 
-      [SUBAGENT_PHASE]: (task, rt) => subagentPhase(deps, task, rt, writeToolResult),
+      [ENGINE_PHASE]: (task, rt) => enginePhase(task, rt),
+      [SUBAGENT_PHASE]: (task, rt) => enginePhase(task, rt),
     },
     onAbort: async (task, scope) => {
       if (task.phase === "approved") {
@@ -713,6 +785,26 @@ export function toolTaskDefinition(
     },
   });
 
+  /**
+   * Runs the tool's `enginePhase` handler (the seam, KTD12). A task parked in
+   * the legacy `subagent` phase whose tool is no longer registered (or no
+   * longer declares the seam) still follows its child to the end.
+   */
+  async function enginePhase(task: State, rt: Scope): Promise<Committed> {
+    const handler = deps.tools.get(task.input.call.name)?.enginePhase;
+    if (handler) return handler.run(deps, task, rt, writeToolResult);
+    if (task.phase === SUBAGENT_PHASE) return subagentPhase(deps, task, rt, writeToolResult);
+    return rt.commit((tx) =>
+      writeToolResult(
+        tx,
+        task,
+        "error",
+        { content: `Tool "${task.input.call.name}" is no longer registered.`, isError: true },
+        0,
+      ),
+    );
+  }
+
   async function recover(
     task: State,
     rt: Scope,
@@ -720,10 +812,12 @@ export function toolTaskDefinition(
     tool: ToolDefinition,
     args: unknown,
     conversation: ToolConversation,
+    agent: AgentConfig,
     stored: ToolOutputState,
   ): Promise<Committed> {
     const { call, runId } = task.input;
     const taintRoot = toolTaints(tool) ? rootOf(conversation) : undefined;
+    const offload: OffloadContext = { conversation, agent, signal: ctx.signal };
     if (tool.reconcile) {
       const api: ToolReconcileApi = {
         ctx,
@@ -737,7 +831,10 @@ export function toolTaskDefinition(
       try {
         const outcome = await tool.reconcile(args, api);
         if (outcome !== null && isToolResult(outcome)) {
-          return finish(task, rt, resultStatus(outcome), outcome, stored.attempt, { taintRoot });
+          return finish(task, rt, resultStatus(outcome), outcome, stored.attempt, {
+            taintRoot,
+            offload,
+          });
         }
       } catch (err) {
         ctx.throwIfCancelled();
@@ -751,6 +848,7 @@ export function toolTaskDefinition(
     ctx.throwIfCancelled();
     return finish(task, rt, "interrupted", interruptedResult(stored), stored.attempt, {
       taintRoot,
+      offload,
     });
   }
 
@@ -845,6 +943,7 @@ export function toolTaskDefinition(
     return finish(task, rt, status, result, attempt, {
       output: touched ? output : undefined,
       taintRoot: toolTaints(tool) ? rootOf(conversation) : undefined,
+      offload: { conversation, agent, signal: ctx.signal },
     });
   }
 }

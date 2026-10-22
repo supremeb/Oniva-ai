@@ -1,0 +1,28 @@
+{
+  "key": "3e68a449335bfdb2aca1eae6b12677dcffb54129c28364e610ae4d4eb744c9c3",
+  "tool": "web_search",
+  "args": {
+    "query": "heat pump installer subsidies in aldermark and brennick",
+    "num_results": 5
+  },
+  "result": {
+    "query": "heat pump installer subsidies in aldermark and brennick",
+    "results": [
+      {
+        "title": "Synthetic source or-w4 1",
+        "url": "https://example.com/or-w4/1",
+        "snippet": "About heat pump installer subsidies in aldermark and brennick, part 1"
+      },
+      {
+        "title": "Synthetic source or-w4 2",
+        "url": "https://example.com/or-w4/2",
+        "snippet": "About heat pump installer subsidies in aldermark and brennick, part 2"
+      },
+      {
+        "title": "Synthetic source or-w4 3",
+        "url": "https://example.com/shared/or-national",
+        "snippet": "About heat pump installer subsidies in aldermark and brennick, part 3"
+      }
+    ]
+  }
+}

@@ -1,6 +1,7 @@
 # Judge calibration labels
 
-One `<judge>.jsonl` per judge in `evals/judges/`: 20 `yes` and 20 `no` examples each (200 rows), the minimum per
+One `<judge>.jsonl` per judge in `evals/judges/`: 20 `yes` and 20 `no` examples each (200 rows; `recall_probe` has 25
+pairs, the last five on early-ID probes for the long-session suite), the minimum per
 class that `python -m evals.calibrate` requires.
 
 ## Every label here is a DRAFT and needs human review
@@ -19,6 +20,17 @@ These rows were written by an AI assistant, not verified by a person. Each row c
 - Pairs make the set easy to learn from. Add harder, unpaired examples from real failed trials while reviewing.
 - Known borderline rows to look at first: `recall_probe` rows whose answer hedges but states the right value, and
   `claim_supported` rows that need a small inference from the evidence.
+
+`claim_supported.jsonl` also holds 12 rows (`cs-sa-*`, rationale prefixed `subagent-suite (U24)`) written for the
+Deep Work subagent suite: claims whose attribution was swapped between two workers' learnings, claims that merge a
+second subject into one learning, claims that add an unsupported detail, and a citation that maps to no learning. They
+are `reviewed: false` like the rest and need the same human pass before the judge can gate Gate C's unsupported-claim
+criterion.
+
+`memory_applied.jsonl` also holds 24 rows (`mp-NN-*`, rationale prefixed `preference-probe suite (U34)`), one pair per
+preference probe of `evals/tasks/memory_prefs`: the stored memory text, the question asked in the second conversation, and
+a response that follows the preference (`yes`) or ignores it (`no`). They are `reviewed: false` like the rest; the judge is
+advisory in the preference tasks (`gating: false`) until a person has reviewed them and a fresh calibration passes.
 
 Row format: `{"id", "label": "yes"|"no", "input": {<the judge's fields>}, "reviewed", "review_note", "draft_rationale"}`.
 Input fields per judge are in `evals/graders/judge.py` (`JUDGE_FIELDS`). All text is synthetic; no real data.

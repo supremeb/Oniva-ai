@@ -1,0 +1,18 @@
+{
+  "key": "de1c78dc37ec22bffbe14d789cd90f70910d6abe86d9b319ba3c86b4d4eec2c2",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 14 maintenance contract tiers overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 14 maintenance contract tiers overview",
+    "results": [
+      {
+        "title": "maintenance contract tiers source 1",
+        "url": "https://example.com/rt/14/1",
+        "snippet": "maintenance contract tiers: general information, opening hours and published limits."
+      }
+    ]
+  }
+}

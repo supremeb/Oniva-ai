@@ -54,27 +54,45 @@ def request_key(tool: str, args: Mapping[str, Any]) -> str:
     return hashlib.sha256(_canonical({"tool": tool, "args": normalize(tool, args)}).encode()).hexdigest()
 
 
-def write_fixture(root: Path | str, key: str, tool: str, args: Mapping[str, Any], result: Any) -> Path:
-    """Store a fixture and register it in ``index.json``. Results are stored as given."""
+def write_fixture(root: Path | str, key: str, tool: str, args: Mapping[str, Any], result: Any,
+                  *, name: str | None = None) -> Path:
+    """Store a fixture and register it in ``index.json``. Results are stored as given.
+
+    The file is ``<key>.json``, or ``<name>.json`` when ``name`` is given (U34: the memory red team's hand-named
+    ``poison_*.json``); the index then records the file name so replay can find it.
+    """
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     norm = normalize(tool, args)
-    path = root / f"{key}.json"
+    path = root / f"{name or key}.json"
     _atomic_write(path, json.dumps({"key": key, "tool": tool, "args": norm, "result": result},
                                    ensure_ascii=False, indent=2))
     index_path = root / "index.json"
     index = json.loads(index_path.read_text()) if index_path.exists() else {}
-    index[key] = {"tool": tool, "args": norm}
+    index[key] = {"tool": tool, "args": norm, **({"file": path.name} if name else {})}
     _atomic_write(index_path, json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True))
     return path
 
 
+def fixture_path(root: Path | str, key: str) -> Path | None:
+    """The file holding fixture ``key``: ``<key>.json``, else the file the index names for it."""
+    root = Path(root)
+    path = root / f"{key}.json"
+    if path.is_file():
+        return path
+    index_path = root / "index.json"
+    if index_path.is_file():
+        name = (json.loads(index_path.read_text()).get(key) or {}).get("file")
+        if isinstance(name, str) and name.endswith(".json") and "/" not in name and name != "index.json":
+            alias = root / name
+            return alias if alias.is_file() else None
+    return None
+
+
 def read_fixture(root: Path | str, key: str) -> Any | None:
     """The stored result, or ``None`` on a miss."""
-    path = Path(root) / f"{key}.json"
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())["result"]
+    path = fixture_path(root, key)
+    return None if path is None else json.loads(path.read_text())["result"]
 
 
 def _is_error(result: Any) -> bool:

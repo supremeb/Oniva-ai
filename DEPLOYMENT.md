@@ -426,6 +426,150 @@ engine routes).
 
 **Smoke test**: `ONIVA_E2E=1 uv run pytest -m e2e tests/e2e/test_engine_smoke.py` (needs Node 22, `initdb`/`pg_ctl`).
 
+### Deep Work subagent contract v2 (`ENABLE_ENGINE_SUBAGENT_V2`)
+
+Off by default (flags and rollout plan: `docs/plans/2026-10-21-001-...`, Phase C, U22). With the flag off, the
+Deep Work execute config and every prompt are byte-identical to before. With it on, the execute config:
+
+- gives the research worker and the reflector an `outputSchema` (the worker's is the same
+  `summary` / `learning_count` / `source_count` / `top_findings` / `sources` object the Deep Work card has always
+  parsed) so they end by calling `complete_task`;
+- passes each worker a `contextPreamble` listing the other workers' sub-queries, and tells the orchestrator to pass
+  `label = worker_id` on every `research_worker` call and a `context.brief` on gap rounds;
+- adds the `verifier` subagent (tools `dw_get_report`, `dw_get_learnings` only), run once before `dw_finalize`,
+  and the `steer_worker` tool for the orchestrator;
+- with `fork` on, runs the reflector in `mode: "fork"` (it sees the parent's recent conversation, bodies elided).
+
+The flag resolves like the others: tenant `features.ENABLE_ENGINE_SUBAGENT_V2` first, then the global setting.
+`ENGINE_SUBAGENT_V2_SWITCHES` (default `typed_results,verifier,steer_worker,fork`) narrows which pieces a tenant
+with the flag on gets. The config is read when a run starts, so running conversations keep their config.
+
+**The engine worker must be started to match** (the engine only runs tools its worker registered, so a tool the
+config names but the worker lacks cannot be used):
+
+```bash
+ENGINE_SUBAGENT_TOOLS=research_worker,reflector,output_agent,verifier \
+ENGINE_COMPLETE_TASK=1 \
+ENGINE_STEER_WORKER=1 \
+npm run worker
+```
+
+Roll the engine workers first (the new names are inert while the flag is off), then turn the flag on. To roll back,
+turn the flag off; new runs use the legacy config and in-flight runs finish with theirs. The default flips only
+after Gate C (U24).
+
+### Context tiers: rollout and kill switch
+
+Tiered context reduction keeps long conversations small: Tier 0 saves a big tool result to the conversation
+workspace and leaves a preview and a pointer, Tier 1 shows old tool results as one-line stubs (view only; stored
+entries never change), Tier 2 writes structured summaries when a conversation does compact. **It ships off.** Nothing
+changes until `ENGINE_CONTEXT_TIERS` is raised, and it is raised only after Gate B passes (below).
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `ENGINE_CONTEXT_TIERS` | `off` | `off`, `offload`, `offload+clear` or `full` (each includes the one before). An unknown value means `off` |
+| `features.ENABLE_ENGINE_CONTEXT_TIERS` | absent | Per-tenant override in the tenant's `features`. `true` gives that tenant `full`, `false` gives it `off`, in both cases over the global value |
+| `ENGINE_CONTEXT_OFFLOAD_TOKENS` | `8000` | A tool result above this is saved out of context |
+| `ENGINE_CONTEXT_CLEAR_FRACTION` | `0.5` | Clearing starts at this fraction of the model's context window |
+| `ENGINE_CONTEXT_KEEP_TOOL_RESULTS` | `5` | The newest tool results are never cleared |
+| `ENGINE_CONTEXT_CLEAR_AT_LEAST_TOKENS` | `8000` | A clearing pass must free at least this much |
+
+The tier is read when a conversation's agent config is built (creation, or `PUT .../agent`). **Existing
+conversations keep their behaviour until they are reconfigured**, in both directions.
+
+**Kill switch.** To turn the tiers off for new conversations:
+
+1. Find tenants that opted in and set the flag to `false` (or remove the key so they follow the global value). A
+   tenant flag wins over the global, so `ENGINE_CONTEXT_TIERS=off` alone does not switch off a tenant with the flag
+   set to `true`:
+
+   ```sql
+   SELECT id, name FROM tenants WHERE settings->'features'->>'ENABLE_ENGINE_CONTEXT_TIERS' = 'true';
+   ```
+
+2. Set `ENGINE_CONTEXT_TIERS=off` on the backend and roll it.
+3. Reconfigure running conversations if they must stop at once. Turning clearing off restores verbatim tool results
+   in the next request; results already offloaded stay in the workspace and the model can still read them with
+   `read_file`. Nothing is deleted.
+
+**Rollout order.** Gate B decides which tiers ship; a tier that fails its criteria stays off while the others go on.
+
+1. Run the long-session suite: `cd backend && uv run --env-file .env python -m evals.cli run --suite long_session --mode live -k 3 --max-usd 30`
+   (three arms: `off`, `offload+clear`, `full`; see `TESTING.md` for the eval setup). Then run the regression suite
+   once per arm under test with `--tiers <arm>` and read everything with `python -m evals.cli gate-b <report>`.
+   The live run spends real credit; the key is the separate eval key, never a deployed one.
+2. On a pass the gate records `evals/baselines/phaseB-<date>.json`.
+3. Raise `ENGINE_CONTEXT_TIERS` one step at a time (`offload`, then `offload+clear`, then `full`) on an internal
+   environment first. The global value applies to every tenant of that environment; only `full` can be given to a
+   single tenant (through the flag), so the two intermediate steps are an environment-wide change, not an opt-in.
+4. Watch, after each step: engine run failures (`context_overflow`, `compaction_failed`), calls to
+   `/internal/workspace/offload` that fail (the engine keeps the full result when the store fails, so a failing
+   store looks like no effect, not an error), and cost per conversation. Roll back with the kill switch above.
+
+### Project memory: rollout order and kill switches
+
+Project memory lets a project remember across conversations: `core.md` and a file index are shown at the start of
+every chat, the model has five `memory_*` tools, Deep Work gets a playbook of short lessons, and a curator proposes
+lessons after a run. **It ships off at three independent levels, and all three must be on for anything to happen.**
+
+| Switch | Default | Where | Effect when off |
+|--------|---------|-------|-----------------|
+| `ENABLE_PROJECT_MEMORY` (global) and `features.ENABLE_PROJECT_MEMORY` (per tenant, wins over the global) | `false` | backend env / tenant `features` | no memory tools, no injected block, no playbook, API answers 404, a tool call is refused |
+| project `settings.memory.enabled` | `false` | each project | the same, for that project only |
+| `MEMORY_CURATOR_MODE` | `off` | backend env | no curation: the Deep Work trigger, the chat sweep and `prepare` all do nothing |
+
+The curator also needs the engine worker to register its task: set `ENGINE_MEMORY_CURATE=1` (with `ENGINE_GATEWAY_URL`
+set) or `ENGINE_MEMORY_BACKEND_URL` on the worker. Without it the backend sees no `memory_curate` task kind and does not
+start one. Related limits: `MEMORY_CURATOR_DAILY_BUDGET_USD` (per tenant per UTC day, default 1.0),
+`MEMORY_CURATE_MAX_RUNS_PER_TENANT_DAY`, `MEMORY_CURATE_MIN_TURNS`, `MEMORY_CURATE_IDLE_S`,
+`MEMORY_RETENTION_DAYS` (pending rows nobody approved are swept) and `MEMORY_BULLET_IDLE_RUNS`.
+
+**What the curator may do.** Curator modes: `propose` makes every result `pending` (invisible to the model until a person
+approves it in the project's Memory tab); `auto` lets results from an untainted source be `active`. A tainted source
+(its conversation read web pages, files, connector output or knowledge-base text) can only add `pending` rows in either
+mode, never revise, retire or bump existing ones. Every Deep Work run is tainted (the reflector reads web-derived
+learnings), so for Deep Work `auto` behaves like `propose`: a playbook reaches a Deep Work prompt only after a person
+approves its bullets. A model's own `memory_*` write needs an approval when its conversation is tainted and is refused
+when nobody can approve it.
+
+**Rollout order.** Deploy order is engine first, then backend, then the flags (as for the other engine features).
+
+1. Run the memory suite: `cd backend && uv run --env-file .env python -m evals.cli run --suite memory --mode live -k 3 --max-usd 40 --out memory.json`,
+   then the regression suite with the flag on, `... run --suite regression --mode live -k 3 --memory manual --out regression-memory.json`,
+   and read everything with `python -m evals.gate_d memory.json --regression-baseline <Gate A regression report> --regression-memory regression-memory.json`.
+   The live run spends real credit (see `TESTING.md` for the eval key). Any poisoning, deletion or isolation failure keeps
+   `ENABLE_PROJECT_MEMORY` off. Fake mode (`--mode fake`, no key, no cost) checks the mechanics only and is never a decision.
+2. Manual tools and injection for an internal tenant: set `features.ENABLE_PROJECT_MEMORY=true` on that tenant and
+   `settings.memory.enabled=true` on its projects. `MEMORY_CURATOR_MODE` stays `off`.
+3. Curator in `propose` for about a week: `MEMORY_CURATOR_MODE=propose` and `ENGINE_MEMORY_CURATE=1` on the worker. Review the
+   pending queue; look at what gets flagged (URLs, e-mail addresses, tool names, imperatives) and at the curator's daily spend.
+4. Curator in `auto` (only untainted chats can produce active rows), then tenant opt-in. The default stays off until
+   the decision is made on Gate D data.
+
+**Kill switches, fastest first.**
+
+- `MEMORY_CURATOR_MODE=off` on the backend: curation stops at once (an in-flight `memory_curate` run applies nothing: `apply`
+  re-checks the mode). Nothing is deleted.
+- Per tenant: set `features.ENABLE_PROJECT_MEMORY` to `false`. The tenant flag wins over the global, so
+  `ENABLE_PROJECT_MEMORY=false` alone does not switch off a tenant that has it set to `true`:
+
+  ```sql
+  SELECT id, name FROM tenants WHERE settings->'features'->>'ENABLE_PROJECT_MEMORY' = 'true';
+  ```
+
+- Per project: set `settings.memory.enabled` to `false`.
+- The memory block, the playbook and the tool grants are decided when a conversation's agent config is built, so a
+  running conversation keeps its block until it is reconfigured (`PUT .../agent`) or a new conversation is opened. Tool
+  calls themselves are refused once the tenant flag is off (tenant flags are cached for up to five minutes).
+- Data: `DELETE /api/v1/projects/{id}/memory` (admins) erases every memory file and bullet of the project, pending ones
+  included; deleting the project does the same. `POST .../memory/export` gives the owner a copy first.
+
+**Known gap (U31).** `deep_work_run_sync.enqueue_curation` runs only from the run reconciler's `on_finished` hook, which looks
+at Deep Work runs still `running`. `dw_finalize` marks a run `completed` inside the tool call, so a run that finishes
+normally is never offered to that hook and the Deep Work curator does not start; the chat sweep is unaffected. The eval
+harness fires the hook itself (`/e2e/memory/deep-work-completed`); `backend/tests/e2e/test_memory_curation_e2e.py` carries
+an expected-failure test that turns green when the trigger is fixed. Until then, the `propose` step above covers chats only.
+
 ## Approvals and audit
 
 A tool call that needs a human is decided by the Python control plane under RBAC; the engine only parks the

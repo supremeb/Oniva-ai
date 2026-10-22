@@ -14,6 +14,7 @@
 
 import { type ApprovalsState, approvalsDoc } from "../agent/approvals.js";
 import { COMPACTION_TASK_KIND, type CompactionState, compactionDoc } from "../agent/compaction.js";
+import { type ContextState, contextDoc } from "../agent/context-clearing.js";
 import { GENERATION_TASK_KIND } from "../agent/generation.js";
 import { type InboxState, inboxDoc } from "../agent/inbox.js";
 import { type LiveState, liveDoc, type ToolOutputState, toolOutputDoc } from "../agent/progress.js";
@@ -43,6 +44,8 @@ export interface ConversationView {
   questions: QuestionsState;
   usage: UsageTotals;
   agent: AgentConfig;
+  /** Tier 1 clearing watermark (the `agent.context` document): what is shown as cleared. */
+  context: ContextState;
   /** Partial output by tool task id; each carries the `toolCallId` / `toolName` it belongs to. */
   toolOutput: { [toolTaskId: string]: ToolOutputState };
   /** Whether a context compaction is in flight (derived from the `agent.compaction` document). */
@@ -326,7 +329,7 @@ function compactionView(
   };
 }
 
-type DocKey = "live" | "inbox" | "approvals" | "questions" | "usage" | "agent";
+type DocKey = "live" | "inbox" | "approvals" | "questions" | "usage" | "agent" | "context";
 
 /** Conversation-scoped documents in the view, by document kind. */
 export const VIEW_DOCUMENTS: Readonly<Record<string, DocKey>> = Object.freeze({
@@ -336,6 +339,7 @@ export const VIEW_DOCUMENTS: Readonly<Record<string, DocKey>> = Object.freeze({
   [questionsDoc.kind]: "questions",
   [usageDoc.kind]: "usage",
   [agentConfigDoc.kind]: "agent",
+  [contextDoc.kind]: "context",
 });
 
 /** No conversation with this id in the session. */
@@ -455,6 +459,7 @@ export async function loadViewState(
     questions: await session.document(questionsDoc, conversationId),
     usage: await session.document(usageDoc, conversationId),
     agent: await session.document(agentConfigDoc, conversationId),
+    context: await session.document(contextDoc, conversationId),
     toolOutput,
     compaction: compactionView(
       await session.document(compactionDoc, conversationId),

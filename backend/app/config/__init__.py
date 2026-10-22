@@ -376,7 +376,40 @@ class Settings(BaseSettings):
     ENABLE_ENGINE_DEEP_WORK: bool = False  # global gate for engine-backed Deep Work; tenants opt in via settings.features
     ENABLE_ENGINE_FLEET: bool = False  # global gate for engine-backed Fleet runs; tenants opt in via settings.features
     ENABLE_ENGINE_WORKFLOWS: bool = False  # global gate for engine-backed workflow runs; tenants opt in via settings.features
+    # Project memory (U26): global gate for the memory tools; tenants override via settings.features.
+    ENABLE_PROJECT_MEMORY: bool = False
+    # Project memory retention (U32): pending rows nobody approved are swept after this many days.
+    MEMORY_RETENTION_DAYS: int = 30
+    # Playbook bullets (U27): an active bullet not bumped for this many runs is retired.
+    MEMORY_BULLET_IDLE_RUNS: int = 20
+    # Memory curator (U31, KTD18). off (default: nothing triggers, no sweep) | propose (every added row is
+    # pending) | auto (untainted results become active; tainted stay pending). Unknown value = off. The engine
+    # worker must also run with ENGINE_MEMORY_CURATE=1.
+    MEMORY_CURATOR_MODE: str = "off"
+    # Per-tenant spend (usage role ``memory_curator``) after which the curator skips for the rest of the UTC day.
+    MEMORY_CURATOR_DAILY_BUDGET_USD: float = 1.0
+    # A chat is curated once it has this many user turns more than the last curated sequence.
+    MEMORY_CURATE_MIN_TURNS: int = 4
+    # Chat sweep: pass interval, idle time before a chat is a candidate, and the per-tenant daily start cap.
+    MEMORY_CURATE_SWEEP_INTERVAL_S: float = 300.0
+    MEMORY_CURATE_IDLE_S: int = 900
+    MEMORY_CURATE_MAX_RUNS_PER_TENANT_DAY: int = 24
     ENGINE_REQUEST_TIMEOUT_S: float = 30.0
+    # Tiered context reduction (evals/context plan, U16). off | offload | offload+clear | full. The per-tenant
+    # flag features.ENABLE_ENGINE_CONTEXT_TIERS (true = full, false = off) overrides this. Read when an agent
+    # config is built, so existing conversations keep their behaviour until reconfigured. Unknown value = off.
+    ENGINE_CONTEXT_TIERS: str = "off"
+    ENGINE_CONTEXT_OFFLOAD_TOKENS: int = 8000        # tool results above this are saved out of context
+    ENGINE_CONTEXT_CLEAR_FRACTION: float = 0.5       # clearing starts at this fraction of the context window
+    ENGINE_CONTEXT_KEEP_TOOL_RESULTS: int = 5        # newest tool results never cleared
+    ENGINE_CONTEXT_CLEAR_AT_LEAST_TOKENS: int = 8000  # a clearing pass must free at least this much
+    # Deep Work subagent contract v2 (evals/context plan, U22): typed worker results (complete_task), labels, sibling
+    # context, steer_worker and a verifier step. The per-tenant flag features.ENABLE_ENGINE_SUBAGENT_V2 overrides this.
+    # The engine worker must also run with ENGINE_COMPLETE_TASK=1 / ENGINE_STEER_WORKER=1 and list "verifier" in
+    # ENGINE_SUBAGENT_TOOLS (DEPLOYMENT.md). Read when the execute config is built; running conversations keep theirs.
+    ENABLE_ENGINE_SUBAGENT_V2: bool = False
+    # Sub-switches applied when the flag is on (comma list of typed_results, verifier, steer_worker, fork).
+    ENGINE_SUBAGENT_V2_SWITCHES: str = "typed_results,verifier,steer_worker,fork"
     # Run reconciler (plan 003 U5): rows stuck active for this long are checked against the engine.
     RUN_RECONCILE_AFTER_S: int = 120
     RUN_RECONCILE_INTERVAL_S: float = 60.0

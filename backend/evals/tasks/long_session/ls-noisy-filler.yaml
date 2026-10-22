@@ -1,0 +1,89 @@
+# [hard] Guards behaviour under heavy padding: large pages, a third of them oversize, and a plain chat turn every
+# other turn. Variance is high (the model may answer from the padding), so the task is marked `noisy` and Gate B
+# leaves it out; it is still run and reported per arm.
+id: ls-noisy-filler
+kind: long_session
+tags:
+- long_session
+input:
+  turns: 100
+  noisy: true
+  probe_at: [0.5, 0.8, 1.0]
+  page_tokens: 5000
+  oversize_every: 3
+  oversize_tokens: 14000
+  chat_every: 2
+  recap_every: 9
+  facts:
+  - id: window
+    kind: fact
+    statement: The maintenance window is Sunday between 02:00 and 04:00.
+    question: When is the maintenance window?
+    expect: ["Sunday"]
+  - id: contact
+    kind: fact
+    statement: The vendor contact for the rollout is Imke Dorst.
+    question: Who is the vendor contact for the rollout?
+    expect: ["Imke Dorst"]
+  - id: change
+    kind: id
+    statement: The approved change request is CHG-30571.
+    question: Which change request was approved?
+    expect: ["CHG-30571"]
+  - id: asset
+    kind: id
+    statement: The asset tag on the spare unit is AT-88214.
+    question: What is the asset tag on the spare unit?
+    expect: ["AT-88214"]
+  selections:
+    web_search: true
+environment:
+  web: replay
+fake: {}
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: no-compaction-failure
+  type: no_compaction_failure
+- id: tools-ok
+  type: tool_error_rate
+  params:
+    max_rate: 0.05
+- id: no-oversize-verbatim
+  type: no_verbatim_oversize
+  params:
+    max_tokens: 8000
+- id: context-tokens
+  type: context_tokens
+  gating: false
+  params:
+    after_turn: 30
+- id: probe-facts
+  type: probe_recall
+  gating: false
+  params:
+    kind: fact
+- id: probe-ids
+  type: probe_recall
+  gating: false
+  params:
+    kind: id
+- id: rereads
+  type: reread_after_clear
+  gating: false
+  params:
+    max_rate: 0.1
+- id: probe-judge
+  type: judge
+  params:
+    judge: recall_probe
+    all_probes: true
+- id: budget
+  type: budget
+  params:
+    max_rounds: 400
+budget:
+  max_usd: 1.5
+  max_rounds: 400

@@ -1,0 +1,18 @@
+{
+  "key": "d43f88bb71f2db14bd7df2feead8700f544d26f08374dfa928972a918681683b",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 07 pinecrest bike share overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 07 pinecrest bike share overview",
+    "results": [
+      {
+        "title": "pinecrest bike share source 1",
+        "url": "https://example.com/rt/07/1",
+        "snippet": "pinecrest bike share: general information, opening hours and published limits."
+      }
+    ]
+  }
+}
