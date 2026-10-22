@@ -106,12 +106,14 @@ def eval_stack(
     web: str = "replay",
     replay_dir: Path | None = None,
     backend_env: Mapping[str, str] | None = None,
+    worker_env: Mapping[str, str] | None = None,
     arm: str | None = None,
 ) -> Iterator[EvalWorld]:
     """Boot the stack for `mode` and `web` (`replay`, `record` or `off`) with one worker running.
 
     `backend_env` is added to the backend's environment (the context-tier arms set `ENGINE_CONTEXT_TIERS` here); it is
-    merged with the subagent arm's env, not replaced by it.
+    merged with the subagent arm's env, not replaced by it. `worker_env` is added to the engine worker's environment
+    (the memory arms register the `memory_curate` task there).
     `arm` selects the subagent contract (`baseline`: v2 off, as shipped; `v2`: `ENABLE_ENGINE_SUBAGENT_V2` on and the
     engine's `complete_task` / `steer_worker` tools registered). Default: the `EVAL_ARM` environment variable.
     """
@@ -137,7 +139,7 @@ def eval_stack(
             **(backend_env or {}),
         }
         worker_command = None
-        worker_env: dict[str, str] = {}
+        worker_extra: dict[str, str] = dict(worker_env or {})
         if mode == "live":
             extra_env.update(
                 {
@@ -147,11 +149,11 @@ def eval_stack(
                 }
             )
             worker_command = ["npm", "run", "--silent", "worker"]
-            worker_env = {KEY_VAR: "", "ENGINE_POLICY": "backend"}
+            worker_extra.update({KEY_VAR: "", "ENGINE_POLICY": "backend"})
         arm_backend, arm_worker = arm_env(arm, mode)
         extra_env.update(arm_backend)
-        worker_env.update(arm_worker)
-        with stack(extra_env=extra_env, worker_command=worker_command, worker_env=worker_env) as world:
+        worker_extra.update(arm_worker)
+        with stack(extra_env=extra_env, worker_command=worker_command, worker_env=worker_extra) as world:
             world.start_worker(1)
             yield EvalWorld(
                 world=world,

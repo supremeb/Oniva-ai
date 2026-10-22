@@ -26,7 +26,7 @@ from .fake_scripts import ScriptError, build_script
 from .graders import GradeContext, grade, to_grader_result
 from .graders.context import trial_metrics
 from .graders.judge import JudgeConfigError, JudgeRunner
-from .ledger import settle_cost, with_ledger_cost
+from .ledger import settle_cost, settle_extra_cost, with_ledger_cost
 from .schema import GraderResult, Task, Trial, TrialResult
 from .stack import FIXTURE_DIR, EvalWorld, LiveModeError, eval_stack, require_live_key
 from .trace import TraceTruncated, flatten
@@ -37,6 +37,8 @@ DEFAULT_TIMEOUT_S = {"fake": 180.0, "live": 900.0}
 def default_timeout(task: Task, mode: str) -> float:
     """Seconds a trial may take: a flat default, more for a long session (it scales with its turns)."""
     base = DEFAULT_TIMEOUT_S[mode]
+    if task.kind == "repeat":  # one trial is `runs` sequential Deep Work runs, each followed by its curation
+        return base * int(task.input.get("runs") or 5)
     return max(base, long_session.timeout_s(task, mode)) if task.kind == "long_session" else base
 
 
@@ -143,6 +145,9 @@ async def run_trial(
         return _failed(trial, "error", "trace_truncated", str(e), started, out.phases)
     # The engine's usage documents have no dollars (the worker has no pricing table); the backend ledger does.
     ledger = await settle_cost(http, ew.world.backend_url, AUTH, out.conversation_id, trace)
+    if out.cost_conversation_ids:  # a memory trial runs more conversations than the one it grades
+        extra = await settle_extra_cost(http, ew.world.backend_url, AUTH, list(out.cost_conversation_ids))
+        ledger = {**ledger, "totalUsd": float(ledger.get("totalUsd") or 0.0) + extra, "extraUsd": extra}
     trace = with_ledger_cost(trace, ledger["totalUsd"])
     gctx = GradeContext(trace=trace, raw=out.raw, files=out.files)
     graders = grade_trace(task, gctx)
@@ -192,6 +197,7 @@ async def run_suite(
     judges: JudgeRunner | bool | None = None,
     tiers: str | None = None,
     arm: str | None = None,
+    memory: str | None = None,
 ) -> list[TrialResult]:
     """Run every task k times; results are in task order, then trial order.
 
@@ -201,6 +207,10 @@ async def run_suite(
     Context tiers (U17): `tiers` pins every task to one `ENGINE_CONTEXT_TIERS` value. Without it, each `long_session`
     task that pins no tier is expanded into one task per arm (`<id>@<tier>`, see `evals.arms`). A stack is booted per
     (web mode, tier) group, so the returned results may name more tasks than were passed.
+
+    Project memory (U34): `memory` pins every task to one memory arm (`control`, `manual`, `propose`, `auto`; see
+    `evals.arms`), for example the regression suite with the flag on. Without it, each `repeat` task runs once per
+    arm (`<id>@propose`, `<id>@control`) and other memory tasks use the arm they declare.
     """
     if k < 1:
         raise ValueError("k must be at least 1")
@@ -209,8 +219,10 @@ async def run_suite(
         if meter is None or meter.max_usd is None or meter.max_usd <= 0:
             raise BudgetConfigError(f"live mode needs a spend cap: set {ENV_VAR} (USD) before running")
     meter = meter or BudgetMeter(None)
+    if memory is not None:
+        tasks = [arms_mod.with_memory(t, memory) for t in tasks]
     if tiers is not None:
-        tasks = [arms_mod.with_tiers(t, tiers) for t in tasks]
+        tasks = arms_mod.expand_memory_arms([arms_mod.with_tiers(t, tiers) for t in tasks])
     else:
         tasks = arms_mod.expand_arms(tasks)
     if judges is None:
@@ -218,18 +230,22 @@ async def run_suite(
     elif isinstance(judges, JudgeRunner) and judges.meter is None:
         judges.meter = meter
     judge_runner = judges if isinstance(judges, JudgeRunner) else None
-    groups: dict[tuple[str, str | None], list[Task]] = {}
+    groups: dict[tuple[str, str | None, str | None], list[Task]] = {}
     for t in tasks:
-        groups.setdefault((t.environment.web, arms_mod.tiers_of(t)), []).append(t)
+        groups.setdefault((t.environment.web, arms_mod.tiers_of(t), arms_mod.memory_of(t)), []).append(t)
     results: dict[tuple[str, int], TrialResult] = {}
     async with httpx.AsyncClient(timeout=60) as http:
-        for (web, tier), group in groups.items():
+        for (web, tier, memory), group in groups.items():
             env = arms_mod.stack_env(tier, mode)
+            memory_backend, memory_worker = arms_mod.memory_stack_env(memory)
+            env = {**env, **memory_backend}
             generated = web != "off" and any(t.kind == "long_session" for t in group)
             base = replay_dir or FIXTURE_DIR
             with contextlib.ExitStack() as stack:
                 directory = stack.enter_context(long_session.replay_dir_for(group, base)) if generated else replay_dir
-                ew = stack.enter_context(eval_stack(mode, web=web, replay_dir=directory, backend_env=env, arm=arm))
+                ew = stack.enter_context(
+                    eval_stack(mode, web=web, replay_dir=directory, backend_env=env, worker_env=memory_worker, arm=arm)
+                )
                 results.update(await run_on_stack(ew, group, k, meter, http, timeout_s, judges=judge_runner))
     return [results[(t.id, i)] for t in tasks for i in range(k)]
 

@@ -1,0 +1,18 @@
+{
+  "key": "a10a3a8cfd6049db89a3329cfa747d7cebd94fe8ae9bcfda13ab388f16e94a5e",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 22 support escalation stats overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 22 support escalation stats overview",
+    "results": [
+      {
+        "title": "support escalation stats source 1",
+        "url": "https://example.com/rt/22/1",
+        "snippet": "support escalation stats: general information, opening hours and published limits."
+      }
+    ]
+  }
+}

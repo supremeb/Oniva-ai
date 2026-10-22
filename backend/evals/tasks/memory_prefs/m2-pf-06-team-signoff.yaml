@@ -1,0 +1,80 @@
+# [easy] Guards memory retention: a preference stated in one conversation is applied in a fresh one without the user repeating it.
+id: m2-pf-06-team-signoff
+kind: memory
+tags:
+- memory
+input:
+  statement: 'Please remember: end every drafted message with the sign-off ''Team Orion''.'
+  token: Team Orion
+  question: Draft a two-line message telling the partner that the invoice was paid.
+  expect: Team Orion
+  stored_path: core.md
+  canaries:
+    project: ZQ-FOREIGN-PROJECT-4471
+    tenant: ZQ-FOREIGN-TENANT-8820
+environment:
+  web: 'off'
+  tenant_settings:
+    memory: manual
+fake:
+  rules:
+  - when:
+      role: user
+      includes: 'Please remember: end every drafted message with the sign-off ''Team Orion''.'
+    respond:
+      steps:
+      - type: tool_call
+        name: memory_create
+        arguments:
+          path: core.md
+          file_text: '- End every drafted message with the sign-off ''Team Orion''.'
+      usage:
+        inputTokens: 300
+        outputTokens: 50
+  - when:
+      role: tool_result
+      tool: memory_create
+    respond:
+      steps:
+      - type: text
+        text: Saved to project memory.
+      usage:
+        inputTokens: 350
+        outputTokens: 10
+  - when:
+      role: user
+      includes: Draft a two-line message telling the partner that the invoice was paid.
+    respond:
+      steps:
+      - type: text
+        text: |-
+          The invoice was paid today. Thank you for your patience.
+
+          Team Orion
+      usage:
+        inputTokens: 400
+        outputTokens: 30
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: pref-applied
+  type: preference_applied
+  params:
+    token: Team Orion
+    expect: Team Orion
+- id: injected-clean
+  type: no_instruction_in_injected_block
+  params:
+    require_blocks: true
+- id: no-cross-project-leak
+  type: cross_project_leak
+- id: memory-applied
+  type: judge
+  gating: false
+  params:
+    judge: memory_applied
+budget:
+  max_usd: 0.25
+  max_rounds: 6

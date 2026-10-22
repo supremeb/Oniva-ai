@@ -12,14 +12,14 @@ import pytest
 from evals import calibrate as cal
 from evals.graders.judge import JUDGE_FIELDS
 from evals.loader import load_tasks, select_by_tags
-from evals.replay import request_key
+from evals.replay import fixture_path, request_key
 from evals.schema import Task
 
 EVALS = Path(__file__).resolve().parents[2] / "evals"
 WEB = EVALS / "fixtures/web"
 CAL = EVALS / "calibration"
 WEB_TOOLS = ("web_search", "browse_url")
-LATER_SUITES = {"dw_subagents"}  # folder names and tags of suites added after the seed corpus
+LATER_SUITES = {"dw_subagents", "memory", "memory_repeat", "memory_prefs", "redteam"}  # folder names and tags of suites added after the seed corpus
 
 
 @pytest.fixture(scope="module")
@@ -35,7 +35,8 @@ def index() -> dict:
 def replayed_requests(task: Task) -> list[tuple[str, dict]]:
     """Every web call a task makes in fake mode, as (tool, args)."""
     calls: list[tuple[str, dict]] = []
-    if task.kind == "deep_work":  # the fake Deep Work script has each worker search its sub_query once
+    runs_deep_work = task.kind in ("deep_work", "repeat") or (task.kind == "redteam" and task.input.get("path") == "dw")
+    if runs_deep_work:  # the fake Deep Work script has each worker search its sub_query once
         for sub in task.input["plan"]["sub_queries"]:
             calls.append(("web_search", {"query": sub["sub_query"]}))
         scenario = task.fake.get("scenario") or {}  # U24: a steered worker and a gap-round worker search once more
@@ -122,18 +123,21 @@ def test_every_replayed_request_has_a_fixture(tasks, index):
             continue
         for tool, args in replayed_requests(t):
             key = request_key(tool, args)
-            if key not in index or not (WEB / f"{key}.json").is_file():
+            if key not in index or fixture_path(WEB, key) is None:
                 missing.append((t.id, tool, args))
     assert not missing, f"no fixture for {missing}"
 
 
 def test_fixtures_are_well_formed_and_used(tasks, index):
     used = {request_key(tool, args) for t in tasks for tool, args in replayed_requests(t)}
-    files = {p.stem for p in WEB.glob("*.json") if p.name != "index.json"}
-    assert files == set(index), "index.json and the fixture files disagree"
-    assert files == used, f"unused fixtures: {sorted(files - used)}"
+    named = {json.loads(p.read_text())["key"]: p for p in WEB.glob("*.json") if p.name != "index.json"}
+    assert set(named) == set(index), "index.json and the fixture files disagree"
+    assert set(named) == used, f"unused fixtures: {sorted(set(named) - used)}"
     for key, meta in index.items():
-        data = json.loads((WEB / f"{key}.json").read_text())
+        path = fixture_path(WEB, key)
+        assert path == named[key]
+        assert path.name == f"{key}.json" or (meta.get("file") == path.name and path.name.startswith("poison_")), path.name
+        data = json.loads(path.read_text())
         assert data["key"] == key and data["tool"] == meta["tool"]
         assert request_key(data["tool"], data["args"]) == key, "file name is not the request hash"
         assert isinstance(data["result"], dict)

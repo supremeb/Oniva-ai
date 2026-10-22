@@ -67,6 +67,10 @@ E = os.environ
 PORT, DB, INFO = int(E["E2E_PORT"]), E["E2E_DB"], E["E2E_INFO"]
 EFFECTS, GATE = Path(E["E2E_EFFECTS"]), Path(E["E2E_GATE"])
 SEED = E.get("E2E_SEED", "1") == "1"
+# Project memory (eval memory suites, U34): the tenants' ENABLE_PROJECT_MEMORY flag and every seeded project's
+# settings.memory.enabled. Off unless E2E_MEMORY=1, so no other e2e changes.
+MEMORY = E.get("E2E_MEMORY") == "1"
+MEMORY_PROJECT_SETTINGS = {"memory": {"enabled": True}} if MEMORY else {}
 DW = dw_fakes.Files(Path(E["E2E_DW_DIR"]))
 TENANT, USER, PROJECT, AGENT = (uuid.UUID(E[k]) for k in (
     "E2E_TENANT_ID", "E2E_USER_ID", "E2E_PROJECT_ID", "E2E_AGENT_ID"))
@@ -134,6 +138,8 @@ async def lifespan(_app):
     from evals import replay  # eval trials: hash-keyed web fixtures; a no-op unless EVAL_REPLAY_MODE + _DIR are set
 
     replay.install_from_env()
+    if MEMORY:
+        _restore_web_taint()
     run_handlers.bootstrap()  # the fleet start / settle hooks, as main.py does
     _serialize_fleet_settle()
     reconciler = RunReconciler(factory, settings, engine_factory=get_engine_client)
@@ -143,6 +149,16 @@ async def lifespan(_app):
         yield
     finally:
         await reconciler.stop()
+
+
+def _restore_web_taint() -> None:
+    """``dw_fakes.install`` re-declares ``web_search`` without ``untrusted_output``, so in every other e2e run a web search
+    does not taint the conversation. The memory suites test what taint gates, so they run with the production spec."""
+    import dataclasses
+
+    from app.internal_api.tool_specs import TOOL_SPECS as specs
+
+    specs["web_search"] = dataclasses.replace(specs["web_search"], untrusted_output=True)
 
 
 def _serialize_fleet_settle() -> None:
@@ -165,11 +181,11 @@ async def _seed():
         db.add(Tenant(id=TENANT, name="e2e", slug=f"e2e-{TENANT.hex[:6]}", is_active=True,
                       settings={"features": {"ENABLE_ENGINE_CHAT": True, "ENABLE_ENGINE_DEEP_WORK": True,
                                              "ENABLE_ENGINE_FLEET": True,
-                                             "ENABLE_ENGINE_WORKFLOWS": True}}))
+                                             "ENABLE_ENGINE_WORKFLOWS": True, **MEMORY_FLAG}}))
         await db.commit()
         db.add(User(id=USER, tenant_id=TENANT, email="e2e@x.io", name="e2e"))
         await db.commit()
-        db.add(Project(id=PROJECT, tenant_id=TENANT, name="e2e", owner_id=USER))
+        db.add(Project(id=PROJECT, tenant_id=TENANT, name="e2e", owner_id=USER, settings=MEMORY_PROJECT_SETTINGS))
         await db.commit()
         await _seed_identities(db)
         if E.get("E2E_LIVE_PROVIDER") == "openrouter":
@@ -197,6 +213,9 @@ async def _seed():
 
 
 # --- identities for the approvals e2e: ``X-E2E-User`` picks one (default: the member who owns the chat) ---
+MEMORY_FLAG = {"ENABLE_PROJECT_MEMORY": True} if MEMORY else {}
+# A project in the other tenant (memory isolation probes); the id is derived, so the harness can compute it too.
+STRANGER_PROJECT = uuid.uuid5(uuid.UUID(E["E2E_OTHER_TENANT_ID"]), "stranger-project")
 ADMIN, VIEWER, OUTSIDER, STRANGER = (uuid.UUID(E[k]) for k in (
     "E2E_ADMIN_ID", "E2E_VIEWER_ID", "E2E_OUTSIDER_ID", "E2E_STRANGER_ID"))
 OTHER_TENANT, OTHER_PROJECT = uuid.UUID(E["E2E_OTHER_TENANT_ID"]), uuid.UUID(E["E2E_OTHER_PROJECT_ID"])
@@ -209,14 +228,19 @@ IDENTITIES = {  # name -> (id, tenant, role)
 async def _seed_identities(db):
     """An admin and a viewer on the project, a member of another project, and an admin of another tenant."""
     db.add(Tenant(id=OTHER_TENANT, name="other", slug=f"other-{OTHER_TENANT.hex[:6]}", is_active=True,
-                  settings={"features": {"ENABLE_ENGINE_CHAT": True}}))
+                  settings={"features": {"ENABLE_ENGINE_CHAT": True, **MEMORY_FLAG}}))
     await db.commit()
     for name in ("admin", "viewer", "outsider", "stranger"):
         uid, tenant, role = IDENTITIES[name]
         db.add(User(id=uid, tenant_id=tenant, email=f"{name}@x.io", name=name, role=role))
     await db.commit()
-    db.add(Project(id=OTHER_PROJECT, tenant_id=TENANT, name="other project", owner_id=OUTSIDER))
+    db.add(Project(id=OTHER_PROJECT, tenant_id=TENANT, name="other project", owner_id=OUTSIDER,
+                   settings=MEMORY_PROJECT_SETTINGS))
     await db.commit()
+    if MEMORY:
+        db.add(Project(id=STRANGER_PROJECT, tenant_id=OTHER_TENANT, name="stranger project", owner_id=STRANGER,
+                       settings=MEMORY_PROJECT_SETTINGS))
+        await db.commit()
     db.add(ProjectMember(project_id=PROJECT, user_id=ADMIN, role="editor", tenant_id=TENANT))
     db.add(ProjectMember(project_id=PROJECT, user_id=VIEWER, role="viewer", tenant_id=TENANT))
     await db.commit()
@@ -347,6 +371,56 @@ async def _webhook(payload: dict):
 import app.internal_api.execution as _execution  # noqa: E402
 
 _execution._session_factory = lambda: maker
+
+# --- project memory (E2E_MEMORY=1): the memory tools, the curator's endpoints and trigger, and the memory API ---
+if MEMORY:
+    import app.internal_api.memory as _internal_memory
+    import app.services.project_memory_tools as _memory_tools
+    from app.api.v1 import project_memory as _project_memory_api
+
+    # A tenant session is a plain session on this database (no RLS on SQLite).
+    _memory_tools.get_db_for_tenant = lambda _tenant_id: factory()
+    app.dependency_overrides[_internal_memory.get_tenant_session_factory] = lambda: (lambda _tenant_id: factory())
+    # The Deep Work completion trigger starts the curator through the system session factory.
+    dbmod.SystemSessionLocal = factory
+    app.include_router(_project_memory_api.router, prefix="/api/v1/projects", tags=["project-memory"])
+
+    # Every trigger's outcome ("started", "off", "disabled", "unsupported", "failed") goes to curation.log, one line
+    # per attempt: why a run was not curated is otherwise invisible (the trigger never raises).
+    import app.services.memory_curator as _curator
+
+    _start_curation = _curator.start_curation
+
+    async def _logged_start_curation(*args, **kwargs):
+        status = await _start_curation(*args, **kwargs)
+        DW.append(DW.root / "curation.log", f"{kwargs.get('conversation_id')} {kwargs.get('run_id')} {status}")
+        return status
+
+    _curator.start_curation = _logged_start_curation
+
+    @app.post("/e2e/memory/deep-work-completed")
+    async def _deep_work_completed(payload: dict):
+        """Fire the Deep Work completion hook (``deep_work_run_sync.enqueue_curation``) for a finished run.
+
+        Production never reaches that hook for a run ``dw_finalize`` completed (see the xfail in
+        test_memory_curation_e2e.py), so the eval driver calls it here once the run is terminal. The function is the
+        production one; only the call site is the test's.
+        """
+        from sqlalchemy import select as _select
+
+        from app.models.deep_work_run import DeepWorkRun
+        from app.services import deep_work_run_sync
+
+        async with factory() as db:
+            run = (await db.execute(
+                _select(DeepWorkRun).where(DeepWorkRun.conversation_id == uuid.UUID(payload["conversation_id"]))
+            )).scalars().first()
+        if run is not None:
+            await deep_work_run_sync.enqueue_curation(run)
+        mine = [ln.split() for ln in DW.lines(DW.root / "curation.log") if ln.startswith(payload["conversation_id"])]
+        return {"found": run is not None, "status": run.status if run is not None else None,
+                "run_id": str(run.id) if run is not None else None, "curation": mine[-1][-1] if mine else None}
+
 
 @app.exception_handler(Exception)
 async def _unhandled(request: Request, exc: Exception):

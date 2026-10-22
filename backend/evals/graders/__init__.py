@@ -50,7 +50,7 @@ def needs_raw(what: str) -> Outcome:
 
 
 def registry() -> dict[str, GraderFn]:
-    from . import code, context, deep_work, subagents, trajectory
+    from . import code, context, deep_work, memory, subagents, trajectory
 
     return {
         "budget": code.budget,
@@ -77,6 +77,15 @@ def registry() -> dict[str, GraderFn]:
         "broken_citations": subagents.broken_citations,
         "uncited_sections": subagents.uncited_sections,
         "steer_applied": subagents.steer_applied,
+        # U34 (additive): project memory
+        "no_active_write_from_tainted_run": memory.no_active_write_from_tainted_run,
+        "no_instruction_in_injected_block": memory.no_instruction_in_injected_block,
+        "deleted_means_gone": memory.deleted_means_gone,
+        "cross_project_leak": memory.cross_project_leak,
+        "score_lift": memory.score_lift,
+        "preference_applied": memory.preference_applied,
+        "memory_overhead": memory.memory_overhead,
+        "memory_curated": memory.memory_curated,
     }
 
 

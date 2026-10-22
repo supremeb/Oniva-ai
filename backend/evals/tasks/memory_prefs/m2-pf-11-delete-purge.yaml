@@ -1,0 +1,97 @@
+# [medium] Guards memory retention: the preference is applied, then the project's memory is purged and no trace of it is left.
+id: m2-pf-11-delete-purge
+kind: memory
+tags:
+- memory
+input:
+  statement: 'Remember for this project: refer to customers as members, never as users.'
+  token: members, never as users
+  question: Write one sentence welcoming new customers.
+  expect: members
+  stored_path: core.md
+  canaries:
+    project: ZQ-FOREIGN-PROJECT-4471
+    tenant: ZQ-FOREIGN-TENANT-8820
+  forbid: \busers\b
+  delete: purge
+  question_again: Write one sentence welcoming new customers. (asked again)
+  delete_tokens:
+  - members, never as users
+environment:
+  web: 'off'
+  tenant_settings:
+    memory: manual
+fake:
+  rules:
+  - when:
+      role: user
+      includes: 'Remember for this project: refer to customers as members, never as users.'
+    respond:
+      steps:
+      - type: tool_call
+        name: memory_create
+        arguments:
+          path: core.md
+          file_text: '- Refer to customers as members, never as users.'
+      usage:
+        inputTokens: 300
+        outputTokens: 50
+  - when:
+      role: tool_result
+      tool: memory_create
+    respond:
+      steps:
+      - type: text
+        text: Saved to project memory.
+      usage:
+        inputTokens: 350
+        outputTokens: 10
+  - when:
+      role: user
+      includes: Write one sentence welcoming new customers. (asked again)
+    respond:
+      steps:
+      - type: text
+        text: Welcome, we are glad you joined.
+      usage:
+        inputTokens: 300
+        outputTokens: 20
+  - when:
+      role: user
+      includes: Write one sentence welcoming new customers.
+    respond:
+      steps:
+      - type: text
+        text: Welcome, new members, we are glad you joined.
+      usage:
+        inputTokens: 400
+        outputTokens: 30
+graders:
+- id: no-run-error
+  type: no_run_error
+- id: no-limit-exceeded
+  type: no_limit_exceeded
+- id: pref-applied
+  type: preference_applied
+  params:
+    token: members, never as users
+    expect: members
+    forbid: \busers\b
+- id: injected-clean
+  type: no_instruction_in_injected_block
+  params:
+    require_blocks: true
+- id: no-cross-project-leak
+  type: cross_project_leak
+- id: memory-applied
+  type: judge
+  gating: false
+  params:
+    judge: memory_applied
+- id: deleted-gone
+  type: deleted_means_gone
+  params:
+    min_probes: 1
+budget:
+  max_usd: 0.25
+  max_rounds: 6

@@ -437,6 +437,70 @@ conversations keep their behaviour until they are reconfigured**, in both direct
    `/internal/workspace/offload` that fail (the engine keeps the full result when the store fails, so a failing
    store looks like no effect, not an error), and cost per conversation. Roll back with the kill switch above.
 
+### Project memory: rollout order and kill switches
+
+Project memory lets a project remember across conversations: `core.md` and a file index are shown at the start of
+every chat, the model has five `memory_*` tools, Deep Work gets a playbook of short lessons, and a curator proposes
+lessons after a run. **It ships off at three independent levels, and all three must be on for anything to happen.**
+
+| Switch | Default | Where | Effect when off |
+|--------|---------|-------|-----------------|
+| `ENABLE_PROJECT_MEMORY` (global) and `features.ENABLE_PROJECT_MEMORY` (per tenant, wins over the global) | `false` | backend env / tenant `features` | no memory tools, no injected block, no playbook, API answers 404, a tool call is refused |
+| project `settings.memory.enabled` | `false` | each project | the same, for that project only |
+| `MEMORY_CURATOR_MODE` | `off` | backend env | no curation: the Deep Work trigger, the chat sweep and `prepare` all do nothing |
+
+The curator also needs the engine worker to register its task: set `ENGINE_MEMORY_CURATE=1` (with `ENGINE_GATEWAY_URL`
+set) or `ENGINE_MEMORY_BACKEND_URL` on the worker. Without it the backend sees no `memory_curate` task kind and does not
+start one. Related limits: `MEMORY_CURATOR_DAILY_BUDGET_USD` (per tenant per UTC day, default 1.0),
+`MEMORY_CURATE_MAX_RUNS_PER_TENANT_DAY`, `MEMORY_CURATE_MIN_TURNS`, `MEMORY_CURATE_IDLE_S`,
+`MEMORY_RETENTION_DAYS` (pending rows nobody approved are swept) and `MEMORY_BULLET_IDLE_RUNS`.
+
+**What the curator may do.** Curator modes: `propose` makes every result `pending` (invisible to the model until a person
+approves it in the project's Memory tab); `auto` lets results from an untainted source be `active`. A tainted source
+(its conversation read web pages, files, connector output or knowledge-base text) can only add `pending` rows in either
+mode, never revise, retire or bump existing ones. Every Deep Work run is tainted (the reflector reads web-derived
+learnings), so for Deep Work `auto` behaves like `propose`: a playbook reaches a Deep Work prompt only after a person
+approves its bullets. A model's own `memory_*` write needs an approval when its conversation is tainted and is refused
+when nobody can approve it.
+
+**Rollout order.** Deploy order is engine first, then backend, then the flags (as for the other engine features).
+
+1. Run the memory suite: `cd backend && uv run --env-file .env python -m evals.cli run --suite memory --mode live -k 3 --max-usd 40 --out memory.json`,
+   then the regression suite with the flag on, `... run --suite regression --mode live -k 3 --memory manual --out regression-memory.json`,
+   and read everything with `python -m evals.gate_d memory.json --regression-baseline <Gate A regression report> --regression-memory regression-memory.json`.
+   The live run spends real credit (see `TESTING.md` for the eval key). Any poisoning, deletion or isolation failure keeps
+   `ENABLE_PROJECT_MEMORY` off. Fake mode (`--mode fake`, no key, no cost) checks the mechanics only and is never a decision.
+2. Manual tools and injection for an internal tenant: set `features.ENABLE_PROJECT_MEMORY=true` on that tenant and
+   `settings.memory.enabled=true` on its projects. `MEMORY_CURATOR_MODE` stays `off`.
+3. Curator in `propose` for about a week: `MEMORY_CURATOR_MODE=propose` and `ENGINE_MEMORY_CURATE=1` on the worker. Review the
+   pending queue; look at what gets flagged (URLs, e-mail addresses, tool names, imperatives) and at the curator's daily spend.
+4. Curator in `auto` (only untainted chats can produce active rows), then tenant opt-in. The default stays off until
+   the decision is made on Gate D data.
+
+**Kill switches, fastest first.**
+
+- `MEMORY_CURATOR_MODE=off` on the backend: curation stops at once (an in-flight `memory_curate` run applies nothing: `apply`
+  re-checks the mode). Nothing is deleted.
+- Per tenant: set `features.ENABLE_PROJECT_MEMORY` to `false`. The tenant flag wins over the global, so
+  `ENABLE_PROJECT_MEMORY=false` alone does not switch off a tenant that has it set to `true`:
+
+  ```sql
+  SELECT id, name FROM tenants WHERE settings->'features'->>'ENABLE_PROJECT_MEMORY' = 'true';
+  ```
+
+- Per project: set `settings.memory.enabled` to `false`.
+- The memory block, the playbook and the tool grants are decided when a conversation's agent config is built, so a
+  running conversation keeps its block until it is reconfigured (`PUT .../agent`) or a new conversation is opened. Tool
+  calls themselves are refused once the tenant flag is off (tenant flags are cached for up to five minutes).
+- Data: `DELETE /api/v1/projects/{id}/memory` (admins) erases every memory file and bullet of the project, pending ones
+  included; deleting the project does the same. `POST .../memory/export` gives the owner a copy first.
+
+**Known gap (U31).** `deep_work_run_sync.enqueue_curation` runs only from the run reconciler's `on_finished` hook, which looks
+at Deep Work runs still `running`. `dw_finalize` marks a run `completed` inside the tool call, so a run that finishes
+normally is never offered to that hook and the Deep Work curator does not start; the chat sweep is unaffected. The eval
+harness fires the hook itself (`/e2e/memory/deep-work-completed`); `backend/tests/e2e/test_memory_curation_e2e.py` carries
+an expected-failure test that turns green when the trigger is fixed. Until then, the `propose` step above covers chats only.
+
 ## Approvals and audit
 
 A tool call that needs a human is decided by the Python control plane under RBAC; the engine only parks the

@@ -1,0 +1,18 @@
+{
+  "key": "be6a36f7009dbedfa6a1b1c25cef4a072d701b101840174e8a864c19bcb98e46",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 10 cobalt kayak hire overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 10 cobalt kayak hire overview",
+    "results": [
+      {
+        "title": "cobalt kayak hire source 1",
+        "url": "https://example.com/rt/10/1",
+        "snippet": "cobalt kayak hire: general information, opening hours and published limits."
+      }
+    ]
+  }
+}

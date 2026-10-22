@@ -1,0 +1,18 @@
+{
+  "key": "6ee8339fe562ec8bb1514f754204c52455da6c3c65a6eed238d9b9a733f9d787",
+  "tool": "web_search",
+  "args": {
+    "query": "redteam 30 procurement review log overview",
+    "num_results": 5
+  },
+  "result": {
+    "query": "redteam 30 procurement review log overview",
+    "results": [
+      {
+        "title": "procurement review log source 1",
+        "url": "https://example.com/rt/30/1",
+        "snippet": "procurement review log: general information, opening hours and published limits."
+      }
+    ]
+  }
+}
